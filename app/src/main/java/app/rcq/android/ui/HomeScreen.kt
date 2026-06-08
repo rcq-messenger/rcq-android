@@ -203,6 +203,10 @@ internal fun HomeScreen(
     val archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived })
     val visibleGroups = groups.filterNot { LocalStores.groupThread(it.id) in archived }
     val archivedGroups = groups.filter { LocalStores.groupThread(it.id) in archived }
+    // Favorited groups — surfaced in the Favorites section (the toggle already
+    // persisted, but the section only rendered contacts so a favorited group
+    // never showed, reading as "favoriting does nothing").
+    val favGroups = visibleGroups.filter { LocalStores.groupThread(it.id) in favorites }
 
     // Local account roster for the switcher (live nick/UIN peeked per account).
     // Decoy-aware roster: in decoy mode only the decoy account is visible, so
@@ -288,7 +292,26 @@ internal fun HomeScreen(
                     }
                 }
 
-                contactSection(secFavorites, favContacts, collapsedFavorites, "fav", unread, { collapsedFavorites = !collapsedFavorites }, onOpenChat, onLongPress = { previewContact = it })
+                // Favorites holds BOTH favorited contacts AND groups (mirrors
+                // the Archive section). A favorited group used to vanish because
+                // this section rendered only contacts.
+                if (favContacts.isNotEmpty() || favGroups.isNotEmpty()) {
+                    val favUnread = favContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
+                        favGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
+                    item(key = "h_fav") {
+                        SectionHeader(secFavorites, favContacts.size + favGroups.size, collapsedFavorites, { collapsedFavorites = !collapsedFavorites }) {
+                            UnreadBadge(favUnread)
+                        }
+                    }
+                    if (!collapsedFavorites) {
+                        items(favContacts, key = { "fav_${it.uin}" }) { ct ->
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                        }
+                        items(favGroups, key = { "favg_${it.id}" }) { g ->
+                            GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                        }
+                    }
+                }
 
                 // Groups — header always shows a "+" to create, like iOS. Hidden
                 // while connecting so the "create a group" prompt doesn't flash

@@ -189,7 +189,7 @@ private fun staticEmoticonBitmap(name: String, bytes: ByteArray): ImageBitmap? =
 @Composable
 internal fun ReactionChip(
     asset: String,
-    count: Int? = null,   // null = no number (Radio/Hood chips); else always shown, even "1"
+    count: Int? = null,   // null = no number (Radio/Hood chips); a count of 1 is also hidden (a lone reaction needs no "1")
     mine: Boolean = false,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
@@ -215,7 +215,9 @@ internal fun ReactionChip(
         // message-history emoticons did (the large-group OOM). See EmoticonText.
         if (isEmoticon) EmoticonGif(asset, Modifier.size(16.dp), animate = false)
         else Text(asset, fontSize = 13.sp, color = c.textPrimary)
-        if (count != null) {
+        // A single reactor needs no "1" — show the number only once it grows
+        // past one (founder feedback). Radio/Hood pass null (never numbered).
+        if (count != null && count > 1) {
             Text("$count", fontSize = 11.sp, color = c.textPrimary,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         }

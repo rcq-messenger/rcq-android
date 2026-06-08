@@ -242,11 +242,25 @@ object LocalStores {
         e.apply()
     }
 
+    // ── privacy-settings cache ───────────────────────────────────────
+    // Last-known-good privacy/visibility profile, per account, as JSON.
+    // The Privacy screen seeds its pickers from this so a transient
+    // profile-load failure (bad/censored network) — or a server reply
+    // that omits the owner-self fields — never makes the UI fall back to
+    // the permissive "Everyone" defaults, which read as a silent reset
+    // of the user's chosen restrictions. Non-sensitive; plain prefs.
+    fun cachedProfileJson(): String? =
+        if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_PRIVACY_CACHE), null) else null
+
+    fun setCachedProfileJson(json: String) {
+        if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_PRIVACY_CACHE), json).apply()
+    }
+
     /** Remove every per-account slot for [accountId] (local account delete). */
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_PRIVACY_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -261,4 +275,5 @@ object LocalStores {
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PRES_WIN = "presence_window"
     private const val K_SECURE = "secure_threads"
+    private const val K_PRIVACY_CACHE = "privacy_cache"
 }

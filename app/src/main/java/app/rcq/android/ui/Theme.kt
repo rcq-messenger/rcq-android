@@ -9,8 +9,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 /**
  * ICQ-2002 palette, ported one-to-one from the iOS client's
@@ -94,6 +97,26 @@ fun RcqTheme(mode: ThemeMode, content: @Composable () -> Unit) {
         ThemeMode.DARK -> true
     }
     val colors = if (dark) DarkColors else LightColors
+
+    // Match the system status- + nav-bar ICON tint to the theme: on dark
+    // mode the bars are dark, so their icons (wifi/battery/clock) must be
+    // LIGHT — otherwise they render black-on-dark and vanish. Light theme
+    // wants dark icons. (Previously unmanaged → black icons in dark mode.)
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            var ctx = view.context
+            while (ctx is android.content.ContextWrapper) {
+                if (ctx is android.app.Activity) {
+                    val controller = WindowCompat.getInsetsController(ctx.window, view)
+                    controller.isAppearanceLightStatusBars = !dark
+                    controller.isAppearanceLightNavigationBars = !dark
+                    break
+                }
+                ctx = ctx.baseContext
+            }
+        }
+    }
 
     // Mirror the RCQ palette into a Material3 colorScheme so built-in
     // components (text fields, AlertDialog, ripples) inherit the right

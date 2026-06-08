@@ -3,6 +3,7 @@ package app.rcq.android.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -99,6 +100,16 @@ private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKE
 @Composable
 internal fun SettingsScreen(session: Session, uin: Int, onBack: () -> Unit, onBurned: (Int?) -> Unit, onMigrated: (Int) -> Unit) {
     var route by remember { mutableStateOf(SettingsRoute.ROOT) }
+    // System-back parity with the in-screen ← arrow: pop ONE settings level
+    // instead of letting back fall through to the activity (which dumped the
+    // user straight out to the chat list). At ROOT the handler is disabled so
+    // back bubbles up to leave Settings as before.
+    BackHandler(enabled = route != SettingsRoute.ROOT) {
+        route = when (route) {
+            SettingsRoute.DIAGNOSTICS, SettingsRoute.CUSTOM_SERVER -> SettingsRoute.PRIVACY
+            else -> SettingsRoute.ROOT
+        }
+    }
     when (route) {
         SettingsRoute.ROOT -> SettingsRoot(
             session, uin,

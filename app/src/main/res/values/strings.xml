@@ -571,6 +571,9 @@
     <string name="gi_delete_body">This deletes the group for everyone.</string>
     <string name="gi_leave_body">You\'ll stop receiving messages from this group.</string>
     <string name="gi_leave_cta">Leave</string>
+    <string name="gi_remove_member">Remove from group</string>
+    <string name="gi_remove_member_q">Remove %1$s from this group?</string>
+    <string name="gi_remove_member_cta">Remove</string>
     <string name="gi_add_member">Add member</string>
     <string name="gi_all_in">All your contacts are already in this group.</string>
     <string name="gi_edit">Edit group</string>

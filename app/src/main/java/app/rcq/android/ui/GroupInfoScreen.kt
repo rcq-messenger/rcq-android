@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -60,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.rcq.android.R
 import app.rcq.android.Session
+import app.rcq.android.model.GroupMember
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,6 +89,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     val context = LocalContext.current
     val groups by session.groups.collectAsState()
     val contacts by session.contacts.collectAsState()
+    // Our own live status — the roster reports each member's presence via the
+    // server's "for other viewers" fold, which shows US as offline; render our
+    // own row from the locally-known status instead (home-header parity).
+    val ownStatus by session.status.collectAsState()
     val group = groups.firstOrNull { it.id == groupId }
     val ownUin = session.uin ?: 0
     val isOwner = group?.ownerUin == ownUin
@@ -94,6 +100,8 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     var showAddMember by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showPin by remember { mutableStateOf(false) }
+    // Member the owner/moderator is about to remove (drives the confirm dialog).
+    var memberToRemove by remember { mutableStateOf<GroupMember?>(null) }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
@@ -107,6 +115,11 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         Box(Modifier.fillMaxSize().background(c.bgPrimary))
         return
     }
+
+    // Who may remove members: the owner (implicitly) or a moderator the owner
+    // granted the "members" cap. Mirrors the backend `_member_can(.,'members')`.
+    val ownMember = group.members.firstOrNull { it.uin == ownUin }
+    val canManageMembers = isOwner || (ownMember?.permissions?.contains("members") == true)
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
@@ -205,7 +218,9 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        StatusIcon(m.presence, size = 26.dp)
+                        // Our own row reflects the locally-known status (the
+                        // server folds self→offline for "other viewers").
+                        StatusIcon(if (m.uin == ownUin) ownStatus else m.presence, size = 26.dp)
                         Column(Modifier.weight(1f)) {
                             Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)
                             Text("#${m.uin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
@@ -217,6 +232,16 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             }
                         } else if (m.permissions.isNotEmpty()) {
                             Text(stringResource(R.string.gi_moderator), color = c.accent, fontSize = 11.sp)
+                        }
+                        // Owner/«members»-moderator can remove anyone but the
+                        // owner and themselves (long-tap-free explicit control).
+                        if (canManageMembers && m.uin != ownUin && m.role != "owner") {
+                            Icon(
+                                Icons.Filled.PersonRemove,
+                                stringResource(R.string.gi_remove_member),
+                                tint = Color(0xFFE5484D),
+                                modifier = Modifier.size(22.dp).clickable { memberToRemove = m },
+                            )
                         }
                     }
                     // Owner picks which rights this member gets. Tapping a chip
@@ -264,6 +289,23 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 }) { Text(stringResource(if (isOwner) R.string.common_delete else R.string.gi_leave_cta), color = Color(0xFFE5484D)) }
             },
             dismissButton = { TextButton(onClick = { confirmDestructive = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+        )
+    }
+
+    memberToRemove?.let { target ->
+        AlertDialog(
+            onDismissRequest = { memberToRemove = null },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.gi_remove_member), color = c.textPrimary) },
+            text = { Text(stringResource(R.string.gi_remove_member_q, target.nickname), color = c.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val uin = target.uin
+                    memberToRemove = null
+                    scope.launch { runCatching { session.removeGroupMember(group.id, uin) } }
+                }) { Text(stringResource(R.string.gi_remove_member_cta), color = Color(0xFFE5484D)) }
+            },
+            dismissButton = { TextButton(onClick = { memberToRemove = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
         )
     }
 

@@ -1156,9 +1156,35 @@ class Session(context: Context) {
 
     // ── own profile + privacy ────────────────────────────────────────
 
+    private val profileGson = com.google.gson.Gson()
+
+    /** Last-known-good privacy profile off disk, or null. */
+    private fun cachedProfile(): RcqApi.MeProfile? =
+        LocalStores.cachedProfileJson()?.let {
+            runCatching { profileGson.fromJson(it, RcqApi.MeProfile::class.java) }.getOrNull()
+        }
+
     suspend fun loadProfile(): RcqApi.MeProfile? {
         val me = store.uin ?: return null
-        return runCatching { api.getMe(me) }.getOrNull()
+        val cached = cachedProfile()
+        val net = runCatching { api.getMe(me) }.getOrNull()
+        // Transient load failure (bad/censored network) → hand back the
+        // last-known-good profile rather than null, so the Privacy screen
+        // never silently shows the permissive "everyone" defaults (which a
+        // user reads as their restrictions having reset). See LocalStores.
+        if (net == null) return cached
+        // Server is the source of truth, but a reply that omits the
+        // owner-self visibility fields (auth/owner-self edge) must NOT
+        // clobber a known cached choice — merge field-by-field.
+        val merged = net.copy(
+            last_seen_visibility = net.last_seen_visibility ?: cached?.last_seen_visibility,
+            gender_visibility = net.gender_visibility ?: cached?.gender_visibility,
+            profile_visibility = net.profile_visibility ?: cached?.profile_visibility,
+            group_invite_policy = net.group_invite_policy ?: cached?.group_invite_policy,
+            read_receipts_visibility = net.read_receipts_visibility ?: cached?.read_receipts_visibility,
+        )
+        LocalStores.setCachedProfileJson(profileGson.toJson(merged))
+        return merged
     }
 
     suspend fun updateProfile(body: RcqApi.UpdateMeBody): RcqApi.MeProfile? {
@@ -1167,6 +1193,10 @@ class Session(context: Context) {
         if (updated != null && !body.nickname.isNullOrBlank()) store.updateNickname(body.nickname)
         // Keep the read-receipt gate in sync when the user changes it.
         if (updated != null) body.read_receipts_visibility?.let { readReceiptsVisibility = it }
+        // The PUT response is the full owner-self profile — refresh the cache
+        // so the next Privacy-screen open re-seeds from the new choice even
+        // offline.
+        if (updated != null) LocalStores.setCachedProfileJson(profileGson.toJson(updated))
         return updated
     }
 

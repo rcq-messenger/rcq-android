@@ -570,6 +570,9 @@
     <string name="gi_delete_body">Группа будет удалена для всех.</string>
     <string name="gi_leave_body">Вы перестанете получать сообщения из этой группы.</string>
     <string name="gi_leave_cta">Покинуть</string>
+    <string name="gi_remove_member">Удалить из группы</string>
+    <string name="gi_remove_member_q">Удалить %1$s из группы?</string>
+    <string name="gi_remove_member_cta">Удалить</string>
     <string name="gi_add_member">Добавить участника</string>
     <string name="gi_all_in">Все ваши контакты уже в этой группе.</string>
     <string name="gi_edit">Редактировать группу</string>
