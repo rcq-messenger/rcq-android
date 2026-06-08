@@ -747,7 +747,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                     scope.launch { runCatching { session.sendReaction(m, asset) } }
                                     actionMsg = null
                                 }.padding(4.dp),
-                            ) { EmoticonGif(asset, Modifier.size(32.dp)) }
+                            ) { EmoticonGif(asset, Modifier.size(32.dp), animate = false) }
                         }
                     }
                     MessageAction(stringResource(R.string.chat_reply)) { replyTarget = m; actionMsg = null }

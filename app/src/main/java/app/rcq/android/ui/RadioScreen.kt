@@ -357,7 +357,7 @@ private fun ReactionPickerDialog(onDismiss: () -> Unit, onPick: (String) -> Unit
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             app.rcq.android.ui.Emoticons.reactions.forEach { asset ->
-                EmoticonGif(asset, modifier = Modifier.size(34.dp).clickable { onPick(asset) })
+                EmoticonGif(asset, modifier = Modifier.size(34.dp).clickable { onPick(asset) }, animate = false)
             }
         }
     }
