@@ -78,6 +78,8 @@ import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.MoreVert
@@ -235,8 +237,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var showGroupPicker by remember { mutableStateOf(false) }
     // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
     var fullscreenImage by remember { mutableStateOf<ByteArray?>(null) }
-    // Tapping the (2-line, truncated) pinned banner opens the full text.
-    var showPinSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     // Per-conversation screen-secure mode (1:1 only) is NOTIFY-ONLY (iOS parity,
@@ -525,81 +525,73 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             val members = group?.members ?: emptyList()
             val annotated = remember(pin, members) { buildPinnedAnnotated(pin, members, c.accent) }
             // Group-invite links in the pin are stripped from the text (above)
-            // and rendered as tappable join cards (iOS parity); tapping opens
-            // the in-app join sheet instead of a browser.
+            // and rendered as tappable join cards (iOS parity); tapping a card
+            // opens the in-app join sheet instead of a browser.
             val pinGroupIds = remember(pin) { GroupLinkParser.parseAll(pin) }
             val hasPinText = annotated.text.isNotBlank()
             val uriHandler = LocalUriHandler.current
+            // Collapsible: a pin can list MANY groups, so the banner defaults to a
+            // single compact line (no cards) and only grows when expanded — it
+            // never pushes the chat down on its own (founder report). Collapse
+            // state resets per pin/thread.
+            var pinExpanded by remember(pin, threadKey) { mutableStateOf(false) }
+            val collapsible = pinGroupIds.isNotEmpty() || pin.length > 48
             Column(Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.PushPin, null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
-                    if (hasPinText) {
-                        ClickableText(
-                            text = annotated,
-                            style = TextStyle(color = c.textSecondary, fontSize = 12.sp),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            onClick = { offset ->
-                                // A mention of yourself isn't actionable (opening your
-                                // own profile in the peer view would offer add/block/
-                                // report against yourself).
-                                annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                                    val mUin = it.item.toInt()
-                                    if (mUin != ownUin) onOpenPeerInfo(mUin)
-                                    return@ClickableText
-                                }
-                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let {
-                                    runCatching { uriHandler.openUri(it.item) }
-                                    return@ClickableText
-                                }
-                                // Tapping the banner anywhere else expands the full pin
-                                // (the banner is clipped to two lines).
-                                showPinSheet = true
-                            },
+                    Box(Modifier.weight(1f)) {
+                        if (hasPinText) {
+                            ClickableText(
+                                text = annotated,
+                                style = TextStyle(color = c.textSecondary, fontSize = 12.sp),
+                                maxLines = if (pinExpanded) Int.MAX_VALUE else 1,
+                                overflow = TextOverflow.Ellipsis,
+                                onClick = { offset ->
+                                    // A mention of yourself isn't actionable (opening
+                                    // your own profile would offer add/block/report
+                                    // against yourself).
+                                    annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
+                                        val mUin = it.item.toInt()
+                                        if (mUin != ownUin) onOpenPeerInfo(mUin)
+                                        return@ClickableText
+                                    }
+                                    annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let {
+                                        runCatching { uriHandler.openUri(it.item) }
+                                        return@ClickableText
+                                    }
+                                    // Tapping the text toggles expand (show/hide the
+                                    // full text + the group cards).
+                                    if (collapsible) pinExpanded = !pinExpanded
+                                },
+                            )
+                        } else {
+                            // Pin is only group links — label it with the count.
+                            Text(
+                                if (pinGroupIds.isEmpty()) stringResource(R.string.gi_pinned)
+                                else "${stringResource(R.string.gi_pinned)} · ${pinGroupIds.size}",
+                                color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    if (collapsible) {
+                        // Count hint when collapsed so the chevron's payload is obvious.
+                        if (!pinExpanded && pinGroupIds.isNotEmpty()) {
+                            Text("${pinGroupIds.size}", color = c.textSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Icon(
+                            if (pinExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            stringResource(if (pinExpanded) R.string.common_close else R.string.gi_pinned),
+                            tint = c.textSecondary,
+                            modifier = Modifier.size(20.dp).clip(CircleShape).clickable { pinExpanded = !pinExpanded },
                         )
-                    } else {
-                        Text(stringResource(R.string.gi_pinned), color = c.textSecondary, fontSize = 12.sp)
                     }
                 }
-                pinGroupIds.forEach { gid ->
-                    Spacer(Modifier.height(4.dp))
-                    PinnedGroupChip(session, gid, onOpenGroup)
+                if (pinExpanded) {
+                    pinGroupIds.forEach { gid ->
+                        Spacer(Modifier.height(4.dp))
+                        PinnedGroupChip(session, gid, onOpenGroup)
+                    }
                 }
-            }
-            if (showPinSheet) {
-                AlertDialog(
-                    onDismissRequest = { showPinSheet = false },
-                    confirmButton = {
-                        TextButton(onClick = { showPinSheet = false }) {
-                            Text(stringResource(R.string.common_close), color = c.accent)
-                        }
-                    },
-                    icon = { Icon(Icons.Filled.PushPin, null, tint = c.accent) },
-                    title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
-                    text = {
-                        Column {
-                            if (hasPinText) {
-                                ClickableText(
-                                    text = annotated,
-                                    style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
-                                    onClick = { offset ->
-                                        annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                                            val mUin = it.item.toInt()
-                                            if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
-                                            return@ClickableText
-                                        }
-                                        annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
-                                    },
-                                )
-                            }
-                            pinGroupIds.forEach { gid ->
-                                Spacer(Modifier.height(6.dp))
-                                PinnedGroupChip(session, gid, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
-                            }
-                        }
-                    },
-                    containerColor = c.bgSecondary,
-                )
             }
         }
 
