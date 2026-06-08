@@ -214,7 +214,17 @@ class Session(context: Context) {
     // once Android↔iOS v=2 is confirmed on a real device.
     private val v2OutboundEnabled = false
     // media_id -> decrypted plaintext bytes (sender seeds it; receiver caches).
-    private val imageCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    // Decrypted media blobs, BOUNDED so an image-heavy chat can't grow the
+    // cache without limit — that unbounded growth was an OOM risk on low-RAM
+    // devices (a leading suspect for the launch crash in active media groups).
+    // Sized to a fraction of the heap so a low-RAM device gets a smaller cap;
+    // LruCache evicts least-recently-used first, so a just-sent/just-viewed
+    // image (most recent) is never the one dropped. Internally synchronized.
+    private val imageCache = object : android.util.LruCache<String, ByteArray>(
+        (Runtime.getRuntime().maxMemory() / 8).coerceIn(8L * 1024 * 1024, 96L * 1024 * 1024).toInt()
+    ) {
+        override fun sizeOf(key: String, value: ByteArray): Int = value.size
+    }
 
     // Own read-receipt privacy ("everyone"|"contacts"|"nobody"); loaded on
     // start, gates whether we emit read receipts. Default everyone.
@@ -848,7 +858,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = jpeg
+        imageCache.put(upload.media_id, jpeg)
         api.postStory(
             RcqApi.PostStoryBody(
                 media_id = upload.media_id,
@@ -1137,7 +1147,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = jpeg
+        imageCache.put(upload.media_id, jpeg)
         upsertGroup(mapGroup(api.patchGroup(id, RcqApi.GroupPatchBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))))
     }
 
@@ -1216,7 +1226,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = jpeg
+        imageCache.put(upload.media_id, jpeg)
         val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId)
     }
@@ -1544,7 +1554,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)            // throws on failure (caller catches)
-        imageCache[upload.media_id] = jpeg            // own bubble renders without re-download
+        imageCache.put(upload.media_id, jpeg)            // own bubble renders without re-download
         val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId)
         store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId))
         sendEnvelope(env, env.id, toUin)
@@ -1557,7 +1567,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = bytes
+        imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
         val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null)
         store(ChatMessage(env.id, toUin, true, "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size))
@@ -1570,7 +1580,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = bytes
+        imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
         val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null)
         sendGroupEnvelope(groupId, env, env.id, "", kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size)
@@ -1582,7 +1592,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = bytes
+        imageCache.put(upload.media_id, bytes)
         val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble())
         store(ChatMessage(env.id, toUin, true, "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec))
         sendEnvelope(env, env.id, toUin)
@@ -1594,7 +1604,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = bytes
+        imageCache.put(upload.media_id, bytes)
         val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble())
         sendGroupEnvelope(groupId, env, env.id, "", kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec)
     }
@@ -1606,7 +1616,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = bytes
+        imageCache.put(upload.media_id, bytes)
         val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId)
         store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId))
         sendEnvelope(env, env.id, toUin)
@@ -1618,7 +1628,7 @@ class Session(context: Context) {
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
-        imageCache[upload.media_id] = bytes
+        imageCache.put(upload.media_id, bytes)
         val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId)
     }
@@ -1910,11 +1920,11 @@ class Session(context: Context) {
 
     /** Download + decrypt a media blob, cached by media id. */
     suspend fun fetchImage(mediaId: String, mediaKey: String): ByteArray? {
-        imageCache[mediaId]?.let { return it }
+        imageCache.get(mediaId)?.let { return it }
         return runCatching {
             val blob = api.getBlob(mediaId)
             val key = Base64.decode(mediaKey, Base64.NO_WRAP)
-            MediaCrypto.open(blob, key).also { imageCache[mediaId] = it }
+            MediaCrypto.open(blob, key).also { imageCache.put(mediaId, it) }
         }.getOrNull()
     }
 
