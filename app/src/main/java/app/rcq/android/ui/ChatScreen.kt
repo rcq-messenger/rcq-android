@@ -524,32 +524,47 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         group?.pinnedText?.takeIf { it.isNotBlank() }?.let { pin ->
             val members = group?.members ?: emptyList()
             val annotated = remember(pin, members) { buildPinnedAnnotated(pin, members, c.accent) }
+            // Group-invite links in the pin are stripped from the text (above)
+            // and rendered as tappable join cards (iOS parity); tapping opens
+            // the in-app join sheet instead of a browser.
+            val pinGroupIds = remember(pin) { GroupLinkParser.parseAll(pin) }
+            val hasPinText = annotated.text.isNotBlank()
             val uriHandler = LocalUriHandler.current
-            Row(Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.PushPin, null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
-                ClickableText(
-                    text = annotated,
-                    style = TextStyle(color = c.textSecondary, fontSize = 12.sp),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    onClick = { offset ->
-                        // A mention of yourself isn't actionable (opening your
-                        // own profile in the peer view would offer add/block/
-                        // report against yourself).
-                        annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                            val mUin = it.item.toInt()
-                            if (mUin != ownUin) onOpenPeerInfo(mUin)
-                            return@ClickableText
-                        }
-                        annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let {
-                            runCatching { uriHandler.openUri(it.item) }
-                            return@ClickableText
-                        }
-                        // Tapping the banner anywhere else expands the full pin
-                        // (the banner is clipped to two lines).
-                        showPinSheet = true
-                    },
-                )
+            Column(Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.PushPin, null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
+                    if (hasPinText) {
+                        ClickableText(
+                            text = annotated,
+                            style = TextStyle(color = c.textSecondary, fontSize = 12.sp),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            onClick = { offset ->
+                                // A mention of yourself isn't actionable (opening your
+                                // own profile in the peer view would offer add/block/
+                                // report against yourself).
+                                annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
+                                    val mUin = it.item.toInt()
+                                    if (mUin != ownUin) onOpenPeerInfo(mUin)
+                                    return@ClickableText
+                                }
+                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let {
+                                    runCatching { uriHandler.openUri(it.item) }
+                                    return@ClickableText
+                                }
+                                // Tapping the banner anywhere else expands the full pin
+                                // (the banner is clipped to two lines).
+                                showPinSheet = true
+                            },
+                        )
+                    } else {
+                        Text(stringResource(R.string.gi_pinned), color = c.textSecondary, fontSize = 12.sp)
+                    }
+                }
+                pinGroupIds.forEach { gid ->
+                    Spacer(Modifier.height(4.dp))
+                    PinnedGroupChip(session, gid, onOpenGroup)
+                }
             }
             if (showPinSheet) {
                 AlertDialog(
@@ -562,18 +577,26 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     icon = { Icon(Icons.Filled.PushPin, null, tint = c.accent) },
                     title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
                     text = {
-                        ClickableText(
-                            text = annotated,
-                            style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
-                            onClick = { offset ->
-                                annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                                    val mUin = it.item.toInt()
-                                    if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
-                                    return@ClickableText
-                                }
-                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
-                            },
-                        )
+                        Column {
+                            if (hasPinText) {
+                                ClickableText(
+                                    text = annotated,
+                                    style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
+                                    onClick = { offset ->
+                                        annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
+                                            val mUin = it.item.toInt()
+                                            if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
+                                            return@ClickableText
+                                        }
+                                        annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
+                                    },
+                                )
+                            }
+                            pinGroupIds.forEach { gid ->
+                                Spacer(Modifier.height(6.dp))
+                                PinnedGroupChip(session, gid, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
+                            }
+                        }
                     },
                     containerColor = c.bgSecondary,
                 )
@@ -1183,6 +1206,14 @@ internal object GroupLinkParser {
     }
 
     fun canonicalUrl(id: Int): String = "https://rcq.app/g/$id"
+
+    /** Every group-invite link in [text], in document order (iOS
+     *  GroupLinkParser.parseAll parity) — used to render pin cards. Matches
+     *  both the shareable https form and the rcq:// deep-link form. */
+    fun parseAll(text: String): List<Int> {
+        val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+)", RegexOption.IGNORE_CASE)
+        return re.findAll(text).mapNotNull { it.groupValues[1].toIntOrNull()?.takeIf { id -> id > 0 } }.distinct().toList()
+    }
 }
 
 /** A shared group-invite link rendered as a join card (iOS GroupLinkBubble
@@ -1257,6 +1288,78 @@ private fun GroupLinkBubble(session: Session, groupId: Int, onOpenGroup: (Int) -
                         val g = session.joinGroup(groupId)
                         joining = false
                         showJoin = false
+                        if (g != null) onOpenGroup(groupId)
+                    }
+                }) { Text(stringResource(R.string.group_invite_join), color = c.accent) }
+            },
+            dismissButton = { TextButton(enabled = !joining, onClick = { showJoin = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+        )
+    }
+}
+
+/** Compact join card for a group-invite link inside a pinned announcement
+ *  (iOS PinnedGroupChip parity): avatar + name + member count. Tap opens the
+ *  in-app join sheet (NOT a browser); joining jumps into that group. */
+@Composable
+private fun PinnedGroupChip(session: Session, groupId: Int, onOpenGroup: (Int) -> Unit) {
+    val c = RcqTheme.colors
+    val scope = rememberCoroutineScope()
+    var showJoin by remember { mutableStateOf(false) }
+    var joining by remember { mutableStateOf(false) }
+    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, groupId) {
+        value = session.previewGroup(groupId)
+    }
+    val p = preview
+    val avatarGroup = remember(p) {
+        p?.let {
+            app.rcq.android.model.RcqGroup(
+                id = it.id, name = it.name ?: "", ownerUin = it.owner_uin,
+                isClosed = it.is_closed, avatarMediaId = it.avatar_media_id, avatarMediaKey = it.avatar_media_key,
+            )
+        }
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(c.bgPrimary)
+            .clickable(enabled = p != null) { showJoin = true }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Box(contentAlignment = Alignment.BottomEnd) {
+            GroupAvatar(avatarGroup, session, 30.dp)
+            if (p?.is_closed == true) {
+                Box(Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)).padding(2.dp)) {
+                    Icon(Icons.Filled.Lock, null, tint = Color.White, modifier = Modifier.size(9.dp))
+                }
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                p?.name ?: stringResource(R.string.group_invite_loading),
+                color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            if (p != null) Text(
+                pluralStringResource(R.plurals.members, p.member_count, p.member_count),
+                color = c.textSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+    if (showJoin && p != null) {
+        AlertDialog(
+            onDismissRequest = { if (!joining) showJoin = false },
+            containerColor = c.bgSecondary,
+            title = { Text(p.name ?: stringResource(R.string.group_invite_title), color = c.textPrimary) },
+            text = { Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary) },
+            confirmButton = {
+                TextButton(enabled = !joining, onClick = {
+                    joining = true
+                    scope.launch {
+                        val g = session.joinGroup(groupId)
+                        joining = false; showJoin = false
                         if (g != null) onOpenGroup(groupId)
                     }
                 }) { Text(stringResource(R.string.group_invite_join), color = c.accent) }
@@ -1380,9 +1483,15 @@ private fun AnnotatedString.Builder.appendWithUrls(segment: String, accent: andr
     var cursor = 0
     for (m in urlRe.findAll(segment)) {
         if (m.range.first > cursor) append(segment.substring(cursor, m.range.first))
-        pushStringAnnotation("URL", m.value)
-        withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(m.value) }
-        pop()
+        if (GroupLinkParser.parse(m.value) != null) {
+            // A group-invite link is rendered as a tappable card under the pin
+            // (iOS parity) and opens the in-app join sheet — strip the raw URL
+            // from the text so it doesn't show AND doesn't open a browser.
+        } else {
+            pushStringAnnotation("URL", m.value)
+            withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(m.value) }
+            pop()
+        }
         cursor = m.range.last + 1
     }
     if (cursor < segment.length) append(segment.substring(cursor))
