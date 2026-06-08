@@ -33,6 +33,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -138,14 +140,16 @@ internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize
 internal fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
     if (count <= 0) return
     val c = RcqTheme.colors
-    // Small, snug pill that hugs the digits — matches the iOS badge
-    // (9pt, 5×1 padding, no min square). The old 16dp min square read as
-    // oversized next to the avatar (founder: too big vs iOS).
+    // 15dp min SQUARE keeps a single digit a true circle (dropping it made
+    // a lone digit a tall oval — the box hugged the narrow-but-tall glyph);
+    // 9sp text keeps it smaller than the old 16dp/10sp badge. Extra width
+    // only kicks in for 2+ digits, growing it into a pill.
     Box(
         modifier
+            .defaultMinSize(minWidth = 15.dp, minHeight = 15.dp)
             .clip(RoundedCornerShape(percent = 50))
             .background(c.statusBusy)
-            .padding(horizontal = 5.dp, vertical = 1.dp),
+            .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -153,6 +157,8 @@ internal fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
             color = Color.White,
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
+            lineHeight = 9.sp,
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
         )
     }
 }
