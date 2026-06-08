@@ -1918,14 +1918,53 @@ class Session(context: Context) {
         }
     }
 
-    /** Download + decrypt a media blob, cached by media id. */
+    // On-disk cache of ENCRYPTED media blobs (the exact bytes the server
+    // returns). Decryption needs the per-message mediaKey, which lives only
+    // in the encrypted message DB — so nothing here is sensitive at rest,
+    // yet it lets a previously-loaded image render OFFLINE and survive an app
+    // restart (report #5: "images vanish when the internet drops"). Bounded
+    // so it can't grow without limit (the historical "Кэш 2гб" failure mode).
+    private val mediaDiskDir: java.io.File by lazy {
+        java.io.File(appCtx.cacheDir, "media").apply { mkdirs() }
+    }
+    private val mediaDiskCapBytes = 200L * 1024 * 1024
+    private fun mediaDiskFile(mediaId: String): java.io.File =
+        java.io.File(mediaDiskDir, mediaId.replace(Regex("[^A-Za-z0-9_-]"), "_"))
+
+    /** Evict oldest (by last-modified) encrypted blobs until under the cap. */
+    private fun trimMediaDiskCache() {
+        runCatching {
+            val files = mediaDiskDir.listFiles()?.toList() ?: return
+            var total = files.sumOf { it.length() }
+            if (total <= mediaDiskCapBytes) return
+            for (f in files.sortedBy { it.lastModified() }) {
+                if (total <= mediaDiskCapBytes) break
+                total -= f.length()
+                f.delete()
+            }
+        }
+    }
+
+    /** Download + decrypt a media blob. Cached in memory by media id, and on
+     *  disk as the still-encrypted blob so it's available offline / after a
+     *  restart (decrypt key stays in the encrypted DB). */
     suspend fun fetchImage(mediaId: String, mediaKey: String): ByteArray? {
         imageCache.get(mediaId)?.let { return it }
-        return runCatching {
-            val blob = api.getBlob(mediaId)
-            val key = Base64.decode(mediaKey, Base64.NO_WRAP)
-            MediaCrypto.open(blob, key).also { imageCache.put(mediaId, it) }
-        }.getOrNull()
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val key = Base64.decode(mediaKey, Base64.NO_WRAP)
+                val file = mediaDiskFile(mediaId)
+                // Disk first (works offline), else fetch + persist the blob.
+                val blob = if (file.exists()) {
+                    file.readBytes()
+                } else {
+                    api.getBlob(mediaId).also {
+                        runCatching { file.writeBytes(it); trimMediaDiskCache() }
+                    }
+                }
+                MediaCrypto.open(blob, key).also { imageCache.put(mediaId, it) }
+            }.getOrNull()
+        }
     }
 
     fun sendTyping(toUin: Int, active: Boolean) {
