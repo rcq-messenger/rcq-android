@@ -494,6 +494,7 @@ class Session(context: Context) {
         started = true
         bindDb(AccountManager.activeId.value ?: "")
         loadMessagesFromDb()
+        loadCachedRoster()
         scope.launch {
             // Obfuscated transport (censorship circumvention), engaged BEFORE
             // the socket/API connect so they ride the sing-box tunnel. Engage
@@ -1058,6 +1059,8 @@ class Session(context: Context) {
 
     private suspend fun refreshGroups() {
         _groups.value = api.groups().map(::mapGroup).sortedByDescending { it.createdAt ?: 0L }
+        // Persist the roster so groups are reachable offline (report #7).
+        runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
     }
 
     /** Upsert a group from a WS event. If the embedded roster no longer
@@ -2037,6 +2040,8 @@ class Session(context: Context) {
                 peerIdentityCache[c.uin] = Base64.decode(c.identityKey, Base64.NO_WRAP)
             }
         }
+        // Persist the roster so the chat list is reachable offline (report #7).
+        runCatching { LocalStores.setCachedContactsJson(profileGson.toJson(_contacts.value)) }
     }
 
     private suspend fun refreshPending() {
@@ -2172,6 +2177,26 @@ class Session(context: Context) {
         val all = db.all()
         _messages.value = all.filter { it.groupId == null }.groupBy { it.peerUin }
         _groupMessages.value = all.filter { it.groupId != null }.groupBy { it.groupId!! }
+    }
+
+    /** Seed the contact/group roster from the on-disk cache so the chat list
+     *  (and its locally-stored history) is reachable OFFLINE instead of an
+     *  endless "Connecting…" screen (report #7). A live refresh overwrites
+     *  this once connected; contacts are forced to offline here since we
+     *  can't vouch for anyone's presence while disconnected. */
+    private fun loadCachedRoster() {
+        if (_contacts.value.isEmpty()) {
+            LocalStores.cachedContactsJson()?.let { json ->
+                runCatching { profileGson.fromJson(json, Array<Contact>::class.java) }
+                    .getOrNull()?.let { arr -> _contacts.value = arr.map { it.copy(status = "offline") } }
+            }
+        }
+        if (_groups.value.isEmpty()) {
+            LocalStores.cachedGroupsJson()?.let { json ->
+                runCatching { profileGson.fromJson(json, Array<RcqGroup>::class.java) }
+                    .getOrNull()?.let { arr -> _groups.value = arr.toList() }
+            }
+        }
     }
 
     private fun store(msg: ChatMessage) {

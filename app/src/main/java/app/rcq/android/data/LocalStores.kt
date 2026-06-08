@@ -256,11 +256,30 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_PRIVACY_CACHE), json).apply()
     }
 
+    // ── roster cache (offline chat list) ─────────────────────────────
+    // The contact/group roster is otherwise network-only, so a cold start
+    // with no connection sat on the "Connecting…" screen forever and the
+    // user couldn't open any chat offline (report #7). Cache it per account
+    // so the chat list (and its locally-stored history) is reachable offline.
+    fun cachedContactsJson(): String? =
+        if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_CONTACTS_CACHE), null) else null
+
+    fun setCachedContactsJson(json: String) {
+        if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_CONTACTS_CACHE), json).apply()
+    }
+
+    fun cachedGroupsJson(): String? =
+        if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_GROUPS_CACHE), null) else null
+
+    fun setCachedGroupsJson(json: String) {
+        if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_GROUPS_CACHE), json).apply()
+    }
+
     /** Remove every per-account slot for [accountId] (local account delete). */
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_PRIVACY_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -276,4 +295,6 @@ object LocalStores {
     private const val K_PRES_WIN = "presence_window"
     private const val K_SECURE = "secure_threads"
     private const val K_PRIVACY_CACHE = "privacy_cache"
+    private const val K_CONTACTS_CACHE = "contacts_cache"
+    private const val K_GROUPS_CACHE = "groups_cache"
 }
