@@ -725,6 +725,13 @@
     <string name="group_create_failed">Не удалось создать группу. Попробуйте снова.</string>
     <string name="home_add_contact_title">Добавить контакт</string>
     <string name="home_send_request">Отправить запрос</string>
+    <string name="add_title">Добавить</string>
+    <string name="add_search_hint">Имя, UIN или группа</string>
+    <string name="add_search_prompt">Ищите людей и группы, чтобы добавить.</string>
+    <string name="add_searching">Поиск…</string>
+    <string name="add_no_results">Ничего не найдено.</string>
+    <string name="add_already_contact">уже в контактах</string>
+    <string name="add_request_sent">запрос отправлен</string>
     <string name="home_report_title">Пожаловаться на %1$s</string>
     <string name="home_report_reason">Причина</string>
     <string name="home_report_submit">Отправить</string>

@@ -152,6 +152,13 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         get("/users/$uin/info", authed = true, UserInfo::class.java)
     }
 
+    /** Server-side people search (nickname / name / city / exact UIN). Powers
+     *  the Add window's "find users" (iOS parity). */
+    suspend fun searchUsers(q: String): List<UserInfo> = withContext(Dispatchers.IO) {
+        val enc = java.net.URLEncoder.encode(q, "UTF-8")
+        get("/users/search?q=$enc&limit=20", authed = true, Array<UserInfo>::class.java).toList()
+    }
+
     // ── news (admin-posted feed, rcq-spec) ───────────────────────────
     data class NewsAttachment(val media_id: String?, val mime: String?, val kind: String?)
     data class NewsPost(
@@ -502,6 +509,13 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
 
     suspend fun previewGroup(id: Int): GroupPreviewOut = withContext(Dispatchers.IO) {
         get("/groups/$id/preview", authed = true, GroupPreviewOut::class.java)
+    }
+
+    /** Server-side group search (name substring / exact id), joinable groups
+     *  the caller isn't already in. Powers the Add window's "find groups". */
+    suspend fun searchGroups(q: String): List<GroupPreviewOut> = withContext(Dispatchers.IO) {
+        val enc = java.net.URLEncoder.encode(q, "UTF-8")
+        get("/groups/search?q=$enc&limit=20", authed = true, Array<GroupPreviewOut>::class.java).toList()
     }
 
     data class AddMemberBody(val uin: Int)

@@ -726,6 +726,13 @@
     <string name="group_create_failed">Couldn\'t create the group. Try again.</string>
     <string name="home_add_contact_title">Add contact</string>
     <string name="home_send_request">Send request</string>
+    <string name="add_title">Add</string>
+    <string name="add_search_hint">Name, UIN or group</string>
+    <string name="add_search_prompt">Search for people and groups to add.</string>
+    <string name="add_searching">Searching…</string>
+    <string name="add_no_results">Nothing found.</string>
+    <string name="add_already_contact">already in contacts</string>
+    <string name="add_request_sent">request sent</string>
     <string name="home_report_title">Report %1$s</string>
     <string name="home_report_reason">Reason</string>
     <string name="home_report_submit">Submit</string>

@@ -2049,6 +2049,13 @@ class Session(context: Context) {
         runCatching { refreshOutgoing() }
     }
 
+    /** Server-side search for the Add window (users + joinable groups). */
+    suspend fun searchUsers(q: String): List<RcqApi.UserInfo> =
+        runCatching { api.searchUsers(q) }.getOrNull() ?: emptyList()
+
+    suspend fun searchGroups(q: String): List<RcqApi.GroupPreviewOut> =
+        runCatching { api.searchGroups(q) }.getOrNull() ?: emptyList()
+
     suspend fun respond(requestId: Int, accept: Boolean) {
         api.respondContact(requestId, accept)
         runCatching { refreshContacts() }

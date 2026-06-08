@@ -7,6 +7,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +91,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -105,6 +109,7 @@ import app.rcq.android.model.UserStatus
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -411,7 +416,11 @@ internal fun HomeScreen(
 
     if (showAdd) {
         AddContactDialog(
-            onAdd = { target -> scope.launch { runCatching { session.addContact(target) } }; showAdd = false },
+            session = session,
+            contacts = contacts,
+            onAddUin = { target -> scope.launch { runCatching { session.addContact(target) } } },
+            onOpenChat = { u -> showAdd = false; onOpenChat(u) },
+            onOpenGroup = { g -> showAdd = false; onOpenGroup(g) },
             onDismiss = { showAdd = false },
         )
     }
@@ -737,10 +746,13 @@ private fun HomeHeader(
             }
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
+                // includeFontPadding=false + tight line heights drop the built-in
+                // font leading that left a big gap between the nick and the UIN
+                // under it (founder: they should sit almost touching).
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenProfile).padding(horizontal = 6.dp, vertical = 4.dp),
             ) {
-                Text(nickname, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
-                Text("#$uin", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text(nickname, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
+                Text("#$uin", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
             }
             // Right of the nick/UIN: a status-width slot holding the stealth
             // shield when the censorship bypass is engaged (iOS StealthHeaderBadge
@@ -1173,29 +1185,111 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
 }
 
 @Composable
-private fun AddContactDialog(onAdd: (Int) -> Unit, onDismiss: () -> Unit) {
+private fun AddContactDialog(
+    session: Session,
+    contacts: List<Contact>,
+    onAddUin: (Int) -> Unit,
+    onOpenChat: (Int) -> Unit,
+    onOpenGroup: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val c = RcqTheme.colors
-    var input by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    var users by remember { mutableStateOf<List<RcqApi.UserInfo>>(emptyList()) }
+    var groups by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var sentTo by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
+    // Debounced server-side search of people AND joinable groups (iOS Add
+    // overlay parity — the old dialog only accepted a raw UIN).
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length < 2) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
+        searching = true
+        delay(300)
+        users = session.searchUsers(q)
+        groups = session.searchGroups(q)
+        searching = false
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.home_add_contact_title), color = c.textPrimary) },
+        title = { Text(stringResource(R.string.add_title), color = c.textPrimary) },
         text = {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it.filter(Char::isDigit) },
-                label = { Text("UIN", color = c.textSecondary) },
-                singleLine = true,
-            )
-        },
-        confirmButton = {
-            val target = input.toIntOrNull()
-            TextButton(enabled = target != null, onClick = { target?.let(onAdd) }) {
-                Text(stringResource(R.string.home_send_request), color = if (target != null) c.accent else c.textSecondary)
+            Column(Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text(stringResource(R.string.add_search_hint), color = c.textSecondary) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val digits = query.trim().toIntOrNull()
+                Box(Modifier.heightIn(max = 320.dp).padding(top = 8.dp)) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        // Exact-UIN add stays possible even for users whose
+                        // profile isn't searchable (privacy-gated).
+                        if (digits != null && users.none { it.uin == digits }) {
+                            AddResultRow("#$digits", stringResource(R.string.home_send_request), accent = true) {
+                                onAddUin(digits); sentTo = sentTo + digits
+                            }
+                        }
+                        users.forEach { u ->
+                            val already = contacts.any { it.uin == u.uin }
+                            val sub = when {
+                                already -> "#${u.uin} · " + stringResource(R.string.add_already_contact)
+                                u.uin in sentTo -> "#${u.uin} · " + stringResource(R.string.add_request_sent)
+                                else -> "#${u.uin}"
+                            }
+                            AddResultRow(u.nickname ?: "#${u.uin}", sub) {
+                                if (already) onOpenChat(u.uin) else { onAddUin(u.uin); sentTo = sentTo + u.uin }
+                            }
+                        }
+                        groups.forEach { g ->
+                            AddResultRow(
+                                g.name ?: "#${g.id}",
+                                pluralStringResource(R.plurals.members, g.member_count, g.member_count),
+                                isGroup = true,
+                            ) {
+                                scope.launch { if (session.joinGroup(g.id) != null) onOpenGroup(g.id) }
+                            }
+                        }
+                        if (searching) {
+                            Text(stringResource(R.string.add_searching), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+                        } else if (query.trim().length >= 2 && users.isEmpty() && groups.isEmpty() && digits == null) {
+                            Text(stringResource(R.string.add_no_results), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+                        } else if (query.isEmpty()) {
+                            Text(stringResource(R.string.add_search_prompt), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+                        }
+                    }
+                }
             }
         },
+        confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
     )
+}
+
+/** One tappable search result (user or group) in the Add window. */
+@Composable
+private fun AddResultRow(title: String, subtitle: String, accent: Boolean = false, isGroup: Boolean = false, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            if (isGroup) Icons.Filled.Groups else if (accent) Icons.Filled.PersonAdd else Icons.Outlined.AccountCircle,
+            null, tint = if (accent) c.accent else c.textSecondary, modifier = Modifier.size(22.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(title, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }
 
 /** Create another anonymous identity. Server host is optional — blank uses
