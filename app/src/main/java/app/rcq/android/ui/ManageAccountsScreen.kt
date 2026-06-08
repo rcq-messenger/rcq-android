@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -58,7 +59,7 @@ import app.rcq.android.net.RcqApi
  * Privacy & Network.
  */
 @Composable
-internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit) {
+internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit, onAddBySeed: () -> Unit = {}) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     // Decoy-aware: only the decoy account shows while decoy mode is active.
@@ -82,6 +83,26 @@ internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit) {
                     color = c.textSecondary, fontSize = 13.sp,
                     modifier = Modifier.padding(bottom = 12.dp),
                 )
+            }
+            // Add an EXISTING account (one you already own elsewhere) to this
+            // device by typing its recovery phrase — registers it as a further
+            // local account and switches to it. Hidden at the account limit.
+            if (!AccountManager.isAtLimit) {
+                item(key = "add_by_phrase") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary)
+                            .clickable(onClick = onAddBySeed).padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Filled.Add, null, tint = c.accent, modifier = Modifier.size(22.dp))
+                        Text(
+                            stringResource(R.string.manage_accounts_add_by_phrase),
+                            color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
             }
             items(sorted, key = { it.id }) { account ->
                 val isActive = account.id == activeId

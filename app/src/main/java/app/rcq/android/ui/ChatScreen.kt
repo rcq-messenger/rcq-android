@@ -239,22 +239,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var showPinSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // Per-conversation screen-secure mode (1:1 only). When on, FLAG_SECURE is
-    // applied while this chat is open so screenshots/recording of it are blocked
-    // (Android genuinely blanks them); the flag is mirrored on both sides.
+    // Per-conversation screen-secure mode (1:1 only) is NOTIFY-ONLY (iOS parity,
+    // founder's choice): we no longer blank the chat with FLAG_SECURE. When a
+    // screenshot is taken while a secure chat is open, MainActivity's screen-
+    // capture detector (Android 14+) sends the peer a "took a screenshot" notice
+    // via Session.onLocalScreenshot(). The global screen-security toggle still
+    // hard-blocks all screenshots via FLAG_SECURE (applied in MainActivity).
     val secureThreads by app.rcq.android.data.LocalStores.secureThreads.collectAsState()
     val chatSecure = !isGroup && !isSelf && peer != null &&
         app.rcq.android.data.LocalStores.peerThread(peer) in secureThreads
-    val activity = LocalContext.current as? android.app.Activity
-    DisposableEffect(chatSecure) {
-        if (chatSecure) activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose {
-            // Leave the global screenshot-block flag alone if it's on.
-            if (!app.rcq.android.data.LocalStores.screenSecurityOn()) {
-                activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-            }
-        }
-    }
 
     fun authorName(m: ChatMessage): String = when {
         m.fromMe -> "You"

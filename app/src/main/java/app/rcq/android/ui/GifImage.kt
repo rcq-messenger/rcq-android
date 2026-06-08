@@ -31,11 +31,27 @@ internal fun ByteArray.isGif(): Boolean =
 @RequiresApi(Build.VERSION_CODES.P)
 @Composable
 internal fun AnimatedGif(bytes: ByteArray, modifier: Modifier) {
-    val drawable = remember(bytes) {
+    // The decoded drawable is paired with the DIRECT ByteBuffer that backs it
+    // so the buffer stays reachable for as long as the drawable lives.
+    //
+    // Why a direct buffer (NOT ByteBuffer.wrap): AnimatedImageDrawable decodes
+    // each animation frame LAZILY on a native "AnimatedImageTh" worker thread.
+    // On Android 10/11 an array-backed source (ByteBuffer.wrap / byte[]) is read
+    // back through ByteArrayStream, which needs a JNIEnv on that worker thread —
+    // the thread isn't attached to the JVM, so the runtime aborts with
+    // "Failed to get JNIEnv for JavaVM" (a native SIGABRT we CAN'T catch, on a
+    // different thread). A *direct* buffer is native memory the decoder reads
+    // without touching the JVM, so the lazy frame decode never crashes. This was
+    // the RCQ-Beta-launch crash (its animated GIF avatar) and the old
+    // "smileys crash" (inline animated GIFs in history) — same root cause.
+    val holder = remember(bytes) {
         runCatching {
-            ImageDecoder.decodeDrawable(ImageDecoder.createSource(ByteBuffer.wrap(bytes)))
+            val direct = ByteBuffer.allocateDirect(bytes.size).apply { put(bytes); rewind() }
+            val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(direct))
+            d to direct
         }.getOrNull()
     }
+    val drawable = holder?.first
     // If the animated decode failed (some OEM/OS ImageDecoder builds choke on
     // particular GIFs), fall back to a static first frame. A bad emoticon must
     // never take down a whole chat.

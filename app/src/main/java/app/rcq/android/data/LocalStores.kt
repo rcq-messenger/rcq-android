@@ -80,6 +80,14 @@ object LocalStores {
     private val _screenSecurity = MutableStateFlow(false)
     val screenSecurity: StateFlow<Boolean> = _screenSecurity.asStateFlow()
 
+    /** Home-list UI flags (set of stable string ids) — currently which sections
+     *  the user has folded. Global UI preference that survives leaving and
+     *  re-entering the home screen, so a collapsed section stays collapsed
+     *  (report: the offline section kept re-expanding because the state was
+     *  only in-memory remember{}). */
+    private val _sectionFlags = MutableStateFlow<Set<String>>(emptySet())
+    val sectionFlags: StateFlow<Set<String>> = _sectionFlags.asStateFlow()
+
     /** Per-account, per-thread "screen-secure" chats (peer:UIN keys). When a
      *  secure chat is open, ChatScreen adds FLAG_SECURE so screenshots/recording
      *  of THAT chat are blocked; the flag is propagated to the peer so both
@@ -96,6 +104,7 @@ object LocalStores {
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
+        _sectionFlags.value = prefs.getStringSet(K_SECTION_FLAGS, emptySet())!!.toSet()
     }
 
     /** Point the per-account flows at [accountId]'s slots and reload them.
@@ -167,6 +176,15 @@ object LocalStores {
 
     fun screenSecurityOn() = _screenSecurity.value
     fun setScreenSecurity(on: Boolean) { _screenSecurity.value = on; prefs.edit().putBoolean(K_SCREEN_SEC, on).apply() }
+
+    // ── home section fold flags (global UI preference) ────────────────
+    fun isSectionFlag(id: String) = id in _sectionFlags.value
+    fun setSectionFlag(id: String, on: Boolean) {
+        val next = if (on) _sectionFlags.value + id else _sectionFlags.value - id
+        if (next == _sectionFlags.value) return
+        _sectionFlags.value = next
+        prefs.edit().putStringSet(K_SECTION_FLAGS, next.toSet()).apply()
+    }
 
     // ── presence stay-online window ──────────────────────────────────
     /** (Re)anchor the stay-online window to now + [ttlMinutes], so the home
@@ -294,6 +312,7 @@ object LocalStores {
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PRES_WIN = "presence_window"
     private const val K_SECURE = "secure_threads"
+    private const val K_SECTION_FLAGS = "section_flags"
     private const val K_PRIVACY_CACHE = "privacy_cache"
     private const val K_CONTACTS_CACHE = "contacts_cache"
     private const val K_GROUPS_CACHE = "groups_cache"

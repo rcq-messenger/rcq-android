@@ -188,11 +188,17 @@ internal fun HomeScreen(
     var previewGroup by remember { mutableStateOf<RcqGroup?>(null) }
     var reportTarget by remember { mutableStateOf<Contact?>(null) }
 
-    var collapsedFavorites by remember { mutableStateOf(false) }
-    var collapsedGroups by remember { mutableStateOf(false) }
-    var collapsedOnline by remember { mutableStateOf(false) }
-    var collapsedOffline by remember { mutableStateOf(false) }
-    var collapsedArchive by remember { mutableStateOf(true) }
+    // Section fold state is persisted (LocalStores.sectionFlags) so a collapsed
+    // section stays collapsed across leaving/re-entering home (report: the
+    // offline section kept re-expanding because it was in-memory remember{}).
+    // Set membership = "collapsed", except Archive which defaults to collapsed
+    // and stores an "open" marker instead.
+    val sectionFlags by LocalStores.sectionFlags.collectAsState()
+    val collapsedFavorites = "sec:fav" in sectionFlags
+    val collapsedGroups = "sec:grp" in sectionFlags
+    val collapsedOnline = "sec:online" in sectionFlags
+    val collapsedOffline = "sec:offline" in sectionFlags
+    val collapsedArchive = "sec:archive:open" !in sectionFlags
 
     // Unread threads float to the top (iOS parity), then by recency.
     fun byRecency(list: List<Contact>) =
@@ -304,7 +310,7 @@ internal fun HomeScreen(
                     val favUnread = favContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
                         favGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
                     item(key = "h_fav") {
-                        SectionHeader(secFavorites, favContacts.size + favGroups.size, collapsedFavorites, { collapsedFavorites = !collapsedFavorites }) {
+                        SectionHeader(secFavorites, favContacts.size + favGroups.size, collapsedFavorites, { LocalStores.setSectionFlag("sec:fav", !collapsedFavorites) }) {
                             UnreadBadge(favUnread)
                         }
                     }
@@ -323,7 +329,7 @@ internal fun HomeScreen(
                 // before the real groups arrive (tester #13).
                 if (!connecting) {
                     item(key = "grp-h") {
-                        SectionHeader(stringResource(R.string.home_sec_groups), visibleGroups.size, collapsedGroups, { collapsedGroups = !collapsedGroups }) {
+                        SectionHeader(stringResource(R.string.home_sec_groups), visibleGroups.size, collapsedGroups, { LocalStores.setSectionFlag("sec:grp", !collapsedGroups) }) {
                             Icon(Icons.Filled.Add, "New group", tint = c.accent, modifier = Modifier.size(20.dp).clip(CircleShape).clickable { showCreateGroup = true })
                         }
                     }
@@ -343,8 +349,8 @@ internal fun HomeScreen(
                     }
                 }
 
-                contactSection(secOnline, onlineContacts, collapsedOnline, "on", unread, { collapsedOnline = !collapsedOnline }, onOpenChat, onLongPress = { previewContact = it })
-                contactSection(secOffline, offlineContacts, collapsedOffline, "off", unread, { collapsedOffline = !collapsedOffline }, onOpenChat, onLongPress = { previewContact = it })
+                contactSection(secOnline, onlineContacts, collapsedOnline, "on", unread, { LocalStores.setSectionFlag("sec:online", !collapsedOnline) }, onOpenChat, onLongPress = { previewContact = it })
+                contactSection(secOffline, offlineContacts, collapsedOffline, "off", unread, { LocalStores.setSectionFlag("sec:offline", !collapsedOffline) }, onOpenChat, onLongPress = { previewContact = it })
                 // Archive holds BOTH archived contacts AND archived groups.
                 // (Bug fix: an archived group was filtered out of the main list
                 // but never rendered here, so it vanished entirely and couldn't
@@ -353,7 +359,7 @@ internal fun HomeScreen(
                     val archUnread = archivedContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
                         archivedGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
                     item(key = "h_arch") {
-                        SectionHeader(secArchive, archivedContacts.size + archivedGroups.size, collapsedArchive, { collapsedArchive = !collapsedArchive }) {
+                        SectionHeader(secArchive, archivedContacts.size + archivedGroups.size, collapsedArchive, { LocalStores.setSectionFlag("sec:archive:open", collapsedArchive) }) {
                             UnreadBadge(archUnread)
                         }
                     }

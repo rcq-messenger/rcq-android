@@ -182,12 +182,18 @@ private fun statusText(state: CallController.State, connectedAtMs: Long): String
         if (state.info.media == CallController.Media.VIDEO) stringResource(R.string.call_incoming_video)
         else stringResource(R.string.call_incoming)
     is CallController.State.Connected -> {
-        var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-        LaunchedEffect(connectedAtMs) {
-            while (true) { now = System.currentTimeMillis(); delay(1000) }
+        // connectedAtMs stays 0 until ICE actually connects — show "Connecting…"
+        // (not a fake 0:00 timer) so silence-with-a-ticking-clock can't happen.
+        if (connectedAtMs <= 0) {
+            stringResource(R.string.call_connecting)
+        } else {
+            var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(connectedAtMs) {
+                while (true) { now = System.currentTimeMillis(); delay(1000) }
+            }
+            val secs = ((now - connectedAtMs) / 1000).coerceAtLeast(0)
+            "%d:%02d".format(secs / 60, secs % 60)
         }
-        val secs = if (connectedAtMs > 0) ((now - connectedAtMs) / 1000).coerceAtLeast(0) else 0
-        "%d:%02d".format(secs / 60, secs % 60)
     }
     is CallController.State.Ended -> stringResource(R.string.call_out_ended)
     CallController.State.Idle -> ""

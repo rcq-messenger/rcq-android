@@ -84,6 +84,12 @@ class CallController(
     init {
         rtc.onLocalIceCandidate = { json -> shipIce(json) }
         rtc.onFailed = { scope.launch { onRtcFailed() } }
+        // Media actually started flowing (ICE connected). Until this fires the
+        // UI shows "Connecting…" instead of a running timer — the old code
+        // marked the call connected the instant the SDP answer landed, so a
+        // call that never completed ICE (dead TURN path, symmetric NAT) showed
+        // a ticking timer with silence ("соединяется и тишина").
+        rtc.onConnected = { scope.launch { onRtcConnected() } }
     }
 
     // ── public API ──────────────────────────────────────────────────────
@@ -116,11 +122,11 @@ class CallController(
                 refreshTurn()
                 val answerSdp = rtc.handleOffer(offer, call.media.toRtc())
                 _state.value = State.Connected(call)
-                markConnected()
                 send(signal("call_answer", call.peerUin, call.id, mapOf("sdp" to answerSdp)))
                 pendingRemoteIce.forEach { rtc.addRemoteIce(it) }
                 pendingRemoteIce.clear()
                 pendingRemoteOffer = null
+                armConnectTimeout(call)
             } catch (e: Exception) {
                 android.util.Log.e("RCQcall", "handleOffer failed: ${e.message}")
                 endLocally(call, "setup_failed")
@@ -230,10 +236,10 @@ class CallController(
             try {
                 rtc.handleAnswer(sdp)
                 _state.value = State.Connected(call)
-                markConnected()
                 ringer.stop()
                 pendingRemoteIce.forEach { rtc.addRemoteIce(it) }
                 pendingRemoteIce.clear()
+                armConnectTimeout(call)
             } catch (e: Exception) {
                 endLocally(call, "setup_failed")
             }
@@ -316,6 +322,26 @@ class CallController(
     private suspend fun onRtcFailed() {
         val call = _state.value.info ?: return
         if (_state.value is State.Connected) finishEnded(call, "peer_disconnected")
+    }
+
+    /** ICE connected → media is flowing. Start the call timer for real (the
+     *  "Connecting…" status flips to the running duration). */
+    private fun onRtcConnected() {
+        if (_state.value is State.Connected && connectedSince == 0L) markConnected()
+    }
+
+    /** If ICE never completes within the window (dead TURN path / symmetric
+     *  NAT on both ends), end the call cleanly instead of leaving the user on a
+     *  silent "Connecting…" forever. No-op once media has connected. */
+    private fun armConnectTimeout(call: CallInfo) {
+        scope.launch {
+            delay(35_000)
+            if (_state.value.info?.id == call.id &&
+                _state.value is State.Connected && connectedSince == 0L
+            ) {
+                endLocally(call, "setup_failed")
+            }
+        }
     }
 
     /** Burn/rebind/wipe hook: drop any in-flight call without signalling. */

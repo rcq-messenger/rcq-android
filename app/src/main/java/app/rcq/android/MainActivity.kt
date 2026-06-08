@@ -97,6 +97,11 @@ object WebLinkRequest {
 // its dialog for the panic-PIN biometric unlock. FragmentActivity is itself a
 // ComponentActivity, so setContent / enableEdgeToEdge still apply.
 class MainActivity : androidx.fragment.app.FragmentActivity() {
+    private lateinit var session: Session
+    // android.app.Activity.ScreenCaptureCallback on API 34+ (held as Any? so the
+    // API-34 type is never referenced in a field signature on older devices).
+    private var screenCaptureCallback: Any? = null
+
     override fun attachBaseContext(newBase: android.content.Context) {
         // Apply the user's chosen app language before any resources resolve.
         super.attachBaseContext(app.rcq.android.data.LanguageManager.wrap(newBase))
@@ -125,7 +130,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val activeAccountId = app.rcq.android.data.AccountManager.activeId.value
         LocalStores.bindAccount(activeAccountId)
         app.rcq.android.data.VisitStore.bindAccount(activeAccountId)
-        val session = Session(applicationContext)
+        session = Session(applicationContext)
         // Apply screenshot-blocking before the first frame if it's already on.
         if (LocalStores.screenSecurityOn()) {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
@@ -138,6 +143,35 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
             }
             RcqTheme(mode) { RcqApp(session) }
+        }
+    }
+
+    // Notify-mode secure chats (iOS parity): on Android 14+ detect a screenshot
+    // and let Session tell the peer. Registered only while the activity is
+    // visible. Older Android has no reliable screenshot-detection API.
+    override fun onStart() {
+        super.onStart()
+        if (android.os.Build.VERSION.SDK_INT >= 34) registerScreenshotDetector()
+    }
+
+    override fun onStop() {
+        if (android.os.Build.VERSION.SDK_INT >= 34) unregisterScreenshotDetector()
+        super.onStop()
+    }
+
+    @androidx.annotation.RequiresApi(34)
+    private fun registerScreenshotDetector() {
+        val cb = (screenCaptureCallback as? android.app.Activity.ScreenCaptureCallback)
+            ?: android.app.Activity.ScreenCaptureCallback {
+                if (::session.isInitialized) session.onLocalScreenshot()
+            }.also { screenCaptureCallback = it }
+        runCatching { registerScreenCaptureCallback(mainExecutor, cb) }
+    }
+
+    @androidx.annotation.RequiresApi(34)
+    private fun unregisterScreenshotDetector() {
+        (screenCaptureCallback as? android.app.Activity.ScreenCaptureCallback)?.let {
+            runCatching { unregisterScreenCaptureCallback(it) }
         }
     }
 }
@@ -232,7 +266,7 @@ private fun RcqApp(session: Session) {
         val backPopsOverlay = (s is UiState.Registered && !locked && (
             groupInfoId != null || peerInfoUin != null || chatTarget != null ||
                 showManageAccounts || showNews || showOutgoing || showRandom ||
-                showAudioRooms || showNearby || showRadio || showProfile || showSettings
+                showAudioRooms || showNearby || showRadio || showProfile || showSettings || showRestore
             )) || (s is UiState.Onboarding && showRestore)
         BackHandler(enabled = backPopsOverlay) {
             when {
@@ -259,6 +293,14 @@ private fun RcqApp(session: Session) {
                 onWiped = { resetNav(); state = UiState.Onboarding },
                 onAccountChanged = { newUin -> resetNav(); state = UiState.Registered(newUin) },
             )
+            // Add an account by recovery phrase (from onboarding OR from the
+            // account-management screen). recoverAccount() adds a NEW local
+            // account slot and switches to it, so onRestored lands on its Home.
+            !locked && showRestore -> app.rcq.android.ui.RestoreScreen(
+                session,
+                onBack = { showRestore = false },
+                onRestored = { uin -> resetNav(); state = UiState.Registered(uin) },
+            )
             // peerInfo is checked BEFORE groupInfo so that opening a member's
             // profile FROM the group-info screen (which leaves groupInfoId set)
             // shows the profile, and backing out of it returns to group-info.
@@ -283,6 +325,7 @@ private fun RcqApp(session: Session) {
             s is UiState.Registered && showManageAccounts -> ManageAccountsScreen(
                 session,
                 onBack = { showManageAccounts = false },
+                onAddBySeed = { showManageAccounts = false; showRestore = true },
             )
             s is UiState.Registered && showNews -> app.rcq.android.ui.NewsScreen(
                 session,
@@ -334,11 +377,6 @@ private fun RcqApp(session: Session) {
                 onSwitchAccount = ::switchAccount,
                 onAddAccount = ::addAccount,
                 onManageAccounts = { showManageAccounts = true },
-            )
-            s is UiState.Onboarding && showRestore -> app.rcq.android.ui.RestoreScreen(
-                session,
-                onBack = { showRestore = false },
-                onRestored = { uin -> showRestore = false; state = UiState.Registered(uin) },
             )
             s is UiState.Onboarding -> OnboardingScreen(onStart = ::register, onRestore = { showRestore = true })
             s is UiState.Registering -> Registering()

@@ -775,6 +775,18 @@ class Session(context: Context) {
         scope.launch { sendControl(peerUin, Envelope.secureScreen(on)) }
     }
 
+    /** A screenshot was just taken on THIS device (detected by MainActivity on
+     *  Android 14+). If a per-conversation secure 1:1 chat is open (notify-only
+     *  mode, iOS parity), tell the peer so a "took a screenshot" notice appears
+     *  on their side. No-op otherwise. */
+    fun onLocalScreenshot() {
+        val thread = activeThread ?: return
+        if (!thread.startsWith("peer:")) return
+        if (!LocalStores.isThreadSecure(thread)) return
+        val peer = thread.removePrefix("peer:").toIntOrNull() ?: return
+        scope.launch { sendControl(peer, Envelope.screenshotTaken()) }
+    }
+
     // ── biometric unlock (panic-PIN phase 4) ─────────────────────────
 
     /** Can biometric unlock be offered now (hardware present, no duress PIN)? */
@@ -1817,6 +1829,11 @@ class Session(context: Context) {
             addPeerReaction(target.peerUin, target.id, me, newAsset)
             sendControl(target.peerUin, env)
         }
+        // Echo to your OWN other devices (linked web / second phone) so a
+        // reaction made here also shows there. Sealed to your own identity; the
+        // receiver resolves the target message by id across all threads. The
+        // origin device re-receives it but applies idempotently (no-op).
+        sendControl(me, env)
     }
 
     /** Retract [target] for everyone (iOS delete-for-everyone). Allowed for the
@@ -2005,7 +2022,7 @@ class Session(context: Context) {
                     store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId))
                 is Envelope.Location ->
                     store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng))
-                is Envelope.Reaction -> addPeerReaction(dec.senderUin, env.targetId, dec.senderUin, env.asset)
+                is Envelope.Reaction -> applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
                     // Author-only: a peer can only retract their own message.
                     val t = _messages.value[dec.senderUin]?.firstOrNull { it.id == env.targetId }
@@ -2330,6 +2347,19 @@ class Session(context: Context) {
     /** Set/clear [reactorUin]'s reaction on a 1:1 message (one reaction per
      *  user): [asset] null removes it. Persists + updates the flow. No-op if
      *  the message isn't in the thread or the state is unchanged. */
+    /** Apply a reaction located by its target message id across ALL threads
+     *  (1:1 and group). The target id is a globally-unique UUID, so it resolves
+     *  to exactly one message wherever it lives. Used for inbound 1:1 reactions
+     *  AND for self-echoes (a reaction you made on another device, sealed to
+     *  your own identity): such an envelope carries only the target id, not the
+     *  conversation, so the thread can't be inferred from the sender. */
+    private fun applyReactionByTargetId(targetId: String, reactorUin: Int, asset: String?) {
+        _messages.value.keys.firstOrNull { peer -> _messages.value[peer]?.any { it.id == targetId } == true }
+            ?.let { peer -> addPeerReaction(peer, targetId, reactorUin, asset); return }
+        _groupMessages.value.keys.firstOrNull { gid -> _groupMessages.value[gid]?.any { it.id == targetId } == true }
+            ?.let { gid -> addGroupReaction(gid, targetId, reactorUin, asset) }
+    }
+
     private fun addPeerReaction(peer: Int, targetId: String, reactorUin: Int, asset: String?) {
         val cur = _messages.value.toMutableMap()
         val list = cur[peer] ?: return

@@ -81,6 +81,7 @@
     <string name="add_account_create">Create</string>
     <string name="manage_accounts_intro">Accounts on this device. Switch between them from the account button on the home screen. Deleting an account here removes it from this device only — its identity stays on the server.</string>
     <string name="manage_accounts_active">Active</string>
+    <string name="manage_accounts_add_by_phrase">Add account by recovery phrase</string>
     <string name="manage_accounts_delete">Delete</string>
     <string name="manage_accounts_delete_title">Delete %1$s?</string>
     <string name="manage_accounts_delete_body">Removes this account and its messages from this device. The account stays on the server and can be added again later.</string>

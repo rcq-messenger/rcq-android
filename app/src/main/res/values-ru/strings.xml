@@ -80,6 +80,7 @@
     <string name="add_account_create">Создать</string>
     <string name="manage_accounts_intro">Аккаунты на этом устройстве. Переключайтесь между ними кнопкой аккаунта на главном экране. Удаление аккаунта здесь убирает его только с этого устройства, личность остаётся на сервере.</string>
     <string name="manage_accounts_active">Активный</string>
+    <string name="manage_accounts_add_by_phrase">Добавить аккаунт по фразе восстановления</string>
     <string name="manage_accounts_delete">Удалить</string>
     <string name="manage_accounts_delete_title">Удалить %1$s?</string>
     <string name="manage_accounts_delete_body">Убирает этот аккаунт и его сообщения с этого устройства. Аккаунт остаётся на сервере, его можно добавить снова позже.</string>
