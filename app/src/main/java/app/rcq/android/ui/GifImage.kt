@@ -26,6 +26,17 @@ internal fun ByteArray.isGif(): Boolean =
     size >= 4 && this[0] == 0x47.toByte() && this[1] == 0x49.toByte() &&
         this[2] == 0x46.toByte() && this[3] == 0x38.toByte()
 
+/** True only for JPEG (FF D8 FF) or PNG (89 50 4E 47) — the two ubiquitous,
+ *  well-hardened still-image formats whose native Skia decoders are safe on
+ *  every device we've seen. GIF and (animated) WebP go through native decoders
+ *  that SIGSEGV/SIGABRT on some OEM ROMs (realme/ColorOS crashed decoding a GIF
+ *  group avatar — and a native crash can't be caught). Callers that can fall
+ *  back to a placeholder (e.g. avatars) decode ONLY these to never crash. */
+internal fun ByteArray.isJpegOrPng(): Boolean =
+    (size >= 3 && this[0] == 0xFF.toByte() && this[1] == 0xD8.toByte() && this[2] == 0xFF.toByte()) ||
+        (size >= 4 && this[0] == 0x89.toByte() && this[1] == 0x50.toByte() &&
+            this[2] == 0x4E.toByte() && this[3] == 0x47.toByte())
+
 /** Renders an animated GIF/WebP via ImageDecoder → AnimatedImageDrawable
  *  (API 28+). Below 28 the caller falls back to a static first frame. */
 @RequiresApi(Build.VERSION_CODES.P)

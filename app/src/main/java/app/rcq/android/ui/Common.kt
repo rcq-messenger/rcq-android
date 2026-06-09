@@ -127,15 +127,16 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
             session.fetchImage(id, key)
         } else null
     }
-    // Render a STATIC, downsampled first frame — NOT via AnimatedImageDrawable.
-    // An animated-GIF group avatar crashed NATIVELY at launch on some devices
-    // (realme RMX1921 / Android 14: the v0.31 crash diagnostic pinned it to
-    // "last stage: group_avatar"), and a native ImageDecoder/AnimatedImageThread
-    // crash can't be caught or retried. A tiny avatar circle doesn't need to
-    // animate; decoding off-thread + downsampled (handles GIF first frame AND
-    // oversized images) trades the animation for never crashing. decodeSampled
-    // returns null on a corrupt blob → falls back to the glyph.
-    val image = rememberSampledBitmap(bytes, maxPx = 384)
+    // Decode ONLY JPEG/PNG (well-hardened native decoders). The beta group's
+    // avatar is a GIF, and on realme/ColorOS (Android 14) the native GIF decoder
+    // SIGSEGV/SIGABRT'd even on a static first-frame decode via BitmapFactory —
+    // a native crash we can't catch (the v0.31 diagnostic pinned it to
+    // "group_avatar", and v0.32's static decode STILL crashed). A GIF/WebP/odd
+    // avatar now falls back to the group glyph instead of decoding. Avatars set
+    // in-app are always JPEG, so real avatars still render; only manually-set
+    // GIF avatars show the glyph. Off-thread + downsampled for safety.
+    val safeBytes = bytes?.takeIf { it.isJpegOrPng() }
+    val image = rememberSampledBitmap(safeBytes, maxPx = 384)
     Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
         if (image != null) {
             Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
