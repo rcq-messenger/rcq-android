@@ -127,20 +127,20 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
             session.fetchImage(id, key)
         } else null
     }
+    // Render a STATIC, downsampled first frame — NOT via AnimatedImageDrawable.
+    // An animated-GIF group avatar crashed NATIVELY at launch on some devices
+    // (realme RMX1921 / Android 14: the v0.31 crash diagnostic pinned it to
+    // "last stage: group_avatar"), and a native ImageDecoder/AnimatedImageThread
+    // crash can't be caught or retried. A tiny avatar circle doesn't need to
+    // animate; decoding off-thread + downsampled (handles GIF first frame AND
+    // oversized images) trades the animation for never crashing. decodeSampled
+    // returns null on a corrupt blob → falls back to the glyph.
+    val image = rememberSampledBitmap(bytes, maxPx = 384)
     Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
-        val b = bytes
-        when {
-            // Animated GIF avatar (kept raw on upload) — render it animated.
-            b != null && b.isGif() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P ->
-                AnimatedGif(b, Modifier.fillMaxSize())
-            else -> {
-                val image = remember(b) { b?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() } }
-                if (image != null) {
-                    Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                } else {
-                    Icon(Icons.Filled.Groups, null, tint = Color.White, modifier = Modifier.size(glyphSize))
-                }
-            }
+        if (image != null) {
+            Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            Icon(Icons.Filled.Groups, null, tint = Color.White, modifier = Modifier.size(glyphSize))
         }
     }
 }
