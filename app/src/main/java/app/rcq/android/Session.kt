@@ -1343,6 +1343,8 @@ class Session(context: Context) {
                 withRetry { api.sendGroupSealed(groupId, payloads) }
             }
             updateGroupMsgState(groupId, id, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
+            // Mirror the message to the user's other devices (best-effort).
+            sendMessageCarbon(env, toPeer = null, toGroup = groupId)
         } catch (e: Exception) {
             updateGroupMsgState(groupId, id, DeliveryState.FAILED)
         }
@@ -1399,6 +1401,7 @@ class Session(context: Context) {
                 is Envelope.Visit -> Unit        // visits are 1:1 only
                 is Envelope.SecureScreen -> Unit // secure mode is 1:1 only
                 is Envelope.ScreenshotTaken -> Unit
+                is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.Unknown -> Unit
             }
         }.onFailure { logDecryptFailure(payloadB64, it) }
@@ -1774,6 +1777,8 @@ class Session(context: Context) {
             val payload = encryptFor(toUin, env)
             val resp = withRetry { api.sendSealed(toUin, payload) }
             updateMessageState(id, toUin, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
+            // Mirror the message to the user's other devices (best-effort).
+            sendMessageCarbon(env, toPeer = toUin, toGroup = null)
         } catch (e: Exception) {
             updateMessageState(id, toUin, DeliveryState.FAILED)
         }
@@ -1905,6 +1910,30 @@ class Session(context: Context) {
         runCatching {
             val payload = encryptFor(toUin, env)
             withRetry { api.sendSealed(toUin, payload) }
+        }
+    }
+
+    /** Message kinds we mirror to the user's other devices via a carbon.
+     *  Reactions sync through their own self-echo; control/poll don't sync. */
+    private fun isCarbonable(env: Envelope): Boolean = when (env) {
+        is Envelope.Text, is Envelope.Photo, is Envelope.Video,
+        is Envelope.Voice, is Envelope.File, is Envelope.Location -> true
+        else -> false
+    }
+
+    /** Mirror a just-sent message to the user's OTHER logged-in devices: seal a
+     *  Carbon (the original envelope + its destination) to our own identity and
+     *  POST it to our own uin with a NON-pushable type, so it syncs over WS /
+     *  the per-device queue without buzzing us about our own message. The other
+     *  device files the inner message as fromMe; the origin device dedups its
+     *  own carbon by id. Best-effort — the message already went out. */
+    private suspend fun sendMessageCarbon(inner: Envelope, toPeer: Int?, toGroup: Int?) {
+        if (!isCarbonable(inner)) return
+        val me = store.uin ?: return
+        runCatching {
+            val carbon = Envelope.Carbon(to = toPeer, gid = toGroup, env = inner)
+            val payload = encryptFor(me, carbon)
+            withRetry { api.sendSealed(me, payload, envelopeType = "carbon") }
         }
     }
 
@@ -2045,9 +2074,43 @@ class Session(context: Context) {
                     store(ChatMessage(env.id, dec.senderUin, fromMe = false, body = appCtx.getString(app.rcq.android.R.string.secscreen_peer_screenshot, name), sentAt = now, kind = "system"))
                 }
                 is Envelope.Poll -> Unit       // polls are group-only; ignore in 1:1
+                is Envelope.Carbon ->
+                    // A message I sent from ANOTHER device, echoed to my own uin.
+                    // Only honour my own carbon; file the inner message as fromMe
+                    // in its destination thread (dedup by id; no badge/sound).
+                    if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now)
                 is Envelope.Unknown -> Unit
             }
         }.onFailure { logDecryptFailure(payloadB64, it) }
+    }
+
+    /** File a carbon's inner message as a fromMe row in its destination thread
+     *  (group [gid] or peer [to]). Mirrors the incoming construction but marks
+     *  it ours. store()/storeGroup() dedup by id (INSERT-OR-IGNORE), so the
+     *  origin device's own carbon and any queue redelivery are no-ops. */
+    private fun storeCarbon(to: Int?, gid: Int?, inner: Envelope, now: Long) {
+        val me = store.uin ?: return
+        if (gid != null) {
+            when (inner) {
+                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, now, kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id))
+                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId))
+                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me))
+                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me))
+                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId))
+                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me))
+                else -> Unit
+            }
+        } else if (to != null) {
+            when (inner) {
+                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, now, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id))
+                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId))
+                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes))
+                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt()))
+                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId))
+                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng))
+                else -> Unit
+            }
+        }
     }
 
     private suspend fun drainQueue() {

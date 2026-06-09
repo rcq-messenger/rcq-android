@@ -103,6 +103,14 @@ sealed interface Envelope {
      *  "shot"). The receiver shows "<name> took a screenshot". Control only. */
     data class ScreenshotTaken(val id: String) : Envelope
 
+    /** Multi-device send-side sync (iOS/web wire "carbon"). When you send a
+     *  message from one device, that device also seals a Carbon to your OWN
+     *  identity (to_uin = you) wrapping the original [env] + its destination
+     *  (exactly one of [to] / [gid]). Your other devices unwrap it and file the
+     *  inner message as fromMe in the destination thread; the origin device
+     *  dedups its own carbon by the inner message's id. */
+    data class Carbon(val to: Int?, val gid: Int?, val env: Envelope) : Envelope
+
     data class Unknown(val kind: String) : Envelope
 
     /** Serialize to the exact JSON bytes that get signed and shipped.
@@ -202,6 +210,13 @@ sealed interface Envelope {
         is ScreenshotTaken -> JsonObject().apply {
             addProperty("kind", "shot")
             addProperty("id", id)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is Carbon -> JsonObject().apply {
+            addProperty("kind", "carbon")
+            to?.let { addProperty("to", it) }
+            gid?.let { addProperty("gid", it) }
+            // Nest the inner envelope as a sub-object (parse its own JSON bytes).
+            add("env", JsonParser.parseString(String(env.toJsonBytes(), Charsets.UTF_8)).asJsonObject)
         }.toString().toByteArray(Charsets.UTF_8)
         is Unknown -> JsonObject().apply { addProperty("kind", kind) }
             .toString().toByteArray(Charsets.UTF_8)
@@ -321,6 +336,13 @@ sealed interface Envelope {
                 )
                 "secscreen" -> SecureScreen(obj.get("on")?.asBoolean ?: false)
                 "shot" -> ScreenshotTaken(obj.get("id")?.asString ?: id)
+                "carbon" -> Carbon(
+                    to = obj.get("to")?.asInt,
+                    gid = obj.get("gid")?.asInt,
+                    env = obj.getAsJsonObject("env")
+                        ?.let { fromJsonBytes(it.toString().toByteArray(Charsets.UTF_8)) }
+                        ?: Unknown("carbon"),
+                )
                 else -> Unknown(kind ?: "unknown")
             }
         }
