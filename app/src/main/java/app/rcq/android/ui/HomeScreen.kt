@@ -152,6 +152,15 @@ internal fun HomeScreen(
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Native-crash diagnostics (#1): mark that we reached the home screen, then
+    // — once we've survived a few seconds of it rendering (group rows + avatars,
+    // the "beta chat loads" danger zone) — declare the launch complete so a
+    // normal later kill isn't mistaken for a startup crash.
+    LaunchedEffect(Unit) {
+        app.rcq.android.CrashReporter.crumb(context, "home_compose")
+        delay(3000)
+        app.rcq.android.CrashReporter.launchComplete(context)
+    }
     val contacts by session.contacts.collectAsState()
     val groups by session.groups.collectAsState()
     val pending by session.pending.collectAsState()

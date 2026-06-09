@@ -17,8 +17,12 @@ import app.rcq.android.security.PanicPinService
 class RcqApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // BEFORE anything else: if the previous launch left a startup breadcrumb,
+        // it died during startup (suspected native crash) — turn it into a report.
+        CrashReporter.checkPreviousLaunch(this)
         // First, so it captures crashes from the rest of init too.
         CrashReporter.install(this)
+        CrashReporter.crumb(this, "app_create")
         PanicPinService.initLockState(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {

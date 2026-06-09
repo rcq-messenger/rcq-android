@@ -21,7 +21,18 @@ import java.io.StringWriter
  */
 object CrashReporter {
     private const val FILE = "last_crash.txt"
+    private const val CRUMB = "launch_crumb.txt"
     private const val MAX = 16_000
+
+    // Native-crash breadcrumb. The handler above catches JVM crashes; a pure
+    // native crash (SIGSEGV/SIGABRT, e.g. some ImageDecoder paths) leaves
+    // nothing. So we drop a breadcrumb at each startup checkpoint via [crumb];
+    // if the NEXT launch finds one still set (the app never reached
+    // [launchComplete]), the previous launch died during startup — almost
+    // certainly natively — and [checkPreviousLaunch] synthesises a report
+    // naming the last stage reached. Turned off once the app is safely running
+    // so a normal later kill is never mistaken for a crash.
+    @Volatile private var crumbOff = false
 
     fun install(context: Context) {
         val appCtx = context.applicationContext
@@ -51,6 +62,43 @@ object CrashReporter {
             append(sw.toString())
         }
         File(context.filesDir, FILE).writeText(report.take(MAX))
+    }
+
+    /** Record the current startup stage (native-crash breadcrumb). Cheap; a
+     *  small file written at a handful of checkpoints. No-op once running. */
+    fun crumb(context: Context, stage: String) {
+        if (crumbOff) return
+        runCatching { File(context.applicationContext.filesDir, CRUMB).writeText(stage) }
+    }
+
+    /** Past the startup danger zone — stop tracking and clear the breadcrumb so
+     *  a normal later kill (swipe-away, OS reclaim) isn't reported as a crash. */
+    fun launchComplete(context: Context) {
+        crumbOff = true
+        runCatching { File(context.applicationContext.filesDir, CRUMB).delete() }
+    }
+
+    /** Call FIRST in Application.onCreate. If the previous launch left a
+     *  breadcrumb (never reached [launchComplete]) AND there's no JVM crash
+     *  report (which would be richer), synthesise a "suspected native crash"
+     *  report naming the last stage — [Session.start]'s existing path submits
+     *  it. This is how the launch-time native crash gets diagnosed with no adb. */
+    fun checkPreviousLaunch(context: Context) {
+        val appCtx = context.applicationContext
+        val crumbFile = File(appCtx.filesDir, CRUMB)
+        val stage = runCatching { if (crumbFile.exists()) crumbFile.readText() else null }.getOrNull()
+        runCatching { crumbFile.delete() }
+        if (stage.isNullOrBlank()) return
+        // A JVM crash already wrote a real stack — don't clobber it.
+        if (File(appCtx.filesDir, FILE).exists()) return
+        val report = buildString {
+            append("RCQ launch crash (suspected NATIVE — no JVM stack)\n")
+            append("app: ${BuildConfig.VERSION_NAME} (vc ${BuildConfig.VERSION_CODE})\n")
+            append("android: ${Build.VERSION.RELEASE} (sdk ${Build.VERSION.SDK_INT})\n")
+            append("device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
+            append("last stage before crash: $stage\n")
+        }
+        runCatching { File(appCtx.filesDir, FILE).writeText(report) }
     }
 
     /** The saved crash report from a previous run, or null if none. */

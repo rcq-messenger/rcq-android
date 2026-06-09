@@ -118,8 +118,14 @@ internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize
 @Composable
 internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f) {
     val c = RcqTheme.colors
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
-        value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) session.fetchImage(id, key) else null
+        value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) {
+            // Native-crash breadcrumb (#1): a launch crash "when the beta chat
+            // loads" is suspected around group-avatar decode — mark the stage.
+            app.rcq.android.CrashReporter.crumb(ctx, "group_avatar")
+            session.fetchImage(id, key)
+        } else null
     }
     Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
         val b = bytes

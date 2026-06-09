@@ -502,7 +502,9 @@ class Session(context: Context) {
         val uin = store.uin ?: return
         val token = store.token ?: return
         started = true
+        CrashReporter.crumb(appCtx, "session_start")
         bindDb(AccountManager.activeId.value ?: "")
+        CrashReporter.crumb(appCtx, "load_db")
         loadMessagesFromDb()
         loadCachedRoster()
         scope.launch {
@@ -592,6 +594,10 @@ class Session(context: Context) {
                     // (transient network/relay death) so the user doesn't have to
                     // tap each red error by hand.
                     retryFailedSends()
+                    // If the previous launch died natively during startup, the
+                    // content-free breadcrumb report is now submittable — do it
+                    // here (the consent prompt can't show during a crash loop).
+                    maybeAutoReportNativeCrash()
                 }
             },
         )
@@ -764,6 +770,17 @@ class Session(context: Context) {
         val me = store.uin ?: return false
         val tag = "[Android ${app.rcq.android.BuildConfig.VERSION_NAME}]"
         return runCatching { api.report(me, "$tag $text", "bug_bounty") }.isSuccess
+    }
+
+    /** Auto-submit a SUSPECTED-NATIVE launch-crash breadcrumb report (stage +
+     *  device only, no message content) once the socket is up. JVM crash stacks
+     *  are NOT auto-sent here — those keep the MainActivity consent prompt. */
+    private fun maybeAutoReportNativeCrash() {
+        scope.launch {
+            val report = CrashReporter.pending(appCtx) ?: return@launch
+            if (!report.startsWith("RCQ launch crash")) return@launch
+            if (submitBugReport("[CRASH]\n$report")) CrashReporter.clear(appCtx)
+        }
     }
 
     /** Toggle per-conversation screen-secure mode for a 1:1 chat: set it
@@ -2114,10 +2131,12 @@ class Session(context: Context) {
     }
 
     private suspend fun drainQueue() {
+        CrashReporter.crumb(appCtx, "drain_queue")
         api.drainQueue().forEach { q ->
             val payload = q.payload ?: return@forEach
             if (q.group_id != null) ingestGroup(payload, q.group_id) else ingest(payload)
         }
+        CrashReporter.crumb(appCtx, "drain_done")
     }
 
     // ── contacts ─────────────────────────────────────────────────────

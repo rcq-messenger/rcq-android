@@ -415,7 +415,13 @@ private fun RcqApp(session: Session) {
         // posture). The report is technical only (stack + device), no content.
         var crashReport by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(s is UiState.Registered) {
-            if (s is UiState.Registered) crashReport = CrashReporter.pending(context)
+            if (s is UiState.Registered) {
+                // Suspected-NATIVE launch-crash breadcrumbs are content-free and
+                // auto-submitted by Session (the consent prompt can't show during
+                // a crash loop) — skip them here so we only prompt for real JVM
+                // crash stacks.
+                crashReport = CrashReporter.pending(context)?.takeUnless { it.startsWith("RCQ launch crash") }
+            }
         }
         crashReport?.let { report ->
             if (s is UiState.Registered && !locked) CrashConsentDialog(
