@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,6 +80,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.MoreVert
@@ -99,6 +101,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -623,7 +626,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
         }
 
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(
                 rows,
                 key = { row ->
@@ -668,6 +672,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         onLongPress = { actionMsg = row.items.first() },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                     )
+                }
+            }
+        }
+            // Jump-to-latest: a floating down-arrow shown only when the user has
+            // scrolled up from the newest message (iOS/Telegram parity). Tapping
+            // animates back to the bottom.
+            val showJumpDown by remember { derivedStateOf { listState.canScrollForward } }
+            if (showJumpDown) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp)
+                        .size(40.dp).clip(CircleShape).background(c.bgSecondary)
+                        .border(1.dp, c.divider, CircleShape)
+                        .clickable { scope.launch { listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0)) } },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowDown, null, tint = c.textPrimary, modifier = Modifier.size(26.dp))
                 }
             }
         }
