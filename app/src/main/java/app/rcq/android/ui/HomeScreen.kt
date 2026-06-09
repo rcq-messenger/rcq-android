@@ -917,7 +917,10 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
-    val muted = LocalStores.isMuted(LocalStores.groupThread(group.id))
+    // Observe the mute set so toggling mute reflects on the row immediately
+    // (was a one-shot read → the bell only appeared after leaving + re-entering).
+    val mutedSet by LocalStores.muted.collectAsState()
+    val muted = LocalStores.groupThread(group.id) in mutedSet
     Row(
         Modifier.fillMaxWidth().scale(scale)
             .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
@@ -950,7 +953,8 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
-    val muted = LocalStores.isMuted(LocalStores.peerThread(contact.uin))
+    val mutedSet by LocalStores.muted.collectAsState()
+    val muted = LocalStores.peerThread(contact.uin) in mutedSet
 
     Row(
         modifier = Modifier
@@ -1215,7 +1219,9 @@ private fun AddContactDialog(
         searching = true
         delay(300)
         users = session.searchUsers(q)
-        groups = session.searchGroups(q)
+        // Don't surface CLOSED groups in open search — they're not joinable this
+        // way (join only via invite link); iOS already hides them (#11).
+        groups = session.searchGroups(q).filter { !it.is_closed }
         searching = false
     }
 
@@ -1258,6 +1264,9 @@ private fun AddContactDialog(
                                 g.name ?: "#${g.id}",
                                 pluralStringResource(R.plurals.members, g.member_count, g.member_count),
                                 isGroup = true,
+                                session = session,
+                                avatarMediaId = g.avatar_media_id,
+                                avatarMediaKey = g.avatar_media_key,
                             ) {
                                 scope.launch { if (session.joinGroup(g.id) != null) onOpenGroup(g.id) }
                             }
@@ -1280,17 +1289,32 @@ private fun AddContactDialog(
 
 /** One tappable search result (user or group) in the Add window. */
 @Composable
-private fun AddResultRow(title: String, subtitle: String, accent: Boolean = false, isGroup: Boolean = false, onClick: () -> Unit) {
+private fun AddResultRow(
+    title: String,
+    subtitle: String,
+    accent: Boolean = false,
+    isGroup: Boolean = false,
+    session: Session? = null,
+    avatarMediaId: String? = null,
+    avatarMediaKey: String? = null,
+    onClick: () -> Unit,
+) {
     val c = RcqTheme.colors
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(
-            if (isGroup) Icons.Filled.Groups else if (accent) Icons.Filled.PersonAdd else Icons.Outlined.AccountCircle,
-            null, tint = if (accent) c.accent else c.textSecondary, modifier = Modifier.size(22.dp),
-        )
+        // Groups show their real avatar (iOS parity, #11); users/exact-UIN keep
+        // the glyph.
+        if (isGroup && session != null) {
+            GroupAvatarMedia(avatarMediaId, avatarMediaKey, session, 26.dp)
+        } else {
+            Icon(
+                if (isGroup) Icons.Filled.Groups else if (accent) Icons.Filled.PersonAdd else Icons.Outlined.AccountCircle,
+                null, tint = if (accent) c.accent else c.textSecondary, modifier = Modifier.size(22.dp),
+            )
+        }
         Column(Modifier.weight(1f)) {
             Text(title, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -492,6 +492,9 @@
     <string name="poll_anon_badge">Анонимный</string>
     <string name="poll_close">Завершить опрос</string>
     <string name="poll_closed">Завершён</string>
+    <string name="poll_who_voted">Кто голосовал</string>
+    <string name="poll_voters_title">Голоса</string>
+    <string name="poll_no_voters">Нет голосов</string>
     <!-- Connection diagnostics -->
     <string name="diag_title">Диагностика подключения</string>
     <string name="diag_transport">Маршрут</string>

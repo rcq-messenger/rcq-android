@@ -678,7 +678,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // Jump-to-latest: a floating down-arrow shown only when the user has
             // scrolled up from the newest message (iOS/Telegram parity). Tapping
             // animates back to the bottom.
-            val showJumpDown by remember { derivedStateOf { listState.canScrollForward } }
+            // Show the jump-down arrow only once the newest message has scrolled
+            // fully off-screen — not the instant the list can scroll down by a
+            // pixel (#19: "буквально один миллиметр — и она тут как тут").
+            val showJumpDown by remember {
+                derivedStateOf {
+                    val info = listState.layoutInfo
+                    val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    lastVisible < info.totalItemsCount - 1
+                }
+            }
             if (showJumpDown) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp)
@@ -1181,18 +1190,31 @@ private fun KeyboardScrollEffect(
     itemCount: Int,
 ) {
     val density = LocalDensity.current
-    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    // Read the per-frame IME inset (this composable is isolated so only it
+    // recomposes each frame, not the whole ChatScreen).
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val imeVisible = imeBottom > 0
+    // Capture, at the moment the keyboard STARTS opening (before imePadding has
+    // shrunk the list), whether the newest messages were on screen — so tapping
+    // the composer while reading history doesn't yank you to the bottom.
+    val followToBottom = remember { mutableStateOf(false) }
     LaunchedEffect(imeVisible) {
-        if (!imeVisible || itemCount == 0) return@LaunchedEffect
-        // Keep the newest messages above the keyboard — but JUMP, don't animate:
-        // an animated scroll ran concurrently with the imePadding() inset
-        // animation, so every frame both squeezed AND scrolled the list,
-        // composing/decoding rows on the way down. On weaker devices that stutter
-        // read as "tapping the field freezes everything". And only follow down
-        // when the latest messages are already on screen, so tapping the composer
-        // while reading history no longer yanks you to the bottom.
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        if (lastVisible >= itemCount - 2) listState.scrollToItem(itemCount - 1)
+        if (imeVisible && itemCount > 0) {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            followToBottom.value = lastVisible >= itemCount - 2
+        } else {
+            followToBottom.value = false
+        }
+    }
+    // The earlier one-shot scroll fired BEFORE the inset finished animating, so
+    // the list re-grew its scroll range as it shrank and the last message slid
+    // back under the keyboard. Instead re-pin to the bottom on every inset frame
+    // while it animates open (JUMP, never animate — an animated scroll racing the
+    // inset animation stuttered on weak devices, report #29/#21).
+    LaunchedEffect(imeBottom) {
+        if (imeVisible && followToBottom.value && itemCount > 0) {
+            listState.scrollToItem(itemCount - 1)
+        }
     }
 }
 

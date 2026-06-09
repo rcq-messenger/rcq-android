@@ -12,10 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -46,6 +49,7 @@ import app.rcq.android.model.ChatMessage
 import app.rcq.android.model.PollContent
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** A group-poll bubble. The question + options come from the encrypted
  *  envelope (persisted in [ChatMessage.body] as JSON); the live tallies are
@@ -69,6 +73,7 @@ internal fun PollBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
     val myVotes = poll?.my_votes ?: emptyList()
     val closed = poll?.closed_at != null
     val isCreator = poll != null && poll?.creator_uin == session.uin
+    var showVoters by remember(m.id) { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -112,13 +117,23 @@ internal fun PollBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                         Spacer(Modifier.width(4.dp))
                     }
                     Text(label, color = c.textPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text("$count", color = c.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    val pct = if (total > 0) (frac * 100f).roundToInt() else 0
+                    Text("$count · $pct%", color = c.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.poll_votes, total), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            // Non-anonymous polls: surface who voted for what (backend returns
+            // voter_uins for these; iOS already shows them).
+            if (!content.anonymous && total > 0) {
+                Text(
+                    stringResource(R.string.poll_who_voted), color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { showVoters = true }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
             when {
                 closed -> Text(stringResource(R.string.poll_closed), color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 isCreator -> Text(
@@ -129,6 +144,35 @@ internal fun PollBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                 )
             }
         }
+    }
+
+    if (showVoters) {
+        val g = m.groupId?.let { session.group(it) }
+        fun nameOf(uin: Int): String = g?.members?.firstOrNull { it.uin == uin }?.nickname ?: "#$uin"
+        AlertDialog(
+            onDismissRequest = { showVoters = false },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.poll_voters_title), color = c.textPrimary) },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    content.options.forEachIndexed { i, label ->
+                        val voters = poll?.tallies?.firstOrNull { it.option_index == i }?.voter_uins ?: emptyList()
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("$label — ${voters.size}", color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            if (voters.isEmpty()) {
+                                Text(stringResource(R.string.poll_no_voters), color = c.textSecondary, fontSize = 13.sp)
+                            } else {
+                                voters.forEach { uin -> Text(nameOf(uin), color = c.textSecondary, fontSize = 13.sp) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showVoters = false }) { Text(stringResource(R.string.common_close), color = c.accent) } },
+        )
     }
 }
 

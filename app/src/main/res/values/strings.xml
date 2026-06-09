@@ -493,6 +493,9 @@
     <string name="poll_anon_badge">Anonymous</string>
     <string name="poll_close">Close poll</string>
     <string name="poll_closed">Closed</string>
+    <string name="poll_who_voted">Who voted</string>
+    <string name="poll_voters_title">Votes</string>
+    <string name="poll_no_voters">No votes</string>
     <!-- Connection diagnostics -->
     <string name="diag_title">Connection diagnostics</string>
     <string name="diag_transport">Route</string>

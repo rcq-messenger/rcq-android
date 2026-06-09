@@ -110,9 +110,14 @@ internal fun SectionHeader(
  */
 @Composable
 internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f) {
+    GroupAvatarMedia(group?.avatarMediaId, group?.avatarMediaKey, session, size, glyphSize)
+}
+
+/** [GroupAvatar] by raw media id/key — for places that only have a group
+ *  PREVIEW (e.g. the Add-window search results) rather than a full roster. */
+@Composable
+internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f) {
     val c = RcqTheme.colors
-    val id = group?.avatarMediaId
-    val key = group?.avatarMediaKey
     val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
         value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) session.fetchImage(id, key) else null
     }
