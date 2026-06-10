@@ -107,6 +107,7 @@ import app.rcq.android.model.Contact
 import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
 import app.rcq.android.net.RcqApi
+import app.rcq.android.net.RcqFederation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -1255,6 +1256,19 @@ private fun AddContactDialog(
                         if (digits != null && users.none { it.uin == digits }) {
                             AddResultRow("#$digits", stringResource(R.string.home_send_request), accent = true) {
                                 onAddUin(digits); sentTo = sentTo + digits
+                            }
+                        }
+                        // Federation (F2): a `uin@host` cross-island address → add
+                        // it as a local cross-island contact and open the chat.
+                        val ci = remember(query) {
+                            runCatching { RcqFederation.parseAddress(query.trim()) }
+                                .getOrNull()?.takeIf { it.host != RcqFederation.FLAGSHIP_HOST }
+                        }
+                        if (ci != null) {
+                            AddResultRow("${ci.uin}@${ci.host}", "Cross-island contact", accent = true) {
+                                scope.launch {
+                                    if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
+                                }
                             }
                         }
                         users.forEach { u ->

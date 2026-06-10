@@ -24,7 +24,10 @@ import app.rcq.android.model.OutgoingRequest
 import app.rcq.android.model.PendingRequest
 import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
+import app.rcq.android.net.CrossIslandSender
+import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.RcqApi
+import app.rcq.android.net.RcqFederation
 import app.rcq.android.net.RcqSocket
 import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
@@ -243,6 +246,8 @@ class Session(context: Context) {
     private var everConnected = false
 
     init {
+        // Federation (F2): local cross-island contact store.
+        CrossIslandStore.init(appCtx)
         // The app locking (background with a PIN set) is signalled by the
         // PanicPinService.locked flow; tear the live session down so the
         // unlocked key + plaintext history don't linger in this process.
@@ -621,7 +626,35 @@ class Session(context: Context) {
         scope.launch { runCatching { _uinShopEnabled.value = api.serverInfo().capabilities.uin_shop } }
         // Ensure our libsignal prekey bundle is published so peers can start
         // v=2 sessions with us. Best-effort: failure leaves us on v=1.
-        scope.launch { runCatching { store.uin?.let { SignalBootstrap.ensureBootstrapped(signalStores, api, it) } }.onFailure { android.util.Log.w("RCQsignal", "bootstrap failed: ${it.javaClass.simpleName}: ${it.message}") } }
+        scope.launch {
+            runCatching { store.uin?.let { SignalBootstrap.ensureBootstrapped(signalStores, api, it) } }
+                .onFailure { android.util.Log.w("RCQsignal", "bootstrap failed: ${it.javaClass.simpleName}: ${it.message}") }
+            // Federation F1: publish our signed home-island record now that the
+            // libsignal identity exists. Best-effort; never throws upward.
+            publishHomeIslandRecord()
+        }
+    }
+
+    /** Federation Layer B (F1): build + publish this account's signed home-island
+     *  record. Single-homed on this session's island for now (multi-homing = F2).
+     *  Fully best-effort: any failure (an island without the F1 endpoint, a
+     *  missing identity, a network hiccup) is swallowed so it can never disrupt
+     *  the session or login. */
+    private suspend fun publishHomeIslandRecord() {
+        try {
+            val uin = store.uin ?: return
+            val signingPriv = store.signingPrivate ?: return
+            if (!signalStores.hasLocalIdentity()) return
+            val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
+            val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
+            val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
+            val homes = listOf(RcqFederation.Home(api.islandHost(), uin))
+            val ts = (System.currentTimeMillis() / 1000).toInt()
+            val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
+            api.publishIslandRecord(doc.toString())
+        } catch (e: Exception) {
+            android.util.Log.w("RCQfed", "publish island record failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     /** Cache the owner's read-receipt visibility so we honour a "nobody"
@@ -1790,6 +1823,20 @@ class Session(context: Context) {
     }
 
     private suspend fun sendEnvelope(env: Envelope, id: String, toUin: Int) {
+        // Federation (F2): if this peer is a cross-island contact, resolve their
+        // island and deposit there instead of the flagship. Gated strictly —
+        // for every flagship peer (no cross-island entry) the path below is
+        // byte-identical to before.
+        val ci = CrossIslandStore.findByUin(toUin)
+        if (ci != null) {
+            val me = store.uin
+            val ok = me != null && runCatching {
+                val sp = signingPriv(); val pp = signingPub()
+                withContext(Dispatchers.IO) { CrossIslandSender.deliver(ci, env, me, sp, pp) }
+            }.getOrDefault(false)
+            updateMessageState(id, toUin, if (ok) DeliveryState.SENT else DeliveryState.FAILED)
+            return
+        }
         try {
             val payload = encryptFor(toUin, env)
             val resp = withRetry { api.sendSealed(toUin, payload) }
@@ -2146,6 +2193,21 @@ class Session(context: Context) {
         runCatching { refreshContacts() }
         runCatching { refreshPending() }
         runCatching { refreshOutgoing() }
+    }
+
+    /** Federation (F2): add a cross-island contact `uin@host` — fetch their
+     *  island's open key card and store it locally (no flagship contact-request;
+     *  they're on another island). Returns true on success. */
+    suspend fun addCrossIslandContact(uin: Int, host: String): Boolean = withContext(Dispatchers.IO) {
+        val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext false
+        CrossIslandStore.save(
+            CrossIslandStore.Contact(
+                uin = uin, host = host, nickname = "$uin@$host",
+                identityKey = card.identityKey, signingKey = card.signingKey,
+                signalIdentityKey = card.signalIdentityKey, addedAt = System.currentTimeMillis(),
+            )
+        )
+        true
     }
 
     /** Server-side search for the Add window (users + joinable groups). */

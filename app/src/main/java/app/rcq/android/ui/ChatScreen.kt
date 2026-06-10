@@ -143,6 +143,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
+import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.crypto.Reply
 import app.rcq.android.media.VoiceRecorder
 import app.rcq.android.model.ChatMessage
@@ -474,7 +475,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                     isSelf -> stringResource(R.string.chat_saved_subtitle)
                     isTyping -> stringResource(R.string.chat_typing)
-                    peerContact == null -> "$peer"
+                    peerContact == null -> CrossIslandStore.findByUin(peer ?: 0)?.host ?: "$peer"
                     peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(peerContact.lastSeen, context))
                     else -> stringResource(peerContact.presence.labelRes).lowercase()
                 }

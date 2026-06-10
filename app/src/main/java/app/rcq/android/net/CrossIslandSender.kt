@@ -1,0 +1,96 @@
+package app.rcq.android.net
+
+import android.util.Base64
+import app.rcq.android.crypto.Envelope
+import app.rcq.android.crypto.SealedSender
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
+
+/**
+ * Federation Layer B (F2) — cross-island send.
+ *
+ * Deliver a sealed envelope to a peer on ANOTHER island: resolve their current
+ * home(s) from their island's open key card + signed record, v=1-seal to them
+ * (their public identity key from the card — a v=2 session would need their
+ * auth-gated prekey bundle, which a cross-island sender has no token for, and
+ * v=1 is the 1:1 default), and deposit a copy to each home's `/messages/sealed`.
+ *
+ * Mirrors web-chat/src/lib/federation-send.ts, which is verified end-to-end
+ * against a real second island. Blocking I/O — call from a Dispatchers.IO context.
+ */
+object CrossIslandSender {
+
+    private val JSON = "application/json".toMediaType()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    data class Card(val identityKey: String, val signingKey: String, val signalIdentityKey: String?)
+
+    /** Fetch a peer's open public-key card from their island (no auth). */
+    fun fetchCard(host: String, uin: Int): Card? {
+        val req = Request.Builder().url("https://$host/federation/keys/$uin").get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val o = JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject
+            return Card(
+                identityKey = o.get("identity_key").asString,
+                signingKey = o.get("signing_key").asString,
+                signalIdentityKey = o.get("signal_identity_key")?.takeIf { !it.isJsonNull }?.asString,
+            )
+        }
+    }
+
+    /** Resolve the peer's verified home islands (spec §4). Falls back to the
+     *  single home [(host, uin)] when no record is published or it doesn't verify. */
+    fun resolveHomes(host: String, uin: Int): List<RcqFederation.Home> {
+        val fallback = listOf(RcqFederation.Home(host, uin))
+        val card = fetchCard(host, uin) ?: return fallback
+        val req = Request.Builder().url("https://$host/federation/island-record/$uin").get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return fallback
+            val doc = runCatching {
+                JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
+            }.getOrNull() ?: return fallback
+            val v = RcqFederation.verifyRecord(doc, expectedIk = card.signalIdentityKey, expectedSk = card.signingKey)
+            if (v is RcqFederation.VerifyResult.Ok) {
+                return v.doc.getAsJsonArray("homes").map {
+                    val h = it.asJsonObject
+                    RcqFederation.Home(h.get("host").asString, h.get("uin").asInt)
+                }
+            }
+            return fallback
+        }
+    }
+
+    /** Deliver [env] to a cross-island [contact]: v=1-seal to their identity key
+     *  and deposit to each resolved home. Returns true if any home accepted it. */
+    fun deliver(
+        contact: CrossIslandStore.Contact,
+        env: Envelope,
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+    ): Boolean {
+        val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
+        val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub)
+        var delivered = false
+        for (h in resolveHomes(contact.host, contact.uin)) {
+            val body = JsonObject().apply {
+                addProperty("to_uin", h.uin)
+                addProperty("envelope_type", "message")
+                addProperty("payload", payload)
+            }.toString().toRequestBody(JSON)
+            val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()
+            runCatching { client.newCall(req).execute().use { if (it.isSuccessful) delivered = true } }
+        }
+        return delivered
+    }
+}
