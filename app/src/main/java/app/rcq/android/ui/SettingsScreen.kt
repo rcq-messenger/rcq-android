@@ -99,13 +99,24 @@ import kotlinx.coroutines.launch
 private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
 
 @Composable
-internal fun SettingsScreen(session: Session, uin: Int, onBack: () -> Unit, onBurned: (Int?) -> Unit, onMigrated: (Int) -> Unit) {
-    var route by remember { mutableStateOf(SettingsRoute.ROOT) }
+internal fun SettingsScreen(
+    session: Session,
+    uin: Int,
+    onBack: () -> Unit,
+    onBurned: (Int?) -> Unit,
+    onMigrated: (Int) -> Unit,
+    // Deep-link: open straight on Network diagnostics (the Home overflow menu
+    // entry). Back from it then closes Settings rather than landing in Privacy.
+    openDiagnostics: Boolean = false,
+) {
+    var route by remember { mutableStateOf(if (openDiagnostics) SettingsRoute.DIAGNOSTICS else SettingsRoute.ROOT) }
     // System-back parity with the in-screen ← arrow: pop ONE settings level
     // instead of letting back fall through to the activity (which dumped the
     // user straight out to the chat list). At ROOT the handler is disabled so
     // back bubbles up to leave Settings as before.
     BackHandler(enabled = route != SettingsRoute.ROOT) {
+        // Diagnostics opened directly from Home → back closes Settings.
+        if (openDiagnostics && route == SettingsRoute.DIAGNOSTICS) { onBack(); return@BackHandler }
         route = when (route) {
             SettingsRoute.DIAGNOSTICS, SettingsRoute.CUSTOM_SERVER -> SettingsRoute.PRIVACY
             else -> SettingsRoute.ROOT
@@ -126,8 +137,11 @@ internal fun SettingsScreen(session: Session, uin: Int, onBack: () -> Unit, onBu
             onOpenDiagnostics = { route = SettingsRoute.DIAGNOSTICS },
         ) { route = SettingsRoute.ROOT }
         // Back from Diagnostics returns to Privacy (where it was opened from),
-        // not the Settings root (tester #1).
-        SettingsRoute.DIAGNOSTICS -> DiagnosticsScreen(session) { route = SettingsRoute.PRIVACY }
+        // not the Settings root (tester #1) — unless we deep-linked here from
+        // Home, in which case back closes Settings entirely.
+        SettingsRoute.DIAGNOSTICS -> DiagnosticsScreen(session) {
+            if (openDiagnostics) onBack() else route = SettingsRoute.PRIVACY
+        }
         SettingsRoute.NOTIFICATIONS -> NotificationsScreen { route = SettingsRoute.ROOT }
         SettingsRoute.SOUNDS -> SoundsScreen { route = SettingsRoute.ROOT }
         SettingsRoute.LANGUAGE -> LanguageScreen { route = SettingsRoute.ROOT }
@@ -581,6 +595,7 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     var receipts by remember { mutableStateOf("everyone") }
     var presencePersistent by remember { mutableStateOf(false) }
     var presenceTtl by remember { mutableStateOf(1440) }
+    var hofOptIn by remember { mutableStateOf(false) }
     val screenSec by app.rcq.android.data.LocalStores.screenSecurity.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
@@ -594,6 +609,7 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             receipts = p.read_receipts_visibility ?: "everyone"
             presencePersistent = p.presence_persistent ?: false
             presenceTtl = p.presence_ttl_minutes ?: 1440
+            hofOptIn = p.hof_opt_in ?: false
             // Seed the local countdown anchor if the feature is on but we have
             // no window yet (enabled on another device, or before this feature
             // existed). Active changes below re-anchor it; passive load never
@@ -658,6 +674,20 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 Switch(
                     checked = screenSec,
                     onCheckedChange = { app.rcq.android.data.LocalStores.setScreenSecurity(it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
+
+            // Hall of Fame opt-in. Just consent to be considered; the founder
+            // curates who actually appears on rcq.app/hof.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_hall_of_fame), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_hall_of_fame_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = hofOptIn,
+                    onCheckedChange = { hofOptIn = it; save(RcqApi.UpdateMeBody(hof_opt_in = it)) },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }

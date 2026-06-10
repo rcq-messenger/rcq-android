@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Block
@@ -138,6 +139,7 @@ internal fun HomeScreen(
     onOpenChat: (Int) -> Unit,
     onOpenGroup: (Int) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
     onOpenNews: () -> Unit = {},
     onOpenOutgoing: () -> Unit = {},
@@ -266,6 +268,7 @@ internal fun HomeScreen(
                 onAddContact = { showAdd = true },
                 onSearch = { showSearch = true },
                 onOpenSettings = onOpenSettings,
+                onOpenDiagnostics = onOpenDiagnostics,
                 onOpenProfile = onOpenProfile,
                 onOpenNews = onOpenNews,
                 onOpenOutgoing = onOpenOutgoing,
@@ -645,6 +648,7 @@ private fun HomeHeader(
     onAddContact: () -> Unit,
     onSearch: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onOpenProfile: () -> Unit,
     onOpenNews: () -> Unit,
     onOpenOutgoing: () -> Unit,
@@ -797,6 +801,11 @@ private fun HomeHeader(
                     text = { Text(stringResource(if (stealthActive) R.string.home_menu_bypass_disable else R.string.home_menu_bypass_enable), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.Shield, null, tint = if (stealthActive) c.accent else c.textSecondary) },
                     onClick = { overflowMenu = false; onToggleBypass(!stealthActive) },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.diag_title), color = c.textPrimary) },
+                    leadingIcon = { Icon(Icons.Filled.NetworkCheck, null, tint = c.accent) },
+                    onClick = { overflowMenu = false; onOpenDiagnostics() },
                 )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_menu_add_contact), color = c.textPrimary) },

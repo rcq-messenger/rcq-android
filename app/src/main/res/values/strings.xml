@@ -488,6 +488,8 @@
     <string name="pv_receipts_desc">Who sees your blue ticks. Turning this off hides theirs too.</string>
     <string name="pv_screen_security">Block screenshots</string>
     <string name="pv_screen_security_desc">Blocks screenshots and screen recording, and hides the app in the recent-apps switcher. A determined person can still photograph the screen with another device.</string>
+    <string name="pv_hall_of_fame">Hall of Fame</string>
+    <string name="pv_hall_of_fame_desc">Allow being considered for the public Hall of Fame at rcq.app. Only your nickname and UIN, and only if approved. You can turn this off any time.</string>
     <string name="pv_network">Network</string>
     <string name="pv_obfuscated">Obfuscated connection</string>
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>

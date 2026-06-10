@@ -487,6 +487,8 @@
     <string name="pv_receipts_desc">Кто видит ваши галочки прочтения. Если выключить, вы не увидите чужие.</string>
     <string name="pv_screen_security">Запрет скриншотов</string>
     <string name="pv_screen_security_desc">Блокирует скриншоты и запись экрана, прячет приложение в списке недавних. Решительный человек всё равно может сфотографировать экран другим устройством.</string>
+    <string name="pv_hall_of_fame">Зал славы</string>
+    <string name="pv_hall_of_fame_desc">Разрешить рассматривать вас для публичного зала славы на rcq.app. Только ник и UIN, и только если одобрят. Можно выключить в любой момент.</string>
     <string name="pv_network">Сеть</string>
     <string name="pv_obfuscated">Маскировка соединения</string>
     <string name="pv_obfuscated_desc">Проводит соединение через релей, когда сеть блокирует RCQ напрямую. Повышает стабильность на ограничивающих сетях. Применяется при следующем запуске.</string>

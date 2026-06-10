@@ -197,6 +197,8 @@ private fun RcqApp(session: Session) {
     var groupInfoId by remember { mutableStateOf<Int?>(null) }
     var peerInfoUin by remember { mutableStateOf<Int?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    // Deep-link Settings straight to Network diagnostics (Home overflow menu).
+    var settingsToDiagnostics by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
     var showManageAccounts by remember { mutableStateOf(false) }
     var showNews by remember { mutableStateOf(false) }
@@ -215,7 +217,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
     }
 
     fun register(server: String? = null, invite: String? = null) {
@@ -357,15 +359,17 @@ private fun RcqApp(session: Session) {
             )
             s is UiState.Registered && showSettings -> SettingsScreen(
                 session, s.uin,
-                onBack = { showSettings = false },
+                onBack = { showSettings = false; settingsToDiagnostics = false },
                 onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
                 onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
+                openDiagnostics = settingsToDiagnostics,
             )
             s is UiState.Registered -> HomeScreen(
                 session, s.uin,
                 onOpenChat = { chatTarget = ChatTarget.Peer(it) },
                 onOpenGroup = { chatTarget = ChatTarget.Group(it) },
-                onOpenSettings = { showSettings = true },
+                onOpenSettings = { settingsToDiagnostics = false; showSettings = true },
+                onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
                 onOpenProfile = { showProfile = true },
                 onOpenNews = { showNews = true },
                 onOpenOutgoing = { showOutgoing = true },
