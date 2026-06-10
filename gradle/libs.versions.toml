@@ -30,6 +30,11 @@ junit = "4.13.2"
 junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 zxing = "3.5.3"
+# Glide's PURE-JAVA GIF frame decoder (no Glide UI, no native code). The
+# platform Skia GIF decoder (BitmapFactory / ImageDecoder) SIGSEGVs on some OEM
+# ROMs (realme/ColorOS) — this decodes GIF frames to Bitmaps in managed code, so
+# GIF avatars / emoticons / photos never touch the crashing native decoder.
+glideGifDecoder = "4.16.0"
 # androidx.biometric: BiometricPrompt + BiometricManager for the panic-PIN
 # fingerprint/face unlock (phase 4). Pulls in androidx.fragment, which is why
 # MainActivity is a FragmentActivity.
@@ -56,6 +61,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+glide-gifdecoder = { group = "com.github.bumptech.glide", name = "gifdecoder", version.ref = "glideGifDecoder" }
 androidx-datastore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security" }
 androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycleRuntimeKtx" }

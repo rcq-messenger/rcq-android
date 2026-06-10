@@ -112,7 +112,9 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // Media.
         bytes?.let { b ->
-            val bmp = remember(story.id, b) { BitmapFactory.decodeByteArray(b, 0, b.size) }
+            // GIF stories via the pure-Java first frame (native GIF decoder
+            // SIGSEGVs on some OEM ROMs); JPEG/PNG via the native decoder.
+            val bmp = remember(story.id, b) { if (b.isGif()) gifFirstFrame(b) else BitmapFactory.decodeByteArray(b, 0, b.size) }
             if (bmp != null) {
                 Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             }

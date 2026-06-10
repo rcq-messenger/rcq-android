@@ -1446,7 +1446,7 @@ private fun MediaPreviewDialog(pending: PendingSend, onCancel: () -> Unit, onSen
     val isVideo = pending is PendingSend.Video
     val base = remember(pending) {
         when (pending) {
-            is PendingSend.Photo -> runCatching { BitmapFactory.decodeByteArray(pending.bytes, 0, pending.bytes.size) }.getOrNull()
+            is PendingSend.Photo -> runCatching { val pb = pending.bytes; if (pb.isGif()) gifFirstFrame(pb) else BitmapFactory.decodeByteArray(pb, 0, pb.size) }.getOrNull()
             is PendingSend.Video -> runCatching {
                 val b = android.util.Base64.decode(pending.v.thumbB64, android.util.Base64.NO_WRAP)
                 BitmapFactory.decodeByteArray(b, 0, b.size)
@@ -1719,7 +1719,9 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
         if (isVideo) {
             m.thumbB64?.takeIf { it.isNotEmpty() }?.let { runCatching { val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP); BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() }
         } else {
-            photo?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() }
+            // GIF album tiles via the pure-Java first frame (native GIF decoder
+            // SIGSEGVs on some OEM ROMs); JPEG/PNG via the native decoder.
+            photo?.let { runCatching { (if (it.isGif()) gifFirstFrame(it) else BitmapFactory.decodeByteArray(it, 0, it.size))?.asImageBitmap() }.getOrNull() }
         }
     }
     Box(
@@ -1887,9 +1889,11 @@ private fun PhotoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                 SpoilerOverlay()
             }
             // Animated GIF (same "photo" media path iOS uses, gated by magic
-            // bytes) — render it animated instead of a frozen first frame.
-            b.isGif() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P ->
-                AnimatedGif(b, Modifier.fillMaxSize())
+            // bytes) — rendered animated via the pure-Java decoder (SafeGif.kt),
+            // which works on all API levels and never hits the crashing native
+            // GIF decoder on realme/ColorOS.
+            b.isGif() ->
+                SafeAnimatedGif(b, Modifier.fillMaxSize())
             else -> {
                 // Downsampled + decoded off the main thread — a full-res JPEG
                 // decode here stalled the UI thread when the row scrolled in
@@ -1953,8 +1957,8 @@ private fun FullscreenImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
             contentAlignment = Alignment.Center,
         ) {
-            if (bytes.isGif() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                AnimatedGif(bytes, Modifier.fillMaxWidth())
+            if (bytes.isGif()) {
+                SafeAnimatedGif(bytes, Modifier.fillMaxWidth())
             } else {
                 // Decode off the main thread, bounded to 2560px (ample for the
                 // 5x pinch-zoom) so opening a big photo never stalls the UI.
@@ -2271,7 +2275,17 @@ private fun readImageForSend(context: Context, uri: Uri): ByteArray? {
 }
 
 private fun compressImage(context: Context, uri: Uri): ByteArray? {
-    val src = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+    val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    // A picked GIF: keep it raw (size-capped) so it animates; a large one is
+    // flattened to a static JPEG via the PURE-JAVA decoder. Either way we never
+    // hit the native GIF decoder, which SIGSEGVs on some OEM ROMs. Mirrors
+    // compressImageFor (the avatar path).
+    if (raw.isGif()) {
+        if (raw.size <= 2 * 1024 * 1024) return raw
+        val frame = gifFirstFrame(raw) ?: return null
+        return ByteArrayOutputStream().also { frame.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
+    }
+    val src = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return null
     val maxSide = 1200
     val longest = maxOf(src.width, src.height)
     val scaled = if (longest > maxSide) {

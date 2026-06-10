@@ -110,7 +110,9 @@ private fun emoticonBitmap(context: android.content.Context, asset: String, size
     val key = "$asset@$sizePx"
     synchronized(spanBitmaps) { if (spanBitmaps.containsKey(key)) return spanBitmaps[key] }
     val src = Emoticons.bytes(context, asset)?.let {
-        runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()
+        // GIF (every Kolobok asset) via the pure-Java first-frame decoder — the
+        // native Skia GIF decoder SIGSEGVs on some OEM ROMs (realme/ColorOS).
+        runCatching { if (it.isGif()) gifFirstFrame(it) else BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull()
     }
     // Scale to fit sizePx on the LONGER side so the kolobok keeps its aspect
     // ratio (they aren't square — forcing sizePx x sizePx squashed them).

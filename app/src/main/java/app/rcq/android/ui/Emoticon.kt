@@ -158,10 +158,13 @@ internal fun EmoticonGif(name: String, modifier: Modifier, animate: Boolean = tr
         value = Emoticons.bytes(context, name)
     }
     val b = bytes ?: return
-    // [animate]=false (e.g. the 28-emoticon picker grid) shows a frozen frame
-    // to avoid running dozens of AnimatedImageDrawables at once.
-    if (animate && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        AnimatedGif(b, modifier)
+    // [animate]=false (e.g. the 28-emoticon picker grid, message history) shows a
+    // frozen first frame so we don't run dozens of frame loops at once. Both
+    // paths use the PURE-JAVA GIF decoder (SafeGif.kt) — the platform Skia GIF
+    // decoder SIGSEGVs on some OEM ROMs (realme/ColorOS), which crashed every
+    // emoticon render and was a v0.30–0.33 launch-crash path.
+    if (animate) {
+        SafeAnimatedGif(b, modifier)
     } else {
         // Static first frame, decoded ONCE per asset and shared process-wide. The
         // same `:code:` recurs across many history rows / reaction chips; without
@@ -174,11 +177,18 @@ internal fun EmoticonGif(name: String, modifier: Modifier, animate: Boolean = tr
 
 private val staticEmoticonBitmaps = HashMap<String, ImageBitmap?>()
 
-/** Decoded static first frame for emoticon [name], cached process-wide. */
+/** Decoded static first frame for emoticon [name], cached process-wide. GIFs
+ *  (every Kolobok asset) decode via the PURE-JAVA decoder; a JPEG/PNG asset
+ *  would use the safe native path. Never touches the native GIF decoder, which
+ *  SIGSEGVs on some OEM ROMs. */
 private fun staticEmoticonBitmap(name: String, bytes: ByteArray): ImageBitmap? =
     synchronized(staticEmoticonBitmaps) {
         staticEmoticonBitmaps.getOrPut(name) {
-            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull()
+            runCatching {
+                val bmp = if (bytes.isGif()) gifFirstFrame(bytes)
+                else BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                bmp?.asImageBitmap()
+            }.getOrNull()
         }
     }
 

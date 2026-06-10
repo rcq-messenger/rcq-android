@@ -423,7 +423,9 @@ internal fun compressImageFor(context: android.content.Context, uri: android.net
     val isGif = raw.size >= 4 && raw[0] == 0x47.toByte() && raw[1] == 0x49.toByte() &&
         raw[2] == 0x46.toByte() && raw[3] == 0x38.toByte()
     if (isGif && raw.size <= 2 * 1024 * 1024) return raw
-    val src = android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return null
+    // A GIF too big to keep raw is flattened to a static JPEG via the PURE-JAVA
+    // decoder — the native GIF decoder SIGSEGVs on some OEM ROMs.
+    val src = (if (isGif) gifFirstFrame(raw) else android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)) ?: return null
     val maxSide = 640
     val longest = maxOf(src.width, src.height)
     val scaled = if (longest > maxSide) {

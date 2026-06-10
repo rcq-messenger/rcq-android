@@ -22,8 +22,8 @@ android {
         applicationId = "app.rcq.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 33
-        versionName = "0.33"
+        versionCode = 34
+        versionName = "0.34"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // libsignal ships native .so for 4 ABIs; keep the real-device ones
         // (arm64-v8a, armeabi-v7a) + x86_64 for the emulator, drop 32-bit x86.
@@ -115,6 +115,12 @@ dependencies {
     // QR generation for the "my code" sheet (rcq://add/<uin>). Pure-Java
     // BitMatrix → Bitmap; no UI dependency.
     implementation(libs.zxing.core)
+
+    // Pure-Java GIF frame decoder (Glide's gifdecoder; no Glide UI, no native
+    // .so). GIF avatars / emoticons / photos decode in MANAGED code instead of
+    // the platform Skia GIF decoder, which SIGSEGVs on some OEM ROMs
+    // (realme/ColorOS) and was the v0.30–0.33 launch-crash root cause.
+    implementation(libs.glide.gifdecoder)
 
     // Networking (HTTP + WebSocket) and JSON — used by the API + WS
     // layers added in the next milestones.

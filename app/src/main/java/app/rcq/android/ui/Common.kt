@@ -127,16 +127,18 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
             session.fetchImage(id, key)
         } else null
     }
-    // Decode ONLY JPEG/PNG (well-hardened native decoders). The beta group's
-    // avatar is a GIF, and on realme/ColorOS (Android 14) the native GIF decoder
-    // SIGSEGV/SIGABRT'd even on a static first-frame decode via BitmapFactory —
-    // a native crash we can't catch (the v0.31 diagnostic pinned it to
-    // "group_avatar", and v0.32's static decode STILL crashed). A GIF/WebP/odd
-    // avatar now falls back to the group glyph instead of decoding. Avatars set
-    // in-app are always JPEG, so real avatars still render; only manually-set
-    // GIF avatars show the glyph. Off-thread + downsampled for safety.
-    val safeBytes = bytes?.takeIf { it.isJpegOrPng() }
-    val image = rememberSampledBitmap(safeBytes, maxPx = 384)
+    // JPEG/PNG decode via the fast, well-hardened native path; a GIF avatar (the
+    // beta group's is a GIF) decodes its first frame via the PURE-JAVA decoder
+    // (SafeGif.kt). The platform Skia GIF decoder SIGSEGV/SIGABRT'd here even on
+    // a static first-frame BitmapFactory decode on realme/ColorOS — a native
+    // crash we can't catch (the v0.31 diagnostic pinned it to "group_avatar",
+    // v0.32/0.33 STILL crashed). Now GIF avatars actually render instead of
+    // showing the glyph, and no path touches the crashing native decoder. Any
+    // other/odd format still falls back to the group glyph. Both decodes are
+    // off the main thread.
+    val nativeImage = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 384)
+    val gifImage = rememberGifFirstFrame(bytes)
+    val image = nativeImage ?: gifImage
     Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
         if (image != null) {
             Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
