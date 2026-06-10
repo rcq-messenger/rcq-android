@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -95,7 +96,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES }
+private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
 
 @Composable
 internal fun SettingsScreen(session: Session, uin: Int, onBack: () -> Unit, onBurned: (Int?) -> Unit, onMigrated: (Int) -> Unit) {
@@ -135,6 +136,7 @@ internal fun SettingsScreen(session: Session, uin: Int, onBack: () -> Unit, onBu
         SettingsRoute.PIN_CODES -> PinCodesScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.RECOVERY_PHRASE -> RecoveryPhraseScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.LINKED_DEVICES -> LinkedDevicesScreen(session) { route = SettingsRoute.ROOT }
+        SettingsRoute.BACKUP_ISLAND -> BackupIslandScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.CUSTOM_SERVER -> CustomServerScreen(
             session,
             // Back returns to Privacy (its parent), not the Settings root (tester #1).
@@ -250,6 +252,8 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.Key, stringResource(R.string.settings_row_recovery)) { onOpen(SettingsRoute.RECOVERY_PHRASE) }
                 Divider()
                 SettingsRow(Icons.Filled.Devices, stringResource(R.string.settings_row_linked_devices)) { onOpen(SettingsRoute.LINKED_DEVICES) }
+                Divider()
+                SettingsRow(Icons.Filled.Dns, stringResource(R.string.settings_row_backup_island)) { onOpen(SettingsRoute.BACKUP_ISLAND) }
             }
             SectionFooter(stringResource(R.string.settings_foot_privacy))
 
@@ -1139,6 +1143,88 @@ private fun AppIconScreen(onBack: () -> Unit) {
                 }
             }
             SectionFooter(stringResource(R.string.app_icon_footer))
+        }
+    }
+}
+
+// ── Backup island (multihoming, federation v1) ───────────────────────
+
+@Composable
+private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
+    val c = RcqTheme.colors
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val homes by session.backupHomes.collectAsState()
+    var host by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun errorText(e: Throwable): String = when (e.message) {
+        "invalid_host" -> context.getString(R.string.backup_island_err_invalid)
+        "primary_island" -> context.getString(R.string.backup_island_err_primary)
+        "already_added" -> context.getString(R.string.backup_island_err_already)
+        // Keep the cause visible — "could not connect" alone is undebuggable
+        // for a self-hoster pointing at their own island.
+        else -> context.getString(R.string.backup_island_err_generic) +
+            " (${e.message ?: e.javaClass.simpleName})"
+    }
+
+    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        SettingsTopBar(stringResource(R.string.settings_row_backup_island), onBack)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(stringResource(R.string.backup_island_body), color = c.textSecondary, fontSize = 14.sp)
+
+            if (homes.isNotEmpty()) {
+                SettingsGroup {
+                    homes.forEachIndexed { index, h ->
+                        if (index > 0) Divider()
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace)
+                                Text(
+                                    stringResource(R.string.backup_island_row_uin, h.uin),
+                                    color = c.textSecondary, fontSize = 12.sp,
+                                )
+                            }
+                            Text(
+                                stringResource(R.string.backup_island_remove),
+                                color = c.accent,
+                                fontSize = 14.sp,
+                                modifier = Modifier.clickable(enabled = !busy) { session.removeBackupIsland(h.host) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            Field(stringResource(R.string.backup_island_host_hint), host) { host = it }
+            Button(
+                onClick = {
+                    busy = true; error = null
+                    scope.launch {
+                        runCatching { session.addBackupIsland(host) }
+                            .onSuccess { host = "" }
+                            .onFailure { error = errorText(it) }
+                        busy = false
+                    }
+                },
+                enabled = !busy && host.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(if (busy) R.string.backup_island_busy else R.string.backup_island_add))
+            }
+            error?.let { Text(it, color = c.statusBusy, fontSize = 13.sp) }
+
+            Text(stringResource(R.string.backup_island_footer), color = c.textSecondary, fontSize = 12.sp)
         }
     }
 }

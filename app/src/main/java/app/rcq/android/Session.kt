@@ -26,6 +26,8 @@ import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
 import app.rcq.android.net.CrossIslandSender
 import app.rcq.android.net.CrossIslandStore
+import app.rcq.android.net.Multihome
+import app.rcq.android.net.MultihomeStore
 import app.rcq.android.net.RcqApi
 import app.rcq.android.net.RcqFederation
 import app.rcq.android.net.RcqSocket
@@ -248,6 +250,8 @@ class Session(context: Context) {
     init {
         // Federation (F2): local cross-island contact store.
         CrossIslandStore.init(appCtx)
+        // Multihoming (federation v1): this account's backup island homes.
+        MultihomeStore.init(appCtx)
         // The app locking (background with a PIN set) is signalled by the
         // PanicPinService.locked flow; tear the live session down so the
         // unlocked key + plaintext history don't linger in this process.
@@ -512,6 +516,16 @@ class Session(context: Context) {
         CrashReporter.crumb(appCtx, "load_db")
         loadMessagesFromDb()
         loadCachedRoster()
+        refreshBackupHomes()
+        // Multihoming v1: poll the backup-island mailboxes. Deliberately
+        // independent of the primary socket — when the primary island is down,
+        // this loop IS the delivery path.
+        scope.launch {
+            while (true) {
+                delay(30_000)
+                runCatching { drainBackupQueuesOnce() }
+            }
+        }
         scope.launch {
             // Obfuscated transport (censorship circumvention), engaged BEFORE
             // the socket/API connect so they ride the sing-box tunnel. Engage
@@ -615,6 +629,9 @@ class Session(context: Context) {
      *  retry (and the reconnect-driven re-call) make it recover on its own. */
     private fun syncGraph() {
         scope.launch { runCatching { withRetry { drainQueue() } } }
+        // Multihoming v1: also drain the backup-island mailboxes (dedup by
+        // envelope uuid collapses anything the primary already delivered).
+        scope.launch { runCatching { drainBackupQueuesOnce() } }
         scope.launch { runCatching { withRetry { refreshContacts() } } }
         scope.launch { runCatching { withRetry { refreshPending() } } }
         scope.launch { runCatching { withRetry { refreshOutgoing() } } }
@@ -636,10 +653,11 @@ class Session(context: Context) {
     }
 
     /** Federation Layer B (F1): build + publish this account's signed home-island
-     *  record. Single-homed on this session's island for now (multi-homing = F2).
-     *  Fully best-effort: any failure (an island without the F1 endpoint, a
-     *  missing identity, a network hiccup) is swallowed so it can never disrupt
-     *  the session or login. */
+     *  record — the primary island plus any backup homes (multihoming v1). The
+     *  same signed record is PUT to every home so senders can resolve it from
+     *  whichever island survives. Fully best-effort: any failure (an island
+     *  without the F1 endpoint, a missing identity, a network hiccup) is
+     *  swallowed so it can never disrupt the session or login. */
     private suspend fun publishHomeIslandRecord() {
         try {
             val uin = store.uin ?: return
@@ -648,12 +666,68 @@ class Session(context: Context) {
             val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
             val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
             val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val homes = listOf(RcqFederation.Home(api.islandHost(), uin))
+            val homes = listOf(RcqFederation.Home(api.islandHost(), uin)) +
+                MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
             val ts = (System.currentTimeMillis() / 1000).toInt()
             val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
             api.publishIslandRecord(doc.toString())
+            if (homes.size > 1) Multihome.publishToBackups(uin, signingPriv, skPub, doc.toString())
         } catch (e: Exception) {
             android.util.Log.w("RCQfed", "publish island record failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    // ── multihoming (federation v1) ──────────────────────────────────
+
+    /** This account's backup island homes, for the Settings surface. */
+    val backupHomes = MutableStateFlow<List<MultihomeStore.Home>>(emptyList())
+
+    private fun refreshBackupHomes() {
+        backupHomes.value = store.uin?.let { MultihomeStore.list(it) } ?: emptyList()
+    }
+
+    /** Register this identity on [hostInput] as a backup home (recover-first),
+     *  then republish the home-island record so senders learn the new home.
+     *  Throws IllegalArgumentException("invalid_host"|"primary_island"|
+     *  "already_added") or a network error; the UI maps these to strings. */
+    suspend fun addBackupIsland(hostInput: String) {
+        val uin = store.uin ?: error("no session")
+        withContext(Dispatchers.IO) {
+            Multihome.addBackupIsland(
+                ownUin = uin,
+                ownHost = api.islandHost(),
+                hostInput = hostInput,
+                identityPub = identityPub(),
+                signingPriv = signingPriv(),
+                signingPub = signingPub(),
+                nickname = store.nickname ?: "user-$uin",
+            )
+        }
+        refreshBackupHomes()
+        scope.launch { publishHomeIslandRecord() }
+        // Pull whatever is already waiting in the new mailbox.
+        scope.launch { drainBackupQueuesOnce() }
+    }
+
+    /** Forget a backup home (the orphan mailbox account stays on that island;
+     *  re-adding recovers the same per-island uin) and republish the record. */
+    fun removeBackupIsland(host: String) {
+        val uin = store.uin ?: return
+        MultihomeStore.remove(uin, host)
+        refreshBackupHomes()
+        scope.launch { publishHomeIslandRecord() }
+    }
+
+    /** Drain every backup mailbox into the normal ingest path. Copies of
+     *  messages the primary already delivered are collapsed by the
+     *  INSERT-OR-IGNORE envelope-uuid dedup in [store]. Never throws. */
+    private suspend fun drainBackupQueuesOnce() {
+        val uin = store.uin ?: return
+        if (MultihomeStore.list(uin).isEmpty()) return
+        val sp = runCatching { signingPriv() }.getOrNull() ?: return
+        val pp = runCatching { signingPub() }.getOrNull() ?: return
+        withContext(Dispatchers.IO) {
+            Multihome.drainBackupQueues(uin, sp, pp) { payload -> ingest(payload) }
         }
     }
 
@@ -1841,11 +1915,38 @@ class Session(context: Context) {
             val payload = encryptFor(toUin, env)
             val resp = withRetry { api.sendSealed(toUin, payload) }
             updateMessageState(id, toUin, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
+            // Multihoming v1: best-effort sealed copy into the peer's OTHER home
+            // islands; no-op (cached record lookup only) for single-homed peers.
+            scope.launch(Dispatchers.IO) { runCatching { depositToPeerExtraHomes(toUin, env) } }
             // Mirror the message to the user's other devices (best-effort).
             sendMessageCarbon(env, toPeer = toUin, toGroup = null)
         } catch (e: Exception) {
-            updateMessageState(id, toUin, DeliveryState.FAILED)
+            // Primary island unreachable — failover: the (possibly stale-cached)
+            // record may list other homes; one accepted copy = delivered.
+            val rescued = runCatching {
+                withContext(Dispatchers.IO) { depositToPeerExtraHomes(toUin, env) }
+            }.getOrDefault(0)
+            updateMessageState(id, toUin, if (rescued > 0) DeliveryState.SENT else DeliveryState.FAILED)
         }
+    }
+
+    /** Multihoming v1 sender side: v=1-seal [env] once and deposit a copy to
+     *  each of the peer's homes other than our own island (resolved from their
+     *  signed record, anchored to the contact's pinned signing key). Returns
+     *  the number of homes that accepted; 0 for single-homed peers. */
+    private fun depositToPeerExtraHomes(toUin: Int, env: Envelope): Int {
+        val me = store.uin ?: return 0
+        val contact = _contacts.value.firstOrNull { it.uin == toUin } ?: return 0
+        return Multihome.depositToExtraHomes(
+            ownHost = api.islandHost(),
+            ownUin = me,
+            peerUin = toUin,
+            peerIdentityKeyB64 = contact.identityKey,
+            peerSigningKeyB64 = contact.signingKey,
+            env = env,
+            signingPriv = signingPriv(),
+            signingPub = signingPub(),
+        )
     }
 
     /**
