@@ -674,6 +674,7 @@
     <string name="search_no_match">Ничего не найдено</string>
     <string name="chat_cancel_reply">Отменить ответ</string>
     <string name="chat_owner_only">Писать может только владелец группы.</string>
+    <string name="chat_you">Вы</string>
     <string name="chat_a_photo">Фото</string>
     <string name="chat_a_message">Сообщение</string>
     <string name="chat_reply">Ответить</string>

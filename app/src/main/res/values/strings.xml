@@ -675,6 +675,7 @@
     <string name="search_no_match">No matches</string>
     <string name="chat_cancel_reply">Cancel reply</string>
     <string name="chat_owner_only">Only the owner can post in this group.</string>
+    <string name="chat_you">You</string>
     <string name="chat_a_photo">Photo</string>
     <string name="chat_a_message">Message</string>
     <string name="chat_reply">Reply</string>

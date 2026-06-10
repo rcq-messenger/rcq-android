@@ -68,6 +68,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
@@ -120,7 +121,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -252,8 +257,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val chatSecure = !isGroup && !isSelf && peer != null &&
         app.rcq.android.data.LocalStores.peerThread(peer) in secureThreads
 
+    val youLabel = stringResource(R.string.chat_you)
     fun authorName(m: ChatMessage): String = when {
-        m.fromMe -> "You"
+        m.fromMe -> youLabel
         isGroup -> group?.memberName(m.senderUin ?: 0) ?: "${m.senderUin}"
         else -> session.contactName(peer ?: 0)
     }
@@ -652,7 +658,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         } else {
                             MessageBubble(
                                 session, m,
-                                senderName = if (isGroup && !m.fromMe) authorName(m) else null,
+                                senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
+                                replyAuthorOverride = if (row.replyMine) youLabel else null,
                                 onRetry = { scope.launch { runCatching { session.resend(m) } } },
                                 onLongPress = { actionMsg = m },
                                 onOpenGroup = onOpenGroup,
@@ -669,7 +676,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                     is ChatRow.Album -> AlbumBubble(
                         session, row.items,
-                        senderName = if (isGroup && !row.items.first().fromMe) authorName(row.items.first()) else null,
+                        senderName = if (isGroup && !row.items.first().fromMe && row.showSender) authorName(row.items.first()) else null,
                         onLongPress = { actionMsg = row.items.first() },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                     )
@@ -715,8 +722,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
 
         if (!canPost) {
-            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.chat_owner_only), color = c.textSecondary, fontSize = 13.sp)
+            // Read-only notice on a subtle plate (parity with the iOS material
+            // backdrop) so it reads as a deliberate bar, not stray text.
+            Box(Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.Center) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Filled.Campaign, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.chat_owner_only), color = c.textSecondary, fontSize = 13.sp)
+                }
             }
         } else {
             Composer(
@@ -730,7 +742,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, nonBlank)
                 },
                 onSend = { body ->
-                    val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), authorName(it)) }
+                    // Carry the REAL author nick in the quote (never the literal
+                    // "You") so other people see the nick; the viewer's own
+                    // client localizes "You" via replyMine at render time.
+                    val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), if (it.fromMe) session.nickname else authorName(it)) }
                     replyTarget = null
                     if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, false)
                     scope.launch {
@@ -992,6 +1007,22 @@ private fun Composer(
 ) {
     val c = RcqTheme.colors
     val keyboard = LocalSoftwareKeyboardController.current
+    // Don't let the keyboard auto-reappear after the app is backgrounded and
+    // resumed (reading a chat, switch apps, come back → IME used to pop up).
+    // On ON_STOP we drop the composer's focus + hide the IME, so resume has
+    // no focused field to restore the keyboard for. The draft is untouched.
+    val focusManager = LocalFocusManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                focusManager.clearFocus(force = true)
+                keyboard?.hide()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
     var showEmoji by remember { mutableStateOf(false) }
     // The draft lives HERE (not in ChatScreen) so a keystroke recomposes only
     // the composer, not the header + message list. Seeded from / persisted to
@@ -1499,8 +1530,13 @@ private fun MediaPreviewDialog(pending: PendingSend, onCancel: () -> Unit, onSen
 /** A chat-list render unit: a normal single message, or a collapsed media
  *  album (2+ consecutive photo/video messages that shared an albumId at send). */
 private sealed interface ChatRow {
-    data class Single(val m: ChatMessage) : ChatRow
-    data class Album(val id: String, val items: List<ChatMessage>) : ChatRow
+    // showSender: first message of a consecutive run from the same sender in a
+    // group (WA/TG style — the name appears once, not on every bubble). A date
+    // or unread divider resets the run.
+    // replyMine: this message quotes one of MY OWN messages, so the quote shows
+    // "You" to ME — but the wire carries the real nick, so OTHERS see the nick.
+    data class Single(val m: ChatMessage, val showSender: Boolean = true, val replyMine: Boolean = false) : ChatRow
+    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true) : ChatRow
     /** A day separator between messages of different calendar dates (iOS parity). */
     data class DateLabel(val label: String, val key: Long) : ChatRow
     /** The "unread messages" marker, placed before the first unread message. */
@@ -1576,14 +1612,23 @@ private fun dayLabelOf(ts: Long): String =
  *  unread message ([firstUnreadIndex] = message index, or -1 for none). */
 private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<ChatRow> {
     val out = ArrayList<ChatRow>(msgs.size + 8)
+    // id -> fromMe, so a reply quoting one of MY messages can render "You" for
+    // me while the wire still carries the real nick for everyone else.
+    val mineById = HashMap<String, Boolean>(msgs.size)
+    for (mm in msgs) mineById[mm.id] = mm.fromMe
     var lastDay = Long.MIN_VALUE
     var unreadDone = firstUnreadIndex < 0
+    // Track the previous content row's sender so a run of messages from the same
+    // person shows the name only once (reset by any divider below).
+    var runSender: Int? = Int.MIN_VALUE  // sentinel: first row always shows
     var i = 0
     while (i < msgs.size) {
         val m = msgs[i]
         val day = dayKeyOf(m.sentAt)
-        if (day != lastDay) { out.add(ChatRow.DateLabel(dayLabelOf(m.sentAt), day)); lastDay = day }
-        if (!unreadDone && i == firstUnreadIndex) { out.add(ChatRow.Unread); unreadDone = true }
+        if (day != lastDay) { out.add(ChatRow.DateLabel(dayLabelOf(m.sentAt), day)); lastDay = day; runSender = Int.MIN_VALUE }
+        if (!unreadDone && i == firstUnreadIndex) { out.add(ChatRow.Unread); unreadDone = true; runSender = Int.MIN_VALUE }
+        val showSender = m.senderUin != runSender
+        runSender = m.senderUin
 
         val alb = m.albumId
         if (alb != null && (m.kind == "photo" || m.kind == "video")) {
@@ -1597,9 +1642,10 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
                     group.add(n); j++
                 } else break
             }
-            if (group.size >= 2) { out.add(ChatRow.Album(alb, group)); i = j; continue }
+            if (group.size >= 2) { out.add(ChatRow.Album(alb, group, showSender)); i = j; continue }
         }
-        out.add(ChatRow.Single(m)); i++
+        val replyMine = m.replyToId?.let { mineById[it] } ?: false
+        out.add(ChatRow.Single(m, showSender, replyMine)); i++
     }
     return out
 }
@@ -1749,7 +1795,7 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionUin: ((String) -> Int?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionUin: ((String) -> Int?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // Cap a bubble so a long message leaves a gap to the far edge — keeps the
@@ -1813,7 +1859,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                             .then(if (tappable) Modifier.clickable { onTapReply!!.invoke(m.replyToId!!) } else Modifier)
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     ) {
-                        Text(m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text(replyAuthorOverride ?: m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         Text(m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
