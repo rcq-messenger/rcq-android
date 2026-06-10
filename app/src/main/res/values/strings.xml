@@ -543,11 +543,13 @@
     <string name="pv_default">Default</string>
 
     <!-- Settings: sounds -->
+    <string name="snd_master_title">App sounds</string>
+    <string name="snd_master_desc">Master switch for all app tones. Incoming calls still ring.</string>
     <string name="snd_message_title">Message sounds</string>
     <string name="snd_message_desc">Play a tone when a new message arrives in a chat you don\'t have open.</string>
     <string name="snd_presence_title">Contact online / offline</string>
     <string name="snd_presence_desc">Play a tone when one of your contacts comes online or goes offline.</string>
-    <string name="snd_footer">Per-chat mute (long-press a chat on the home screen) silences message sounds for that chat.</string>
+    <string name="snd_footer">Tone volume follows the media volume (the volume buttons). Tones stay quiet in silent, vibrate and Do Not Disturb modes. Per-chat mute (long-press a chat on the home screen) silences message sounds for that chat.</string>
 
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Translations roll out gradually. Untranslated text falls back to English.</string>

@@ -68,6 +68,9 @@ object LocalStores {
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     /** Notification-sound toggles (iOS SoundService parity). */
+    private val _soundMaster = MutableStateFlow(true)
+    val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
+
     private val _soundMessages = MutableStateFlow(true)
     val soundMessages: StateFlow<Boolean> = _soundMessages.asStateFlow()
 
@@ -101,6 +104,7 @@ object LocalStores {
         // Global (app-wide) settings only; per-account flows load in bindAccount.
         _themeMode.value = runCatching { ThemeMode.valueOf(prefs.getString(K_THEME, null) ?: "SYSTEM") }
             .getOrDefault(ThemeMode.SYSTEM)
+        _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
@@ -169,8 +173,10 @@ object LocalStores {
     }
 
     // ── sound toggles ────────────────────────────────────────────────
+    fun soundMasterOn() = _soundMaster.value
     fun soundMessagesOn() = _soundMessages.value
     fun soundPresenceOn() = _soundPresence.value
+    fun setSoundMaster(on: Boolean) { _soundMaster.value = on; prefs.edit().putBoolean(K_SND_MASTER, on).apply() }
     fun setSoundMessages(on: Boolean) { _soundMessages.value = on; prefs.edit().putBoolean(K_SND_MSG, on).apply() }
     fun setSoundPresence(on: Boolean) { _soundPresence.value = on; prefs.edit().putBoolean(K_SND_PRES, on).apply() }
 
@@ -307,6 +313,7 @@ object LocalStores {
     private const val K_REMOVED = "removed"
     private const val K_THEME = "theme_mode"
     private const val K_UNREAD = "unread"
+    private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"
     private const val K_SCREEN_SEC = "screen_security"

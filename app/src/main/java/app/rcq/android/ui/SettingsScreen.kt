@@ -74,6 +74,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -868,27 +869,29 @@ private fun statusText(ok: Boolean?, yes: String, no: String): String = when (ok
 @Composable
 private fun SoundsScreen(onBack: () -> Unit) {
     val c = RcqTheme.colors
+    val masterOn by LocalStores.soundMaster.collectAsState()
     val msgOn by LocalStores.soundMessages.collectAsState()
     val presOn by LocalStores.soundPresence.collectAsState()
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_sounds), onBack)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SettingToggleRow(stringResource(R.string.snd_message_title), stringResource(R.string.snd_message_desc), msgOn) { LocalStores.setSoundMessages(it) }
-            SettingToggleRow(stringResource(R.string.snd_presence_title), stringResource(R.string.snd_presence_desc), presOn) { LocalStores.setSoundPresence(it) }
+            SettingToggleRow(stringResource(R.string.snd_master_title), stringResource(R.string.snd_master_desc), masterOn) { LocalStores.setSoundMaster(it) }
+            SettingToggleRow(stringResource(R.string.snd_message_title), stringResource(R.string.snd_message_desc), msgOn, enabled = masterOn) { LocalStores.setSoundMessages(it) }
+            SettingToggleRow(stringResource(R.string.snd_presence_title), stringResource(R.string.snd_presence_desc), presOn, enabled = masterOn) { LocalStores.setSoundPresence(it) }
             SectionFooter(stringResource(R.string.snd_footer))
         }
     }
 }
 
 @Composable
-private fun SettingToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SettingToggleRow(title: String, subtitle: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val c = RcqTheme.colors
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).alpha(if (enabled) 1f else 0.45f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = c.textPrimary, fontSize = 15.sp)
             Text(subtitle, color = c.textSecondary, fontSize = 11.sp)
         }
-        Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
     }
 }
 
