@@ -718,6 +718,42 @@ class Session(context: Context) {
         scope.launch { publishHomeIslandRecord() }
     }
 
+    /** The auto-backup toggle's ON action: pick a healthy island from the
+     *  public catalogue and register there (recover-first, same keys). Returns
+     *  the chosen host. Throws IllegalArgumentException("no_island") when the
+     *  catalogue is unreachable or no flagged island responds. */
+    suspend fun enableAutoBackup(): String {
+        val uin = store.uin ?: error("no session")
+        val host = withContext(Dispatchers.IO) {
+            Multihome.autoPickHost(api.islandHost(), MultihomeStore.list(uin).map { it.host }.toSet())
+        } ?: throw IllegalArgumentException("no_island")
+        withContext(Dispatchers.IO) {
+            Multihome.addBackupIsland(
+                ownUin = uin,
+                ownHost = api.islandHost(),
+                hostInput = host,
+                identityPub = identityPub(),
+                signingPriv = signingPriv(),
+                signingPub = signingPub(),
+                nickname = store.nickname ?: "user-$uin",
+                auto = true,
+            )
+        }
+        refreshBackupHomes()
+        scope.launch { publishHomeIslandRecord() }
+        scope.launch { drainBackupQueuesOnce() }
+        return host
+    }
+
+    /** The toggle's OFF action: forget every auto-picked home (manually-added
+     *  islands stay) and republish the record so senders stop depositing. */
+    fun disableAutoBackup() {
+        val uin = store.uin ?: return
+        MultihomeStore.list(uin).filter { it.auto }.forEach { MultihomeStore.remove(uin, it.host) }
+        refreshBackupHomes()
+        scope.launch { publishHomeIslandRecord() }
+    }
+
     /** Drain every backup mailbox into the normal ingest path. Copies of
      *  messages the primary already delivered are collapsed by the
      *  INSERT-OR-IGNORE envelope-uuid dedup in [store]. Never throws. */

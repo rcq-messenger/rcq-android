@@ -72,6 +72,7 @@ object Multihome {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         nickname: String,
+        auto: Boolean = false,
     ): MultihomeStore.Home {
         val host = normalizeHost(hostInput) ?: throw IllegalArgumentException("invalid_host")
         if (host == ownHost) throw IllegalArgumentException("primary_island")
@@ -85,10 +86,38 @@ object Multihome {
                     signing_key = Base64.encodeToString(signingPub, Base64.NO_WRAP),
                 ),
             )
-        val home = MultihomeStore.Home(ownUin, host, creds.uin, creds.token, System.currentTimeMillis())
+        val home = MultihomeStore.Home(ownUin, host, creds.uin, creds.token, System.currentTimeMillis(), auto)
         MultihomeStore.save(home)
         return home
     }
+
+    private const val CATALOGUE_URL =
+        "https://raw.githubusercontent.com/rcq-messenger/rcq-servers/main/servers.json"
+
+    /** Pick a backup island from the public catalogue: entries the maintainer
+     *  flagged `auto_backup`, minus our own island + already-added hosts; the
+     *  FIRST healthy one in catalogue order wins (the order is the project's
+     *  preference). Returns the bare host, or null when the catalogue is
+     *  unreachable or no flagged island responds. Plain OkHttp, same accepted
+     *  simplification as the deposit path. Blocking — call from IO. */
+    fun autoPickHost(ownHost: String, exclude: Set<String>): String? = runCatching {
+        val req = Request.Builder().url(CATALOGUE_URL).header("Cache-Control", "no-cache").get().build()
+        val candidates = client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@runCatching null
+            val doc = JsonParser.parseString(resp.body?.string() ?: return@runCatching null).asJsonObject
+            doc.getAsJsonArray("servers")?.mapNotNull { el ->
+                val o = el.asJsonObject
+                val flagged = runCatching { o.get("auto_backup")?.asBoolean == true }.getOrDefault(false)
+                if (flagged) normalizeHost(o.get("url")?.asString ?: "") else null
+            } ?: emptyList()
+        }
+        candidates.firstOrNull { it != ownHost && it !in exclude && healthy(it) }
+    }.getOrNull()
+
+    private fun healthy(host: String): Boolean = runCatching {
+        val req = Request.Builder().url("https://$host/health").get().build()
+        client.newCall(req).execute().use { it.isSuccessful }
+    }.getOrDefault(false)
 
     /** `is2.rcq.app`, `https://is2.rcq.app/x` → `is2.rcq.app`. */
     fun normalizeHost(input: String): String? = runCatching {

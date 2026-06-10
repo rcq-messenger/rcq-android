@@ -129,6 +129,11 @@
     <string name="settings_row_backup_island">Backup island</string>
     <string name="backup_island_body">Your account can also live on a second, independent RCQ island (server). Messages are then delivered into both mailboxes, so if one island goes down, nothing is lost — the other keeps receiving.</string>
     <string name="backup_island_row_uin">your number there: #%1$d</string>
+    <string name="backup_island_auto_title">Keep a backup on another island</string>
+    <string name="backup_island_auto_sub">The island is picked automatically from the public catalogue</string>
+    <string name="backup_island_auto_busy">Picking an island…</string>
+    <string name="backup_island_advanced">Advanced: add an island manually</string>
+    <string name="backup_island_err_none">No reachable backup island right now. Try again later, or add one manually.</string>
     <string name="backup_island_host_hint">Island host, e.g. is2.rcq.app</string>
     <string name="backup_island_add">Add backup island</string>
     <string name="backup_island_busy">Connecting…</string>

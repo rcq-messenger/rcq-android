@@ -1240,12 +1240,19 @@ private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
     val homes by session.backupHomes.collectAsState()
     var host by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var autoBusy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val autoHomes = homes.filter { it.auto }
+    val manualHomes = homes.filter { !it.auto }
+    // The manual block starts open only for self-hosters who already added an
+    // island by hand; everyone else just sees the toggle.
+    var advanced by remember { mutableStateOf(manualHomes.isNotEmpty()) }
 
     fun errorText(e: Throwable): String = when (e.message) {
         "invalid_host" -> context.getString(R.string.backup_island_err_invalid)
         "primary_island" -> context.getString(R.string.backup_island_err_primary)
         "already_added" -> context.getString(R.string.backup_island_err_already)
+        "no_island" -> context.getString(R.string.backup_island_err_none)
         // Keep the cause visible — "could not connect" alone is undebuggable
         // for a self-hoster pointing at their own island.
         else -> context.getString(R.string.backup_island_err_generic) +
@@ -1263,49 +1270,91 @@ private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
         ) {
             Text(stringResource(R.string.backup_island_body), color = c.textSecondary, fontSize = 14.sp)
 
-            if (homes.isNotEmpty()) {
+            // One toggle for normal users: the island comes from the catalogue.
+            SettingToggleRow(
+                title = stringResource(R.string.backup_island_auto_title),
+                subtitle = stringResource(R.string.backup_island_auto_sub),
+                checked = autoHomes.isNotEmpty(),
+            ) { on ->
+                if (autoBusy) return@SettingToggleRow
+                autoBusy = true; error = null
+                scope.launch {
+                    runCatching {
+                        if (on) session.enableAutoBackup() else session.disableAutoBackup()
+                    }.onFailure { error = errorText(it) }
+                    autoBusy = false
+                }
+            }
+            if (autoBusy) {
+                Text(stringResource(R.string.backup_island_auto_busy), color = c.textSecondary, fontSize = 13.sp)
+            }
+            if (autoHomes.isNotEmpty()) {
                 SettingsGroup {
-                    homes.forEachIndexed { index, h ->
+                    autoHomes.forEachIndexed { index, h ->
                         if (index > 0) Divider()
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace)
-                                Text(
-                                    stringResource(R.string.backup_island_row_uin, h.uin),
-                                    color = c.textSecondary, fontSize = 12.sp,
-                                )
-                            }
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace)
                             Text(
-                                stringResource(R.string.backup_island_remove),
-                                color = c.accent,
-                                fontSize = 14.sp,
-                                modifier = Modifier.clickable(enabled = !busy) { session.removeBackupIsland(h.host) },
+                                stringResource(R.string.backup_island_row_uin, h.uin),
+                                color = c.textSecondary, fontSize = 12.sp,
                             )
                         }
                     }
                 }
             }
-
-            Field(stringResource(R.string.backup_island_host_hint), host) { host = it }
-            Button(
-                onClick = {
-                    busy = true; error = null
-                    scope.launch {
-                        runCatching { session.addBackupIsland(host) }
-                            .onSuccess { host = "" }
-                            .onFailure { error = errorText(it) }
-                        busy = false
-                    }
-                },
-                enabled = !busy && host.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(if (busy) R.string.backup_island_busy else R.string.backup_island_add))
-            }
             error?.let { Text(it, color = c.statusBusy, fontSize = 13.sp) }
+
+            // Manual host entry stays for self-hosters, tucked away.
+            Text(
+                (if (advanced) "▾ " else "▸ ") + stringResource(R.string.backup_island_advanced),
+                color = c.textSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable { advanced = !advanced },
+            )
+            if (advanced) {
+                if (manualHomes.isNotEmpty()) {
+                    SettingsGroup {
+                        manualHomes.forEachIndexed { index, h ->
+                            if (index > 0) Divider()
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace)
+                                    Text(
+                                        stringResource(R.string.backup_island_row_uin, h.uin),
+                                        color = c.textSecondary, fontSize = 12.sp,
+                                    )
+                                }
+                                Text(
+                                    stringResource(R.string.backup_island_remove),
+                                    color = c.accent,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.clickable(enabled = !busy) { session.removeBackupIsland(h.host) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Field(stringResource(R.string.backup_island_host_hint), host) { host = it }
+                Button(
+                    onClick = {
+                        busy = true; error = null
+                        scope.launch {
+                            runCatching { session.addBackupIsland(host) }
+                                .onSuccess { host = "" }
+                                .onFailure { error = errorText(it) }
+                            busy = false
+                        }
+                    },
+                    enabled = !busy && host.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(if (busy) R.string.backup_island_busy else R.string.backup_island_add))
+                }
+            }
 
             Text(stringResource(R.string.backup_island_footer), color = c.textSecondary, fontSize = 12.sp)
         }

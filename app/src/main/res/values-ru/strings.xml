@@ -128,6 +128,11 @@
     <string name="settings_row_backup_island">Резервный остров</string>
     <string name="backup_island_body">Ваш аккаунт может жить ещё и на втором, независимом острове RCQ (сервере). Сообщения доставляются сразу в оба почтовых ящика: если один остров упадёт, ничего не потеряется — второй продолжит принимать.</string>
     <string name="backup_island_row_uin">ваш номер там: #%1$d</string>
+    <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
+    <string name="backup_island_auto_sub">Остров подбирается автоматически из публичного каталога</string>
+    <string name="backup_island_auto_busy">Подбираем остров…</string>
+    <string name="backup_island_advanced">Дополнительно: добавить остров вручную</string>
+    <string name="backup_island_err_none">Сейчас нет доступного резервного острова. Попробуйте позже или добавьте вручную.</string>
     <string name="backup_island_host_hint">Адрес острова, напр. is2.rcq.app</string>
     <string name="backup_island_add">Добавить резервный остров</string>
     <string name="backup_island_busy">Подключение…</string>

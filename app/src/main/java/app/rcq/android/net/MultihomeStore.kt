@@ -18,8 +18,17 @@ import com.google.gson.reflect.TypeToken
 object MultihomeStore {
 
     /** One backup home of OUR account. [uin]/[jwt] are our handle + token on
-     *  THAT island; [ownUin] is the primary-island uin this entry belongs to. */
-    data class Home(val ownUin: Int, val host: String, val uin: Int, val jwt: String, val addedAt: Long)
+     *  THAT island; [ownUin] is the primary-island uin this entry belongs to.
+     *  [auto] marks homes picked by the catalogue auto-pick toggle (vs a
+     *  manually-entered host); the toggle only adds/removes its own homes. */
+    data class Home(
+        val ownUin: Int,
+        val host: String,
+        val uin: Int,
+        val jwt: String,
+        val addedAt: Long,
+        val auto: Boolean = false,
+    )
 
     /** Resolved peer homes + when. Stale entries are still served — a stale
      *  cache IS the failover path when the primary island is unreachable. */
