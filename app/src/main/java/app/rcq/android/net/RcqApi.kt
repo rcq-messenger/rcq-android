@@ -120,6 +120,17 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         get("/keys/$uin/bundle", authed = true, PeerBundle::class.java)
     }
 
+    // ── Federation Layer B (F1): self-signed home-island record ──
+    data class IslandRecordPutResp(val ok: Boolean = false, val ts: Long = 0)
+
+    /** Publish this account's signed home-island record (PUT /federation/island-record). */
+    suspend fun publishIslandRecord(docJson: String): IslandRecordPutResp = withContext(Dispatchers.IO) {
+        request("PUT", "/federation/island-record", docJson, authed = true, IslandRecordPutResp::class.java)
+    }
+
+    /** Host authority of this session's island, for the record's home entry. */
+    fun islandHost(): String = runCatching { java.net.URI(baseUrl).host ?: DEFAULT_HOST }.getOrDefault(DEFAULT_HOST)
+
     suspend fun register(req: RegisterRequest): RegisterResponse = withContext(Dispatchers.IO) {
         post("/auth/register", gson.toJson(req), authed = false, RegisterResponse::class.java)
     }
