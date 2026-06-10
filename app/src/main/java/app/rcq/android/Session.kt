@@ -1332,6 +1332,7 @@ class Session(context: Context) {
             group_invite_policy = net.group_invite_policy ?: cached?.group_invite_policy,
             read_receipts_visibility = net.read_receipts_visibility ?: cached?.read_receipts_visibility,
             hof_opt_in = net.hof_opt_in ?: cached?.hof_opt_in,
+            hof_avatar = net.hof_avatar ?: cached?.hof_avatar,
         )
         LocalStores.setCachedProfileJson(profileGson.toJson(merged))
         return merged

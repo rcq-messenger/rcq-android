@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -596,9 +598,26 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     var presencePersistent by remember { mutableStateOf(false) }
     var presenceTtl by remember { mutableStateOf(1440) }
     var hofOptIn by remember { mutableStateOf(false) }
+    var hofAvatar by remember { mutableStateOf<String?>(null) }   // data-URI or null
+    var hofBusy by remember { mutableStateOf(false) }
+    var hofError by remember { mutableStateOf<String?>(null) }
     val screenSec by app.rcq.android.data.LocalStores.screenSecurity.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
+    val hofPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            hofBusy = true; hofError = null
+            val dataUri = withContext(Dispatchers.IO) { hofAvatarDataUri(context, uri) }
+            if (dataUri == null) {
+                hofError = context.getString(R.string.pv_hof_image_too_large)
+            } else {
+                val ok = runCatching { session.updateProfile(RcqApi.UpdateMeBody(hof_avatar = dataUri)) }.getOrNull() != null
+                if (ok) hofAvatar = dataUri else hofError = context.getString(R.string.pv_hof_image_error)
+            }
+            hofBusy = false
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         session.loadProfile()?.let { p ->
@@ -610,6 +629,7 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             presencePersistent = p.presence_persistent ?: false
             presenceTtl = p.presence_ttl_minutes ?: 1440
             hofOptIn = p.hof_opt_in ?: false
+            hofAvatar = p.hof_avatar
             // Seed the local countdown anchor if the feature is on but we have
             // no window yet (enabled on another device, or before this feature
             // existed). Active changes below re-anchor it; passive load never
@@ -678,18 +698,51 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 )
             }
 
-            // Hall of Fame opt-in. Just consent to be considered; the founder
-            // curates who actually appears on rcq.app/hof.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.pv_hall_of_fame), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Text(stringResource(R.string.pv_hall_of_fame_desc), color = c.textSecondary, fontSize = 11.sp)
+            // Hall of Fame opt-in + optional public avatar. Just consent to be
+            // considered; the founder curates who actually appears on rcq.app/hof.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.pv_hall_of_fame), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.pv_hall_of_fame_desc), color = c.textSecondary, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = hofOptIn,
+                        onCheckedChange = { hofOptIn = it; save(RcqApi.UpdateMeBody(hof_opt_in = it)) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                    )
                 }
-                Switch(
-                    checked = hofOptIn,
-                    onCheckedChange = { hofOptIn = it; save(RcqApi.UpdateMeBody(hof_opt_in = it)) },
-                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
-                )
+                if (hofOptIn) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val avatarBytes = remember(hofAvatar) { hofAvatar?.let { decodeDataUriBytes(it) } }
+                        Box(Modifier.size(48.dp).clip(CircleShape).background(c.bgSecondary), contentAlignment = Alignment.Center) {
+                            if (avatarBytes != null) SafeAnimatedGif(avatarBytes, Modifier.fillMaxSize())
+                            else Text(stringResource(R.string.pv_hof_image_hint_short), color = c.textSecondary, fontSize = 9.sp)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                stringResource(if (hofAvatar != null) R.string.pv_hof_change_image else R.string.pv_hof_add_image),
+                                color = if (hofBusy) c.textSecondary else c.accent, fontSize = 13.sp,
+                                modifier = Modifier.clickable(enabled = !hofBusy) { hofPicker.launch("image/*") },
+                            )
+                            if (hofAvatar != null) {
+                                Text(
+                                    stringResource(R.string.pv_hof_remove_image),
+                                    color = c.textSecondary, fontSize = 13.sp,
+                                    modifier = Modifier.clickable(enabled = !hofBusy) {
+                                        scope.launch {
+                                            hofBusy = true
+                                            val ok = runCatching { session.updateProfile(RcqApi.UpdateMeBody(hof_avatar = "")) }.getOrNull() != null
+                                            if (ok) hofAvatar = null
+                                            hofBusy = false
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    hofError?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
+                }
             }
 
             Spacer(Modifier.height(4.dp))
@@ -1257,6 +1310,42 @@ private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
             Text(stringResource(R.string.backup_island_footer), color = c.textSecondary, fontSize = 12.sp)
         }
     }
+}
+
+/** Decode a `data:<mime>;base64,<b64>` URI back to bytes (for the preview). */
+private fun decodeDataUriBytes(dataUri: String): ByteArray? = runCatching {
+    val b64 = dataUri.substringAfter(";base64,", "")
+    if (b64.isEmpty()) null else android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+}.getOrNull()
+
+/** Turn a picked image into a small data-URI for the HoF wall. Caps at ~256KB
+ *  (the server limit): a small animated GIF is kept raw so it still animates;
+ *  anything else (or an oversized GIF) is downscaled + JPEG-compressed through
+ *  the PURE-JAVA path (the native GIF decoder SIGSEGVs on some OEM ROMs).
+ *  Returns null if it can't get the bytes under the cap. */
+private fun hofAvatarDataUri(context: android.content.Context, uri: android.net.Uri): String? {
+    val cap = 256 * 1024
+    val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    val isGif = raw.size >= 4 && raw[0] == 0x47.toByte() && raw[1] == 0x49.toByte() &&
+        raw[2] == 0x46.toByte() && raw[3] == 0x38.toByte()
+    fun encode(bytes: ByteArray, mime: String) =
+        "data:$mime;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+    if (isGif && raw.size <= cap) return encode(raw, "image/gif")
+    val src = (if (isGif) gifFirstFrame(raw) else android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)) ?: return null
+    val maxSide = 256
+    val longest = maxOf(src.width, src.height)
+    val scaled = if (longest > maxSide) {
+        val f = maxSide.toFloat() / longest
+        android.graphics.Bitmap.createScaledBitmap(src, (src.width * f).toInt().coerceAtLeast(1), (src.height * f).toInt().coerceAtLeast(1), true)
+    } else src
+    // Step the JPEG quality down until it fits the cap.
+    for (q in intArrayOf(85, 70, 55, 40)) {
+        val out = java.io.ByteArrayOutputStream()
+        scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, out)
+        val bytes = out.toByteArray()
+        if (bytes.size <= cap) return encode(bytes, "image/jpeg")
+    }
+    return null
 }
 
 @Composable

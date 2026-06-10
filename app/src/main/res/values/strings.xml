@@ -490,6 +490,12 @@
     <string name="pv_screen_security_desc">Blocks screenshots and screen recording, and hides the app in the recent-apps switcher. A determined person can still photograph the screen with another device.</string>
     <string name="pv_hall_of_fame">Hall of Fame</string>
     <string name="pv_hall_of_fame_desc">Allow being considered for the public Hall of Fame at rcq.app. Only your nickname and UIN, and only if approved. You can turn this off any time.</string>
+    <string name="pv_hof_add_image">Add image / GIF</string>
+    <string name="pv_hof_change_image">Change image</string>
+    <string name="pv_hof_remove_image">Remove image</string>
+    <string name="pv_hof_image_hint_short">image</string>
+    <string name="pv_hof_image_too_large">Image is too large. Pick a smaller one (max ~256 KB).</string>
+    <string name="pv_hof_image_error">Could not upload the image. Try again.</string>
     <string name="pv_network">Network</string>
     <string name="pv_obfuscated">Obfuscated connection</string>
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>
