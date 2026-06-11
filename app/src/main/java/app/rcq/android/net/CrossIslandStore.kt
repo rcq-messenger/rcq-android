@@ -13,6 +13,13 @@ import com.google.gson.reflect.TypeToken
  * We keep cross-island contacts on-device, keyed `uin@host` (uin is per-island, so
  * the host is part of the handle's identity). Mirrors web-chat's crossisland-store.
  *
+ * Per-account: a cross-island contact added on one local account must NOT bleed
+ * into another (founder report on iOS: `911@api` added on the is2 account showed
+ * up on the 911 account, where it read as "I added myself"). Storage is keyed by
+ * the active account id; [bindAccount] re-points the slot on launch and on every
+ * account switch (Session.rebindTo). The old single global "contacts.v1" key is
+ * left orphaned, same as iOS.
+ *
  * Carries the peer's pinned public keys (from their island's open key card) for
  * sealing + display; the actual send re-resolves via [CrossIslandSender] so a
  * moved peer is still reached. Wire by calling [init] once with the app context.
@@ -33,22 +40,34 @@ object CrossIslandStore {
     private val gson = Gson()
     private const val KEY = "contacts.v1"
 
+    /** Active account id; null before any account is bound (all reads empty). */
+    private var acct: String? = null
+
     fun init(ctx: Context) {
         if (!::prefs.isInitialized) {
             prefs = ctx.applicationContext.getSharedPreferences("rcq_crossisland", Context.MODE_PRIVATE)
         }
     }
 
+    /** Point the store at [accountId]'s slot. null = no account (empty store). */
+    fun bindAccount(accountId: String?) {
+        acct = accountId
+    }
+
+    private fun storageKey(accountId: String) = "$accountId.$KEY"
+
     private fun ciKey(uin: Int, host: String) = "$uin@${host.lowercase()}"
 
     private fun loadAll(): MutableMap<String, Contact> {
-        val raw = prefs.getString(KEY, "{}") ?: "{}"
+        val a = acct ?: return mutableMapOf()
+        val raw = prefs.getString(storageKey(a), "{}") ?: "{}"
         val type = object : TypeToken<MutableMap<String, Contact>>() {}.type
         return runCatching { gson.fromJson<MutableMap<String, Contact>>(raw, type) }.getOrNull() ?: mutableMapOf()
     }
 
     private fun saveAll(m: Map<String, Contact>) {
-        prefs.edit().putString(KEY, gson.toJson(m)).apply()
+        val a = acct ?: return
+        prefs.edit().putString(storageKey(a), gson.toJson(m)).apply()
     }
 
     fun save(c: Contact) {
@@ -65,5 +84,10 @@ object CrossIslandStore {
 
     fun remove(uin: Int, host: String) {
         val m = loadAll(); m.remove(ciKey(uin, host)); saveAll(m)
+    }
+
+    /** Wipe a specific (possibly non-active) account's contacts (burn / local delete). */
+    fun wipeAccount(accountId: String) {
+        if (::prefs.isInitialized) prefs.edit().remove(storageKey(accountId)).apply()
     }
 }

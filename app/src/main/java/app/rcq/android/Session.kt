@@ -249,8 +249,10 @@ class Session(context: Context) {
     private var everConnected = false
 
     init {
-        // Federation (F2): local cross-island contact store.
+        // Federation (F2): local cross-island contact store (per-account;
+        // AccountManager.init has already run in MainActivity.onCreate).
         CrossIslandStore.init(appCtx)
+        CrossIslandStore.bindAccount(AccountManager.activeId.value)
         // Multihoming (federation v1): this account's backup island homes.
         MultihomeStore.init(appCtx)
         CrossIslandRequestsStore.init(appCtx)
@@ -480,6 +482,7 @@ class Session(context: Context) {
         signalStores = SignalStores(SignalStoreDb(appCtx, accountId))
         LocalStores.bindAccount(accountId)
         app.rcq.android.data.VisitStore.bindAccount(accountId)
+        CrossIslandStore.bindAccount(accountId)
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
@@ -886,6 +889,7 @@ class Session(context: Context) {
                 MessageDb.wipeAccount(appCtx, acc.id)
                 SignalStoreDb.wipeAccount(appCtx, acc.id)
                 app.rcq.android.data.VisitStore.wipeAccount(acc.id)
+                CrossIslandStore.wipeAccount(acc.id)
                 LocalStores.clearAccount(acc.id)
             }
             AccountManager.remove(acc.id)
@@ -1585,6 +1589,7 @@ class Session(context: Context) {
             MessageDb.wipeAccount(appCtx, burnedId)
             SignalStoreDb.wipeAccount(appCtx, burnedId)
             app.rcq.android.data.VisitStore.wipeAccount(burnedId)
+            CrossIslandStore.wipeAccount(burnedId)
             LocalStores.clearAccount(burnedId)
             AccountManager.remove(burnedId)   // active falls back to first remaining (or null)
         } else {
@@ -1617,6 +1622,7 @@ class Session(context: Context) {
         } else {
             LocalStores.bindAccount(null)
             app.rcq.android.data.VisitStore.bindAccount(null)
+            CrossIslandStore.bindAccount(null)
             null
         }
     }
@@ -1630,6 +1636,7 @@ class Session(context: Context) {
         MessageDb.wipeAccount(appCtx, accountId)
         SignalStoreDb.wipeAccount(appCtx, accountId)
         app.rcq.android.data.VisitStore.wipeAccount(accountId)
+        CrossIslandStore.wipeAccount(accountId)
         LocalStores.clearAccount(accountId)
         AccountManager.remove(accountId)
     }
