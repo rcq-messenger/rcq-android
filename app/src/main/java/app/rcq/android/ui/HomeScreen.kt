@@ -1267,11 +1267,14 @@ private fun AddContactDialog(
                                 onAddUin(digits); sentTo = sentTo + digits
                             }
                         }
-                        // Federation (F2): a `uin@host` cross-island address → add
-                        // it as a local cross-island contact and open the chat.
+                        // Federation (F2): an explicit `uin@host` whose host is NOT
+                        // our OWN island → add it as a cross-island contact. Compared
+                        // to our own island, not the flagship: a self-hoster on is2
+                        // adding `911@api.rcq.app` must see the flagship as cross-island.
                         val ci = remember(query) {
-                            runCatching { RcqFederation.parseAddress(query.trim()) }
-                                .getOrNull()?.takeIf { it.host != RcqFederation.FLAGSHIP_HOST }
+                            query.trim().takeIf { it.contains("@") }
+                                ?.let { runCatching { RcqFederation.parseAddress(it) }.getOrNull() }
+                                ?.takeIf { it.host != session.currentServer }
                         }
                         if (ci != null) {
                             AddResultRow("${ci.uin}@${ci.host}", "Cross-island contact", accent = true) {
