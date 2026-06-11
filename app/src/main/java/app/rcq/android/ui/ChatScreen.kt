@@ -607,7 +607,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     icon = { Icon(Icons.Filled.PushPin, null, tint = c.accent) },
                     title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
                     text = {
-                        Column {
+                        // Scrollable: a dialog caps its own height, so a long pin
+                        // (text + a dozen group chips) was CLIPPED with no way to
+                        // see the rest (founder report #16).
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
                             if (hasPinText) {
                                 ClickableText(
                                     text = annotated,
