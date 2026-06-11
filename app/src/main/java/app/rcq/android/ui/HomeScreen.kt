@@ -979,8 +979,10 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
             }
             Text(
-                pluralStringResource(R.plurals.members, group.members.size, group.members.size),
+                pluralStringResource(R.plurals.members, group.members.size, group.members.size) +
+                    (group.host?.let { " · $it" } ?: ""),
                 color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
     }

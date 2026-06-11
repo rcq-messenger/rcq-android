@@ -110,13 +110,13 @@ internal fun SectionHeader(
  */
 @Composable
 internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f) {
-    GroupAvatarMedia(group?.avatarMediaId, group?.avatarMediaKey, session, size, glyphSize)
+    GroupAvatarMedia(group?.avatarMediaId, group?.avatarMediaKey, session, size, glyphSize, host = group?.host)
 }
 
 /** [GroupAvatar] by raw media id/key — for places that only have a group
  *  PREVIEW (e.g. the Add-window search results) rather than a full roster. */
 @Composable
-internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f) {
+internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, host: String? = null) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
@@ -124,7 +124,8 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
             // Native-crash breadcrumb (#1): a launch crash "when the beta chat
             // loads" is suspected around group-avatar decode — mark the stage.
             app.rcq.android.CrashReporter.crumb(ctx, "group_avatar")
-            session.fetchImage(id, key)
+            // §5c: a foreign group's avatar blob lives on ITS island.
+            session.fetchImage(id, key, host)
         } else null
     }
     // JPEG/PNG decode via the fast, well-hardened native path; a GIF avatar (the

@@ -26,6 +26,7 @@ import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
 import app.rcq.android.net.CrossIslandSender
 import app.rcq.android.net.CrossIslandStore
+import app.rcq.android.net.VisitedIslandsStore
 import app.rcq.android.net.Multihome
 import app.rcq.android.net.CrossIslandRequestsStore
 import app.rcq.android.net.MultihomeStore
@@ -253,6 +254,9 @@ class Session(context: Context) {
         // AccountManager.init has already run in MainActivity.onCreate).
         CrossIslandStore.init(appCtx)
         CrossIslandStore.bindAccount(AccountManager.activeId.value)
+        // Cross-island groups (§5c): guest registrations + foreign-group aliases.
+        VisitedIslandsStore.init(appCtx)
+        VisitedIslandsStore.bindAccount(AccountManager.activeId.value)
         // Multihoming (federation v1): this account's backup island homes.
         MultihomeStore.init(appCtx)
         CrossIslandRequestsStore.init(appCtx)
@@ -483,6 +487,7 @@ class Session(context: Context) {
         LocalStores.bindAccount(accountId)
         app.rcq.android.data.VisitStore.bindAccount(accountId)
         CrossIslandStore.bindAccount(accountId)
+        VisitedIslandsStore.bindAccount(accountId)
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
@@ -530,6 +535,7 @@ class Session(context: Context) {
             while (true) {
                 delay(30_000)
                 runCatching { drainBackupQueuesOnce() }
+                runCatching { drainVisitedQueuesOnce() }
             }
         }
         scope.launch {
@@ -769,7 +775,30 @@ class Session(context: Context) {
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
         withContext(Dispatchers.IO) {
-            Multihome.drainBackupQueues(uin, sp, pp) { payload -> ingest(payload) }
+            Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
+                // A group row in a BACKUP mailbox = that island also hosts a
+                // group we joined (§5c, same identity = same mailbox) — file it
+                // under the local alias like the visited-island drain does.
+                if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
+                else ingest(payload)
+            }
+        }
+    }
+
+    /** §5c: drain the guest mailbox on every visited island — the receive path
+     *  for cross-island groups. Group rows file under the local alias; a stray
+     *  1:1 row (someone on that island messaged our guest uin) goes through the
+     *  normal ingest, whose cross-island consent gate quarantines unknown
+     *  senders. Never throws. */
+    private suspend fun drainVisitedQueuesOnce() {
+        if (VisitedIslandsStore.list().isEmpty()) return
+        val sp = runCatching { signingPriv() }.getOrNull() ?: return
+        val pp = runCatching { signingPub() }.getOrNull() ?: return
+        withContext(Dispatchers.IO) {
+            Multihome.drainVisitedQueues(sp, pp) { payload, groupId, host ->
+                if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
+                else ingest(payload)
+            }
         }
     }
 
@@ -890,6 +919,7 @@ class Session(context: Context) {
                 SignalStoreDb.wipeAccount(appCtx, acc.id)
                 app.rcq.android.data.VisitStore.wipeAccount(acc.id)
                 CrossIslandStore.wipeAccount(acc.id)
+                VisitedIslandsStore.wipeAccount(acc.id)
                 LocalStores.clearAccount(acc.id)
             }
             AccountManager.remove(acc.id)
@@ -1247,7 +1277,18 @@ class Session(context: Context) {
     )
 
     private suspend fun refreshGroups() {
-        _groups.value = api.groups().map(::mapGroup).sortedByDescending { it.createdAt ?: 0L }
+        val own = api.groups().map(::mapGroup)
+        // §5c: groups joined on other islands, fetched with the guest creds;
+        // ids rewritten to the local alias at this boundary. A failing island
+        // degrades to "no groups from there" — never blocks the own list (the
+        // 30s drain refreshes expired guest creds; next refresh recovers).
+        val foreign = VisitedIslandsStore.list().flatMap { v ->
+            runCatching {
+                val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
+                guest.groups().map { mapGroup(it).copy(id = VisitedIslandsStore.aliasFor(v.host, it.id), host = v.host) }
+            }.getOrElse { emptyList() }
+        }
+        _groups.value = (own + foreign).sortedByDescending { it.createdAt ?: 0L }
         // Persist the roster so groups are reachable offline (report #7).
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
     }
@@ -1256,7 +1297,8 @@ class Session(context: Context) {
      *  contains us (we left / were removed), drop it locally instead —
      *  mirrors the iOS GroupService.upsert rule. */
     private fun upsertGroup(g: RcqGroup) {
-        val me = store.uin
+        // Foreign group (§5c): in ITS roster we are our per-island guest uin.
+        val me = if (g.host != null) VisitedIslandsStore.get(g.host)?.uin else store.uin
         // Self-removal rule: drop a group we're no longer a member of. Guard
         // on a non-empty roster so a partial/empty WS payload (e.g. the
         // server echoing group_created back to the creator) can't nuke a
@@ -1269,6 +1311,86 @@ class Session(context: Context) {
             .sortedByDescending { it.createdAt ?: 0L }
     }
 
+    // ── Cross-island groups (§5c): guest context ─────────────────────
+
+    /** Resolution of (api client, server-side id, island, my uin THERE) for a
+     *  group op. Own-island groups pass through; a NEGATIVE id is the local
+     *  alias of a foreign group → the guest client + remote id. */
+    private data class GroupCtx(val api: RcqApi, val gid: Int, val host: String?, val myUin: Int)
+
+    private fun groupCtx(groupId: Int): GroupCtx {
+        if (groupId >= 0) return GroupCtx(api, groupId, null, store.uin ?: 0)
+        val ref = VisitedIslandsStore.refByAlias(groupId)
+        val v = ref?.let { VisitedIslandsStore.get(it.host) }
+        if (ref == null || v == null) return GroupCtx(api, groupId, null, store.uin ?: 0)
+        val guest = RcqApi("https://${ref.host}").apply { setToken(v.jwt) }
+        return GroupCtx(guest, ref.remoteId, ref.host, v.uin)
+    }
+
+    /** The island a foreign group lives on (null for own-island groups) — for
+     *  UI media fetches and labels. */
+    /** (server-side id, island host) for composing a share link — new links
+     *  always carry the host so they work from any island (§5c). */
+    fun groupShareRef(groupId: Int): Pair<Int, String> {
+        val ref = if (groupId < 0) VisitedIslandsStore.refByAlias(groupId) else null
+        return if (ref != null) ref.remoteId to ref.host else groupId to serverHost()
+    }
+
+    fun groupHost(groupId: Int): String? =
+        if (groupId < 0) VisitedIslandsStore.refByAlias(groupId)?.host else null
+
+    private fun mapGroupCtx(ctx: GroupCtx, g: RcqApi.GroupOut): RcqGroup =
+        if (ctx.host == null) mapGroup(g)
+        else mapGroup(g).copy(id = VisitedIslandsStore.aliasFor(ctx.host, g.id), host = ctx.host)
+
+    /** Guest credentials for [host] (§5c), registering recover-first on first
+     *  use — the multihome mechanic, but PRIVATE (never published in the
+     *  signed home record). Throws with a short reason on failure. */
+    suspend fun ensureGuestOn(host: String): VisitedIslandsStore.Visited {
+        val h = Multihome.normalizeHost(host) ?: throw IllegalArgumentException("invalid_host")
+        if (h == serverHost()) throw IllegalArgumentException("own_island")
+        VisitedIslandsStore.get(h)?.let { return it }
+        val uin = store.uin ?: throw IllegalStateException("no identity")
+        val creds = Multihome.recoverOn(h, signingPriv(), signingPub())
+            ?: RcqApi("https://$h").register(
+                RcqApi.RegisterRequest(
+                    nickname = store.nickname ?: "user-$uin",
+                    identity_key = Base64.encodeToString(identityPub(), Base64.NO_WRAP),
+                    signing_key = Base64.encodeToString(signingPub(), Base64.NO_WRAP),
+                ),
+            )
+        val v = VisitedIslandsStore.Visited(h, creds.uin, creds.token, System.currentTimeMillis())
+        VisitedIslandsStore.save(v)
+        return v
+    }
+
+    /** §5c join: guest-register on [host] (explicit user action — seeing a
+     *  foreign link never touches the island), join the group there, merge it
+     *  into the list under its local alias. Returns the alias id, or null. */
+    suspend fun joinForeignGroup(host: String, remoteId: Int): Int? = runCatching {
+        val v = ensureGuestOn(host)
+        val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
+        val g = guest.joinGroup(remoteId)
+        val alias = VisitedIslandsStore.aliasFor(v.host, remoteId)
+        upsertGroup(mapGroup(g).copy(id = alias, host = v.host))
+        alias
+    }.getOrNull()
+
+    /** §5c invite-card preview for a group on another island. Privacy rule:
+     *  only islands we already VISITED may be queried — an unvisited island is
+     *  never touched before the user taps Join (returns null → minimal card). */
+    suspend fun previewForeignGroup(host: String, remoteId: Int): RcqApi.GroupPreviewOut? {
+        val v = VisitedIslandsStore.get(host) ?: return null
+        return runCatching {
+            RcqApi("https://${v.host}").apply { setToken(v.jwt) }.previewGroup(remoteId)
+        }.getOrNull()
+    }
+
+    /** §5c: media in a group lives on the GROUP's island — upload there (the
+     *  guest client for foreign groups; own api otherwise). */
+    private suspend fun uploadBlobForGroup(groupId: Int, blob: ByteArray): RcqApi.UploadResponse =
+        groupCtx(groupId).api.uploadBlob(blob)
+
     fun group(id: Int): RcqGroup? = _groups.value.firstOrNull { it.id == id }
     fun groupName(id: Int): String = group(id)?.name ?: "Group $id"
 
@@ -1279,20 +1401,23 @@ class Session(context: Context) {
     }
 
     suspend fun addGroupMember(id: Int, uin: Int) {
-        runCatching { upsertGroup(mapGroup(api.addGroupMember(id, uin))) }
+        val ctx = groupCtx(id)
+        runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, uin))) }
     }
 
     /** Owner: kick a member (same endpoint as self-leave). */
     suspend fun removeGroupMember(id: Int, memberUin: Int) {
-        runCatching { api.leaveGroup(id, memberUin) }
+        val ctx = groupCtx(id)
+        runCatching { ctx.api.leaveGroup(ctx.gid, memberUin) }
         // The server broadcasts group_membership_changed; refresh to reflect it.
-        runCatching { upsertGroup(mapGroup(api.groupInfo(id))) }
+        runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.groupInfo(ctx.gid))) }
     }
 
     /** Owner: grant/revoke a member's moderator caps (subset of
      *  delete|members|info). Updates local roster from the returned group. */
     suspend fun setMemberPermissions(id: Int, memberUin: Int, permissions: List<String>) {
-        runCatching { upsertGroup(mapGroup(api.setMemberPermissions(id, memberUin, permissions))) }
+        val ctx = groupCtx(id)
+        runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.setMemberPermissions(ctx.gid, memberUin, permissions))) }
     }
 
     /** Fetch a group invite-card snapshot (no membership needed). */
@@ -1308,13 +1433,15 @@ class Session(context: Context) {
     }
 
     suspend fun leaveGroup(id: Int) {
-        val me = store.uin ?: return
-        runCatching { api.leaveGroup(id, me) }
+        val ctx = groupCtx(id)
+        if (ctx.myUin == 0) return
+        runCatching { ctx.api.leaveGroup(ctx.gid, ctx.myUin) }
         _groups.value = _groups.value.filterNot { it.id == id }
     }
 
     suspend fun deleteGroup(id: Int) {
-        runCatching { api.deleteGroup(id) }
+        val ctx = groupCtx(id)
+        runCatching { ctx.api.deleteGroup(ctx.gid) }
         _groups.value = _groups.value.filterNot { it.id == id }
     }
 
@@ -1322,12 +1449,13 @@ class Session(context: Context) {
      *  the group with the new media id + per-blob key. Throws on failure
      *  so the caller can surface it. */
     suspend fun setGroupAvatar(id: Int, jpeg: ByteArray) {
+        val ctx = groupCtx(id)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = ctx.api.uploadBlob(blob)
         imageCache.put(upload.media_id, jpeg)
-        upsertGroup(mapGroup(api.patchGroup(id, RcqApi.GroupPatchBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))))
+        upsertGroup(mapGroupCtx(ctx, ctx.api.patchGroup(ctx.gid, RcqApi.GroupPatchBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))))
     }
 
     /** Owner/admin: rename / re-describe / re-pin a group. */
@@ -1340,7 +1468,8 @@ class Session(context: Context) {
         isClosed: Boolean? = null,
         membersHidden: Boolean? = null,
     ) {
-        upsertGroup(mapGroup(api.patchGroup(id, RcqApi.GroupPatchBody(
+        val ctx = groupCtx(id)
+        upsertGroup(mapGroupCtx(ctx, ctx.api.patchGroup(ctx.gid, RcqApi.GroupPatchBody(
             name = name, description = description, pinned_text = pinnedText,
             post_policy = postPolicy, is_closed = isClosed, members_hidden = membersHidden,
         ))))
@@ -1406,7 +1535,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, jpeg)
         val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId)
@@ -1478,7 +1607,11 @@ class Session(context: Context) {
     /** Encrypt [env] once per member (skipping self) and POST the fan-out;
      *  flips the local bubble's delivery state. Shared by send + resend. */
     private suspend fun fanOutGroup(groupId: Int, env: Envelope, id: String) = withContext(Dispatchers.IO) {
-        val me = store.uin ?: return@withContext
+        // §5c: a foreign group seals AS the guest identity (the sender uin must
+        // be our per-island uin so the roster resolves it; keys are identical)
+        // and POSTs to the group's island with the guest jwt.
+        val ctx = groupCtx(groupId)
+        val me = ctx.myUin.takeIf { it != 0 } ?: return@withContext
         val group = group(groupId) ?: return@withContext
         // Encrypt once per member, off the main thread (a big group's fan-out is
         // hundreds of X25519 ops + a large POST — on the UI thread it froze the
@@ -1499,6 +1632,7 @@ class Session(context: Context) {
                             ownUin = me,
                             signingPriv = signingPriv(),
                             signingPub = signingPub(),
+                            ownHost = ctx.host ?: serverHost(),
                         ),
                     )
                 }.getOrElse { skipped++; null }
@@ -1509,11 +1643,14 @@ class Session(context: Context) {
                 // Lone member, or every other key is unusable — nothing to send.
                 RcqApi.SendResponse(delivered = false)
             } else {
-                withRetry { api.sendGroupSealed(groupId, payloads) }
+                withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads) }
             }
             updateGroupMsgState(groupId, id, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
             // Mirror the message to the user's other devices (best-effort).
-            sendMessageCarbon(env, toPeer = null, toGroup = groupId)
+            // NOT for foreign groups: the carbon would carry the server-side
+            // group id, which another of our devices would misread as a LOCAL
+            // group (alias maps are per-device) — §5c v1 limit.
+            if (ctx.host == null) sendMessageCarbon(env, toPeer = null, toGroup = groupId)
         } catch (e: Exception) {
             updateGroupMsgState(groupId, id, DeliveryState.FAILED)
         }
@@ -1590,6 +1727,7 @@ class Session(context: Context) {
             SignalStoreDb.wipeAccount(appCtx, burnedId)
             app.rcq.android.data.VisitStore.wipeAccount(burnedId)
             CrossIslandStore.wipeAccount(burnedId)
+            VisitedIslandsStore.wipeAccount(burnedId)
             LocalStores.clearAccount(burnedId)
             AccountManager.remove(burnedId)   // active falls back to first remaining (or null)
         } else {
@@ -1623,6 +1761,7 @@ class Session(context: Context) {
             LocalStores.bindAccount(null)
             app.rcq.android.data.VisitStore.bindAccount(null)
             CrossIslandStore.bindAccount(null)
+            VisitedIslandsStore.bindAccount(null)
             null
         }
     }
@@ -1637,6 +1776,7 @@ class Session(context: Context) {
         SignalStoreDb.wipeAccount(appCtx, accountId)
         app.rcq.android.data.VisitStore.wipeAccount(accountId)
         CrossIslandStore.wipeAccount(accountId)
+        VisitedIslandsStore.wipeAccount(accountId)
         LocalStores.clearAccount(accountId)
         AccountManager.remove(accountId)
     }
@@ -1785,7 +1925,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
         val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null)
@@ -1809,7 +1949,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
         val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble())
         sendGroupEnvelope(groupId, env, env.id, "", kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec)
@@ -1833,7 +1973,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
         val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId)
@@ -2226,17 +2366,18 @@ class Session(context: Context) {
     /** Download + decrypt a media blob. Cached in memory by media id, and on
      *  disk as the still-encrypted blob so it's available offline / after a
      *  restart (decrypt key stays in the encrypted DB). */
-    suspend fun fetchImage(mediaId: String, mediaKey: String): ByteArray? {
+    suspend fun fetchImage(mediaId: String, mediaKey: String, host: String? = null): ByteArray? {
         imageCache.get(mediaId)?.let { return it }
         return withContext(Dispatchers.IO) {
             runCatching {
                 val key = Base64.decode(mediaKey, Base64.NO_WRAP)
                 val file = mediaDiskFile(mediaId)
                 // Disk first (works offline), else fetch + persist the blob.
+                // §5c: media in a foreign group lives on the GROUP's island.
                 val blob = if (file.exists()) {
                     file.readBytes()
                 } else {
-                    api.getBlob(mediaId).also {
+                    (if (host != null) RcqApi("https://$host") else api).getBlob(mediaId).also {
                         runCatching { file.writeBytes(it); trimMediaDiskCache() }
                     }
                 }

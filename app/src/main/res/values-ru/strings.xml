@@ -708,6 +708,8 @@
     <string name="group_invite_closed">Закрытая группа</string>
     <string name="group_invite_tap_join">Нажмите, чтобы вступить</string>
     <string name="group_invite_link">Приглашение в группу</string>
+    <string name="group_invite_island">Группа на другом острове</string>
+    <string name="group_invite_island_hint">При входе ваш ключ регистрируется на %1$s, чтобы группа могла доставлять вам сообщения.</string>
     <string name="group_invite_title">Приглашение в группу</string>
     <string name="group_invite_join">Вступить</string>
     <string name="group_invite_none">У вас нет групп, чтобы поделиться.</string>

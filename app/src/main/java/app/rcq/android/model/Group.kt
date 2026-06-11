@@ -36,6 +36,10 @@ data class RcqGroup(
     val avatarMediaKey: String? = null,
     val members: List<GroupMember> = emptyList(),
     val createdAt: Long? = null,
+    // CLIENT-SIDE only (§5c): the island a cross-island group lives on. When
+    // set, [id] is the local NEGATIVE alias and the server-side id lives in
+    // VisitedIslandsStore's alias map. Null for own-island groups.
+    val host: String? = null,
 ) {
     /** Broadcast mode (owner_only) is enforced client-side; the server
      *  can't see who's posting under sealed sender. */

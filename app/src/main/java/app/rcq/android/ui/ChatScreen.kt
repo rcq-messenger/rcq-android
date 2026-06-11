@@ -630,9 +630,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                     },
                                 )
                             }
-                            pinGroupIds.forEach { gid ->
+                            pinGroupIds.forEach { gref ->
                                 Spacer(Modifier.height(6.dp))
-                                PinnedGroupChip(session, gid, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
+                                PinnedGroupChip(session, gref, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
                             }
                         }
                     },
@@ -953,7 +953,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         groups.forEach { g ->
                             MessageAction(g.name) {
                                 showGroupPicker = false
-                                val url = GroupLinkParser.canonicalUrl(g.id)
+                                val (shareId, shareHost) = session.groupShareRef(g.id)
+                                val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
                                 scope.launch {
                                     runCatching {
                                         if (isGroup) session.sendGroupText(groupId!!, url) else session.sendText(peer!!, url)
@@ -1293,28 +1294,40 @@ private fun SystemNoticeRow(m: ChatMessage) {
  *  Matches iOS GroupLinkParser: `rcq://group/<id>` (in-app tap) or
  *  `https://rcq.app/g/<id>` (the shareable / paste form). */
 internal object GroupLinkParser {
-    fun parse(body: String): Int? {
+    /** A parsed invite: server-side group id + the island it lives on
+     *  (§5c — null host = "my own island", the legacy bare-id form). */
+    data class GroupRef(val id: Int, val host: String?)
+
+    private fun refOf(seg: String): GroupRef? {
+        val at = seg.indexOf('@')
+        val id = (if (at >= 0) seg.substring(0, at) else seg).toIntOrNull()?.takeIf { it > 0 } ?: return null
+        val host = if (at >= 0) seg.substring(at + 1).lowercase().takeIf { it.isNotEmpty() } else null
+        return GroupRef(id, host)
+    }
+
+    fun parse(body: String): GroupRef? {
         val t = body.trim()
         if (t.isEmpty() || t.contains(' ') || t.contains('\n')) return null
         val uri = runCatching { android.net.Uri.parse(t) }.getOrNull() ?: return null
         if (uri.scheme == "rcq" && uri.host == "group") {
-            return uri.lastPathSegment?.toIntOrNull()?.takeIf { it > 0 }
+            return uri.lastPathSegment?.let(::refOf)
         }
         if ((uri.scheme == "https" || uri.scheme == "http") && uri.host == "rcq.app") {
             val segs = uri.pathSegments
-            if (segs.size >= 2 && segs[0] == "g") return segs[1].toIntOrNull()?.takeIf { it > 0 }
+            if (segs.size >= 2 && segs[0] == "g") return refOf(segs[1])
         }
         return null
     }
 
-    fun canonicalUrl(id: Int): String = "https://rcq.app/g/$id"
+    /** New shares always carry the host so the link works from ANY island. */
+    fun canonicalUrl(id: Int, host: String): String = "https://rcq.app/g/$id@$host"
 
     /** Every group-invite link in [text], in document order (iOS
      *  GroupLinkParser.parseAll parity) — used to render pin cards. Matches
      *  both the shareable https form and the rcq:// deep-link form. */
-    fun parseAll(text: String): List<Int> {
-        val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+)", RegexOption.IGNORE_CASE)
-        return re.findAll(text).mapNotNull { it.groupValues[1].toIntOrNull()?.takeIf { id -> id > 0 } }.distinct().toList()
+    fun parseAll(text: String): List<GroupRef> {
+        val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+(?:@[a-z0-9.-]+)?)", RegexOption.IGNORE_CASE)
+        return re.findAll(text).mapNotNull { refOf(it.groupValues[1]) }.distinct().toList()
     }
 }
 
@@ -1323,13 +1336,19 @@ internal object GroupLinkParser {
  *  dialog, and joining jumps into the group chat. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GroupLinkBubble(session: Session, groupId: Int, onOpenGroup: (Int) -> Unit, onLongPress: () -> Unit) {
+private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onOpenGroup: (Int) -> Unit, onLongPress: () -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     var showJoin by remember { mutableStateOf(false) }
     var joining by remember { mutableStateOf(false) }
-    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, groupId) {
-        value = session.previewGroup(groupId)
+    val groupId = ref.id
+    // §5c: a link can carry the group's island. Privacy rule — an island we
+    // never visited is NOT touched for the preview (minimal card; the guest
+    // registration happens only on the explicit Join tap).
+    val foreignHost = ref.host?.takeIf { it != session.currentServer }
+    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, ref) {
+        value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId)
+        else session.previewGroup(groupId)
     }
     val p = preview
     // Minimal RcqGroup so the shared GroupAvatar can render the real avatar
@@ -1349,7 +1368,7 @@ private fun GroupLinkBubble(session: Session, groupId: Int, onOpenGroup: (Int) -
             .width(260.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(c.bubbleOther)
-            .combinedClickable(onClick = { if (p != null) showJoin = true }, onLongClick = onLongPress)
+            .combinedClickable(onClick = { if (p != null || foreignHost != null) showJoin = true }, onLongClick = onLongPress)
             .padding(10.dp),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
@@ -1362,35 +1381,50 @@ private fun GroupLinkBubble(session: Session, groupId: Int, onOpenGroup: (Int) -
         }
         Column(Modifier.weight(1f)) {
             Text(
-                p?.name ?: stringResource(R.string.group_invite_loading),
+                p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_loading),
                 color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            if (foreignHost != null) {
+                Text(foreignHost, color = c.textMono, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (p != null) {
                 Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary, fontSize = 12.sp)
                 Text(
                     stringResource(if (p.is_closed) R.string.group_invite_closed else R.string.group_invite_tap_join),
                     color = if (p.is_closed) Color(0xFFE5484D) else c.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 )
+            } else if (foreignHost != null) {
+                Text(stringResource(R.string.group_invite_tap_join), color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             } else {
                 Text(stringResource(R.string.group_invite_link), color = c.textSecondary, fontSize = 12.sp)
             }
         }
     }
-    if (showJoin && p != null) {
+    if (showJoin && (p != null || foreignHost != null)) {
         AlertDialog(
             onDismissRequest = { if (!joining) showJoin = false },
             containerColor = c.bgSecondary,
-            title = { Text(p.name ?: stringResource(R.string.group_invite_title), color = c.textPrimary) },
-            text = { Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary) },
+            title = { Text(p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title), color = c.textPrimary) },
+            text = {
+                if (p != null) Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary)
+                else Text(stringResource(R.string.group_invite_island_hint, foreignHost ?: ""), color = c.textSecondary)
+            },
             confirmButton = {
                 TextButton(enabled = !joining, onClick = {
                     joining = true
                     scope.launch {
-                        val g = session.joinGroup(groupId)
-                        joining = false
-                        showJoin = false
-                        if (g != null) onOpenGroup(groupId)
+                        if (foreignHost != null) {
+                            val alias = session.joinForeignGroup(foreignHost, groupId)
+                            joining = false
+                            showJoin = false
+                            if (alias != null) onOpenGroup(alias)
+                        } else {
+                            val g = session.joinGroup(groupId)
+                            joining = false
+                            showJoin = false
+                            if (g != null) onOpenGroup(groupId)
+                        }
                     }
                 }) { Text(stringResource(R.string.group_invite_join), color = c.accent) }
             },
@@ -1403,13 +1437,16 @@ private fun GroupLinkBubble(session: Session, groupId: Int, onOpenGroup: (Int) -
  *  (iOS PinnedGroupChip parity): avatar + name + member count. Tap opens the
  *  in-app join sheet (NOT a browser); joining jumps into that group. */
 @Composable
-private fun PinnedGroupChip(session: Session, groupId: Int, onOpenGroup: (Int) -> Unit) {
+private fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, onOpenGroup: (Int) -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     var showJoin by remember { mutableStateOf(false) }
     var joining by remember { mutableStateOf(false) }
-    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, groupId) {
-        value = session.previewGroup(groupId)
+    val groupId = ref.id
+    val foreignHost = ref.host?.takeIf { it != session.currentServer }
+    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, ref) {
+        value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId)
+        else session.previewGroup(groupId)
     }
     val p = preview
     val avatarGroup = remember(p) {
@@ -1427,7 +1464,7 @@ private fun PinnedGroupChip(session: Session, groupId: Int, onOpenGroup: (Int) -
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(c.bgPrimary)
-            .clickable(enabled = p != null) { showJoin = true }
+            .clickable(enabled = p != null || foreignHost != null) { showJoin = true }
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
@@ -1440,29 +1477,39 @@ private fun PinnedGroupChip(session: Session, groupId: Int, onOpenGroup: (Int) -
         }
         Column(Modifier.weight(1f)) {
             Text(
-                p?.name ?: stringResource(R.string.group_invite_loading),
+                p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_loading),
                 color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            if (foreignHost != null) Text(foreignHost, color = c.textMono, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (p != null) Text(
                 pluralStringResource(R.plurals.members, p.member_count, p.member_count),
                 color = c.textSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
             )
         }
     }
-    if (showJoin && p != null) {
+    if (showJoin && (p != null || foreignHost != null)) {
         AlertDialog(
             onDismissRequest = { if (!joining) showJoin = false },
             containerColor = c.bgSecondary,
-            title = { Text(p.name ?: stringResource(R.string.group_invite_title), color = c.textPrimary) },
-            text = { Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary) },
+            title = { Text(p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title), color = c.textPrimary) },
+            text = {
+                if (p != null) Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary)
+                else Text(stringResource(R.string.group_invite_island_hint, foreignHost ?: ""), color = c.textSecondary)
+            },
             confirmButton = {
                 TextButton(enabled = !joining, onClick = {
                     joining = true
                     scope.launch {
-                        val g = session.joinGroup(groupId)
-                        joining = false; showJoin = false
-                        if (g != null) onOpenGroup(groupId)
+                        if (foreignHost != null) {
+                            val alias = session.joinForeignGroup(foreignHost, groupId)
+                            joining = false; showJoin = false
+                            if (alias != null) onOpenGroup(alias)
+                        } else {
+                            val g = session.joinGroup(groupId)
+                            joining = false; showJoin = false
+                            if (g != null) onOpenGroup(groupId)
+                        }
                     }
                 }) { Text(stringResource(R.string.group_invite_join), color = c.accent) }
             },
@@ -1768,7 +1815,7 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
     val scope = rememberCoroutineScope()
     val isVideo = m.kind == "video"
     val photo by produceState<ByteArray?>(initialValue = null, m.id) {
-        value = if (!isVideo && m.mediaId != null && m.mediaKey != null) session.fetchImage(m.mediaId, m.mediaKey) else null
+        value = if (!isVideo && m.mediaId != null && m.mediaKey != null) session.fetchImage(m.mediaId, m.mediaKey, m.groupId?.let { session.groupHost(it) }) else null
     }
     val bmp = remember(photo, m.id) {
         if (isVideo) {
@@ -1918,7 +1965,7 @@ private fun PhotoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
     var revealed by remember(m.id) { mutableStateOf(false) }
     val hidden = m.spoiler && !revealed
     val bytes by produceState<ByteArray?>(initialValue = null, m.mediaId) {
-        value = if (m.mediaId != null && m.mediaKey != null) session.fetchImage(m.mediaId, m.mediaKey) else null
+        value = if (m.mediaId != null && m.mediaKey != null) session.fetchImage(m.mediaId, m.mediaKey, m.groupId?.let { session.groupHost(it) }) else null
     }
     val b = bytes
     Box(
@@ -2056,7 +2103,7 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
                 onClick = {
                     val mid = m.mediaId; val key = m.mediaKey
                     if (mid != null && key != null) scope.launch {
-                        val bytes = session.fetchImage(mid, key)
+                        val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
                         if (bytes != null) openFile(context, bytes, m.fileName ?: "file", m.fileMime ?: "application/octet-stream")
                     }
                 },
@@ -2095,7 +2142,7 @@ private fun VoiceBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                     } else {
                         val mid = m.mediaId; val key = m.mediaKey
                         if (mid != null && key != null) scope.launch {
-                            val bytes = session.fetchImage(mid, key) ?: return@launch
+                            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) }) ?: return@launch
                             runCatching {
                                 val f = java.io.File(context.cacheDir, "voice-${m.id}.m4a")
                                 if (!f.exists() || f.length() == 0L) f.writeBytes(bytes)
@@ -2150,7 +2197,7 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                     if (hidden) { revealed = true; return@combinedClickable }
                     val mid = m.mediaId; val key = m.mediaKey
                     if (mid != null && key != null) scope.launch {
-                        val bytes = session.fetchImage(mid, key)
+                        val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
                         if (bytes != null) openFile(context, bytes, "video-${m.id}.mp4", "video/mp4")
                     }
                 },

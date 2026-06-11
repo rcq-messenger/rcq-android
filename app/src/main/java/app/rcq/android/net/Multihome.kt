@@ -165,11 +165,15 @@ object Multihome {
     /** Drain every backup mailbox, feeding each payload to [onPayload] (the
      *  session's ingest — dedup happens there). A 401 refreshes the token via
      *  recover and retries once. Never throws. */
+    /** The handler gets each row's payload plus its group_id and the home's
+     *  host: if a backup island ALSO hosts a group we joined (§5c — same
+     *  identity, same mailbox there), group rows arrive through this drain and
+     *  must be filed under the local alias, not the raw remote group id. */
     suspend fun drainBackupQueues(
         ownUin: Int,
         signingPriv: ByteArray,
         signingPub: ByteArray,
-        onPayload: (String) -> Unit,
+        onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
             runCatching {
@@ -185,9 +189,38 @@ object Multihome {
                         api.drainQueue()
                     } else throw e
                 }
-                rows.forEach { q -> q.payload?.let(onPayload) }
+                rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
             }.onFailure {
                 android.util.Log.w("RCQfed", "multihome drain ${home.host}: ${it.javaClass.simpleName}: ${it.message}")
+            }
+        }
+    }
+
+    /** §5c: drain the GUEST mailbox on every visited island (the receive path
+     *  for cross-island groups — the host island spools group fan-out there).
+     *  Same shape as the backup drain; 401 → recover-refresh once. */
+    suspend fun drainVisitedQueues(
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
+    ) {
+        for (v in VisitedIslandsStore.list()) {
+            runCatching {
+                val api = RcqApi("https://${v.host}")
+                api.setToken(v.jwt)
+                val rows = try {
+                    api.drainQueue()
+                } catch (e: IOException) {
+                    if (e.message?.startsWith("HTTP 401") == true) {
+                        val fresh = recoverOn(v.host, signingPriv, signingPub) ?: return@runCatching
+                        VisitedIslandsStore.updateCreds(v.host, fresh.uin, fresh.token)
+                        api.setToken(fresh.token)
+                        api.drainQueue()
+                    } else throw e
+                }
+                rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
+            }.onFailure {
+                android.util.Log.w("RCQfed", "visited drain ${v.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
         }
     }

@@ -709,6 +709,8 @@
     <string name="group_invite_closed">Closed group</string>
     <string name="group_invite_tap_join">Tap to join</string>
     <string name="group_invite_link">Group invite</string>
+    <string name="group_invite_island">Group on another island</string>
+    <string name="group_invite_island_hint">Joining registers your key on %1$s so the group can deliver to you.</string>
     <string name="group_invite_title">Group invite</string>
     <string name="group_invite_join">Join</string>
     <string name="group_invite_none">You have no groups to share.</string>
