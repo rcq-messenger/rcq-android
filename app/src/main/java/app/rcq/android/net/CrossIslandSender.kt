@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit
 object CrossIslandSender {
 
     private val JSON = "application/json".toMediaType()
+    private val OCTET = "application/octet-stream".toMediaType()
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -68,6 +69,19 @@ object CrossIslandSender {
             }
             return fallback
         }
+    }
+
+    /** Deposit an already-encrypted media blob under a CLIENT-chosen id
+     *  (`PUT /media/{id}`, idempotent, no auth — same trust model as the
+     *  envelope deposit). Cross-island media: the recipient fetches media from
+     *  their OWN island, so the sender puts the blob there itself
+     *  (deposit-the-blob — islands never talk to each other). */
+    fun depositBlob(host: String, mediaId: String, blob: ByteArray): Boolean {
+        val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("blob", "photo.bin", blob.toRequestBody(OCTET))
+            .build()
+        val req = Request.Builder().url("https://$host/media/$mediaId").put(body).build()
+        return runCatching { client.newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
     }
 
     /** Deliver [env] to a cross-island [contact]: v=1-seal to their identity key

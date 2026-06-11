@@ -1733,6 +1733,25 @@ class Session(context: Context) {
         }
     }
 
+    /** Upload an encrypted media blob for a 1:1 send to [toUin]. Same-island
+     *  peers use the normal POST /media/upload. A CROSS-ISLAND peer fetches
+     *  media from their OWN island, so the blob is DEPOSITED there under a
+     *  client-chosen id (deposit-the-blob — islands never talk; the message
+     *  survives our island dying), plus a best-effort copy on our island for
+     *  carbons + re-fetch. Mirrors web-chat media.ts uploadBlob. */
+    private suspend fun uploadBlobFor(toUin: Int, blob: ByteArray): RcqApi.UploadResponse {
+        val ci = CrossIslandStore.findByUin(toUin) ?: return api.uploadBlob(blob)
+        return withContext(Dispatchers.IO) {
+            val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
+            // The peer-island copy is REQUIRED — that's the one they read.
+            if (!CrossIslandSender.depositBlob(ci.host, mediaId, blob)) {
+                throw java.io.IOException("cross-island media deposit failed (${ci.host})")
+            }
+            runCatching { api.putBlob(mediaId, blob) }
+            RcqApi.UploadResponse(mediaId, blob.size)
+        }
+    }
+
     /** Encrypt+upload an already-compressed JPEG, then send a photo
      *  envelope carrying the media id + per-blob key (rcq-spec 9). The
      *  local bubble appears once the blob is uploaded. */
@@ -1740,7 +1759,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)            // throws on failure (caller catches)
+        val upload = uploadBlobFor(toUin, blob)      // throws on failure (caller catches)
         imageCache.put(upload.media_id, jpeg)            // own bubble renders without re-download
         val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId)
         store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId))
@@ -1753,7 +1772,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
         val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null)
@@ -1778,7 +1797,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
         val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble())
         store(ChatMessage(env.id, toUin, true, "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec))
@@ -1802,7 +1821,7 @@ class Session(context: Context) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
+        val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
         val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId)
         store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId))

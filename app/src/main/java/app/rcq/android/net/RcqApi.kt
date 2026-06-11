@@ -902,6 +902,22 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         }
     }
 
+    /** Cross-island media (federation): PUT an encrypted blob under a
+     *  CLIENT-chosen id, so the same envelope reference resolves on every
+     *  island the blob is deposited to. Idempotent server-side. */
+    suspend fun putBlob(mediaId: String, bytes: ByteArray): UploadResponse = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("blob", "photo.bin", bytes.toRequestBody(OCTET))
+            .build()
+        val b = Request.Builder().url("$baseUrl/media/$mediaId").put(body)
+        token?.let { b.header("Authorization", "Bearer $it") }
+        client.newCall(b.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IOException("deposit HTTP ${resp.code}: ${text.take(200)}")
+            gson.fromJson(text, UploadResponse::class.java)
+        }
+    }
+
     suspend fun getBlob(mediaId: String): ByteArray = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl/media/$mediaId").get().build()
         client.newCall(req).execute().use { resp ->
