@@ -763,7 +763,9 @@
     <string name="home_send_request">Отправить запрос</string>
     <string name="add_title">Добавить</string>
     <string name="add_search_hint">Имя, UIN или группа</string>
-    <string name="add_search_prompt">Ищите людей и группы, чтобы добавить.</string>
+    <string name="add_search_prompt">Ищите людей и группы. Просто номер действует на вашем острове; для другого острова введите номер@остров.</string>
+    <string name="add_on_own_island">Отправить запрос · на %1$s</string>
+    <string name="add_ci_row">Контакт с другого острова</string>
     <string name="add_searching">Поиск…</string>
     <string name="add_no_results">Ничего не найдено.</string>
     <string name="add_already_contact">уже в контактах</string>

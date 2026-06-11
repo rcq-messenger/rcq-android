@@ -1306,7 +1306,10 @@ private fun AddContactDialog(
                         // Exact-UIN add stays possible even for users whose
                         // profile isn't searchable (privacy-gated).
                         if (digits != null && users.none { it.uin == digits }) {
-                            AddResultRow("#$digits", stringResource(R.string.home_send_request), accent = true) {
+                            // Say WHICH island a bare number reaches — a user on
+                            // is2 typing an api number must see the mismatch
+                            // (beta report: the request "never arrived").
+                            AddResultRow("#$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
                                 onAddUin(digits); sentTo = sentTo + digits
                             }
                         }
@@ -1320,7 +1323,7 @@ private fun AddContactDialog(
                                 ?.takeIf { it.host != session.currentServer }
                         }
                         if (ci != null) {
-                            AddResultRow("${ci.uin}@${ci.host}", "Cross-island contact", accent = true) {
+                            AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_row), accent = true) {
                                 scope.launch {
                                     if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
                                 }
