@@ -1061,10 +1061,15 @@ class Session(context: Context) {
         runCatching { refreshContacts() }
     }
 
-    /** Mutual remove + local silent-drop of future sealed messages. */
+    /** Mutual remove + local silent-drop of future sealed messages. A
+     *  cross-island contact lives only in CrossIslandStore (the own island has
+     *  no roster row to DELETE) — drop it there, or refreshContacts would
+     *  merge it right back (beta report #207). */
     suspend fun removeContact(uin: Int) {
         LocalStores.addRemoved(uin)
-        runCatching { api.removeContact(uin) }
+        val ci = CrossIslandStore.findByUin(uin)
+        if (ci != null) CrossIslandStore.remove(ci.uin, ci.host)
+        else runCatching { api.removeContact(uin) }
         runCatching { refreshContacts() }
     }
 
