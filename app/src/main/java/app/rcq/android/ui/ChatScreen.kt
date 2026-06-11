@@ -464,7 +464,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             } else if (isSelf) {
                 Icon(Icons.Filled.Bookmark, null, tint = c.accent, modifier = Modifier.size(26.dp))
             } else {
-                StatusIcon(peerContact?.presence ?: UserStatus.OFFLINE, size = 26.dp)
+                val isCrossIsland = peerContact?.host != null ||
+                    (peerContact == null && CrossIslandStore.findByUin(peer ?: 0) != null)
+                StatusIcon(peerContact?.presence ?: UserStatus.OFFLINE, size = 26.dp, crossIsland = isCrossIsland)
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
@@ -482,6 +484,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     isSelf -> stringResource(R.string.chat_saved_subtitle)
                     isTyping -> stringResource(R.string.chat_typing)
                     peerContact == null -> CrossIslandStore.findByUin(peer ?: 0)?.host ?: "$peer"
+                    // Cross-island peer: show their island, not a fake "offline"
+                    // (presence isn't tracked across islands).
+                    peerContact.host != null -> peerContact.host
                     peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(peerContact.lastSeen, context))
                     else -> stringResource(peerContact.presence.labelRes).lowercase()
                 }

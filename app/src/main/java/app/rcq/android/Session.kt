@@ -2413,7 +2413,7 @@ class Session(context: Context) {
     /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
      *  chat list (the send path still routes them by [CrossIslandStore] host). */
     private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
-        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = false)
+        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = false, host = c.host)
     }
 
     /** Append cross-island contacts to the displayed roster (skip uin already

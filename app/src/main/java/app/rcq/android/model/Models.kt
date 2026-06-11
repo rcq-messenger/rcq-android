@@ -12,6 +12,10 @@ data class Contact(
     val gender: String? = null,     // "m" | "f" | null (visibility-gated)
     val lastSeen: Long? = null,     // epoch millis, null when hidden/online
     val callable: Boolean = true,   // false = peer's call_policy is "nobody" (hide call buttons)
+    // Cross-island contact's island (local-only, never sent by the server —
+    // Gson leaves it null for roster rows). Drives the "Other islands" home
+    // section + the gray presence flower.
+    val host: String? = null,
 ) {
     /** Presence as a typed enum (server never sends `invisible` for peers). */
     val presence: UserStatus get() = UserStatus.from(status)

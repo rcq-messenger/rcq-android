@@ -213,6 +213,7 @@ internal fun HomeScreen(
     val collapsedGroups = "sec:grp" in sectionFlags
     val collapsedOnline = "sec:online" in sectionFlags
     val collapsedOffline = "sec:offline" in sectionFlags
+    val collapsedCrossIsland = "sec:ci" in sectionFlags
     val collapsedArchive = "sec:archive:open" !in sectionFlags
 
     // Unread threads float to the top (iOS parity), then by recency.
@@ -224,8 +225,11 @@ internal fun HomeScreen(
 
     val nonArchived = contacts.filterNot { LocalStores.peerThread(it.uin) in archived }
     val favContacts = byRecency(nonArchived.filter { LocalStores.peerThread(it.uin) in favorites })
-    val onlineContacts = byRecency(nonArchived.filter { it.presence != UserStatus.OFFLINE })
-    val offlineContacts = byRecency(nonArchived.filter { it.presence == UserStatus.OFFLINE })
+    // Cross-island contacts live in their own section — presence isn't tracked
+    // across islands, so filing them under online/offline would be a lie.
+    val crossIslandContacts = byRecency(nonArchived.filter { it.host != null })
+    val onlineContacts = byRecency(nonArchived.filter { it.host == null && it.presence != UserStatus.OFFLINE })
+    val offlineContacts = byRecency(nonArchived.filter { it.host == null && it.presence == UserStatus.OFFLINE })
     val archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived })
     val visibleGroups = groups.filterNot { LocalStores.groupThread(it.id) in archived }
     val archivedGroups = groups.filter { LocalStores.groupThread(it.id) in archived }
@@ -255,6 +259,7 @@ internal fun HomeScreen(
     val secFavorites = stringResource(R.string.home_sec_favorites)
     val secOnline = stringResource(R.string.home_sec_online)
     val secOffline = stringResource(R.string.home_sec_offline)
+    val secCrossIsland = stringResource(R.string.home_sec_cross_island)
     val secArchive = stringResource(R.string.home_sec_archive)
 
     Box(Modifier.fillMaxSize().background(c.bgPrimary)) {
@@ -379,6 +384,7 @@ internal fun HomeScreen(
 
                 contactSection(secOnline, onlineContacts, collapsedOnline, "on", unread, { LocalStores.setSectionFlag("sec:online", !collapsedOnline) }, onOpenChat, onLongPress = { previewContact = it })
                 contactSection(secOffline, offlineContacts, collapsedOffline, "off", unread, { LocalStores.setSectionFlag("sec:offline", !collapsedOffline) }, onOpenChat, onLongPress = { previewContact = it })
+                contactSection(secCrossIsland, crossIslandContacts, collapsedCrossIsland, "cisl", unread, { LocalStores.setSectionFlag("sec:ci", !collapsedCrossIsland) }, onOpenChat, onLongPress = { previewContact = it })
                 // Archive holds BOTH archived contacts AND archived groups.
                 // (Bug fix: an archived group was filtered out of the main list
                 // but never rendered here, so it vanished entirely and couldn't
@@ -1001,7 +1007,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            StatusIcon(contact.presence, size = 28.dp)
+            StatusIcon(contact.presence, size = 28.dp, crossIsland = contact.host != null)
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd))
         }
         Column(Modifier.weight(1f)) {

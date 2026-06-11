@@ -55,6 +55,7 @@
     <string name="home_sec_favorites">Избранное</string>
     <string name="home_sec_online">В сети</string>
     <string name="home_sec_offline">Не в сети</string>
+    <string name="home_sec_cross_island">Другие острова</string>
     <string name="home_sec_archive">Архив</string>
 
     <!-- Home: overflow + account menu -->
