@@ -1030,6 +1030,9 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
                 Text("#${contact.uin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                 val ctx = LocalContext.current
                 val sub = when {
+                    // §5c: a cross-island peer shows its island (presence/last_seen
+                    // don't cross islands), then any status message.
+                    contact.host != null -> contact.host + (contact.statusMessage?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
                     !contact.statusMessage.isNullOrEmpty() -> contact.statusMessage
                     contact.presence == UserStatus.OFFLINE && contact.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen, ctx))
                     else -> null

@@ -33,7 +33,19 @@ object CrossIslandSender {
         .callTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    data class Card(val identityKey: String, val signingKey: String, val signalIdentityKey: String?)
+    data class Card(
+        val identityKey: String,
+        val signingKey: String,
+        val signalIdentityKey: String?,
+        // §5c display: the open card now carries the peer's nickname (+ optional
+        // gender/status) so a cross-island contact shows a real name, not uin@host.
+        val nickname: String? = null,
+        val gender: String? = null,
+        val statusMessage: String? = null,
+    )
+
+    private fun JsonObject.str(key: String): String? =
+        get(key)?.takeIf { !it.isJsonNull }?.asString
 
     /** Fetch a peer's open public-key card from their island (no auth). */
     fun fetchCard(host: String, uin: Int): Card? {
@@ -44,7 +56,10 @@ object CrossIslandSender {
             return Card(
                 identityKey = o.get("identity_key").asString,
                 signingKey = o.get("signing_key").asString,
-                signalIdentityKey = o.get("signal_identity_key")?.takeIf { !it.isJsonNull }?.asString,
+                signalIdentityKey = o.str("signal_identity_key"),
+                nickname = o.str("nickname"),
+                gender = o.str("gender"),
+                statusMessage = o.str("status_message"),
             )
         }
     }

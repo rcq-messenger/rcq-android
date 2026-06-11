@@ -2525,9 +2525,11 @@ class Session(context: Context) {
         val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext false
         CrossIslandStore.save(
             CrossIslandStore.Contact(
-                uin = uin, host = host, nickname = "$uin@$host",
+                uin = uin, host = host,
+                nickname = card.nickname?.takeIf { it.isNotBlank() } ?: "$uin@$host",
                 identityKey = card.identityKey, signingKey = card.signingKey,
                 signalIdentityKey = card.signalIdentityKey, addedAt = System.currentTimeMillis(),
+                gender = card.gender, statusMessage = card.statusMessage,
             )
         )
         true
@@ -2554,7 +2556,7 @@ class Session(context: Context) {
     /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
      *  chat list (the send path still routes them by [CrossIslandStore] host). */
     private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
-        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = false, host = c.host)
+        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = false, host = c.host, gender = c.gender, statusMessage = c.statusMessage)
     }
 
     /** Append cross-island contacts to the displayed roster (skip uin already

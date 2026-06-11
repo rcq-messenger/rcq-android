@@ -34,6 +34,9 @@ object CrossIslandStore {
         val signingKey: String,          // v=1 Ed25519 public, base64
         val signalIdentityKey: String?,  // v=2 libsignal / safety-number key, base64
         val addedAt: Long,
+        // §5c display, from the open card (gson leaves them null for old entries).
+        val gender: String? = null,
+        val statusMessage: String? = null,
     )
 
     private lateinit var prefs: SharedPreferences

@@ -88,11 +88,17 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     var safetyLoading by remember { mutableStateOf(false) }
     var identityChanged by remember { mutableStateOf(false) }
 
+    // §5c: a cross-island contact's profile lives on ITS island — our own
+    // /users/{uin}/info 404s, so render from the locally-stored card
+    // (nickname/gender/status) and skip the visit ping (it'd mis-route to our
+    // own island's uin).
+    val crossIslandHost = contact?.host
     LaunchedEffect(uin) {
-        profile = session.loadPeerProfile(uin)
-        identityChanged = session.peerIdentityChanged(uin)
-        // Tell them we looked (fire-and-forget; tallied on their device).
-        runCatching { session.sendVisit(uin) }
+        if (crossIslandHost == null) {
+            profile = session.loadPeerProfile(uin)
+            identityChanged = session.peerIdentityChanged(uin)
+            runCatching { session.sendVisit(uin) }
+        }
     }
 
     val nickname = profile?.nickname ?: contact?.nickname ?: session.contactName(uin)
@@ -117,13 +123,16 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             // Identity block.
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusIcon(presence, size = 80.dp)
+                StatusIcon(presence, size = 80.dp, crossIsland = crossIslandHost != null)
                 Text(nickname, color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 val sub = when {
+                    // Cross-island: presence/last_seen don't cross islands — show
+                    // the island instead of a misleading "offline".
+                    crossIslandHost != null -> crossIslandHost
                     presence == UserStatus.OFFLINE && contact?.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen!!, context))
                     else -> stringResource(presence.labelRes).lowercase()
                 }
-                Text(sub, color = c.textSecondary, fontSize = 13.sp)
+                Text(sub, color = c.textSecondary, fontSize = 13.sp, fontFamily = if (crossIslandHost != null) FontFamily.Monospace else FontFamily.Default)
                 statusMessage?.let { Text(it, color = c.textPrimary, fontSize = 14.sp, textAlign = TextAlign.Center) }
             }
 
