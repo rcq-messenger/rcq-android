@@ -10,6 +10,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -91,27 +93,37 @@ object Multihome {
         return home
     }
 
-    private const val CATALOGUE_URL =
-        "https://raw.githubusercontent.com/rcq-messenger/rcq-servers/main/servers.json"
+    // The auto-pick list is a SEPARATE, Ed25519-signed file (not servers.json):
+    // the toggle silently registers a backup mailbox on whatever it picks, so a
+    // tampered catalogue must not steer that. We verify the signature over the
+    // EXACT bytes GitHub served, against the maintainer key already pinned for
+    // relay-config (RelayConfigStore.PUBKEY_B64). servers.json stays display-only.
+    private const val AUTO_ISLANDS_URL =
+        "https://raw.githubusercontent.com/rcq-messenger/rcq-servers/main/auto-islands.json"
+    private const val PUBKEY_B64 = "TY834OFcBvtUqHcnVw/QrPBOaEAZo7a1GAmABMhjkT8="
 
-    /** Pick a backup island from the public catalogue: entries the maintainer
-     *  flagged `auto_backup`, minus our own island + already-added hosts; the
-     *  FIRST healthy one in catalogue order wins (the order is the project's
-     *  preference). Returns the bare host, or null when the catalogue is
-     *  unreachable or no flagged island responds. Plain OkHttp, same accepted
-     *  simplification as the deposit path. Blocking — call from IO. */
+    /** Pick a backup island from the SIGNED island list, minus our own island +
+     *  already-added hosts; the FIRST healthy one in list order wins (the order
+     *  is the project's preference). Returns the bare host, or null when the
+     *  list is unreachable, the signature fails, or no island responds
+     *  (fail-safe: never auto-register on an unverified island). Plain OkHttp,
+     *  same accepted simplification as the deposit path. Blocking — call from IO. */
     fun autoPickHost(ownHost: String, exclude: Set<String>): String? = runCatching {
-        val req = Request.Builder().url(CATALOGUE_URL).header("Cache-Control", "no-cache").get().build()
-        val candidates = client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@runCatching null
-            val doc = JsonParser.parseString(resp.body?.string() ?: return@runCatching null).asJsonObject
-            doc.getAsJsonArray("servers")?.mapNotNull { el ->
-                val o = el.asJsonObject
-                val flagged = runCatching { o.get("auto_backup")?.asBoolean == true }.getOrDefault(false)
-                if (flagged) normalizeHost(o.get("url")?.asString ?: "") else null
-            } ?: emptyList()
-        }
-        candidates.firstOrNull { it != ownHost && it !in exclude && healthy(it) }
+        val jsonBytes = httpBytes(AUTO_ISLANDS_URL) ?: return@runCatching null
+        val sigB64 = httpBytes("$AUTO_ISLANDS_URL.sig")?.toString(Charsets.UTF_8)?.trim()
+            ?: return@runCatching null
+        val pub = Ed25519PublicKeyParameters(Base64.decode(PUBKEY_B64, Base64.DEFAULT), 0)
+        val signer = Ed25519Signer().apply { init(false, pub); update(jsonBytes, 0, jsonBytes.size) }
+        if (!signer.verifySignature(Base64.decode(sigB64, Base64.DEFAULT))) return@runCatching null
+        val doc = JsonParser.parseString(jsonBytes.toString(Charsets.UTF_8)).asJsonObject
+        val islands = doc.getAsJsonArray("islands")?.mapNotNull { normalizeHost(it.asString) } ?: emptyList()
+        islands.firstOrNull { it != ownHost && it !in exclude && healthy(it) }
+    }.getOrNull()
+
+    /** Raw response bytes (the exact bytes the signature covers), or null. */
+    private fun httpBytes(url: String): ByteArray? = runCatching {
+        val req = Request.Builder().url(url).header("Cache-Control", "no-cache").get().build()
+        client.newCall(req).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
     }.getOrNull()
 
     private fun healthy(host: String): Boolean = runCatching {
