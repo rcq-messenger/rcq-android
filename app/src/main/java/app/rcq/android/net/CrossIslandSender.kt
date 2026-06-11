@@ -78,9 +78,10 @@ object CrossIslandSender {
         ownUin: Int,
         signingPriv: ByteArray,
         signingPub: ByteArray,
+        ownHost: String,
     ): Boolean {
         val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
-        val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub)
+        val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
         var delivered = false
         for (h in resolveHomes(contact.host, contact.uin)) {
             val body = JsonObject().apply {

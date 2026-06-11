@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.activity.compose.BackHandler
@@ -103,6 +104,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.rcq.android.R
 import app.rcq.android.Session
+import app.rcq.android.net.CrossIslandRequestsStore
 import app.rcq.android.data.LocalStores
 import app.rcq.android.model.Contact
 import app.rcq.android.model.RcqGroup
@@ -167,6 +169,7 @@ internal fun HomeScreen(
     val contacts by session.contacts.collectAsState()
     val groups by session.groups.collectAsState()
     val pending by session.pending.collectAsState()
+    val ciReqs by session.ciRequests.collectAsState()
     val messages by session.messages.collectAsState()
     val ownStatus by session.status.collectAsState()
     val connected by session.connected.collectAsState()
@@ -301,6 +304,18 @@ internal fun HomeScreen(
                             name = req.fromNickname,
                             onAccept = { scope.launch { runCatching { session.respond(req.requestId, true) } } },
                             onDecline = { scope.launch { runCatching { session.respond(req.requestId, false) } } },
+                        )
+                    }
+                }
+                // Variant A: cross-island message requests (consent).
+                if (ciReqs.isNotEmpty()) {
+                    item(key = "cireq-h") { SectionHeader(stringResource(R.string.home_sec_ci_requests), ciReqs.size, collapsed = false, onToggle = {}) }
+                    items(ciReqs, key = { "ci${it.uin}@${it.host}" }) { r ->
+                        CiPendingRow(
+                            tag = "${r.uin}@${r.host}",
+                            preview = r.preview,
+                            onAccept = { scope.launch { runCatching { session.acceptCrossIslandRequest(r.uin, r.host) } } },
+                            onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
                         )
                     }
                 }
@@ -1040,6 +1055,26 @@ private fun PendingRow(name: String, onAccept: () -> Unit, onDecline: () -> Unit
         Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(R.string.home_decline), color = c.textSecondary, modifier = Modifier.clickable(onClick = onDecline).padding(8.dp))
+    }
+}
+
+@Composable
+private fun CiPendingRow(tag: String, preview: String, onAccept: () -> Unit, onBlock: () -> Unit) {
+    val c = RcqTheme.colors
+    Row(
+        Modifier.fillMaxWidth().background(c.bgPrimary).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Public, null, tint = c.accent, modifier = Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(tag, color = c.textPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+            if (preview.isNotEmpty()) Text(preview, color = c.textSecondary, fontSize = 12.sp, maxLines = 1)
+        }
+        Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(stringResource(R.string.ci_block), color = c.textSecondary, modifier = Modifier.clickable(onClick = onBlock).padding(8.dp))
     }
 }
 

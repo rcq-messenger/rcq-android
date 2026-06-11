@@ -242,7 +242,7 @@ object Multihome {
             if (extra.isEmpty()) return 0
 
             val recipientPub = Base64.decode(peerIdentityKeyB64, Base64.NO_WRAP)
-            val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub)
+            val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
             var delivered = 0
             for (h in extra) {
                 val body = JsonObject().apply {

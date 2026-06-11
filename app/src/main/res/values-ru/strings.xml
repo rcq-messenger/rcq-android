@@ -50,6 +50,7 @@
 
     <!-- Home: sections -->
     <string name="home_sec_requests">Запросы</string>
+    <string name="home_sec_ci_requests">Запросы на переписку (другие острова)</string>
     <string name="home_sec_groups">Группы</string>
     <string name="home_sec_favorites">Избранное</string>
     <string name="home_sec_online">В сети</string>

@@ -51,6 +51,9 @@ object SealedSender {
         val senderUin: Int,
         val envelope: Envelope,
         val senderSigningPub: ByteArray,
+        /** The sender's island host if they included it (v=1 `from_host`); null
+         *  for pre-`from_host` senders and all v=2 (same-island). Drives Variant A. */
+        val senderHost: String? = null,
     )
 
     /** A v=2 envelope after the outer ECIES is peeled but before the inner
@@ -65,6 +68,7 @@ object SealedSender {
         ownUin: Int,
         signingPriv: ByteArray,
         signingPub: ByteArray,
+        ownHost: String = "api.rcq.app",
     ): String {
         // Ephemeral X25519 keypair.
         val gen = X25519KeyPairGenerator().apply {
@@ -86,8 +90,12 @@ object SealedSender {
         }
         val sig = signer.generateSignature()
 
+        // `from_host` (the sender's island) lets the recipient tell a cross-island
+        // sender from a local one (Variant A consent + correct labeling). Additive:
+        // old decoders ignore it; the authenticated identity stays `spub`.
         val inner = JsonObject().apply {
             addProperty("from", ownUin)
+            addProperty("from_host", ownHost)
             addProperty("spub", b64(signingPub))
             addProperty("sig", b64(sig))
             addProperty("env", b64(envJson))
@@ -171,6 +179,7 @@ object SealedSender {
             senderUin = from,
             envelope = Envelope.fromJsonBytes(envBytes),
             senderSigningPub = spub,
+            senderHost = obj.get("from_host")?.asString,
         )
     }
 

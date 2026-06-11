@@ -51,6 +51,7 @@
 
     <!-- Home: sections -->
     <string name="home_sec_requests">Requests</string>
+    <string name="home_sec_ci_requests">Message requests (other islands)</string>
     <string name="home_sec_groups">Groups</string>
     <string name="home_sec_favorites">Favorites</string>
     <string name="home_sec_online">Online</string>

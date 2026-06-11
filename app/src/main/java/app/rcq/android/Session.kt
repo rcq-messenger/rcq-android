@@ -27,6 +27,7 @@ import app.rcq.android.model.UserStatus
 import app.rcq.android.net.CrossIslandSender
 import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.Multihome
+import app.rcq.android.net.CrossIslandRequestsStore
 import app.rcq.android.net.MultihomeStore
 import app.rcq.android.net.RcqApi
 import app.rcq.android.net.RcqFederation
@@ -252,6 +253,7 @@ class Session(context: Context) {
         CrossIslandStore.init(appCtx)
         // Multihoming (federation v1): this account's backup island homes.
         MultihomeStore.init(appCtx)
+        CrossIslandRequestsStore.init(appCtx)
         // The app locking (background with a PIN set) is signalled by the
         // PanicPinService.locked flow; tear the live session down so the
         // unlocked key + plaintext history don't linger in this process.
@@ -517,6 +519,7 @@ class Session(context: Context) {
         loadMessagesFromDb()
         loadCachedRoster()
         refreshBackupHomes()
+        refreshCiRequests()
         // Multihoming v1: poll the backup-island mailboxes. Deliberately
         // independent of the primary socket — when the primary island is down,
         // this loop IS the delivery path.
@@ -1931,7 +1934,7 @@ class Session(context: Context) {
                 noV2Peers.add(toUin)
             }
         }
-        return SealedSender.encryptV1(env, recipientPub, me, signingPriv(), signingPub())
+        return SealedSender.encryptV1(env, recipientPub, me, signingPriv(), signingPub(), serverHost())
     }
 
     private suspend fun sendEnvelope(env: Envelope, id: String, toUin: Int) {
@@ -1944,7 +1947,7 @@ class Session(context: Context) {
             val me = store.uin
             val ok = me != null && runCatching {
                 val sp = signingPriv(); val pp = signingPub()
-                withContext(Dispatchers.IO) { CrossIslandSender.deliver(ci, env, me, sp, pp) }
+                withContext(Dispatchers.IO) { CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost()) }
             }.getOrDefault(false)
             updateMessageState(id, toUin, if (ok) DeliveryState.SENT else DeliveryState.FAILED)
             return
@@ -2234,6 +2237,20 @@ class Session(context: Context) {
             // Removed contacts are silently dropped — sealed sender means
             // the server can't filter by sender, so we gate on receipt.
             if (LocalStores.isRemoved(dec.senderUin)) return@runCatching
+            // Variant A consent: a 1:1 message from an un-accepted CROSS-ISLAND
+            // sender (its from_host isn't ours and we haven't added them) is
+            // QUARANTINED as a request instead of landing in the chat list.
+            // Blocked → hold() drops it. We hold the raw payload so Accept can
+            // re-ingest it (now an accepted contact → passes this gate).
+            val ciHost = dec.senderHost
+            val meUin = store.uin ?: 0
+            if (ciHost != null && ciHost != serverHost() && dec.senderUin != meUin &&
+                CrossIslandStore.get(dec.senderUin, ciHost) == null
+            ) {
+                CrossIslandRequestsStore.hold(meUin, dec.senderUin, ciHost, payloadB64, ciPreview(dec.envelope))
+                refreshCiRequests()
+                return@runCatching
+            }
             val now = System.currentTimeMillis()
             // Random-chat peer: keep the conversation ephemeral (in-memory,
             // never persisted, never on Home). Text only for v=1.
@@ -2349,6 +2366,55 @@ class Session(context: Context) {
         true
     }
 
+    // ── cross-island message requests (Variant A consent) ──
+
+    val ciRequests = MutableStateFlow<List<CrossIslandRequestsStore.Request>>(emptyList())
+
+    fun refreshCiRequests() {
+        ciRequests.value = store.uin?.let { CrossIslandRequestsStore.list(it) } ?: emptyList()
+    }
+
+    private fun ciPreview(env: Envelope): String = when (env) {
+        is Envelope.Text -> env.text
+        is Envelope.Photo -> env.caption?.takeIf { it.isNotEmpty() } ?: "📷"
+        is Envelope.Video -> env.caption?.takeIf { it.isNotEmpty() } ?: "🎬"
+        is Envelope.Voice -> "🎤"
+        is Envelope.File -> "📎 ${env.fileName}"
+        is Envelope.Location -> "📍"
+        else -> ""
+    }
+
+    /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
+     *  chat list (the send path still routes them by [CrossIslandStore] host). */
+    private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
+        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = false)
+    }
+
+    /** Append cross-island contacts to the displayed roster (skip uin already
+     *  held by a same-island contact). Called after every contacts refresh
+     *  (which overwrites the list) + on accept. */
+    fun mergeCrossIslandContacts() {
+        val extra = crossIslandContacts().filter { c -> _contacts.value.none { it.uin == c.uin } }
+        if (extra.isNotEmpty()) _contacts.value = _contacts.value + extra
+    }
+
+    /** Accept a cross-island request: save the sender as a contact FIRST (so the
+     *  held payloads pass the consent gate), then re-ingest them so the messages
+     *  surface in the now-visible thread, and surface the contact in the roster. */
+    suspend fun acceptCrossIslandRequest(uin: Int, host: String) {
+        val me = store.uin ?: return
+        addCrossIslandContact(uin, host)
+        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload) }
+        mergeCrossIslandContacts()
+        refreshCiRequests()
+    }
+
+    fun blockCrossIslandRequest(uin: Int, host: String) {
+        val me = store.uin ?: return
+        CrossIslandRequestsStore.block(me, uin, host)
+        refreshCiRequests()
+    }
+
     /** Server-side search for the Add window (users + joinable groups). */
     suspend fun searchUsers(q: String): List<RcqApi.UserInfo> =
         runCatching { api.searchUsers(q) }.getOrNull() ?: emptyList()
@@ -2398,6 +2464,8 @@ class Session(context: Context) {
         }
         // Persist the roster so the chat list is reachable offline (report #7).
         runCatching { LocalStores.setCachedContactsJson(profileGson.toJson(_contacts.value)) }
+        // Cross-island contacts aren't in the server roster — surface them too.
+        mergeCrossIslandContacts()
     }
 
     private suspend fun refreshPending() {
@@ -2553,6 +2621,7 @@ class Session(context: Context) {
                     .getOrNull()?.let { arr -> _groups.value = arr.toList() }
             }
         }
+        mergeCrossIslandContacts()
     }
 
     private fun store(msg: ChatMessage) {
