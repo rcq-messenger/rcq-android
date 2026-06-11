@@ -64,6 +64,42 @@ object CrossIslandSender {
         }
     }
 
+    /** §5c cross-island group add: resolve the local uin bound to [signingKeyB64]
+     *  on [host], or null when no account there has that key yet. Open inverse
+     *  map of the key card; lets an owner-initiated add reuse an existing
+     *  account instead of minting a duplicate. */
+    fun resolveUinForKey(host: String, signingKeyB64: String): Int? {
+        val url = "https://$host/federation/uin-for-key?signing_key=" +
+            java.net.URLEncoder.encode(signingKeyB64, "UTF-8")
+        val req = Request.Builder().url(url).get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            return runCatching {
+                JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject.get("uin").asInt
+            }.getOrNull()
+        }
+    }
+
+    /** §5c: register a cross-island contact's PUBLIC keys on [host] so an
+     *  owner-initiated group add has a local uin to put in the roster. The
+     *  contact later recovers the SAME uin (recover-first is keyed by the
+     *  signing key). Returns the new local uin, or null on failure. */
+    fun registerForeignKeys(host: String, identityKeyB64: String, signingKeyB64: String, nickname: String): Int? {
+        val body = com.google.gson.JsonObject().apply {
+            addProperty("nickname", nickname)
+            addProperty("identity_key", identityKeyB64)
+            addProperty("signing_key", signingKeyB64)
+        }
+        val req = Request.Builder().url("https://$host/auth/register")
+            .post(body.toString().toRequestBody(JSON)).build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            return runCatching {
+                JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject.get("uin").asInt
+            }.getOrNull()
+        }
+    }
+
     /** Resolve the peer's verified home islands (spec §4). Falls back to the
      *  single home [(host, uin)] when no record is published or it doesn't verify. */
     fun resolveHomes(host: String, uin: Int): List<RcqFederation.Home> {

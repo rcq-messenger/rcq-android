@@ -1405,6 +1405,45 @@ class Session(context: Context) {
         runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, uin))) }
     }
 
+    /** §5c owner-initiated cross-island add: put a contact who lives on ANOTHER
+     *  island into a group on THIS group's island. The group's island has no
+     *  account for the foreign uin (that's the "no such user" 404), so we
+     *  resolve-or-register the contact's PUBLIC keys there to get a local uin,
+     *  add THAT uin, then send the contact the group link so they guest-register
+     *  (recover-first → the SAME uin) and start polling. Because they're added
+     *  FIRST, their later /join short-circuits on "already a member" — so this
+     *  works for CLOSED groups too. Returns null on success, else a reason. */
+    suspend fun addCrossIslandGroupMember(groupId: Int, contact: app.rcq.android.net.CrossIslandStore.Contact): String? =
+        withContext(Dispatchers.IO) {
+            val ctx = groupCtx(groupId)
+            // The island the group lives on (own server for a local group).
+            val groupHost = ctx.host ?: serverHost()
+            // If the contact already lives on the group's island, it's a normal
+            // same-island add — no cross-island dance needed.
+            if (contact.host.equals(groupHost, ignoreCase = true)) {
+                return@withContext runCatching {
+                    upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, contact.uin))); null
+                }.getOrElse { it.message ?: "add failed" }
+            }
+            // Resolve (or mint) the contact's uin ON the group's island.
+            val localUin = CrossIslandSender.resolveUinForKey(groupHost, contact.signingKey)
+                ?: CrossIslandSender.registerForeignKeys(
+                    groupHost, contact.identityKey, contact.signingKey,
+                    contact.nickname.takeIf { it.isNotBlank() } ?: "user-${contact.uin}",
+                )
+                ?: return@withContext "could not reach ${groupHost}"
+            // Add them to the roster on the group's island.
+            val added = runCatching { ctx.api.addGroupMember(ctx.gid, localUin) }.getOrElse {
+                return@withContext it.message ?: "add failed"
+            }
+            withContext(Dispatchers.Main) { upsertGroup(mapGroupCtx(ctx, added)) }
+            // Tell the contact via a cross-island 1:1: the group invite link
+            // (carries the host) renders as a join card on their side.
+            val link = "https://rcq.app/g/${ctx.gid}@$groupHost"
+            withContext(Dispatchers.Main) { runCatching { sendText(contact.uin, link) } }
+            null
+        }
+
     /** Owner: kick a member (same endpoint as self-leave). */
     suspend fun removeGroupMember(id: Int, memberUin: Int) {
         val ctx = groupCtx(id)

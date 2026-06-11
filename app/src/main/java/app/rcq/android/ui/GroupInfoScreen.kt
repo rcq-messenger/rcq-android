@@ -323,14 +323,30 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         items(candidates, key = { it.uin }) { ct ->
                             Row(
                                 Modifier.fillMaxWidth().clickable {
-                                    scope.launch { runCatching { session.addGroupMember(groupId, ct.uin) } }
+                                    scope.launch {
+                                        if (ct.host != null) {
+                                            // §5c: a contact on another island can't be added by their
+                                            // foreign uin (the group's island has no such account).
+                                            // Resolve/register them on the group's island + invite by link.
+                                            val ci = app.rcq.android.net.CrossIslandStore.get(ct.uin, ct.host)
+                                            val err = if (ci != null) session.addCrossIslandGroupMember(groupId, ci) else "no card"
+                                            if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+                                        } else {
+                                            runCatching { session.addGroupMember(groupId, ct.uin) }
+                                        }
+                                    }
                                     showAddMember = false
                                 }.padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                StatusIcon(ct.presence, size = 24.dp)
-                                Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
+                                StatusIcon(ct.presence, size = 24.dp, crossIsland = ct.host != null)
+                                Column {
+                                    Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
+                                    if (ct.host != null) {
+                                        Text(ct.host, color = c.textSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    }
+                                }
                             }
                         }
                     }
