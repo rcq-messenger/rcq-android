@@ -135,6 +135,29 @@ object CrossIslandSender {
         return runCatching { client.newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
     }
 
+    /** §5d cross-island call signaling: v=1-seal a call envelope and deposit it
+     *  to the contact's PRIMARY island only. No backup-home copies — backup
+     *  mailboxes are polled (~30s), useless for real-time signaling, and if the
+     *  primary island is down the call cannot work anyway. */
+    fun deliverCall(
+        contact: CrossIslandStore.Contact,
+        env: Envelope,
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        ownHost: String,
+    ): Boolean {
+        val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
+        val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
+        val body = JsonObject().apply {
+            addProperty("to_uin", contact.uin)
+            addProperty("envelope_type", "message")
+            addProperty("payload", payload)
+        }.toString().toRequestBody(JSON)
+        val req = Request.Builder().url("https://${contact.host}/messages/sealed").post(body).build()
+        return runCatching { client.newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
+    }
+
     /** Deliver [env] to a cross-island [contact]: v=1-seal to their identity key
      *  and deposit to each resolved home. Returns true if any home accepted it. */
     fun deliver(

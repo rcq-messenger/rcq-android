@@ -104,6 +104,7 @@ class CallController(
                 val sdp = rtc.createOffer(media.toRtc())
                 send(signal("call_offer", peerUin, call.id, mapOf("media" to media.wire, "sdp" to sdp)))
                 ringer.startRingback()
+                armRingTimeout(call)
             } catch (e: Exception) {
                 android.util.Log.e("RCQcall", "createOffer failed: ${e.message}")
                 endLocally(call, "setup_failed")
@@ -226,6 +227,7 @@ class CallController(
         pendingRemoteIce.clear()
         _state.value = State.Incoming(call)
         ringer.startIncoming()
+        armRingTimeout(call)
     }
 
     private fun handleAnswer(callId: String, sdp: String) {
@@ -328,6 +330,23 @@ class CallController(
      *  "Connecting…" status flips to the running duration). */
     private fun onRtcConnected() {
         if (_state.value is State.Connected && connectedSince == 0L) markConnected()
+    }
+
+    /** Ringing watchdog, both directions. Outgoing: the offer can be silently
+     *  lost (peer offline same-island, old peer client ignoring a §5d
+     *  cross-island call envelope) — stop ringback after 60s as "no answer".
+     *  Incoming: if the caller's app died mid-ring no call_end ever arrives —
+     *  stop ringing after 60s as missed. No-op once the state moved on. */
+    private fun armRingTimeout(call: CallInfo) {
+        scope.launch {
+            delay(60_000)
+            if (_state.value.info?.id != call.id) return@launch
+            when (_state.value) {
+                is State.Outgoing -> endLocally(call, "unanswered")
+                is State.Incoming -> finishEnded(call, "expired")
+                else -> Unit
+            }
+        }
     }
 
     /** If ICE never completes within the window (dead TURN path / symmetric

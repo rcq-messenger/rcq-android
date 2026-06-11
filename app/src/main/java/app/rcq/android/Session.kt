@@ -69,6 +69,10 @@ sealed interface RandomState {
  */
 class Session(context: Context) {
     private val appCtx = context.applicationContext
+
+    /** §5d: a cross-island call_offer older than this (sender `ts`) is a
+     *  stale offline-queue row, not a live call — file as missed, don't ring. */
+    private val callOfferTtlSec = 60L
     // Per-account encrypted identity + message store. Reassigned by
     // [rebindTo] when the active account changes (switch / add / burn);
     // empty-string id is a harmless placeholder on a fresh install where
@@ -92,18 +96,44 @@ class Session(context: Context) {
     private val gson = com.google.gson.Gson()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 1:1 audio/video calls. Signalling rides the WS (call_* events routed
-     *  in [handleEvent]); reads store/socket/api lazily so it follows account
-     *  switches. */
+    /** 1:1 audio/video calls. Same-island signalling rides the WS (call_*
+     *  events routed in [handleEvent]); signals to a CROSS-ISLAND peer are
+     *  wrapped as an Envelope.CallSignal, v=1-sealed and deposited to the
+     *  peer's island instead (spec §5d — no shared socket exists across
+     *  islands). Reads store/socket/api lazily so it follows account switches. */
     val calls = app.rcq.android.call.CallController(
         appContext = appCtx,
         scope = scope,
         ownUin = { store.uin },
-        send = { obj -> socket.send(obj.toString()) },
+        send = { obj -> routeCallSignal(obj) },
         turn = { api.turnCredentials() },
         nameFor = { contactName(it) },
         appendHistory = { peer, fromMe, text -> logCallHistory(peer, fromMe, text) },
     )
+
+    /** §5d: WS for same-island peers, sealed deposit for cross-island ones. */
+    private fun routeCallSignal(obj: JsonObject) {
+        val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
+        val ci = toUin?.let { CrossIslandStore.findByUin(it) }
+        if (ci == null) {
+            socket.send(obj.toString())
+            return
+        }
+        val me = store.uin ?: return
+        val type = obj.get("type")?.takeIf { !it.isJsonNull }?.asString ?: return
+        val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
+        val data = mutableMapOf<String, String>()
+        for ((k, v) in obj.entrySet()) {
+            if (k == "type" || k == "to_uin" || k == "call_id") continue
+            if (v.isJsonPrimitive) data[k] = v.asString
+        }
+        val env = Envelope.callSignal(type, callId, data)
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                CrossIslandSender.deliverCall(ci, env, me, signingPriv(), signingPub(), serverHost())
+            }.onFailure { android.util.Log.e("RCQcall", "cross-island signal failed: ${it.message}") }
+        }
+    }
 
     /** Audio rooms (mesh voice). Single-busy vs 1:1 calls; signalling routed
      *  in [handleEvent]; lazy store/api so it follows account switches. */
@@ -1746,6 +1776,7 @@ class Session(context: Context) {
                 is Envelope.Visit -> Unit        // visits are 1:1 only
                 is Envelope.SecureScreen -> Unit // secure mode is 1:1 only
                 is Envelope.ScreenshotTaken -> Unit
+                is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.Unknown -> Unit
             }
@@ -2443,6 +2474,32 @@ class Session(context: Context) {
             // Removed contacts are silently dropped — sealed sender means
             // the server can't filter by sender, so we gate on receipt.
             if (LocalStores.isRemoved(dec.senderUin)) return@runCatching
+            // §5d cross-island call signaling rides sealed envelopes (kind
+            // "call") — route to the call state machine, never the message
+            // store, and never the request quarantine (signals are ephemeral).
+            // Only an ACCEPTED cross-island contact may ring us; a stale offer
+            // (old ts — offline-queue drains deliver hours-old rows) is filed
+            // as a missed call instead of ringing.
+            (dec.envelope as? Envelope.CallSignal)?.let { cs ->
+                val host = dec.senderHost ?: return@runCatching // same-island calls use the WS, not envelopes
+                if (host == serverHost()) return@runCatching
+                if (CrossIslandStore.get(dec.senderUin, host) == null) return@runCatching
+                if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
+                    val media = appCtx.getString(
+                        if (cs.data["media"] == "video") app.rcq.android.R.string.call_hist_video
+                        else app.rcq.android.R.string.call_hist_voice,
+                    )
+                    logCallHistory(dec.senderUin, fromMe = false, text = "$media · ${appCtx.getString(app.rcq.android.R.string.call_out_missed)}")
+                    return@runCatching
+                }
+                val sigObj = com.google.gson.JsonObject().apply {
+                    addProperty("from_uin", dec.senderUin)
+                    addProperty("call_id", cs.cid)
+                    cs.data.forEach { (k, v) -> addProperty(k, v) }
+                }
+                calls.onSignal(cs.sig, sigObj)
+                return@runCatching
+            }
             // Variant A consent: a 1:1 message from an un-accepted CROSS-ISLAND
             // sender (its from_host isn't ours and we haven't added them) is
             // QUARANTINED as a request instead of landing in the chat list.
@@ -2500,6 +2557,7 @@ class Session(context: Context) {
                     store(ChatMessage(env.id, dec.senderUin, fromMe = false, body = appCtx.getString(app.rcq.android.R.string.secscreen_peer_screenshot, name), sentAt = now, kind = "system"))
                 }
                 is Envelope.Poll -> Unit       // polls are group-only; ignore in 1:1
+                is Envelope.CallSignal -> Unit // intercepted above, never reaches here
                 is Envelope.Carbon ->
                     // A message I sent from ANOTHER device, echoed to my own uin.
                     // Only honour my own carbon; file the inner message as fromMe
@@ -2595,7 +2653,9 @@ class Session(context: Context) {
     /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
      *  chat list (the send path still routes them by [CrossIslandStore] host). */
     private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
-        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = false, host = c.host, gender = c.gender, statusMessage = c.statusMessage)
+        // callable: §5d made cross-island 1:1 calls work (signaling crosses as
+        // sealed deposits; media is P2P either way).
+        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = true, host = c.host, gender = c.gender, statusMessage = c.statusMessage)
     }
 
     /** Append cross-island contacts to the displayed roster (skip uin already

@@ -111,6 +111,21 @@ sealed interface Envelope {
      *  dedups its own carbon by the inner message's id. */
     data class Carbon(val to: Int?, val gid: Int?, val env: Envelope) : Envelope
 
+    /** Cross-island call signaling (wire kind "call", spec §5d). Same-island
+     *  calls ride the WS as plaintext call_* events; across islands there is
+     *  no shared socket, so the SAME signal payload is wrapped here, v=1-sealed
+     *  and deposited to the peer's island. [sig] = the WS event type verbatim
+     *  (call_offer/call_answer/call_ice/call_end/call_renegotiate*), [cid] =
+     *  the call id, [ts] = sender epoch SECONDS (receivers drop stale offers),
+     *  [data] = the signal extras (sdp/candidate/media/reason — all strings). */
+    data class CallSignal(
+        val id: String,
+        val sig: String,
+        val cid: String,
+        val ts: Long,
+        val data: Map<String, String>,
+    ) : Envelope
+
     data class Unknown(val kind: String) : Envelope
 
     /** Serialize to the exact JSON bytes that get signed and shipped.
@@ -218,6 +233,14 @@ sealed interface Envelope {
             // Nest the inner envelope as a sub-object (parse its own JSON bytes).
             add("env", JsonParser.parseString(String(env.toJsonBytes(), Charsets.UTF_8)).asJsonObject)
         }.toString().toByteArray(Charsets.UTF_8)
+        is CallSignal -> JsonObject().apply {
+            addProperty("kind", "call")
+            addProperty("id", id)
+            addProperty("sig", sig)
+            addProperty("cid", cid)
+            addProperty("ts", ts)
+            add("data", JsonObject().apply { data.forEach { (k, v) -> addProperty(k, v) } })
+        }.toString().toByteArray(Charsets.UTF_8)
         is Unknown -> JsonObject().apply { addProperty("kind", kind) }
             .toString().toByteArray(Charsets.UTF_8)
     }
@@ -258,6 +281,10 @@ sealed interface Envelope {
             Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption)
 
         fun secureScreen(on: Boolean): SecureScreen = SecureScreen(on)
+
+        /** Wrap a call_* WS signal for cross-island deposit, stamped now. */
+        fun callSignal(sig: String, cid: String, data: Map<String, String>): CallSignal =
+            CallSignal(UUID.randomUUID().toString().uppercase(), sig, cid, System.currentTimeMillis() / 1000, data)
 
         fun screenshotTaken(): ScreenshotTaken =
             ScreenshotTaken(UUID.randomUUID().toString().uppercase())
@@ -336,6 +363,16 @@ sealed interface Envelope {
                 )
                 "secscreen" -> SecureScreen(obj.get("on")?.asBoolean ?: false)
                 "shot" -> ScreenshotTaken(obj.get("id")?.asString ?: id)
+                "call" -> CallSignal(
+                    id = id,
+                    sig = obj.get("sig")?.asString.orEmpty(),
+                    cid = obj.get("cid")?.asString.orEmpty(),
+                    ts = obj.get("ts")?.asLong ?: 0L,
+                    data = obj.getAsJsonObject("data")
+                        ?.entrySet()
+                        ?.mapNotNull { (k, v) -> if (v.isJsonPrimitive) k to v.asString else null }
+                        ?.toMap() ?: emptyMap(),
+                )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,
                     gid = obj.get("gid")?.asInt,

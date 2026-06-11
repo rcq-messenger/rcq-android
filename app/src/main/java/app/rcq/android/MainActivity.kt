@@ -220,7 +220,15 @@ private fun RcqApp(session: Session) {
         showSettings = false; settingsToDiagnostics = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
     }
 
+    // Kept for "Try again": retrying after a transient failure must re-use the
+    // ISLAND the user picked — retrying with null silently registered a
+    // self-hoster's account on the flagship.
+    var lastRegisterServer: String? = null
+    var lastRegisterInvite: String? = null
+
     fun register(server: String? = null, invite: String? = null) {
+        lastRegisterServer = server
+        lastRegisterInvite = invite
         state = UiState.Registering
         scope.launch {
             state = try {
@@ -230,6 +238,8 @@ private fun RcqApp(session: Session) {
             }
         }
     }
+
+    fun retryRegister() = register(lastRegisterServer, lastRegisterInvite)
 
     // Add a further account from the switcher. Register-first means a
     // failure leaves the current account intact, so we surface a toast and
@@ -384,7 +394,7 @@ private fun RcqApp(session: Session) {
             )
             s is UiState.Onboarding -> OnboardingScreen(onStart = ::register, onRestore = { showRestore = true })
             s is UiState.Registering -> Registering()
-            s is UiState.Failed -> Failed(s.message, onRetry = { register(null) })
+            s is UiState.Failed -> Failed(s.message, onRetry = { retryRegister() })
         }
 
         // Active 1:1 call overlay, drawn above everything while registered +
