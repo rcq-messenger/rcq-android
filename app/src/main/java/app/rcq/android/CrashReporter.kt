@@ -30,8 +30,15 @@ object CrashReporter {
     // if the NEXT launch finds one still set (the app never reached
     // [launchComplete]), the previous launch died during startup — almost
     // certainly natively — and [checkPreviousLaunch] synthesises a report
-    // naming the last stage reached. Turned off once the app is safely running
-    // so a normal later kill is never mistaken for a crash.
+    // naming the last stage reached.
+    //
+    // The heuristic only holds while the app is in the FOREGROUND danger
+    // window, so [launchComplete] fires from three places and the earliest
+    // wins: HomeScreen composed + 3s; 8s after MainActivity.onCreate (entries
+    // that never compose home, e.g. notification straight into a chat); and
+    // the app going to background (a kill while backgrounded is a normal OS
+    // reclaim, not a crash). Arming happens in MainActivity.onCreate — never
+    // in Application.onCreate, which also runs for headless process warmups.
     @Volatile private var crumbOff = false
 
     fun install(context: Context) {

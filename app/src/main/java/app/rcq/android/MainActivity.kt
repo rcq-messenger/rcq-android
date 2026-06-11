@@ -137,6 +137,15 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Arm the launch-crash breadcrumb only when real UI starts (headless
+        // process warmups must not arm it), and cap the danger window at 8s:
+        // entries that never compose HomeScreen (notification straight into a
+        // chat) otherwise kept the crumb armed for the whole session, turning
+        // every later OS kill into a phantom crash report.
+        CrashReporter.crumb(this, "activity_create")
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+            { CrashReporter.launchComplete(applicationContext) }, 8_000,
+        )
         ServerJoinLink.fromUri(intent?.data)?.let { ServerJoinLink.pending.value = it }
         WebLinkRequest.fromUri(intent?.data)?.let { WebLinkRequest.pending.value = it }
         ContactAddLink.fromUri(intent?.data)?.let { ContactAddLink.pending.value = it }
