@@ -223,16 +223,24 @@ object RcqFederation {
         return s + "=".repeat(pad)
     }
 
-    /** Build the contact deep link. Flagship + no keys yields exactly the legacy
-     *  `https://rcq.app/u/<uin>`. */
-    fun buildContactLink(a: Address, sk: String? = null, ik: String? = null, base: String = "https://rcq.app"): String {
+    private fun contactQuery(a: Address, sk: String?, ik: String?): String {
         val params = ArrayList<String>()
         if (!isFlagship(a.host)) params.add("h=${a.host}")
         if (sk != null) params.add("k=${b64ToUrl(sk)}")
         if (ik != null) params.add("i=${b64ToUrl(ik)}")
-        val q = params.joinToString("&")
-        return "$base/u/${a.uin}" + if (q.isEmpty()) "" else "?$q"
+        return if (params.isEmpty()) "" else "?" + params.joinToString("&")
     }
+
+    /** Build the contact deep link. Flagship + no keys yields exactly the legacy
+     *  `https://rcq.app/u/<uin>`. */
+    fun buildContactLink(a: Address, sk: String? = null, ik: String? = null, base: String = "https://rcq.app"): String =
+        "$base/u/${a.uin}" + contactQuery(a, sk, ik)
+
+    /** The `rcq://add/…` form encoded in the contact QR — any camera app fires
+     *  the VIEW intent for the custom scheme, no in-app scanner needed. Same
+     *  query params as [buildContactLink]. */
+    fun buildContactQr(a: Address, sk: String? = null, ik: String? = null): String =
+        "rcq://add/${a.uin}" + contactQuery(a, sk, ik)
 
     data class ParsedContactLink(val address: Address, val sk: String?, val ik: String?)
 

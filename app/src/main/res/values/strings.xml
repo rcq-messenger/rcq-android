@@ -127,6 +127,11 @@
     <string name="weblink_confirm">Connect</string>
     <string name="weblink_done">Web connected. Your browser should log in now.</string>
     <string name="weblink_failed">Couldn\'t connect to web. The code may have expired — try again.</string>
+    <string name="common_add">Add</string>
+    <string name="addlink_title">Add contact?</string>
+    <string name="addlink_body">Add %1$s to your contacts?</string>
+    <string name="addlink_failed">Couldn\'t add the contact. Check the connection and try again.</string>
+    <string name="addlink_request_sent">Request sent</string>
     <string name="settings_row_linked_devices">Linked devices</string>
     <string name="settings_row_backup_island">Backup island</string>
     <string name="backup_island_body">Your account can also live on a second, independent RCQ island (server). Messages are then delivered into both mailboxes, so if one island goes down, nothing is lost — the other keeps receiving.</string>

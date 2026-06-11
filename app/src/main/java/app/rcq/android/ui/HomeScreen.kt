@@ -464,7 +464,10 @@ internal fun HomeScreen(
             onDismiss = { showAdd = false },
         )
     }
-    if (showQr) QrDialog(uin = uin, onDismiss = { showQr = false })
+    if (showQr) {
+        val links = remember { session.contactLinks() }
+        QrDialog(uin = uin, qrPayload = links.first, shareLink = links.second, onDismiss = { showQr = false })
+    }
     if (showAddAccount) {
         AddAccountDialog(
             onAdd = { host -> showAddAccount = false; onAddAccount(host) },

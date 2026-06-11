@@ -58,13 +58,14 @@ private fun qrBitmap(content: String, size: Int = 512): Bitmap? = runCatching {
     Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setPixels(pixels, 0, w, 0, 0, w, h) }
 }.getOrNull()
 
-/** "My code" sheet — a QR of rcq://u/<uin> plus the UIN. Matches the iOS QRSheet. */
+/** "My code" sheet — a QR of the federated contact link (spec §5: island +
+ *  advisory key ride query params; flagship degrades to the legacy bare uin)
+ *  plus the UIN. Matches the iOS QRSheet. */
 @Composable
-fun QrDialog(uin: Int, onDismiss: () -> Unit) {
+fun QrDialog(uin: Int, qrPayload: String, shareLink: String, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     val context = LocalContext.current
-    val bmp = remember(uin) { qrBitmap("rcq://add/$uin") }
-    val shareLink = "https://rcq.app/u/$uin"
+    val bmp = remember(qrPayload) { qrBitmap(qrPayload) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,

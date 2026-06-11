@@ -77,6 +77,26 @@ object ServerJoinLink {
     }
 }
 
+/** A pending add-contact from a scanned/opened contact link — `rcq://add/<uin>`
+ *  or `https://rcq.app/u/<uin>`, with the spec-§5 federation query `?h=<island>`
+ *  (k/i are advisory and ignored here: the add flow fetches the peer's key card
+ *  from their island anyway). RcqApp confirms, then routes: cross-island host →
+ *  addCrossIslandContact + open the chat; same island → contact request. */
+object ContactAddLink {
+    data class Req(val uin: Int, val host: String?)
+    val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+
+    fun fromUri(uri: android.net.Uri?): Req? {
+        if (uri == null) return null
+        val isRcq = uri.scheme == "rcq" && uri.host == "add"
+        val isWeb = (uri.scheme == "https" || uri.scheme == "http") &&
+            uri.host == "rcq.app" && uri.pathSegments.firstOrNull() == "u"
+        if (!isRcq && !isWeb) return null
+        val uin = uri.lastPathSegment?.toIntOrNull()?.takeIf { it > 0 } ?: return null
+        return Req(uin, uri.getQueryParameter("h")?.takeIf { it.isNotBlank() })
+    }
+}
+
 /** A pending connect-to-web from a scanned `rcq://link?t=<token>&k=<webEphPub>`
  *  QR (shown on chat.rcq.app). Parsed from the VIEW intent like [ServerJoinLink];
  *  RcqApp shows a confirm dialog, then seals this account into the relay slot so
@@ -112,12 +132,14 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         setIntent(intent)
         ServerJoinLink.fromUri(intent.data)?.let { ServerJoinLink.pending.value = it }
         WebLinkRequest.fromUri(intent.data)?.let { WebLinkRequest.pending.value = it }
+        ContactAddLink.fromUri(intent.data)?.let { ContactAddLink.pending.value = it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ServerJoinLink.fromUri(intent?.data)?.let { ServerJoinLink.pending.value = it }
         WebLinkRequest.fromUri(intent?.data)?.let { WebLinkRequest.pending.value = it }
+        ContactAddLink.fromUri(intent?.data)?.let { ContactAddLink.pending.value = it }
         enableEdgeToEdge()
         app.rcq.android.data.LanguageManager.init(applicationContext)
         LocalStores.init(applicationContext)
@@ -497,7 +519,62 @@ private fun RcqApp(session: Session) {
                 )
             }
         }
+
+        // Add-contact from a scanned/tapped contact link (rcq://add/<uin>?h=…,
+        // https://rcq.app/u/<uin>?h=…, spec §5). Confirm first — a tapped link
+        // must not silently register a contact or fire a request. Cross-island
+        // host → fetch the peer's card + add locally + open the chat; same
+        // island → ordinary contact request.
+        val addReq by ContactAddLink.pending.collectAsState()
+        if (s is UiState.Registered && !locked) {
+            addReq?.let { req ->
+                if (req.uin == s.uin) {
+                    ContactAddLink.pending.value = null
+                } else {
+                    val ci = req.host?.takeIf { it != session.currentServer }
+                    ContactAddDialog2(
+                        address = if (ci != null) "${req.uin}@$ci" else "#${req.uin}",
+                        onConfirm = {
+                            ContactAddLink.pending.value = null
+                            scope.launch {
+                                if (ci != null) {
+                                    val ok = runCatching { session.addCrossIslandContact(req.uin, ci) }.getOrDefault(false)
+                                    if (ok) {
+                                        chatTarget = ChatTarget.Peer(req.uin)
+                                    } else {
+                                        Toast.makeText(context, context.getString(R.string.addlink_failed), Toast.LENGTH_LONG).show()
+                                    }
+                                } else {
+                                    val ok = runCatching { session.addContact(req.uin) }.isSuccess
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(if (ok) R.string.addlink_request_sent else R.string.addlink_failed),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        },
+                        onDismiss = { ContactAddLink.pending.value = null },
+                    )
+                }
+            }
+        }
     }
+}
+
+/** Confirm sheet for a contact deep link. Named "2" because the Add dialog
+ *  composable in HomeScreen already took `AddContactDialog`. */
+@Composable
+private fun ContactAddDialog2(address: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        title = { Text(stringResource(R.string.addlink_title), color = c.textPrimary) },
+        text = { Text(stringResource(R.string.addlink_body, address), color = c.textSecondary, fontSize = 14.sp) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.common_add), color = c.accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+    )
 }
 
 @Composable

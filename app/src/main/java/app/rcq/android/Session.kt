@@ -2618,6 +2618,19 @@ class Session(context: Context) {
     /** Federation (F2): add a cross-island contact `uin@host` — fetch their
      *  island's open key card and store it locally (no flagship contact-request;
      *  they're on another island). Returns true on success. */
+    /** Spec §5: my shareable contact handles — (QR payload `rcq://add/…`,
+     *  https share link). Both carry the island (`h=`, omitted on the flagship)
+     *  + the advisory signing key (`k=`); a flagship account degrades to the
+     *  legacy bare forms old clients already parse. */
+    fun contactLinks(): Pair<String, String> {
+        val uin = store.uin ?: return "" to ""
+        val a = RcqFederation.Address(uin, serverHost())
+        val sk = runCatching {
+            android.util.Base64.encodeToString(signingPub(), android.util.Base64.NO_WRAP)
+        }.getOrNull()
+        return RcqFederation.buildContactQr(a, sk) to RcqFederation.buildContactLink(a, sk)
+    }
+
     suspend fun addCrossIslandContact(uin: Int, host: String): Boolean = withContext(Dispatchers.IO) {
         val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext false
         CrossIslandStore.save(

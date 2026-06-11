@@ -64,6 +64,24 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="rcq" android:host="link" />
             </intent-filter>
+            <!-- Contact deep link (spec §5): rcq://add/<uin>?h=<island>&k=<key> —
+                 scanning a contact QR with any camera opens the add-contact
+                 confirm; h routes a cross-island add. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="rcq" android:host="add" />
+            </intent-filter>
+            <!-- Same link in https form (https://rcq.app/u/<uin>?h=…) — tapped
+                 in a chat/browser Android offers RCQ in the app chooser (no
+                 assetlinks.json yet, so not auto-verified). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/u/" />
+            </intent-filter>
         </activity>
 
         <provider
