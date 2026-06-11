@@ -127,6 +127,7 @@
     <string name="weblink_confirm">Connect</string>
     <string name="weblink_done">Web connected. Your browser should log in now.</string>
     <string name="weblink_failed">Couldn\'t connect to web. The code may have expired — try again.</string>
+    <string name="weblink_taken">This link was already used. Refresh the QR on the website and scan the new one.</string>
     <string name="common_add">Add</string>
     <string name="addlink_title">Add contact?</string>
     <string name="addlink_body">Add %1$s to your contacts?</string>

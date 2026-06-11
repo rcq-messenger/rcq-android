@@ -516,12 +516,15 @@ private fun RcqApp(session: Session) {
                     onConfirm = {
                         WebLinkRequest.pending.value = null
                         scope.launch {
-                            val ok = runCatching { session.linkWeb(req.token, req.webPub) }.isSuccess
-                            Toast.makeText(
-                                context,
-                                context.getString(if (ok) R.string.weblink_done else R.string.weblink_failed),
-                                Toast.LENGTH_LONG,
-                            ).show()
+                            val err = runCatching { session.linkWeb(req.token, req.webPub) }.exceptionOrNull()
+                            val msg = when {
+                                err == null -> R.string.weblink_done
+                                // 409 = the one-time slot is already filled: a
+                                // re-confirm of an old link, not an expiry.
+                                err.message?.contains("HTTP 409") == true -> R.string.weblink_taken
+                                else -> R.string.weblink_failed
+                            }
+                            Toast.makeText(context, context.getString(msg), Toast.LENGTH_LONG).show()
                         }
                     },
                     onDismiss = { WebLinkRequest.pending.value = null },

@@ -126,6 +126,7 @@
     <string name="weblink_confirm">Подключить</string>
     <string name="weblink_done">Веб подключён. Браузер должен войти.</string>
     <string name="weblink_failed">Не удалось подключить веб. Код мог истечь — попробуйте снова.</string>
+    <string name="weblink_taken">Эта ссылка уже использована. Обновите QR на сайте и отсканируйте новый.</string>
     <string name="common_add">Добавить</string>
     <string name="addlink_title">Добавить контакт?</string>
     <string name="addlink_body">Добавить %1$s в контакты?</string>
