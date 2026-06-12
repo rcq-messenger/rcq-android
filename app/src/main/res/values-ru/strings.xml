@@ -156,6 +156,12 @@
     <string name="backup_island_err_primary">Это уже ваш основной остров.</string>
     <string name="backup_island_err_already">Этот остров уже добавлен.</string>
     <string name="backup_island_err_generic">Не удалось подключиться к острову.</string>
+    <string name="backup_island_promote">Сделать основным</string>
+    <string name="backup_island_promote_title">Сделать этот остров основным?</string>
+    <string name="backup_island_promote_body">Приложение переключится на %1$s: номер и адрес станут тамошними, а нынешний основной остров станет резервным. История чатов останется на этом устройстве. Контакты увидят штатное предупреждение о смене кода безопасности.</string>
+    <string name="backup_island_promote_confirm">Сделать основным</string>
+    <string name="backup_island_promoted">Основной остров теперь %1$s</string>
+    <string name="backup_island_err_unreachable">Остров недоступен. Ничего не изменено.</string>
     <string name="linked_devices_hint">Браузеры, подключённые к вашему аккаунту. Чтобы подключить, откройте chat.rcq.app, выберите «Connect phone» и отсканируйте код камерой.</string>
     <string name="linked_devices_empty">Нет подключённых браузеров.</string>
     <string name="linked_devices_error">Не удалось загрузить список устройств.</string>

@@ -86,6 +86,18 @@ class SecureStore(context: Context, accountId: String) {
         prefs.edit().putInt(p + K_UIN, uin).putString(p + K_TOKEN, token).apply()
     }
 
+    /** Repoint this identity at a different home island after a backup-island
+     *  promote (federation §5a.5): per-island uin + token + host swap in one
+     *  transaction. Keys, nickname and seed stay — identity is the key, the
+     *  number is just a local handle on each island. */
+    fun rebindHome(uin: Int, token: String, serverHost: String?) {
+        prefs.edit()
+            .putInt(p + K_UIN, uin)
+            .putString(p + K_TOKEN, token)
+            .putString(p + K_SERVER, serverHost)
+            .apply()
+    }
+
     /** Wipe just this account's slots (the shared file's other accounts
      *  stay intact). */
     fun wipe() = wipeKeys(prefs, p)

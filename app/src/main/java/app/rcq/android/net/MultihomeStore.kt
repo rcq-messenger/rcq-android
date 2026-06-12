@@ -59,6 +59,17 @@ object MultihomeStore {
         write(all().map { if (it.ownUin == ownUin && it.host == host) it.copy(uin = uin, jwt = jwt) else it })
     }
 
+    /** Promote bookkeeping (§5a.5): drop the promoted host's backup entry,
+     *  re-key this account's remaining entries to the NEW primary uin, and file
+     *  the old primary as a manual backup home (senders keep depositing there
+     *  until they re-resolve the record, so its mailbox must stay drained). */
+    fun promoteSwap(oldOwnUin: Int, newOwnUin: Int, promotedHost: String, oldPrimary: Home) {
+        write(
+            all().filterNot { it.ownUin == oldOwnUin && it.host == promotedHost }
+                .map { if (it.ownUin == oldOwnUin) it.copy(ownUin = newOwnUin) else it } + oldPrimary,
+        )
+    }
+
     private fun all(): List<Home> = runCatching {
         val raw = prefs.getString(KEY_HOMES, null) ?: return emptyList()
         gson.fromJson<List<Home>>(raw, object : TypeToken<List<Home>>() {}.type) ?: emptyList()

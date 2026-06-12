@@ -111,6 +111,7 @@ import app.rcq.android.Session
 import app.rcq.android.security.BiometricGate
 import app.rcq.android.data.LanguageManager
 import app.rcq.android.data.LocalStores
+import app.rcq.android.net.MultihomeStore
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
@@ -169,7 +170,9 @@ internal fun SettingsScreen(
         SettingsRoute.PIN_CODES -> PinCodesScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.RECOVERY_PHRASE -> RecoveryPhraseScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.LINKED_DEVICES -> LinkedDevicesScreen(session) { route = SettingsRoute.ROOT }
-        SettingsRoute.BACKUP_ISLAND -> BackupIslandScreen(session) { route = SettingsRoute.ROOT }
+        // Promote rebinds the session to another island (new uin) — bubble it
+        // up like a migration so the Home header re-registers immediately.
+        SettingsRoute.BACKUP_ISLAND -> BackupIslandScreen(session, onPromoted = onMigrated) { route = SettingsRoute.ROOT }
         SettingsRoute.CUSTOM_SERVER -> CustomServerScreen(
             session,
             // Back returns to Privacy (its parent), not the Settings root (tester #1).
@@ -1424,7 +1427,7 @@ private fun AppIconScreen(onBack: () -> Unit) {
 // ── Backup island (multihoming, federation v1) ───────────────────────
 
 @Composable
-private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
+private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBack: () -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1444,10 +1447,48 @@ private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
         "primary_island" -> context.getString(R.string.backup_island_err_primary)
         "already_added" -> context.getString(R.string.backup_island_err_already)
         "no_island" -> context.getString(R.string.backup_island_err_none)
+        "unreachable" -> context.getString(R.string.backup_island_err_unreachable)
         // Keep the cause visible — "could not connect" alone is undebuggable
         // for a self-hoster pointing at their own island.
         else -> context.getString(R.string.backup_island_err_generic) +
             " (${e.message ?: e.javaClass.simpleName})"
+    }
+
+    // §5a.5 promote: confirm-first — the number and the connected island change.
+    var promoteTarget by remember { mutableStateOf<MultihomeStore.Home?>(null) }
+    promoteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) promoteTarget = null },
+            title = { Text(stringResource(R.string.backup_island_promote_title)) },
+            text = { Text(stringResource(R.string.backup_island_promote_body, target.host)) },
+            confirmButton = {
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true; error = null
+                        scope.launch {
+                            runCatching { session.promoteBackupToPrimary(target.host) }
+                                .onSuccess {
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.backup_island_promoted, target.host),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                    session.uin?.let(onPromoted)
+                                }
+                                .onFailure { error = errorText(it) }
+                            busy = false
+                            promoteTarget = null
+                        }
+                    },
+                ) { Text(stringResource(R.string.backup_island_promote_confirm)) }
+            },
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = { promoteTarget = null }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
@@ -1518,12 +1559,20 @@ private fun BackupIslandScreen(session: Session, onBack: () -> Unit) {
                                         color = c.textSecondary, fontSize = 12.sp,
                                     )
                                 }
-                                Text(
-                                    stringResource(R.string.backup_island_remove),
-                                    color = c.accent,
-                                    fontSize = 14.sp,
-                                    modifier = Modifier.clickable(enabled = !busy) { session.removeBackupIsland(h.host) },
-                                )
+                                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        stringResource(R.string.backup_island_remove),
+                                        color = c.accent,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.clickable(enabled = !busy) { session.removeBackupIsland(h.host) },
+                                    )
+                                    Text(
+                                        stringResource(R.string.backup_island_promote),
+                                        color = c.textSecondary,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.clickable(enabled = !busy) { promoteTarget = h },
+                                    )
+                                }
                             }
                         }
                     }

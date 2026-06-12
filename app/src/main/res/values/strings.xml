@@ -157,6 +157,12 @@
     <string name="backup_island_err_primary">That is already your primary island.</string>
     <string name="backup_island_err_already">This island is already added.</string>
     <string name="backup_island_err_generic">Could not connect to the island.</string>
+    <string name="backup_island_promote">Make primary</string>
+    <string name="backup_island_promote_title">Make this island primary?</string>
+    <string name="backup_island_promote_body">The app will switch to %1$s: your number and address become the ones from that island, and the current primary island becomes a backup. Chat history stays on this device. Contacts will see a routine security-code change.</string>
+    <string name="backup_island_promote_confirm">Make primary</string>
+    <string name="backup_island_promoted">Primary island is now %1$s</string>
+    <string name="backup_island_err_unreachable">Island unreachable. Nothing was changed.</string>
     <string name="linked_devices_hint">Browsers connected to your account. To connect one, open chat.rcq.app, choose Connect phone, and scan the code with your camera.</string>
     <string name="linked_devices_empty">No browsers are connected.</string>
     <string name="linked_devices_error">Couldn\'t load linked devices.</string>

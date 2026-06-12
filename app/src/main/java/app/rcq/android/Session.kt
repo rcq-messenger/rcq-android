@@ -811,6 +811,41 @@ class Session(context: Context) {
         scope.launch { publishHomeIslandRecord() }
     }
 
+    /** §5a.5: make backup [host] the PRIMARY home — one-tap disaster recovery
+     *  for a dead/blocked primary island. Refreshes the target's token FIRST
+     *  (recover challenge-response: possession of the signing key IS the
+     *  credential, no phrase) and ABORTS if the island is unreachable — a
+     *  failed promote is a no-op, never a stranded account. Only then swaps
+     *  primary/backup in the stores and rebinds the running session to the new
+     *  island. Chat history is local, it survives the move; the v=2 prekey
+     *  bundle is per-island, so contacts see a routine safety-number change. */
+    suspend fun promoteBackupToPrimary(host: String) {
+        val accountId = AccountManager.activeId.value ?: error("no session")
+        val oldUin = store.uin ?: error("no session")
+        val oldToken = store.token ?: error("no session")
+        val oldHost = api.islandHost()
+        if (host == oldHost) throw IllegalArgumentException("primary_island")
+        if (MultihomeStore.list(oldUin).none { it.host == host }) throw IllegalArgumentException("not_backup")
+        val cred = withContext(Dispatchers.IO) {
+            runCatching { Multihome.recoverOn(host, signingPriv(), signingPub()) }.getOrNull()
+        } ?: throw IllegalArgumentException("unreachable")
+
+        // Token in hand — the swap below is pure local bookkeeping.
+        socket.disconnect()
+        store.rebindHome(cred.uin, cred.token, normalizeHost(host))
+        AccountManager.setServerHost(accountId, normalizeHost(host))
+        MultihomeStore.promoteSwap(
+            oldOwnUin = oldUin,
+            newOwnUin = cred.uin,
+            promotedHost = host,
+            oldPrimary = MultihomeStore.Home(cred.uin, oldHost, oldUin, oldToken, System.currentTimeMillis()),
+        )
+        rebindTo(accountId)
+        start()
+        // start() republishes the record after the signal bootstrap, so senders
+        // learn the new home order (new primary first, old primary demoted).
+    }
+
     /** The auto-backup toggle's ON action: pick a healthy island from the
      *  public catalogue and register there (recover-first, same keys). Returns
      *  the chosen host. Throws IllegalArgumentException("no_island") when the
