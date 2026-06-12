@@ -1943,13 +1943,16 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 var bodyOverflow by remember(m.id) { mutableStateOf(false) }
                 val candidate = m.body.length > 280
                 val collapsed = candidate && !bodyExpanded
+                // Truncated if the layout reports overflow (handles a long
+                // no-newline paragraph) OR the body alone has > 14 hard lines.
+                val manyLines = m.body.count { it == '\n' } >= 14
                 EmoticonText(
                     m.body, color = c.textPrimary, fontSize = 15.sp, lineHeight = 19.sp,
                     mentionNick = mentionNick, onMentionClick = onMentionClick, mentionUin = mentionUin,
                     maxLines = if (collapsed) 14 else Int.MAX_VALUE,
                     onTextLayout = { if (collapsed) bodyOverflow = it.hasVisualOverflow },
                 )
-                if (collapsed && bodyOverflow) {
+                if (collapsed && (bodyOverflow || manyLines)) {
                     Text(
                         stringResource(R.string.chat_show_more),
                         color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
