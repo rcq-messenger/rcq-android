@@ -228,34 +228,109 @@ object Multihome {
         }
     }
 
-    /** Resolve a flagship peer's home list from OUR island's open record
-     *  endpoint, verified against the peer's locally-pinned Ed25519 signing
-     *  key. Cached with a TTL; a fetch failure serves the stale cache. */
+    // ── Gossip: mirror a peer's signed record by global identity (sk) so it can
+    // be served from any honest island a contact uses (address-mobility B1).
+    // Self-signed, so a mirror adds redundancy with zero added trust — the
+    // server re-verifies the signature on write, this client on read.
+
+    /** Best-effort mirror a verified record JSON onto [host]'s gossip store.
+     *  Never throws; a busy/unreachable island just retries on the next resolve. */
+    fun mirrorRecord(host: String, recordJson: String) {
+        runCatching {
+            val req = Request.Builder()
+                .url("https://$host/federation/gossip-record")
+                .put(recordJson.toRequestBody(JSON))
+                .build()
+            client.newCall(req).execute().use { }
+        }
+    }
+
+    /** Fetch a peer's mirrored record by its Ed25519 signing key from [host]'s
+     *  gossip store. Returns the parsed doc or null (404 / unreachable / error). */
+    fun fetchGossipRecord(host: String, signingKeyB64: String): JsonObject? = runCatching {
+        val sk = java.net.URLEncoder.encode(signingKeyB64, "UTF-8")
+        val req = Request.Builder().url("https://$host/federation/gossip-record?sk=$sk").get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
+        }
+    }.getOrNull()
+
+    private fun homesOf(doc: JsonObject): List<RcqFederation.Home> =
+        doc.getAsJsonArray("homes").map {
+            val h = it.asJsonObject
+            RcqFederation.Home(h.get("host").asString, h.get("uin").asInt)
+        }
+
+    /** Resolve a peer's home list. Sources, in order: (1) OUR island's by-uin
+     *  owner record (peer is on / multi-homed onto us), seeded into our gossip
+     *  store on success; (2) OUR island's GOSSIP mirror by sk (some contact
+     *  mirrored it here — survives the peer's own island being blocked/gone).
+     *  Verified against the peer's locally-pinned Ed25519 signing key. TTL
+     *  cached; a total miss serves the stale cache. */
     private fun resolvePeerHomesCached(ownHost: String, peerUin: Int, peerSigningKeyB64: String): List<RcqFederation.Home> {
         val cached = MultihomeStore.cachedPeerHomes(peerUin)
         if (cached != null && System.currentTimeMillis() - cached.ts < PEER_CACHE_TTL_MS) return cached.homes
-        return try {
+        // (1) by-uin owner record on our island.
+        runCatching {
             val req = Request.Builder().url("https://$ownHost/federation/island-record/$peerUin").get().build()
             client.newCall(req).execute().use { resp ->
-                if (resp.code == 404) {
-                    MultihomeStore.cachePeerHomes(peerUin, emptyList())
-                    return emptyList()
-                }
+                if (resp.code == 404) return@runCatching null
                 if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                val doc = JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
+                val body = resp.body?.string() ?: ""
+                val doc = JsonParser.parseString(body).asJsonObject
                 val v = RcqFederation.verifyRecord(doc, expectedIk = null, expectedSk = peerSigningKeyB64)
-                val homes = if (v is RcqFederation.VerifyResult.Ok) {
-                    v.doc.getAsJsonArray("homes").map {
-                        val h = it.asJsonObject
-                        RcqFederation.Home(h.get("host").asString, h.get("uin").asInt)
-                    }
-                } else emptyList()
-                MultihomeStore.cachePeerHomes(peerUin, homes)
-                homes
+                if (v is RcqFederation.VerifyResult.Ok) {
+                    mirrorRecord(ownHost, body)  // seed gossip so other islands can serve it by sk
+                    val homes = homesOf(v.doc)
+                    MultihomeStore.cachePeerHomes(peerUin, homes)
+                    return homes
+                }
+                null
             }
-        } catch (e: Exception) {
-            cached?.homes ?: emptyList()
         }
+        // (2) gossip mirror by sk on our island.
+        val rec = fetchGossipRecord(ownHost, peerSigningKeyB64)
+        if (rec != null) {
+            val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = peerSigningKeyB64)
+            if (v is RcqFederation.VerifyResult.Ok) {
+                val homes = homesOf(v.doc)
+                MultihomeStore.cachePeerHomes(peerUin, homes)
+                return homes
+            }
+        }
+        // by-uin was a clean 404 (peer has no owner record here) and no gossip:
+        // cache empty so single-homed peers cost one lookup per TTL.
+        if (cached == null) MultihomeStore.cachePeerHomes(peerUin, emptyList())
+        return cached?.homes ?: emptyList()
+    }
+
+    /** Resolve a peer's homes from THEIR OWN island, mirror the verified record
+     *  onto our island's gossip store, and fall back to our gossip mirror if
+     *  their island is unreachable. The cross-island entry point (used when we
+     *  know the peer's home host). Returns verified homes, or [] if nothing
+     *  verifies anywhere. */
+    fun resolveAndMirrorHomes(ownHost: String, peerHost: String, peerUin: Int, peerSigningKeyB64: String): List<RcqFederation.Home> {
+        runCatching {
+            val req = Request.Builder().url("https://$peerHost/federation/island-record/$peerUin").get().build()
+            client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: ""
+                    val doc = JsonParser.parseString(body).asJsonObject
+                    val v = RcqFederation.verifyRecord(doc, expectedIk = null, expectedSk = peerSigningKeyB64)
+                    if (v is RcqFederation.VerifyResult.Ok) {
+                        mirrorRecord(ownHost, body)
+                        return homesOf(v.doc)
+                    }
+                }
+            }
+        }
+        val rec = fetchGossipRecord(ownHost, peerSigningKeyB64)
+        if (rec != null) {
+            val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = peerSigningKeyB64)
+            if (v is RcqFederation.VerifyResult.Ok) return homesOf(v.doc)
+        }
+        return emptyList()
     }
 
     /** Deposit a v=1 sealed copy of [env] into each of the peer's homes OTHER
