@@ -905,6 +905,23 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }
+
+            // Onion routing (M3, experimental). A per-device opt-in for the
+            // 2-hop chain so no single relay sees both the user and the server.
+            // Only meaningful when the obfuscated connection above is on.
+            var onion by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isOnionOptIn(context)) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_onion), color = if (obfuscated) c.textPrimary else c.textSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_onion_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    enabled = obfuscated,
+                    checked = onion,
+                    onCheckedChange = { onion = it; app.rcq.android.net.SingBoxTransport.setOnionOptIn(context, it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
         }
     }
 }

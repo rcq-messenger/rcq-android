@@ -28,6 +28,7 @@ object SingBoxTransport {
     private const val PREFS = "rcq_singbox"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_ENTRY = "onion_entry"   // sticky onion guard (O4)
+    private const val KEY_ONION_OPTIN = "onion_optin"   // per-device opt-in (O5)
 
     @Volatile
     var isActive = false
@@ -42,6 +43,20 @@ object SingBoxTransport {
 
     private fun prefs(): android.content.SharedPreferences? =
         appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Onion routing is ON when the signed config enables it (cohort flip) OR
+     *  this device opted in (the experimental Settings toggle, O5). Per-device
+     *  opt-in lets volunteers self-select for real-world testing WITHOUT the
+     *  all-or-nothing signed-config flip. Default OFF. */
+    fun onionMode(): Boolean =
+        RelayConfigStore.onionEnabled || (prefs()?.getBoolean(KEY_ONION_OPTIN, false) ?: false)
+
+    fun isOnionOptIn(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ONION_OPTIN, false)
+
+    fun setOnionOptIn(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ONION_OPTIN, on).apply()
+    }
 
     /** Sticky onion ENTRY guard (Tor lesson: pin the entry, don't reshuffle it
      *  every launch). Returns the persisted entry tag if it's still a VLESS
@@ -190,7 +205,7 @@ object SingBoxTransport {
         // to the single-hop path below when onion is off or we lack 2 VLESS
         // relays, so connectivity is never worse than today. Proven via a local
         // sing-box prototype (RCQ/docs/onion-design.md).
-        if (RelayConfigStore.onionEnabled && vless.size >= 2) {
+        if (onionMode() && vless.size >= 2) {
             val entry = stickyEntry(vless)          // O4: persisted guard, not just vless.first()
             val exits = vless.filter { it.tag != entry.tag }
             outbounds.put(JSONObject().apply {

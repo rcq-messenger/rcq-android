@@ -675,7 +675,7 @@ class Session(context: Context) {
             var deadStreak = 0
             while (true) {
                 delay(60_000)
-                if (!transport.isActive || !app.rcq.android.net.RelayConfigStore.onionEnabled) { deadStreak = 0; continue }
+                if (!transport.isActive || !transport.onionMode()) { deadStreak = 0; continue }
                 val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) }
                 if (ok) { deadStreak = 0; continue }
                 deadStreak++
