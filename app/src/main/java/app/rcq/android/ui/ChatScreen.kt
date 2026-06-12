@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mood
@@ -83,6 +84,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -150,6 +152,7 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.crypto.Reply
+import app.rcq.android.media.MediaSaver
 import app.rcq.android.media.VoiceRecorder
 import app.rcq.android.model.ChatMessage
 import app.rcq.android.model.DeliveryState
@@ -246,6 +249,56 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
     var fullscreenImage by remember { mutableStateOf<ByteArray?>(null) }
     val listState = rememberLazyListState()
+
+    // Share / save media to device (report #6 — Android couldn't share/download
+    // a photo/video; iOS already could). Save uses scoped MediaStore on API 29+
+    // (no permission); on API ≤ 28 it needs WRITE_EXTERNAL_STORAGE, which we
+    // request on demand and then run the deferred save.
+    val savedToast = stringResource(R.string.media_saved)
+    val saveFailToast = stringResource(R.string.media_save_failed)
+    var pendingSave by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val storagePerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) pendingSave?.invoke()
+        else android.widget.Toast.makeText(context, saveFailToast, android.widget.Toast.LENGTH_SHORT).show()
+        pendingSave = null
+    }
+    fun runSave(action: () -> Unit) {
+        if (!MediaSaver.needsLegacyWritePermission ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+            action()
+        } else {
+            pendingSave = action
+            storagePerm.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+    /** Fetch a message's decrypted media bytes, then share or save. [toGallery]
+     *  routes images/video to the gallery and everything else to Downloads. */
+    fun mediaBytes(m: ChatMessage, then: (ByteArray) -> Unit) {
+        val mid = m.mediaId; val key = m.mediaKey ?: return
+        if (mid == null) return
+        scope.launch {
+            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) }) ?: return@launch
+            then(bytes)
+        }
+    }
+    fun mediaNameMime(m: ChatMessage, bytes: ByteArray): Pair<String, String> = when (m.kind) {
+        "photo" -> if (bytes.isGif()) "RCQ_${m.id}.gif" to "image/gif" else "RCQ_${m.id}.jpg" to "image/jpeg"
+        "video" -> "RCQ_${m.id}.mp4" to "video/mp4"
+        "voice" -> "RCQ_voice_${m.id}.m4a" to "audio/mp4"
+        else -> (m.fileName ?: "RCQ_${m.id}") to (m.fileMime ?: "application/octet-stream")
+    }
+    fun shareMessageMedia(m: ChatMessage) = mediaBytes(m) { bytes ->
+        val (name, mime) = mediaNameMime(m, bytes)
+        MediaSaver.share(context, bytes, name, mime)
+    }
+    fun saveMessageMedia(m: ChatMessage) = mediaBytes(m) { bytes ->
+        val (name, mime) = mediaNameMime(m, bytes)
+        runSave {
+            val ok = if (m.kind == "photo" || m.kind == "video") MediaSaver.saveToGallery(context, bytes, name, mime)
+                     else MediaSaver.saveToDownloads(context, bytes, name, mime)
+            android.widget.Toast.makeText(context, if (ok) savedToast else saveFailToast, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Per-conversation screen-secure mode (1:1 only) is NOTIFY-ONLY (iOS parity,
     // founder's choice): we no longer blank the chat with FLAG_SECURE. When a
@@ -788,7 +841,23 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     fullscreenImage?.let { bytes ->
-        FullscreenImageViewer(bytes) { fullscreenImage = null }
+        FullscreenImageViewer(
+            bytes,
+            onShare = {
+                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
+                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
+                MediaSaver.share(context, it, name, mime)
+            },
+            onSave = {
+                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
+                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
+                runSave {
+                    val ok = MediaSaver.saveToGallery(context, it, name, mime)
+                    android.widget.Toast.makeText(context, if (ok) savedToast else saveFailToast, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { fullscreenImage = null },
+        )
     }
 
     whoReactedMsg?.let { m ->
@@ -857,6 +926,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         }
                     }
                     MessageAction(stringResource(R.string.chat_reply)) { replyTarget = m; actionMsg = null }
+                    if (m.kind == "photo" || m.kind == "video" || m.kind == "file" || m.kind == "voice") {
+                        MessageAction(stringResource(R.string.media_share)) { shareMessageMedia(m); actionMsg = null }
+                        MessageAction(stringResource(R.string.media_save)) { saveMessageMedia(m); actionMsg = null }
+                    }
                     if (m.kind == "text") MessageAction(stringResource(R.string.chat_copy)) {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(ClipData.newPlainText("message", m.body))
@@ -2086,7 +2159,12 @@ private fun blurForSpoiler(src: Bitmap): Bitmap {
 /** Fullscreen photo viewer (tester #10): tap anywhere or the X to close, pinch
  *  to zoom, drag while zoomed to pan. */
 @Composable
-private fun FullscreenImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
+private fun FullscreenImageViewer(
+    bytes: ByteArray,
+    onShare: (ByteArray) -> Unit = {},
+    onSave: (ByteArray) -> Unit = {},
+    onDismiss: () -> Unit,
+) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         var scale by remember { mutableStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
@@ -2125,6 +2203,23 @@ private fun FullscreenImageViewer(bytes: ByteArray, onDismiss: () -> Unit) {
                 tint = Color.White,
                 modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).size(28.dp).clickable(onClick = onDismiss),
             )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Download,
+                    stringResource(R.string.media_save),
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp).clickable { onSave(bytes) },
+                )
+                Icon(
+                    Icons.Filled.Share,
+                    stringResource(R.string.media_share),
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp).clickable { onShare(bytes) },
+                )
+            }
         }
     }
 }

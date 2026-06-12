@@ -724,6 +724,10 @@
     <string name="chat_a_message">Message</string>
     <string name="chat_reply">Reply</string>
     <string name="chat_copy">Copy</string>
+    <string name="media_share">Share</string>
+    <string name="media_save">Save</string>
+    <string name="media_saved">Saved</string>
+    <string name="media_save_failed">Couldn\'t save</string>
     <string name="chat_edit">Edit</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_delete_all">Delete for everyone</string>
