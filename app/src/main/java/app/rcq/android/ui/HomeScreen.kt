@@ -269,6 +269,7 @@ internal fun HomeScreen(
                 uin = uin,
                 serverHost = session.currentServer,
                 ownStatus = ownStatus,
+                connected = connected,
                 stealthActive = stealthActive,
                 accounts = accountRows,
                 canAddAccount = accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
@@ -665,6 +666,7 @@ private fun HomeHeader(
     uin: Int,
     serverHost: String,
     ownStatus: UserStatus,
+    connected: Boolean,
     stealthActive: Boolean,
     accounts: List<AccountRow>,
     canAddAccount: Boolean,
@@ -772,6 +774,19 @@ private fun HomeHeader(
         ) {
             Box {
                 StatusIcon(ownStatus, size = 30.dp, modifier = Modifier.clip(CircleShape).clickable { statusMenu = true })
+                // Always-visible connection indicator (#16): a small dot on the
+                // identity flower. Green = socket up, amber = connecting /
+                // offline (the app auto-reconnects). Non-interactive overlay.
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(11.dp)
+                        .clip(CircleShape)
+                        .background(c.bgPrimary)
+                        .padding(2.dp)
+                        .clip(CircleShape)
+                        .background(if (connected) c.statusOnline else c.statusAway),
+                )
                 DropdownMenu(expanded = statusMenu, onDismissRequest = { statusMenu = false }) {
                     // "Stay visible after you leave" countdown, top-right of the
                     // status menu (moved here from the home header).

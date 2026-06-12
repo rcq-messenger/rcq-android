@@ -263,6 +263,16 @@ internal fun EmoticonText(
         Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier)
         return
     }
+    // Solo-emoticon message (#12): the whole body is a single `:code:` — animate
+    // it (the common "send a smiley" case). Bounded to ONE frame loop per
+    // VISIBLE message (LazyColumn composes only on-screen rows), so it avoids
+    // the inline-in-text / picker churn that forced static frames elsewhere.
+    (tokens.singleOrNull() as? Emoticons.Token.Emo)?.let { emo ->
+        if (!hasMention) {
+            EmoticonGif(emo.asset, Modifier.size(34.dp), animate = true)
+            return
+        }
+    }
     // MEMOIZE the annotated string + inline-emoticon content. Without this,
     // every recomposition rebuilt the inline map with FRESH composable lambdas,
     // so each inline emoticon was recreated → re-read its GIF bytes + re-decoded

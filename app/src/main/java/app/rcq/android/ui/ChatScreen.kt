@@ -460,7 +460,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             )
             Spacer(Modifier.width(6.dp))
             if (isGroup) {
-                GroupAvatar(group, session, 28.dp)
+                GroupAvatar(group, session, 28.dp, animated = true)
             } else if (isSelf) {
                 Icon(Icons.Filled.Bookmark, null, tint = c.accent, modifier = Modifier.size(26.dp))
             } else {
@@ -656,7 +656,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             ) { row ->
                 when (row) {
                     is ChatRow.DateLabel -> DateDividerRow(row.label)
-                    ChatRow.Unread -> UnreadDividerRow()
+                    ChatRow.Unread -> UnreadDividerRow(initialUnread)
                     is ChatRow.Single -> {
                         val m = row.m
                         if (m.kind == "call") {
@@ -704,15 +704,30 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     lastVisible < info.totalItemsCount - 1
                 }
             }
+            // #15: how many message rows sit below the fold — shown as a badge
+            // on the arrow so the user knows there's unread content down there.
+            val belowCount by remember(rows) {
+                derivedStateOf {
+                    val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf 0
+                    if (last >= rows.lastIndex) 0
+                    else (last + 1..rows.lastIndex).count { rows[it] is ChatRow.Single || rows[it] is ChatRow.Album }
+                }
+            }
             if (showJumpDown) {
                 Box(
-                    Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp)
-                        .size(40.dp).clip(CircleShape).background(c.bgSecondary)
-                        .border(1.dp, c.divider, CircleShape)
-                        .clickable { scope.launch { listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0)) } },
-                    contentAlignment = Alignment.Center,
+                    Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp),
+                    contentAlignment = Alignment.TopEnd,
                 ) {
-                    Icon(Icons.Filled.KeyboardArrowDown, null, tint = c.textPrimary, modifier = Modifier.size(26.dp))
+                    Box(
+                        Modifier.padding(top = 6.dp, end = 0.dp)
+                            .size(40.dp).clip(CircleShape).background(c.bgSecondary)
+                            .border(1.dp, c.divider, CircleShape)
+                            .clickable { scope.launch { listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0)) } },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.KeyboardArrowDown, null, tint = c.textPrimary, modifier = Modifier.size(26.dp))
+                    }
+                    UnreadBadge(belowCount, Modifier.align(Alignment.TopEnd))
                 }
             }
         }
@@ -1718,11 +1733,12 @@ private fun DateDividerRow(label: String) {
 
 /** The "Unread messages" divider, accent-tinted so it reads as a marker. */
 @Composable
-private fun UnreadDividerRow() {
+private fun UnreadDividerRow(count: Int = 0) {
     val c = RcqTheme.colors
+    val label = stringResource(R.string.chat_unread_divider) + if (count > 0) " ($count)" else ""
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.accent.copy(alpha = 0.5f)))
-        Text(stringResource(R.string.chat_unread_divider), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+        Text(label, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.accent.copy(alpha = 0.5f)))
     }
 }

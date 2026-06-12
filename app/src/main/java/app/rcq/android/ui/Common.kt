@@ -109,14 +109,16 @@ internal fun SectionHeader(
  * preview overlay, chat header, and group-info header.
  */
 @Composable
-internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f) {
-    GroupAvatarMedia(group?.avatarMediaId, group?.avatarMediaKey, session, size, glyphSize, host = group?.host)
+internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, animated: Boolean = false) {
+    GroupAvatarMedia(group?.avatarMediaId, group?.avatarMediaKey, session, size, glyphSize, host = group?.host, animated = animated)
 }
 
 /** [GroupAvatar] by raw media id/key — for places that only have a group
- *  PREVIEW (e.g. the Add-window search results) rather than a full roster. */
+ *  PREVIEW (e.g. the Add-window search results) rather than a full roster.
+ *  [animated]=true plays a GIF avatar (only used where ONE avatar is on screen,
+ *  e.g. the chat header — list rows stay static first-frame to bound memory). */
 @Composable
-internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, host: String? = null) {
+internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, host: String? = null, animated: Boolean = false) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
@@ -140,11 +142,14 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
     val nativeImage = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 384)
     val gifImage = rememberGifFirstFrame(bytes)
     val image = nativeImage ?: gifImage
+    val animatableGif = bytes?.takeIf { animated && it.isGif() }
     Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
-        if (image != null) {
-            Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        } else {
-            Icon(Icons.Filled.Groups, null, tint = Color.White, modifier = Modifier.size(glyphSize))
+        when {
+            // Animated GIF avatar (chat header only) — pure-Java decoder, safe
+            // on every ROM; one instance so no list-wide churn.
+            animatableGif != null -> SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
+            image != null -> Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            else -> Icon(Icons.Filled.Groups, null, tint = Color.White, modifier = Modifier.size(glyphSize))
         }
     }
 }
