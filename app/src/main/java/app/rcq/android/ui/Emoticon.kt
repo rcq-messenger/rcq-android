@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -252,15 +253,18 @@ internal fun EmoticonText(
     // When supplied, an `@nickname` whose nick resolves to a group member's uin
     // renders as the clickable accent nick (tap → [onMentionClick]); else plain.
     mentionUin: ((String) -> Int?)? = null,
+    // #2: cap visible lines (collapsed long message); Int.MAX_VALUE = no cap.
+    maxLines: Int = Int.MAX_VALUE,
 ) {
     val tokens = remember(body) { Emoticons.tokenize(body) }
     val accent = RcqTheme.colors.accent
+    val overflow = if (maxLines == Int.MAX_VALUE) TextOverflow.Clip else TextOverflow.Ellipsis
     val hasMention =
         (mentionNick != null && body.contains('#') && Emoticons.MENTION_RE.containsMatchIn(body)) ||
         (mentionUin != null && body.contains('@') && Emoticons.MENTION_AT_RE.containsMatchIn(body))
     // Fast path: a pure-text body with no resolvable mentions.
     if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention) {
-        Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier)
+        Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow)
         return
     }
     // Solo-emoticon message (#12): the whole body is a single `:code:` — animate
@@ -301,7 +305,7 @@ internal fun EmoticonText(
         }
         ann to inlineMap
     }
-    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier)
+    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier, maxLines = maxLines, overflow = overflow)
 }
 
 /** Append [text], turning each resolvable mention into a clickable accent nick

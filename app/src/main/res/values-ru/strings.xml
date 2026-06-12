@@ -657,6 +657,7 @@
     <!-- Chat -->
     <string name="chat_group">Группа</string>
     <string name="chat_unread_divider">Непрочитанные сообщения</string>
+    <string name="chat_show_more">Показать полностью</string>
     <string name="chat_typing">печатает…</string>
     <string name="chat_saved_title">Избранное</string>
     <string name="chat_saved_subtitle">Заметки для себя</string>

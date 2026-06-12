@@ -658,6 +658,7 @@
     <!-- Chat -->
     <string name="chat_group">Group</string>
     <string name="chat_unread_divider">Unread messages</string>
+    <string name="chat_show_more">Show more</string>
     <string name="chat_typing">typing…</string>
     <string name="chat_saved_title">Saved messages</string>
     <string name="chat_saved_subtitle">Notes to yourself</string>
