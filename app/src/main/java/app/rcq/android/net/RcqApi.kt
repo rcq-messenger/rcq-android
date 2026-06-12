@@ -481,6 +481,8 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         val signing_key: String?,
         // Granular moderator caps the owner granted (subset of delete|members|info).
         val permissions: List<String> = emptyList(),
+        // Sender-keys capability of this member's account (gmsg/skdm support).
+        val sender_keys: Boolean = false,
     )
 
     data class GroupOut(
@@ -600,6 +602,30 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
                 authed = authed,
                 SendResponse::class.java,
             )
+        }
+
+    data class GroupBroadcastBody(val group_id: Int, val envelope_type: String, val payload: String)
+
+    /** Sender-keys encrypt-once group send: ONE ciphertext for the whole
+     *  group. The server fans the same blob to every capable member. Always
+     *  authed — the new endpoint enforces owner_only strictly (and an authed
+     *  poster costs nothing for 'all' groups). */
+    suspend fun sendGroupBroadcast(groupId: Int, payload: String, envelopeType: String = "message"): SendResponse =
+        withContext(Dispatchers.IO) {
+            post(
+                "/messages/group-broadcast",
+                gson.toJson(GroupBroadcastBody(groupId, envelopeType, payload)),
+                authed = true,
+                SendResponse::class.java,
+            )
+        }
+
+    data class CapabilitiesBody(val sender_keys: Boolean)
+
+    /** Advertise this client's capabilities (fire-and-forget at start). */
+    suspend fun advertiseCapabilities(senderKeys: Boolean): Unit =
+        withContext(Dispatchers.IO) {
+            postNoContent("/users/me/capabilities", gson.toJson(CapabilitiesBody(senderKeys)), authed = true)
         }
 
     // ── presence + account (rcq-spec 3.3 / 2.4) ──────────────────────

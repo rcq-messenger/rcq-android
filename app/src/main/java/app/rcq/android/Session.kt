@@ -7,6 +7,8 @@ import app.rcq.android.crypto.IdentityKeys
 import app.rcq.android.crypto.MediaCrypto
 import app.rcq.android.crypto.Reply
 import app.rcq.android.crypto.SealedSender
+import app.rcq.android.crypto.SenderKeyStore
+import app.rcq.android.crypto.SenderKeys
 import app.rcq.android.crypto.SignalBootstrap
 import app.rcq.android.crypto.SignalSession
 import app.rcq.android.crypto.SignalStoreDb
@@ -375,6 +377,8 @@ class Session(context: Context) {
         VisitedIslandsStore.bindAccount(AccountManager.activeId.value)
         // Multihoming (federation v1): this account's backup island homes.
         MultihomeStore.init(appCtx)
+        // Sender-keys chain state (group encrypt-once).
+        SenderKeyStore.init(appCtx)
         CrossIslandRequestsStore.init(appCtx)
         // The app locking (background with a PIN set) is signalled by the
         // PanicPinService.locked flow; tear the live session down so the
@@ -807,6 +811,9 @@ class Session(context: Context) {
         // Optional-surface flags for this server (UIN shop). Best-effort:
         // failure keeps the permissive default so the shop stays reachable.
         scope.launch { runCatching { _uinShopEnabled.value = api.serverInfo().capabilities.uin_shop } }
+        // Advertise sender-keys support so others broadcast to us (encrypt-once)
+        // instead of the legacy per-member fan-out. Fire-and-forget.
+        scope.launch { runCatching { api.advertiseCapabilities(senderKeys = true) } }
         // Ensure our libsignal prekey bundle is published so peers can start
         // v=2 sessions with us. Best-effort: failure leaves us on v=1.
         scope.launch {
@@ -1532,6 +1539,7 @@ class Session(context: Context) {
                 identityKey = it.identity_key ?: "",
                 signingKey = it.signing_key,
                 permissions = it.permissions,
+                senderKeys = it.sender_keys,
             )
         },
         createdAt = parseIso(g.created_at),
@@ -1919,36 +1927,56 @@ class Session(context: Context) {
         // single member whose identity key isn't a valid X25519 point (a legacy
         // or other-client key) must NOT sink the whole send: skip it and deliver
         // to everyone else, instead of failing the message for the whole group.
+        // Sender keys (encrypt-once) for a LOCAL group with any capable member;
+        // foreign groups (ctx.host != null) keep the legacy per-member path in
+        // v1 (their capability lookup + broadcast endpoint live on the foreign
+        // island we hold only guest creds for). seal once, distribute the chain
+        // to capable members who need it, and fan the legacy copy to the rest.
+        val sendable = group.members.filter { it.uin != me && it.identityKey.isNotEmpty() }
+        val capable = if (ctx.host == null) sendable.filter { it.senderKeys } else emptyList()
         var skipped = 0
-        val payloads = group.members
-            .filter { it.uin != me && it.identityKey.isNotEmpty() }
-            .mapNotNull { m ->
-                runCatching {
-                    RcqApi.GroupPayload(
-                        to_uin = m.uin,
-                        payload = SealedSender.encryptV1(
-                            envelope = env,
-                            recipientIdentityPub = Base64.decode(m.identityKey, Base64.NO_WRAP),
-                            ownUin = me,
-                            signingPriv = signingPriv(),
-                            signingPub = signingPub(),
-                            ownHost = ctx.host ?: serverHost(),
-                        ),
-                    )
-                }.getOrElse { skipped++; null }
-            }
-        if (skipped > 0) android.util.Log.w("RCQgroup", "group $groupId: skipped $skipped member(s) with an unusable identity key")
         try {
-            val resp = if (payloads.isEmpty()) {
-                // Lone member, or every other key is unusable — nothing to send.
-                RcqApi.SendResponse(delivered = false)
+            val resp: RcqApi.SendResponse
+            if (capable.isNotEmpty()) {
+                val step = SenderKeyStore.prepareOwnSend(me, ctx.gid, capable.map { it.uin })
+                val gmsg = SenderKeys.sealGmsg(env, ctx.gid, step.kid, step.epoch, step.index, step.mk, signingPriv())
+                // Distribute the chain key to capable members who don't hold it
+                // yet FIRST, so a recipient never gets a gmsg for an unknown kid.
+                val skdmTargets = capable.filter { it.uin in step.needDistribution }
+                if (skdmTargets.isNotEmpty()) {
+                    val skdmEnv = Envelope.Skdm(ctx.gid, step.kid, step.epoch, step.index, step.ckAtI)
+                    val skdmPayloads = skdmTargets.mapNotNull { m ->
+                        runCatching {
+                            RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(skdmEnv, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                        }.getOrElse { skipped++; null }
+                    }
+                    if (skdmPayloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, skdmPayloads, envelopeType = "skdm") }
+                }
+                resp = withRetry { ctx.api.sendGroupBroadcast(ctx.gid, gmsg) }
+                // Ratchet + mark distributed only after the broadcast lands.
+                SenderKeyStore.markDistributed(me, ctx.gid, skdmTargets.map { it.uin })
+                SenderKeyStore.advanceOwn(me, ctx.gid)
+                // Legacy members (not yet updated) still get their per-member copy.
+                val legacy = sendable.filter { !it.senderKeys }
+                if (legacy.isNotEmpty()) {
+                    val legacyPayloads = legacy.mapNotNull { m ->
+                        runCatching {
+                            RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                        }.getOrElse { skipped++; null }
+                    }
+                    if (legacyPayloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, legacyPayloads, authed = group.postPolicy == "owner_only") }
+                }
             } else {
-                // owner_only groups attach our token so the server can verify
-                // we're the owner (sealed sender hides nothing here — every
-                // broadcast post is known to be the owner's); 'all' groups stay
-                // anonymous to preserve sealed sender.
-                withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, authed = group.postPolicy == "owner_only") }
+                // No capable member (or a foreign group): original per-member fan-out.
+                val payloads = sendable.mapNotNull { m ->
+                    runCatching {
+                        RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                    }.getOrElse { skipped++; null }
+                }
+                resp = if (payloads.isEmpty()) RcqApi.SendResponse(delivered = false)
+                    else withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, authed = group.postPolicy == "owner_only") }
             }
+            if (skipped > 0) android.util.Log.w("RCQgroup", "group $groupId: skipped $skipped member(s) with an unusable identity key")
             updateGroupMsgState(groupId, id, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
             // Mirror the message to the user's other devices (best-effort).
             // NOT for foreign groups: the carbon would carry the server-side
@@ -1964,8 +1992,46 @@ class Session(context: Context) {
     private fun ingestGroup(payloadB64: String, groupId: Int) {
         runCatching {
             val dec = decryptInbound(payloadB64)
-            val now = System.currentTimeMillis()
             when (val env = dec.envelope) {
+                // Sender-keys distribution / recovery (never rendered). SKDM binds
+                // the chain to its authenticated sender; SKNACK asks the kid owner
+                // to re-distribute. Both ride the per-member sealed path.
+                is Envelope.Skdm -> SenderKeyStore.acceptSkdm(env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck)
+                is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
+                else -> routeGroupEnvelope(env, groupId, dec.senderUin)
+            }
+        }.onFailure { logDecryptFailure(payloadB64, it) }
+    }
+
+    /** Decode a sender-keys `gmsg` broadcast via the stored chain and route the
+     *  inner envelope. Drops my own echoed broadcast (carbon handles own
+     *  multi-device sync), NACKs an unknown kid, and ignores an unverifiable or
+     *  replayed message. */
+    private fun ingestGmsg(payloadB64: String, groupId: Int) {
+        runCatching {
+            val hdr = SenderKeys.parseGmsgHeader(payloadB64) ?: return
+            if (SenderKeyStore.ownsKid(hdr.kid)) return // my own broadcast echoed back
+            val key = SenderKeyStore.deriveInbound(hdr.kid, hdr.epoch, hdr.index)
+            if (key == null) {
+                if (!SenderKeyStore.knowsKid(hdr.kid)) sendSknack(groupId, hdr.kid)
+                return
+            }
+            val opened = SenderKeys.openGmsg(payloadB64, groupId, key.mk, key.spub)
+            if (!opened.verified) {
+                android.util.Log.w("RCQgroup", "gmsg sig did not verify; dropping gid=$groupId kid=${hdr.kid}")
+                return
+            }
+            routeGroupEnvelope(opened.envelope, groupId, key.senderUin)
+        }.onFailure { logDecryptFailure(payloadB64, it) }
+    }
+
+    /** Store a decoded group envelope under its thread. Shared by the legacy
+     *  per-member path (ingestGroup) and the sender-keys broadcast (ingestGmsg);
+     *  [senderUin] is the authenticated sender from either path. */
+    private fun routeGroupEnvelope(envelope: Envelope, groupId: Int, senderUin: Int) {
+        val dec = SenderUin(senderUin)
+        val now = System.currentTimeMillis()
+        when (val env = envelope) {
                 is Envelope.Text -> storeGroup(
                     ChatMessage(env.id, 0, false, env.text, now, kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id)
                 )
@@ -2014,9 +2080,58 @@ class Session(context: Context) {
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
+                is Envelope.Skdm -> Unit         // intercepted in ingestGroup before routing
+                is Envelope.Sknack -> Unit       // intercepted in ingestGroup before routing
                 is Envelope.Unknown -> Unit
             }
-        }.onFailure { logDecryptFailure(payloadB64, it) }
+    }
+
+    /** Minimal holder so the routing block keeps its `dec.senderUin` reads
+     *  whether the sender came from a sealed decrypt or a sender-keys chain. */
+    private data class SenderUin(val senderUin: Int)
+
+    /** Per-(kid) debounce so a burst of un-openable gmsg fires at most one NACK
+     *  per recovery window. */
+    private val sknackSent = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Fire one recovery request for an unknown kid to the group's capable
+     *  members (we don't know whose kid it is). Debounced per kid. */
+    private fun sendSknack(groupId: Int, kid: String) {
+        val prev = sknackSent[kid]
+        val now = System.currentTimeMillis()
+        if (prev != null && now - prev < 10 * 60 * 1000) return
+        sknackSent[kid] = now
+        val ctx = groupCtx(groupId)
+        val me = ctx.myUin.takeIf { it != 0 } ?: return
+        val g = group(groupId) ?: return
+        scope.launch(Dispatchers.IO) {
+            val payloads = g.members
+                .filter { it.senderKeys && it.uin != me && it.identityKey.isNotEmpty() }
+                .mapNotNull { m ->
+                    runCatching {
+                        RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(Envelope.Sknack(ctx.gid, kid), Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                    }.getOrNull()
+                }
+            if (payloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, payloads, envelopeType = "sknack") }
+        }
+    }
+
+    /** Answer a recovery request: if I own this group's chain, re-seal a current
+     *  SKDM to the requester so they can read going forward. */
+    private fun answerSknack(groupId: Int, requesterUin: Int, env: Envelope.Sknack) {
+        val ctx = groupCtx(groupId)
+        val me = ctx.myUin.takeIf { it != 0 } ?: return
+        if (SenderKeyStore.ownKidForGroup(me, ctx.gid) != env.kid) return
+        val snap = SenderKeyStore.ownChainSnapshot(me, ctx.gid) ?: return
+        val m = group(groupId)?.members?.firstOrNull { it.uin == requesterUin } ?: return
+        if (m.identityKey.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            val skdmEnv = Envelope.Skdm(ctx.gid, snap.kid, snap.epoch, snap.index, snap.ck)
+            runCatching {
+                val p = RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(skdmEnv, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                ctx.api.sendGroupSealed(ctx.gid, listOf(p), envelopeType = "skdm")
+            }
+        }
     }
 
     /** Irreversible burn of the ACTIVE account: delete it server-side, wipe
@@ -2809,6 +2924,8 @@ class Session(context: Context) {
                     // Only honour my own carbon; file the inner message as fromMe
                     // in its destination thread (dedup by id; no badge/sound).
                     if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now)
+                is Envelope.Skdm -> Unit       // sender-keys distribution is group-only
+                is Envelope.Sknack -> Unit     // sender-keys recovery is group-only
                 is Envelope.Unknown -> Unit
             }
         }.onFailure { logDecryptFailure(payloadB64, it) }
@@ -2847,7 +2964,11 @@ class Session(context: Context) {
         CrashReporter.crumb(appCtx, "drain_queue")
         api.drainQueue().forEach { q ->
             val payload = q.payload ?: return@forEach
-            if (q.group_id != null) ingestGroup(payload, q.group_id) else ingest(payload)
+            when {
+                q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id)
+                q.group_id != null -> ingestGroup(payload, q.group_id)
+                else -> ingest(payload)
+            }
         }
         CrashReporter.crumb(appCtx, "drain_done")
     }
@@ -3062,6 +3183,12 @@ class Session(context: Context) {
                 if (payload != null) {
                     if (gid != null) ingestGroup(payload, gid) else ingest(payload)
                 }
+            }
+            "gmsg" -> {
+                // Sender-keys broadcast: not a sealed envelope — decode via the chain.
+                val payload = obj.get("payload")?.asString
+                val gid = obj.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
+                if (payload != null && gid != null) ingestGmsg(payload, gid)
             }
             "group_created", "group_membership_changed" -> {
                 obj.getAsJsonObject("group")?.let { gj ->

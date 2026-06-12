@@ -133,6 +133,18 @@ sealed interface Envelope {
      *  receipt); never rendered as a message. Cross-client identical. */
     data class HomeRecord(val rec: com.google.gson.JsonObject) : Envelope
 
+    /** Sender-key distribution (wire kind "skdm"): hands one group member the
+     *  chain key for a (kid, epoch) so they can derive message keys for the
+     *  encrypt-once "gmsg" broadcasts. Rides the per-member ECIES seal via
+     *  /messages/group-sealed (envelope_type "skdm"); never rendered. The
+     *  receiver binds the kid to the decrypt's authenticated sender.
+     *  See RCQ/docs/sender-keys-design.md. */
+    data class Skdm(val gid: Int, val kid: String, val epoch: Int, val index: Int, val ck: String) : Envelope
+
+    /** Sender-key recovery request (wire kind "sknack"): I got a gmsg for a kid
+     *  I don't hold; the kid's owner re-seals a fresh SKDM. Per-member sealed. */
+    data class Sknack(val gid: Int, val kid: String) : Envelope
+
     data class Unknown(val kind: String) : Envelope
 
     /** Serialize to the exact JSON bytes that get signed and shipped.
@@ -251,6 +263,19 @@ sealed interface Envelope {
         is HomeRecord -> JsonObject().apply {
             addProperty("kind", "homerec")
             add("rec", rec)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is Skdm -> JsonObject().apply {
+            addProperty("kind", "skdm")
+            addProperty("gid", gid)
+            addProperty("kid", kid)
+            addProperty("e", epoch)
+            addProperty("i", index)
+            addProperty("ck", ck)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is Sknack -> JsonObject().apply {
+            addProperty("kind", "sknack")
+            addProperty("gid", gid)
+            addProperty("kid", kid)
         }.toString().toByteArray(Charsets.UTF_8)
         is Unknown -> JsonObject().apply { addProperty("kind", kind) }
             .toString().toByteArray(Charsets.UTF_8)
@@ -392,6 +417,17 @@ sealed interface Envelope {
                         ?: Unknown("carbon"),
                 )
                 "homerec" -> obj.getAsJsonObject("rec")?.let { HomeRecord(it) } ?: Unknown("homerec")
+                "skdm" -> Skdm(
+                    gid = obj.get("gid")?.asInt ?: 0,
+                    kid = obj.get("kid")?.asString.orEmpty(),
+                    epoch = obj.get("e")?.asInt ?: 0,
+                    index = obj.get("i")?.asInt ?: 0,
+                    ck = obj.get("ck")?.asString.orEmpty(),
+                )
+                "sknack" -> Sknack(
+                    gid = obj.get("gid")?.asInt ?: 0,
+                    kid = obj.get("kid")?.asString.orEmpty(),
+                )
                 else -> Unknown(kind ?: "unknown")
             }
         }

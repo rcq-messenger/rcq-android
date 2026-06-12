@@ -11,6 +11,10 @@ data class GroupMember(
     // Granular moderator caps the owner granted (subset of delete|members|info).
     // Owner implicitly has all; a non-owner with any cap is a moderator.
     val permissions: List<String> = emptyList(),
+    // This member's client(s) understand the sender-keys group path (gmsg
+    // broadcast + skdm). False → only the legacy per-member fan-out reaches
+    // them (dual-send migration). See RCQ/docs/sender-keys-design.md.
+    val senderKeys: Boolean = false,
 ) {
     val presence: UserStatus get() = UserStatus.from(status)
     /** True if this member may delete anyone's message (owner OR `delete` cap). */
