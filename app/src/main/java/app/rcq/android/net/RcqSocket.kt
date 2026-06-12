@@ -32,6 +32,13 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private var attempt = 0
     private var pingTimer: java.util.Timer? = null
 
+    // Identity guard for listener callbacks: open() rotates sockets, and a
+    // cancel()ed socket still fires onFailure asynchronously. Without the
+    // generation check that stale callback would flip the connected state
+    // to false and schedule a competing reconnect against the fresh socket.
+    @Volatile
+    private var generation = 0
+
     private var uin: Int = 0
     private var token: String = ""
     private var onEvent: (type: String, obj: JsonObject) -> Unit = { _, _ -> }
@@ -68,15 +75,18 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
 
     private fun open() {
         ws?.cancel()
+        val gen = ++generation
         val request = Request.Builder().url("$baseWsUrl/ws/$uin?token=$token").build()
         ws = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (gen != generation) return
                 attempt = 0
                 startPing()
                 onState(true)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (gen != generation) return
                 runCatching {
                     val obj = JsonParser.parseString(text).asJsonObject
                     val type = obj.get("type")?.asString ?: return
@@ -85,24 +95,41 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (gen != generation) return
                 onState(false)
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (gen != generation) return
                 onState(false)
                 scheduleReconnect()
             }
         })
     }
 
+    /** Tear down the current socket and dial again right away. Used when the
+     *  network path changed (VPN dropped/joined, Wi-Fi ↔ cellular): the old
+     *  socket is bound to the vanished route and OkHttp's protocol ping takes
+     *  up to ~40s to notice, so the connection dot would lie green meanwhile.
+     *  Flips the state to "connecting" immediately and resets the backoff. */
+    fun reconnectNow() {
+        if (!shouldStayConnected) return
+        attempt = 0
+        onState(false)
+        open()
+    }
+
     private fun scheduleReconnect() {
         if (!shouldStayConnected) return
         attempt += 1
+        val gen = generation
         val delayMs = min(30_000L, (1000L shl min(attempt - 1, 5)))
         Thread {
             Thread.sleep(delayMs)
-            if (shouldStayConnected) open()
+            // Skip if a newer socket was dialed while we waited (reconnectNow
+            // on a network change) — open() would needlessly cancel it.
+            if (shouldStayConnected && gen == generation) open()
         }.apply { isDaemon = true }.start()
     }
 

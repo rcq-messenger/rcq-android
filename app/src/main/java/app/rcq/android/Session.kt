@@ -279,7 +279,49 @@ class Session(context: Context) {
     @Volatile
     private var everConnected = false
 
+    // Default network the device is currently routing through. When it
+    // CHANGES (VPN dropped/joined, Wi-Fi ↔ cellular) the live socket is
+    // bound to the old route and sits half-dead until OkHttp's protocol
+    // ping notices (~40s of the home dot lying green) — redial right away
+    // instead. The very first onAvailable (registration echo) is skipped:
+    // start() dials on its own.
+    @Volatile
+    private var defaultNetwork: android.net.Network? = null
+    @Volatile
+    private var sawFirstNetwork = false
+    private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: android.net.Network) {
+            val previous = defaultNetwork
+            defaultNetwork = network
+            if (!sawFirstNetwork) {
+                sawFirstNetwork = true
+                return
+            }
+            if (network != previous) socket.reconnectNow()
+        }
+
+        override fun onLost(network: android.net.Network) {
+            // Only when the lost network IS the current default (a lingering
+            // old VPN network dying after the switch is not). Cleared so the
+            // NEXT onAvailable counts as a change even if the same physical
+            // network returns (airplane mode off). The redial flips the dot
+            // to "connecting" at once; with no route it fails fast and the
+            // normal backoff takes over until onAvailable.
+            if (network == defaultNetwork) {
+                defaultNetwork = null
+                socket.reconnectNow()
+            }
+        }
+    }
+
     init {
+        // Network-path watcher for the instant reconnect above. ACCESS_NETWORK_STATE
+        // is a normal permission; runCatching guards exotic ROMs only.
+        runCatching {
+            val cm = appCtx.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as android.net.ConnectivityManager
+            cm.registerDefaultNetworkCallback(networkCallback)
+        }
         // Federation (F2): local cross-island contact store (per-account;
         // AccountManager.init has already run in MainActivity.onCreate).
         CrossIslandStore.init(appCtx)
