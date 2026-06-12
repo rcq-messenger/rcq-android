@@ -384,6 +384,7 @@
     <string name="settings_row_report_bug">Report a bug</string>
     <string name="bug_report_hint">Describe what went wrong. Your platform and app version are attached automatically.</string>
     <string name="bug_report_placeholder">What happened?</string>
+    <string name="bug_report_attach">Attach photo or video</string>
     <string name="bug_report_send">Send</string>
     <string name="bug_report_sending">Sending…</string>
     <string name="bug_report_sent">Thanks. Your report was sent.</string>

@@ -985,11 +985,29 @@ class Session(context: Context) {
      *  (iOS parity; target is self, which the backend allows for bug_bounty).
      *  The platform + app version are tagged into the text so the admin queue
      *  shows which client a report came from. */
-    suspend fun submitBugReport(text: String): Boolean {
+    suspend fun submitBugReport(text: String, attachments: List<RcqApi.ReportAttachment> = emptyList()): Boolean {
         val me = store.uin ?: return false
         val tag = "[Android ${app.rcq.android.BuildConfig.VERSION_NAME}]"
-        return runCatching { api.report(me, "$tag $text", "bug_bounty") }.isSuccess
+        return runCatching { api.report(me, "$tag $text", "bug_bounty", attachments) }.isSuccess
     }
+
+    /** Encrypt [bytes] with a fresh per-blob key, upload it, and return the
+     *  attachment descriptor (id + key + mime) for a bug report. Null on
+     *  failure. The admin decrypts the blob with the returned key. */
+    suspend fun uploadReportAttachment(bytes: ByteArray, mime: String): RcqApi.ReportAttachment? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val key = app.rcq.android.crypto.MediaCrypto.newKey()
+                val sealed = app.rcq.android.crypto.MediaCrypto.seal(bytes, key)
+                val up = api.uploadBlob(sealed)
+                RcqApi.ReportAttachment(
+                    media_id = up.media_id,
+                    key = android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP),
+                    mime = mime,
+                    size = bytes.size,
+                )
+            }.getOrNull()
+        }
 
     /** Auto-submit a SUSPECTED-NATIVE launch-crash breadcrumb report (stage +
      *  device only, no message content) once the socket is up. JVM crash stacks

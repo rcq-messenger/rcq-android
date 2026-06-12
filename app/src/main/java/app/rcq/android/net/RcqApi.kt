@@ -455,11 +455,19 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         sendNoResult("DELETE", "/contacts/$uin", null, authed = true)
     }
 
-    data class ReportBody(val target_uin: Int, val reason: String, val context: String = "")
+    /** A bug-report attachment: an AES-GCM-sealed blob (nonce||ct||tag) already
+     *  uploaded to /media, plus the key the admin needs to decrypt it. */
+    data class ReportAttachment(val media_id: String, val key: String, val mime: String, val size: Int)
+    data class ReportBody(
+        val target_uin: Int,
+        val reason: String,
+        val context: String = "",
+        val attachments: List<ReportAttachment> = emptyList(),
+    )
 
-    /** File an abuse report (POST /reports). */
-    suspend fun report(targetUin: Int, reason: String, context: String = "") = withContext(Dispatchers.IO) {
-        sendNoResult("POST", "/reports", gson.toJson(ReportBody(targetUin, reason, context)), authed = true)
+    /** File an abuse / bug report (POST /reports), optionally with attachments. */
+    suspend fun report(targetUin: Int, reason: String, context: String = "", attachments: List<ReportAttachment> = emptyList()) = withContext(Dispatchers.IO) {
+        sendNoResult("POST", "/reports", gson.toJson(ReportBody(targetUin, reason, context, attachments)), authed = true)
     }
 
     // ── groups (rcq-spec 6.4) ────────────────────────────────────────

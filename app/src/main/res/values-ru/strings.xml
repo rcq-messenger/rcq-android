@@ -383,6 +383,7 @@
     <string name="settings_row_report_bug">Сообщить о баге</string>
     <string name="bug_report_hint">Опишите, что пошло не так. Платформа и версия приложения добавятся автоматически.</string>
     <string name="bug_report_placeholder">Что случилось?</string>
+    <string name="bug_report_attach">Прикрепить фото или видео</string>
     <string name="bug_report_send">Отправить</string>
     <string name="bug_report_sending">Отправка…</string>
     <string name="bug_report_sent">Спасибо. Репорт отправлен.</string>

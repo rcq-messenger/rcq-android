@@ -6,6 +6,11 @@ import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -38,6 +43,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Language
@@ -84,6 +91,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardOptions
@@ -203,6 +211,12 @@ private fun SettingsRoot(
     var bugText by remember { mutableStateOf("") }
     var bugSending by remember { mutableStateOf(false) }
     var bugSent by remember { mutableStateOf(false) }
+    // Bug-report attachments (#28): picked photo/video URIs (max 3), shown as
+    // thumbnails; sealed + uploaded only on send.
+    var bugAttachments by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    val bugPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null && bugAttachments.size < 3) bugAttachments = bugAttachments + uri
+    }
     // Manual update check from the About sheet (so a "Later"-dismissed update is
     // still reachable, tester #2).
     var updChecking by remember { mutableStateOf(false) }
@@ -390,7 +404,21 @@ private fun SettingsRoot(
                         onClick = {
                             bugSending = true
                             scope.launch {
-                                val ok = session.submitBugReport(bugText.trim())
+                                // Seal + upload each picked attachment first
+                                // (images compressed, videos sent raw ≤ 50MB).
+                                val atts = withContext(Dispatchers.IO) {
+                                    bugAttachments.mapNotNull { uri ->
+                                        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                                        val bytes = if (mime.startsWith("image/")) {
+                                            compressImageFor(context, uri)
+                                        } else {
+                                            runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                                        } ?: return@mapNotNull null
+                                        val outMime = if (mime.startsWith("image/")) "image/jpeg" else mime
+                                        session.uploadReportAttachment(bytes, outMime)
+                                    }
+                                }
+                                val ok = session.submitBugReport(bugText.trim(), atts)
                                 bugSending = false
                                 if (ok) bugSent = true
                             }
@@ -414,6 +442,28 @@ private fun SettingsRoot(
                             minLines = 3,
                             placeholder = { Text(stringResource(R.string.bug_report_placeholder), color = c.textSecondary) },
                         )
+                        // Attachments (#28): up to 3 photos/videos, thumbnails
+                        // with a remove (×); only uploaded on send.
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            bugAttachments.forEach { uri ->
+                                Box {
+                                    AttachThumb(uri, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
+                                    Icon(
+                                        Icons.Filled.Close, stringResource(R.string.common_cancel), tint = Color.White,
+                                        modifier = Modifier.align(Alignment.TopEnd).size(16.dp)
+                                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                            .clickable { bugAttachments = bugAttachments - uri },
+                                    )
+                                }
+                            }
+                            if (bugAttachments.size < 3 && !bugSending) {
+                                Box(
+                                    Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(c.bgPrimary)
+                                        .clickable { bugPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                                    contentAlignment = Alignment.Center,
+                                ) { Icon(Icons.Filled.Add, stringResource(R.string.bug_report_attach), tint = c.accent, modifier = Modifier.size(22.dp)) }
+                            }
+                        }
                     }
                 }
             },
@@ -971,6 +1021,34 @@ private fun Modifier.simpleVerticalScrollbar(state: ScrollState, color: Color, w
             )
         }
     }
+
+/** Small thumbnail for a picked bug-report attachment (#28): a downsampled
+ *  image preview, or a film icon for video / undecodable picks. */
+@Composable
+private fun AttachThumb(uri: android.net.Uri, modifier: Modifier) {
+    val c = RcqTheme.colors
+    val ctx = LocalContext.current
+    val img by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val mime = ctx.contentResolver.getType(uri) ?: ""
+                if (!mime.startsWith("image/")) return@runCatching null
+                ctx.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = 4 })
+                        ?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+    val bmp = img
+    if (bmp != null) {
+        Image(bitmap = bmp, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop)
+    } else {
+        Box(modifier.background(c.bgPrimary), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Videocam, null, tint = c.textSecondary, modifier = Modifier.size(22.dp))
+        }
+    }
+}
 
 @Composable
 private fun SettingToggleRow(title: String, subtitle: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
