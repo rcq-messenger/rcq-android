@@ -49,6 +49,15 @@ object RelayConfigStore {
     var version: Int? = null
         private set
 
+    /** Onion routing policy from the signed config (`onion.enabled`, O3). When
+     *  true AND ≥2 VLESS relays exist, [SingBoxTransport] builds a 2-hop chain
+     *  (M3 metadata resistance, RCQ/docs/onion-design.md). Default OFF — only a
+     *  signature-valid payload that explicitly sets it can flip onion on, so
+     *  rollout is a signed-config push to a cohort, ZERO app release. */
+    @Volatile
+    var onionEnabled: Boolean = false
+        private set
+
     /** True when [currentRelays] is serving a verified remote list (in memory),
      *  false when it's the bundled fallback. Diagnostics only. */
     fun usingRemote(): Boolean = cached != null
@@ -120,6 +129,10 @@ object RelayConfigStore {
         if (!signer.verifySignature(Base64.decode(sigB64, Base64.DEFAULT))) return null
 
         root.get("version")?.takeIf { !it.isJsonNull }?.let { version = runCatching { it.asInt }.getOrNull() }
+        // Optional onion policy (O3): `{"onion":{"enabled":true}}`. Absent → off.
+        onionEnabled = runCatching {
+            root.getAsJsonObject("onion")?.get("enabled")?.asBoolean ?: false
+        }.getOrDefault(false)
         val out = ArrayList<Pair<Int, SingBoxTransport.Relay>>()
         for (el in root.getAsJsonArray("relays")) {
             val o = el.asJsonObject

@@ -137,15 +137,47 @@ object SingBoxTransport {
     private fun buildConfig(): String {
         val rs = relays()
         val outbounds = JSONArray()
-        outbounds.put(JSONObject().apply {
-            put("type", "urltest")
-            put("tag", "out")
-            put("outbounds", JSONArray(rs.map { it.tag }))
-            put("url", "https://api.rcq.app/health")
-            put("interval", "5m")
-            put("tolerance", 50)
-        })
-        rs.forEach { outbounds.put(if (it.proto == "hysteria2") hysteria2Outbound(it) else vlessOutbound(it)) }
+        val vless = rs.filter { it.proto == "vless" }
+        // ONION (M3): when the signed config turns it on AND we have ≥2 VLESS
+        // relays, route through a 2-hop chain so no single relay sees the
+        // client IP AND the destination island together. A STICKY entry (the
+        // first VLESS relay — O4 will refine selection) carries opaque tunnels
+        // to a set of EXIT relays (each `detour`ed through the entry); a urltest
+        // races the EXIT chains so the exit rotates while the entry stays
+        // sticky (Tor guard lesson). The entry sees only "forward to the exit
+        // relay"; the exit sees only "from the entry IP → island". Falls back
+        // to the single-hop path below when onion is off or we lack 2 VLESS
+        // relays, so connectivity is never worse than today. Proven via a local
+        // sing-box prototype (RCQ/docs/onion-design.md).
+        if (RelayConfigStore.onionEnabled && vless.size >= 2) {
+            val entry = vless.first()
+            val exits = vless.drop(1)
+            outbounds.put(JSONObject().apply {
+                put("type", "urltest")
+                put("tag", "out")
+                put("outbounds", JSONArray(exits.map { "onion-${it.tag}" }))
+                put("url", "https://api.rcq.app/health")
+                put("interval", "5m")
+                put("tolerance", 50)
+            })
+            outbounds.put(vlessOutbound(entry).apply { put("tag", "onion-entry") })
+            exits.forEach { ex ->
+                outbounds.put(vlessOutbound(ex).apply {
+                    put("tag", "onion-${ex.tag}")
+                    put("detour", "onion-entry")
+                })
+            }
+        } else {
+            outbounds.put(JSONObject().apply {
+                put("type", "urltest")
+                put("tag", "out")
+                put("outbounds", JSONArray(rs.map { it.tag }))
+                put("url", "https://api.rcq.app/health")
+                put("interval", "5m")
+                put("tolerance", 50)
+            })
+            rs.forEach { outbounds.put(if (it.proto == "hysteria2") hysteria2Outbound(it) else vlessOutbound(it)) }
+        }
 
         val inbound = JSONObject().apply {
             put("type", "mixed")
