@@ -255,16 +255,20 @@ internal fun EmoticonText(
     mentionUin: ((String) -> Int?)? = null,
     // #2: cap visible lines (collapsed long message); Int.MAX_VALUE = no cap.
     maxLines: Int = Int.MAX_VALUE,
+    // #2: reports the layout so the caller can tell if the text was actually
+    // truncated (hasVisualOverflow) and only then offer "Show more".
+    onTextLayout: ((androidx.compose.ui.text.TextLayoutResult) -> Unit)? = null,
 ) {
     val tokens = remember(body) { Emoticons.tokenize(body) }
     val accent = RcqTheme.colors.accent
     val overflow = if (maxLines == Int.MAX_VALUE) TextOverflow.Clip else TextOverflow.Ellipsis
+    val layoutCb: (androidx.compose.ui.text.TextLayoutResult) -> Unit = { onTextLayout?.invoke(it) }
     val hasMention =
         (mentionNick != null && body.contains('#') && Emoticons.MENTION_RE.containsMatchIn(body)) ||
         (mentionUin != null && body.contains('@') && Emoticons.MENTION_AT_RE.containsMatchIn(body))
     // Fast path: a pure-text body with no resolvable mentions.
     if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention) {
-        Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow)
+        Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
         return
     }
     // Solo-emoticon message (#12): the whole body is a single `:code:` — animate
@@ -305,7 +309,7 @@ internal fun EmoticonText(
         }
         ann to inlineMap
     }
-    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier, maxLines = maxLines, overflow = overflow)
+    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
 }
 
 /** Append [text], turning each resolvable mention into a clickable accent nick

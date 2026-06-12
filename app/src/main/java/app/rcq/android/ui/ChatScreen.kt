@@ -1935,17 +1935,21 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     }
                 }
                 // #2: collapse a very long body to ~14 lines with "Показать
-                // полностью" (Telegram-style) so one wall of text doesn't fill
-                // the timeline. Heuristic by length / line count.
+                // полностью" (Telegram-style). Only a long CANDIDATE collapses,
+                // and the button shows ONLY when the text actually overflowed
+                // (hasVisualOverflow) — so a message that fits in <14 lines never
+                // gets a pointless toggle.
                 var bodyExpanded by remember(m.id) { mutableStateOf(false) }
-                val collapsible = !bodyExpanded &&
-                    (m.body.length > 700 || m.body.count { it == '\n' } >= 14)
+                var bodyOverflow by remember(m.id) { mutableStateOf(false) }
+                val candidate = m.body.length > 280
+                val collapsed = candidate && !bodyExpanded
                 EmoticonText(
                     m.body, color = c.textPrimary, fontSize = 15.sp, lineHeight = 19.sp,
                     mentionNick = mentionNick, onMentionClick = onMentionClick, mentionUin = mentionUin,
-                    maxLines = if (collapsible) 14 else Int.MAX_VALUE,
+                    maxLines = if (collapsed) 14 else Int.MAX_VALUE,
+                    onTextLayout = { if (collapsed) bodyOverflow = it.hasVisualOverflow },
                 )
-                if (collapsible) {
+                if (collapsed && bodyOverflow) {
                     Text(
                         stringResource(R.string.chat_show_more),
                         color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
