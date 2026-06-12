@@ -86,6 +86,9 @@ object Multihome {
                     nickname = nickname,
                     identity_key = Base64.encodeToString(identityPub, Base64.NO_WRAP),
                     signing_key = Base64.encodeToString(signingPub, Base64.NO_WRAP),
+                    // Ask to keep our primary number on this backup island
+                    // (best-effort; the server mints a fresh uin if it's taken).
+                    desired_uin = ownUin,
                 ),
             )
         val home = MultihomeStore.Home(ownUin, host, creds.uin, creds.token, System.currentTimeMillis(), auto)
