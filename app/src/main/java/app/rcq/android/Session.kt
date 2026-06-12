@@ -116,18 +116,62 @@ class Session(context: Context) {
         val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val ci = toUin?.let { CrossIslandStore.findByUin(it) }
         if (ci == null) {
-            socket.send(obj.toString())
+            socket.send(obj.toString())   // same-island: unchanged plaintext WS relay
             return
         }
         val me = store.uin ?: return
         val type = obj.get("type")?.takeIf { !it.isJsonNull }?.asString ?: return
         val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
+
+        // §5d v1-limit fix — BATCH ICE: each trickle candidate was its own
+        // sealed deposit = its own NSE banner on the peer (~12 banners/call).
+        // Micro-batch a burst into ONE "call_ice" envelope carrying a
+        // `candidates` JSON-array string; a short debounce trades a little
+        // setup latency for far fewer pushes. Cross-island only — same-island
+        // ICE rides the WS above with no banner cost, untouched.
+        if (type == "call_ice") {
+            val cand = obj.get("candidate")?.takeIf { !it.isJsonNull }?.asString ?: return
+            synchronized(ciIceLock) {
+                ciIceBuffer.getOrPut(callId) { mutableListOf() }.add(cand)
+                ciIceFlushJobs[callId]?.cancel()
+                ciIceFlushJobs[callId] = scope.launch {
+                    delay(CI_ICE_DEBOUNCE_MS)
+                    flushCrossIslandIce(ci, me, callId)
+                }
+            }
+            return
+        }
+        // Any other signal (offer/answer/end/renegotiate): flush pending ICE
+        // for this call first so none are stranded behind it, then deposit it.
+        flushCrossIslandIce(ci, me, callId)
         val data = mutableMapOf<String, String>()
         for ((k, v) in obj.entrySet()) {
             if (k == "type" || k == "to_uin" || k == "call_id") continue
             if (v.isJsonPrimitive) data[k] = v.asString
         }
-        val env = Envelope.callSignal(type, callId, data)
+        depositCallSignal(ci, me, Envelope.callSignal(type, callId, data))
+    }
+
+    // Cross-island ICE micro-batch state (keyed by call id).
+    private val ciIceLock = Any()
+    private val ciIceBuffer = mutableMapOf<String, MutableList<String>>()
+    private val ciIceFlushJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+    private val CI_ICE_DEBOUNCE_MS = 350L
+
+    /** Deposit all buffered cross-island ICE candidates for [callId] as one
+     *  sealed `call_ice` envelope (`candidates` = JSON array). No-op when the
+     *  buffer is empty. */
+    private fun flushCrossIslandIce(ci: CrossIslandStore.Contact, me: Int, callId: String) {
+        val cands = synchronized(ciIceLock) {
+            ciIceFlushJobs.remove(callId)?.cancel()
+            ciIceBuffer.remove(callId)
+        }
+        if (cands.isNullOrEmpty()) return
+        val arr = com.google.gson.JsonArray().apply { cands.forEach { add(it) } }
+        depositCallSignal(ci, me, Envelope.callSignal("call_ice", callId, mapOf("candidates" to arr.toString())))
+    }
+
+    private fun depositCallSignal(ci: CrossIslandStore.Contact, me: Int, env: Envelope) {
         scope.launch(Dispatchers.IO) {
             runCatching {
                 CrossIslandSender.deliverCall(ci, env, me, signingPriv(), signingPub(), serverHost())

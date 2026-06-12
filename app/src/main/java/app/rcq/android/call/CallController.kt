@@ -207,7 +207,18 @@ class CallController(
         when (type) {
             "call_offer" -> handleIncomingOffer(from, callId, obj)
             "call_answer" -> handleAnswer(callId, obj.get("sdp")?.asString ?: "")
-            "call_ice" -> handleIce(callId, obj.get("candidate")?.asString ?: "")
+            "call_ice" -> {
+                // Cross-island calls may batch a burst of trickle candidates
+                // into one envelope (`candidates` = JSON array string); a
+                // same-island WS signal still carries a single `candidate`.
+                val batch = obj.get("candidates")?.takeIf { !it.isJsonNull }?.asString
+                if (batch != null) {
+                    runCatching { com.google.gson.JsonParser.parseString(batch).asJsonArray }
+                        .getOrNull()?.forEach { handleIce(callId, it.asString) }
+                } else {
+                    handleIce(callId, obj.get("candidate")?.asString ?: "")
+                }
+            }
             "call_end" -> handleRemoteEnd(callId, obj.get("reason")?.takeIf { !it.isJsonNull }?.asString ?: "ended")
             "call_renegotiate" -> handleRenegotiate(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_answer" -> handleRenegotiateAnswer(callId, obj.get("sdp")?.asString ?: "")
