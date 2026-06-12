@@ -89,7 +89,7 @@ internal fun SectionHeader(
             .clip(RoundedCornerShape(0.dp))
             .background(c.bgSecondary.copy(alpha = 0.7f))
             .clickable(onClick = onToggle)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CollapseChevron(collapsed)

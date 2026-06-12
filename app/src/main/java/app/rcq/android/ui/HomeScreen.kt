@@ -1007,7 +1007,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
             .scale(scale)
             .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
             .background(c.bgPrimary)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {

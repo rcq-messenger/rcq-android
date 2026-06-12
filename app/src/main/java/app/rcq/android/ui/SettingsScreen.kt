@@ -3,6 +3,7 @@ package app.rcq.android.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,8 +23,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Autorenew
@@ -87,6 +94,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
@@ -418,9 +426,18 @@ private fun SettingsRoot(
                 // paragraph that otherwise pushes the "Download and install"
                 // button below the (non-scrolling) AlertDialog viewport, so the
                 // user saw "update available" but never the install action.
+                val aboutScroll = rememberScrollState()
+                val downloading = downloadState is app.rcq.android.net.UpdateChecker.DownloadState.Active
+                // When a download starts, the progress bar + hint live BELOW the
+                // notes — scroll there so the user sees the status (beta report).
+                LaunchedEffect(downloading) {
+                    if (downloading) aboutScroll.animateScrollTo(aboutScroll.maxValue)
+                }
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    modifier = Modifier
+                        .verticalScroll(aboutScroll)
+                        .simpleVerticalScrollbar(aboutScroll, c.textSecondary),
                 ) {
                     Text(stringResource(R.string.cs_about_tagline), color = c.textSecondary, fontSize = 14.sp)
                     Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
@@ -539,13 +556,60 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
             }) { Text(stringResource(R.string.common_save), color = if (nickname.isNotBlank()) c.accent else c.textSecondary) }
         })
 
+        val backupHomes by session.backupHomes.collectAsState()
+        fun copyText(label: String, value: String) {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText(label, value))
+            Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
+        }
+        fun shareText(value: String) {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, value)
+            }
+            context.startActivity(Intent.createChooser(send, context.getString(R.string.qr_share)))
+        }
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Identity header card (avatar + UIN), like the iOS profile.
+            // The number is copyable + shareable here too (beta report).
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatusIcon(ownStatus, size = 48.dp)
                 Column {
                     Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Text("#$ownUin", color = c.textMono, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("#$ownUin", color = c.textMono, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                        Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
+                            modifier = Modifier.size(15.dp).clickable { copyText("UIN", "$ownUin") })
+                        Icon(Icons.Filled.Share, stringResource(R.string.qr_share), tint = c.textSecondary,
+                            modifier = Modifier.size(15.dp).clickable {
+                                shareText(context.getString(R.string.qr_share_text, "$ownUin", session.contactLinks().second))
+                            })
+                    }
+                }
+            }
+            // Backup-island addresses: copyable/shareable too (a self-hoster's
+            // number there can differ from the flagship one).
+            if (backupHomes.isNotEmpty()) {
+                SettingsGroup {
+                    backupHomes.forEachIndexed { index, h ->
+                        if (index > 0) Divider()
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                Text(stringResource(R.string.backup_island_row_uin, h.uin), color = c.textSecondary, fontSize = 12.sp)
+                            }
+                            Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
+                                modifier = Modifier.size(16.dp).clickable { copyText("UIN", "${h.uin}@${h.host}") })
+                            Icon(Icons.Filled.Share, stringResource(R.string.qr_share), tint = c.textSecondary,
+                                modifier = Modifier.size(16.dp).clickable {
+                                    shareText(context.getString(R.string.qr_share_text, "${h.uin}@${h.host}", "https://${h.host}/u/${h.uin}"))
+                                })
+                        }
+                    }
                 }
             }
             // Profile views (own-profile only; tallied locally from sealed visit pings).
@@ -883,6 +947,27 @@ private fun SoundsScreen(onBack: () -> Unit) {
     }
 }
 
+/** A thin always-on vertical scrollbar thumb for a [ScrollState] column, so a
+ *  user can SEE there's more content below the fold (Compose has no built-in;
+ *  beta report on the update dialog). No-op when nothing scrolls. */
+private fun Modifier.simpleVerticalScrollbar(state: ScrollState, color: Color, width: Dp = 3.dp): Modifier =
+    drawWithContent {
+        drawContent()
+        val max = state.maxValue
+        if (max > 0) {
+            val viewport = size.height
+            val thumbH = (viewport / (viewport + max)) * viewport
+            val thumbY = (state.value.toFloat() / max) * (viewport - thumbH)
+            val w = width.toPx()
+            drawRoundRect(
+                color = color.copy(alpha = 0.5f),
+                topLeft = Offset(size.width - w, thumbY),
+                size = Size(w, thumbH),
+                cornerRadius = CornerRadius(w / 2, w / 2),
+            )
+        }
+    }
+
 @Composable
 private fun SettingToggleRow(title: String, subtitle: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val c = RcqTheme.colors
@@ -891,7 +976,20 @@ private fun SettingToggleRow(title: String, subtitle: String, checked: Boolean, 
             Text(title, color = c.textPrimary, fontSize = 15.sp)
             Text(subtitle, color = c.textSecondary, fontSize = 11.sp)
         }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
+        // Explicit OFF-state colours: the default M3 unchecked switch on our
+        // dark theme reads as "disabled" (flat grey blob). A visible thumb +
+        // border makes OFF look like a tappable-but-off switch (beta report).
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = c.accent,
+                uncheckedThumbColor = c.textSecondary,
+                uncheckedTrackColor = c.bgPrimary,
+                uncheckedBorderColor = c.textSecondary,
+            ),
+        )
     }
 }
 
