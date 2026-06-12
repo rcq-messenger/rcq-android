@@ -202,6 +202,12 @@
     <string name="pin_on">On</string>
     <string name="pin_codes_title">PIN codes</string>
     <string name="pin_codes_footer">A PIN encrypts your message history on this device and is required every time you open the app. Keep it safe: there is no recovery if you forget it.</string>
+    <string name="pin_autolock_title">Auto-lock</string>
+    <string name="pin_autolock_now">Immediately</string>
+    <string name="pin_autolock_1m">1 min</string>
+    <string name="pin_autolock_5m">5 min</string>
+    <string name="pin_autolock_15m">15 min</string>
+    <string name="pin_autolock_footer">How long the app can stay in the background before it asks for the PIN again. Longer is more convenient but less private on a shared device.</string>
     <string name="pin_set">Set a PIN</string>
     <string name="pin_change">Change PIN</string>
     <string name="pin_remove">Remove PIN</string>

@@ -1779,6 +1779,31 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
+            // Auto-lock grace (#10): how long the app can sit in the background
+            // before it demands the PIN again. Only meaningful with a PIN set.
+            if (configured) {
+                Spacer(Modifier.height(18.dp))
+                SectionLabel(stringResource(R.string.pin_autolock_title))
+                val grace by LocalStores.lockGrace.collectAsState()
+                val c2 = RcqTheme.colors
+                val presets = listOf(
+                    0 to stringResource(R.string.pin_autolock_now),
+                    60 to stringResource(R.string.pin_autolock_1m),
+                    300 to stringResource(R.string.pin_autolock_5m),
+                    900 to stringResource(R.string.pin_autolock_15m),
+                )
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c2.bgSecondary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    presets.forEach { (secs, label) ->
+                        val sel = grace == secs
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c2.accent else Color.Transparent)
+                                .clickable { LocalStores.setLockGrace(secs) }.padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(label, color = if (sel) Color.White else c2.textSecondary, fontSize = 12.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal) }
+                    }
+                }
+                SectionFooter(stringResource(R.string.pin_autolock_footer))
+            }
             SectionFooter(stringResource(R.string.pin_codes_footer))
         }
     }

@@ -89,6 +89,13 @@ object LocalStores {
     private val _screenSecurity = MutableStateFlow(false)
     val screenSecurity: StateFlow<Boolean> = _screenSecurity.asStateFlow()
 
+    /** PIN re-lock grace in SECONDS (#10): 0 = lock the moment the app
+     *  backgrounds (current behaviour); >0 = only re-lock if away longer than
+     *  this, so quick app switches don't demand the PIN every time. */
+    private val _lockGrace = MutableStateFlow(0)
+    val lockGrace: StateFlow<Int> = _lockGrace.asStateFlow()
+    fun lockGraceSeconds(): Int = if (::prefs.isInitialized) _lockGrace.value else 0
+
     /** Home-list UI flags (set of stable string ids) — currently which sections
      *  the user has folded. Global UI preference that survives leaving and
      *  re-entering the home screen, so a collapsed section stays collapsed
@@ -111,6 +118,7 @@ object LocalStores {
         _themeMode.value = runCatching { ThemeMode.valueOf(prefs.getString(K_THEME, null) ?: "SYSTEM") }
             .getOrDefault(ThemeMode.SYSTEM)
         _fontScale.value = prefs.getFloat(K_FONT_SCALE, 1.0f)
+        _lockGrace.value = prefs.getInt(K_LOCK_GRACE, 0)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
@@ -178,6 +186,11 @@ object LocalStores {
         val clamped = scale.coerceIn(0.85f, 1.5f)
         _fontScale.value = clamped
         prefs.edit().putFloat(K_FONT_SCALE, clamped).apply()
+    }
+
+    fun setLockGrace(seconds: Int) {
+        _lockGrace.value = seconds.coerceAtLeast(0)
+        prefs.edit().putInt(K_LOCK_GRACE, _lockGrace.value).apply()
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -326,6 +339,7 @@ object LocalStores {
     private const val K_REMOVED = "removed"
     private const val K_THEME = "theme_mode"
     private const val K_FONT_SCALE = "font_scale"
+    private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"

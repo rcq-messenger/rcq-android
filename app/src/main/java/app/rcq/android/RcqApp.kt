@@ -1,9 +1,11 @@
 package app.rcq.android
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import app.rcq.android.data.LocalStores
 import app.rcq.android.security.PanicPinService
 
 /**
@@ -28,13 +30,30 @@ class RcqApp : Application() {
         // reclaims the cached process — arming here turned every such reclaim
         // into a phantom "launch crash" report.
         PanicPinService.initLockState(this)
+        // Optional PIN-lock grace (#10): users asked not to re-enter the PIN on
+        // every quick app switch. With a grace > 0 we DON'T lock on background;
+        // instead we lock on RETURN if the app was away longer than the grace
+        // (Signal-style). elapsedRealtime so it can't be gamed by clock changes.
+        var backgroundedAt = 0L
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {
-                PanicPinService.lock(applicationContext)
+                val grace = LocalStores.lockGraceSeconds()
+                if (grace <= 0) PanicPinService.lock(applicationContext)
+                else backgroundedAt = SystemClock.elapsedRealtime()
                 // The user left a working app — anything that kills the
                 // process from here on (swipe-away, OEM reaper, memory
                 // pressure) is a normal background death, not a launch crash.
                 CrashReporter.launchComplete(applicationContext)
+            }
+
+            override fun onStart(owner: LifecycleOwner) {
+                val grace = LocalStores.lockGraceSeconds()
+                if (grace > 0 && backgroundedAt > 0L &&
+                    SystemClock.elapsedRealtime() - backgroundedAt >= grace * 1000L
+                ) {
+                    PanicPinService.lock(applicationContext)
+                }
+                backgroundedAt = 0L
             }
         })
     }

@@ -201,6 +201,12 @@
     <string name="pin_on">Вкл</string>
     <string name="pin_codes_title">PIN-коды</string>
     <string name="pin_codes_footer">PIN шифрует историю сообщений на этом устройстве и запрашивается при каждом открытии приложения. Запомните его: восстановления нет.</string>
+    <string name="pin_autolock_title">Автоблокировка</string>
+    <string name="pin_autolock_now">Сразу</string>
+    <string name="pin_autolock_1m">1 мин</string>
+    <string name="pin_autolock_5m">5 мин</string>
+    <string name="pin_autolock_15m">15 мин</string>
+    <string name="pin_autolock_footer">Сколько приложение может оставаться в фоне, прежде чем снова запросит PIN. Дольше удобнее, но менее безопасно на общем устройстве.</string>
     <string name="pin_set">Задать PIN</string>
     <string name="pin_change">Сменить PIN</string>
     <string name="pin_remove">Удалить PIN</string>
