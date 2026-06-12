@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import app.rcq.android.data.LocalStores
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -155,6 +156,35 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Filled.PushPin, null, tint = c.accent, modifier = Modifier.size(16.dp))
                 Text(pin, color = c.textPrimary, fontSize = 13.sp)
+            }
+        }
+
+        // Notifications (#11) — every member: All / Mentions only / None.
+        run {
+            val mutedSet by LocalStores.muted.collectAsState()
+            val mentionsSet by LocalStores.mentionsOnly.collectAsState()
+            val thread = LocalStores.groupThread(groupId)
+            val mode = when {
+                thread in mutedSet -> LocalStores.NotifyMode.NONE
+                thread in mentionsSet -> LocalStores.NotifyMode.MENTIONS
+                else -> LocalStores.NotifyMode.ALL
+            }
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.gi_notifications), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgSecondary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    listOf(
+                        LocalStores.NotifyMode.ALL to stringResource(R.string.gi_notify_all),
+                        LocalStores.NotifyMode.MENTIONS to stringResource(R.string.gi_notify_mentions),
+                        LocalStores.NotifyMode.NONE to stringResource(R.string.gi_notify_none),
+                    ).forEach { (m, label) ->
+                        val sel = mode == m
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
+                                .clickable { if (!sel) LocalStores.setNotifyMode(thread, m) }.padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 13.sp) }
+                    }
+                }
             }
         }
 

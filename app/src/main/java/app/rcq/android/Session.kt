@@ -2930,21 +2930,71 @@ class Session(context: Context) {
         if (!msg.fromMe && LocalStores.peerThread(msg.peerUin) == activeThread) sendReadReceipts(msg.peerUin)
     }
 
+    /** A transient in-app notification banner (#11): shown at the top while the
+     *  app is open and the user is NOT in that chat, so they see WHERE a message
+     *  landed (Android had only a sound). The preview line is built in the UI so
+     *  the media-kind fallback stays localized. */
+    data class InAppBanner(
+        val thread: String,
+        val title: String,
+        val sender: String?,   // group sender label; null for 1:1
+        val body: String,
+        val kind: String,
+        val peerUin: Int?,     // non-null → tapping opens this 1:1
+        val groupId: Int?,     // non-null → tapping opens this group
+    )
+    private val _banner = MutableStateFlow<InAppBanner?>(null)
+    val banner: StateFlow<InAppBanner?> = _banner.asStateFlow()
+    fun dismissBanner() { _banner.value = null }
+
+    /** True when [body] @mentions me — by `@<my nick>` or `#<my uin>` — used to
+     *  gate sound/banner for groups in "mentions only" notify mode. */
+    private fun bodyMentionsMe(body: String): Boolean {
+        if (body.isEmpty()) return false
+        store.uin?.let { if (body.contains("#$it")) return true }
+        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: return false
+        return body.contains("@$nick", ignoreCase = true)
+    }
+
     /** Bump the unread badge for a genuinely-new inbound message, unless
      *  the user is currently looking at that thread. Own (fromMe)
      *  messages never count. */
     private fun bumpUnreadIfInbound(msg: ChatMessage, thread: String) {
         if (msg.fromMe) return
         // Badge only counts for threads you're NOT looking at; the receive
-        // SOUND plays for any inbound non-muted message — including the open
-        // chat (iOS/Telegram behaviour). The old code returned early for the
-        // active thread, so a tester sitting inside a chat heard nothing.
+        // SOUND plays for any inbound message that passes the notify gate —
+        // including the open chat (iOS/Telegram behaviour). The old code
+        // returned early for the active thread, so a tester sitting inside a
+        // chat heard nothing.
         if (thread == activeThread) LocalStores.clearUnread(thread)
         else LocalStores.bumpUnread(thread)
         // Skip the receive sound during the post-connect backfill window so a
         // pile of messages missed while away doesn't ring N times on open.
         val live = System.currentTimeMillis() >= soundsSuppressedUntil
-        if (live && !LocalStores.isMuted(thread)) app.rcq.android.media.SoundService.message()
+        // Notify gate (#11): NONE = silent, MENTIONS = only when @mentioned,
+        // ALL = always. One authoritative read of the mute state (no second
+        // push path on Android), so mute is deterministic.
+        val ring = when (LocalStores.notifyMode(thread)) {
+            LocalStores.NotifyMode.NONE -> false
+            LocalStores.NotifyMode.MENTIONS -> msg.groupId != null && bodyMentionsMe(msg.body)
+            LocalStores.NotifyMode.ALL -> true
+        }
+        if (live && ring) app.rcq.android.media.SoundService.message()
+        // In-app banner for a thread you're NOT looking at — same gate as the
+        // sound, so a muted / non-mention message never interrupts.
+        if (live && ring && thread != activeThread) emitBanner(msg, thread)
+    }
+
+    private fun emitBanner(msg: ChatMessage, thread: String) {
+        val gid = msg.groupId
+        if (gid != null) {
+            val sender = _contacts.value.firstOrNull { it.uin == msg.senderUin }?.nickname
+                ?: msg.senderUin?.let { "#$it" }
+            _banner.value = InAppBanner(thread, groupName(gid), sender, msg.body, msg.kind, null, gid)
+        } else {
+            val name = _contacts.value.firstOrNull { it.uin == msg.peerUin }?.nickname ?: "#${msg.peerUin}"
+            _banner.value = InAppBanner(thread, name, null, msg.body, msg.kind, msg.peerUin, null)
+        }
     }
 
     /** Wall-clock until which inbound receive sounds are muted — set on every

@@ -128,6 +128,12 @@
     <string name="weblink_failed">Не удалось подключить веб. Код мог истечь — попробуйте снова.</string>
     <string name="weblink_taken">Эта ссылка уже использована. Обновите QR на сайте и отсканируйте новый.</string>
     <string name="common_add">Добавить</string>
+    <string name="kind_message">Новое сообщение</string>
+    <string name="kind_photo">Фото</string>
+    <string name="kind_video">Видео</string>
+    <string name="kind_voice">Голосовое сообщение</string>
+    <string name="kind_file">Файл</string>
+    <string name="kind_location">Геопозиция</string>
     <string name="addlink_title">Добавить контакт?</string>
     <string name="addlink_body">Добавить %1$s в контакты?</string>
     <string name="addlink_failed">Не удалось добавить контакт. Проверьте соединение и попробуйте снова.</string>
@@ -593,6 +599,10 @@
     <string name="gi_rename">Переименовать</string>
     <string name="gi_change_avatar">Сменить аватар</string>
     <string name="gi_settings">НАСТРОЙКИ ГРУППЫ</string>
+    <string name="gi_notifications">УВЕДОМЛЕНИЯ</string>
+    <string name="gi_notify_all">Все</string>
+    <string name="gi_notify_mentions">Упоминания</string>
+    <string name="gi_notify_none">Нет</string>
     <string name="gi_pinned">Закреплённое сообщение</string>
     <string name="gi_none">Нет</string>
     <string name="gi_who_post">Кто может писать</string>

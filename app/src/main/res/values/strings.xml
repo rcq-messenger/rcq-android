@@ -129,6 +129,12 @@
     <string name="weblink_failed">Couldn\'t connect to web. The code may have expired — try again.</string>
     <string name="weblink_taken">This link was already used. Refresh the QR on the website and scan the new one.</string>
     <string name="common_add">Add</string>
+    <string name="kind_message">New message</string>
+    <string name="kind_photo">Photo</string>
+    <string name="kind_video">Video</string>
+    <string name="kind_voice">Voice message</string>
+    <string name="kind_file">File</string>
+    <string name="kind_location">Location</string>
     <string name="addlink_title">Add contact?</string>
     <string name="addlink_body">Add %1$s to your contacts?</string>
     <string name="addlink_failed">Couldn\'t add the contact. Check the connection and try again.</string>
@@ -594,6 +600,10 @@
     <string name="gi_rename">Rename</string>
     <string name="gi_change_avatar">Change avatar</string>
     <string name="gi_settings">GROUP SETTINGS</string>
+    <string name="gi_notifications">NOTIFICATIONS</string>
+    <string name="gi_notify_all">All</string>
+    <string name="gi_notify_mentions">Mentions</string>
+    <string name="gi_notify_none">None</string>
     <string name="gi_pinned">Pinned message</string>
     <string name="gi_none">None</string>
     <string name="gi_who_post">Who can post</string>

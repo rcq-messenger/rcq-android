@@ -19,7 +19,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
@@ -499,6 +501,34 @@ private fun RcqApp(session: Session) {
             else androidx.compose.material3.LinearProgressIndicator(progress = { a.progress }, color = RcqTheme.colors.accent, modifier = barMod)
         }
 
+        // In-app message banner (#11): when a message lands for a chat you're
+        // NOT in, slide a tappable banner down from the top so you SEE where it
+        // went (Android used to give only a sound). Auto-hides after 4s.
+        if (s is UiState.Registered && !locked) {
+            val banner by session.banner.collectAsState()
+            // Don't show a banner for the chat that's already open.
+            val openThread = when (val t = chatTarget) {
+                is ChatTarget.Peer -> app.rcq.android.data.LocalStores.peerThread(t.uin)
+                is ChatTarget.Group -> app.rcq.android.data.LocalStores.groupThread(t.id)
+                else -> null
+            }
+            LaunchedEffect(banner?.thread) {
+                if (banner != null) { kotlinx.coroutines.delay(4000); session.dismissBanner() }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = banner != null && banner?.thread != openThread,
+                enter = androidx.compose.animation.slideInVertically { -it } + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.slideOutVertically { -it } + androidx.compose.animation.fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
+                banner?.let { b -> InAppBanner(b, onTap = {
+                    session.dismissBanner()
+                    if (b.groupId != null) chatTarget = ChatTarget.Group(b.groupId)
+                    else if (b.peerUin != null) chatTarget = ChatTarget.Peer(b.peerUin)
+                }) }
+            }
+        }
+
         // Server-join from a scanned rcq://server/<host>?invite=<code> deep link:
         // confirm, then register a fresh account on that host with the invite.
         val joinReq by ServerJoinLink.pending.collectAsState()
@@ -578,6 +608,40 @@ private fun RcqApp(session: Session) {
                         onDismiss = { ContactAddLink.pending.value = null },
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Top in-app message banner (#11): sender/title + a one-line preview, tap to
+ *  open. The media-kind fallback is resolved here so it stays localized. */
+@Composable
+private fun InAppBanner(b: Session.InAppBanner, onTap: () -> Unit) {
+    val c = RcqTheme.colors
+    val preview = b.body.ifBlank {
+        stringResource(
+            when (b.kind) {
+                "photo" -> R.string.kind_photo
+                "video" -> R.string.kind_video
+                "voice" -> R.string.kind_voice
+                "file" -> R.string.kind_file
+                "location" -> R.string.kind_location
+                else -> R.string.kind_message
+            },
+        )
+    }
+    val line = b.sender?.let { "$it: $preview" } ?: preview
+    Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
+                .clickable(onClick = onTap).padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(c.accent))
+            Column(Modifier.weight(1f)) {
+                Text(b.title, color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(line, color = c.textSecondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

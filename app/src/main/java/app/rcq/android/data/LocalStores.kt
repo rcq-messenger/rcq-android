@@ -41,6 +41,12 @@ object LocalStores {
     private val _muted = MutableStateFlow<Set<String>>(emptySet())
     val muted: StateFlow<Set<String>> = _muted.asStateFlow()
 
+    /** Group threads in "mentions only" notify mode: silent UNLESS the message
+     *  @mentions me (#11). Mutually exclusive with [_muted] (= fully silent);
+     *  a thread in neither set rings for everything. */
+    private val _mentionsOnly = MutableStateFlow<Set<String>>(emptySet())
+    val mentionsOnly: StateFlow<Set<String>> = _mentionsOnly.asStateFlow()
+
     private val _archived = MutableStateFlow<Set<String>>(emptySet())
     val archived: StateFlow<Set<String>> = _archived.asStateFlow()
 
@@ -133,6 +139,7 @@ object LocalStores {
         if (accountId == null) {
             _favorites.value = emptySet()
             _muted.value = emptySet()
+            _mentionsOnly.value = emptySet()
             _archived.value = emptySet()
             _removed.value = emptySet()
             _unread.value = emptyMap()
@@ -142,6 +149,7 @@ object LocalStores {
         }
         _favorites.value = prefs.getStringSet(pk(K_FAV), emptySet())!!.toSet()
         _muted.value = prefs.getStringSet(pk(K_MUTE), emptySet())!!.toSet()
+        _mentionsOnly.value = prefs.getStringSet(pk(K_MENTIONS), emptySet())!!.toSet()
         _archived.value = prefs.getStringSet(pk(K_ARCH), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
@@ -171,6 +179,33 @@ object LocalStores {
 
     fun isMuted(thread: String) = thread in _muted.value
     fun toggleMute(thread: String) = toggle(_muted, K_MUTE, thread)
+
+    fun isMentionsOnly(thread: String) = thread in _mentionsOnly.value
+
+    /** Group notify mode (#11): ALL rings always, MENTIONS rings only on an
+     *  @mention, NONE is fully silent. The two sets stay mutually exclusive. */
+    enum class NotifyMode { ALL, MENTIONS, NONE }
+    fun notifyMode(thread: String): NotifyMode = when {
+        thread in _muted.value -> NotifyMode.NONE
+        thread in _mentionsOnly.value -> NotifyMode.MENTIONS
+        else -> NotifyMode.ALL
+    }
+    fun setNotifyMode(thread: String, mode: NotifyMode) {
+        if (acct == null) return
+        val muted = _muted.value.toMutableSet()
+        val mentions = _mentionsOnly.value.toMutableSet()
+        muted.remove(thread); mentions.remove(thread)
+        when (mode) {
+            NotifyMode.ALL -> {}
+            NotifyMode.MENTIONS -> mentions.add(thread)
+            NotifyMode.NONE -> muted.add(thread)
+        }
+        _muted.value = muted; _mentionsOnly.value = mentions
+        prefs.edit()
+            .putStringSet(pk(K_MUTE), muted)
+            .putStringSet(pk(K_MENTIONS), mentions)
+            .apply()
+    }
 
     fun isArchived(thread: String) = thread in _archived.value
     fun toggleArchive(thread: String) = toggle(_archived, K_ARCH, thread)
@@ -329,12 +364,13 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_UNREAD, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
     private const val K_FAV = "favorites"
     private const val K_MUTE = "muted"
+    private const val K_MENTIONS = "mentions_only"
     private const val K_ARCH = "archived"
     private const val K_REMOVED = "removed"
     private const val K_THEME = "theme_mode"
