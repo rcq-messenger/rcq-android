@@ -906,19 +906,28 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 )
             }
 
-            // Onion routing (M3, experimental). A per-device opt-in for the
-            // 2-hop chain so no single relay sees both the user and the server.
-            // Only meaningful when the obfuscated connection above is on.
+            // Onion routing (M3, experimental). One switch for the user: turning
+            // it on ALSO engages the obfuscated connection, because onion routes
+            // THROUGH the obfuscated tunnel and can't work without it. So the
+            // user never has to think about two toggles.
             var onion by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isOnionOptIn(context)) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.pv_onion), color = if (obfuscated) c.textPrimary else c.textSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_onion), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     Text(stringResource(R.string.pv_onion_desc), color = c.textSecondary, fontSize = 11.sp)
                 }
                 Switch(
-                    enabled = obfuscated,
                     checked = onion,
-                    onCheckedChange = { onion = it; app.rcq.android.net.SingBoxTransport.setOnionOptIn(context, it) },
+                    onCheckedChange = {
+                        onion = it
+                        app.rcq.android.net.SingBoxTransport.setOnionOptIn(context, it)
+                        // Onion implies the protected connection. Flip it on too
+                        // so this single switch is all the user touches.
+                        if (it && !obfuscated) {
+                            obfuscated = true
+                            app.rcq.android.net.SingBoxTransport.setEnabled(context, true)
+                        }
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }

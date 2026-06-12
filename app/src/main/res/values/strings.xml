@@ -535,7 +535,7 @@
     <string name="pv_obfuscated">Obfuscated connection</string>
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>
     <string name="pv_onion">Onion routing (experimental)</string>
-    <string name="pv_onion_desc">Routes through two relays so no single relay sees both you and the server. Adds a little latency. Needs the obfuscated connection above. Takes effect on next launch.</string>
+    <string name="pv_onion_desc">Routes through two relays so no single relay sees both you and the server. Turns on the protected connection automatically. A little slower. Takes effect on next launch.</string>
     <!-- Polls -->
     <string name="poll_create">Create poll</string>
     <string name="poll_question">Question</string>
