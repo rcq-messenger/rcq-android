@@ -407,6 +407,7 @@
     <string name="uin_shop_error_taken">Someone grabbed it first. Try a different UIN.</string>
     <string name="uin_shop_error_generic">Purchase failed. Try again.</string>
     <string name="settings_foot_appearance">Choose light, dark, or follow the system theme.</string>
+    <string name="settings_text_size">Text size</string>
     <string name="settings_row_app_icon">App icon</string>
     <string name="app_icon_default">Default</string>
     <string name="app_icon_footer">Pick a different launcher icon. The home screen may flicker for a moment while it updates.</string>

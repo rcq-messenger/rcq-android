@@ -406,6 +406,7 @@
     <string name="uin_shop_error_taken">Кто-то перехватил. Попробуй другой UIN.</string>
     <string name="uin_shop_error_generic">Не удалось купить. Попробуй ещё раз.</string>
     <string name="settings_foot_appearance">Светлая, тёмная или как в системе.</string>
+    <string name="settings_text_size">Размер текста</string>
     <string name="settings_row_app_icon">Иконка приложения</string>
     <string name="app_icon_default">По умолчанию</string>
     <string name="app_icon_footer">Выберите другую иконку на рабочем столе. При смене иконка может на миг мигнуть, пока система обновляет её.</string>

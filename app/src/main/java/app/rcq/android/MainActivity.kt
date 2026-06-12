@@ -173,7 +173,16 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 if (secure) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
                 else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
             }
-            RcqTheme(mode) { RcqApp(session) }
+            // #3 Accessibility: apply the in-app text-size multiplier on TOP of
+            // the OS font scale by overriding LocalDensity. Every `.sp` text in
+            // the app scales from this single wrapper.
+            val fontScale by LocalStores.fontScale.collectAsState()
+            val base = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(base.density, base.fontScale * fontScale),
+            ) {
+                RcqTheme(mode) { RcqApp(session) }
+            }
         }
     }
 

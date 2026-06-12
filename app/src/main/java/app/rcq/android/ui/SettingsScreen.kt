@@ -248,6 +248,10 @@ private fun SettingsRoot(
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_appearance))
             SegmentedTheme(themeMode) { LocalStores.setThemeMode(it) }
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.settings_text_size), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+            val fontScale by LocalStores.fontScale.collectAsState()
+            SegmentedFontScale(fontScale) { LocalStores.setFontScale(it) }
             SectionFooter(stringResource(R.string.settings_foot_appearance))
             Spacer(Modifier.height(12.dp))
             val lang by LanguageManager.current.collectAsState()
@@ -1828,6 +1832,25 @@ private fun SegmentedTheme(mode: ThemeMode, onPick: (ThemeMode) -> Unit) {
                     .clickable { onPick(m) }.padding(vertical = 9.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 14.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal) }
+        }
+    }
+}
+
+/** Text-size presets (#3 accessibility). The glyph grows with each step so the
+ *  control previews itself. Multiplies the OS font scale app-wide. */
+@Composable
+private fun SegmentedFontScale(scale: Float, onPick: (Float) -> Unit) {
+    val c = RcqTheme.colors
+    val steps = listOf(0.85f to 13, 1.0f to 16, 1.15f to 19, 1.3f to 22)
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgSecondary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        steps.forEach { (s, glyph) ->
+            // Selected when within half a step of this preset.
+            val sel = kotlin.math.abs(scale - s) < 0.08f
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
+                    .clickable { onPick(s) }.padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text("A", color = if (sel) Color.White else c.textSecondary, fontSize = glyph.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal) }
         }
     }
 }

@@ -67,6 +67,12 @@ object LocalStores {
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
+    /** In-app text-size multiplier ON TOP of the OS font scale (accessibility:
+     *  the audience skews 30+ with imperfect vision). Applied app-wide by
+     *  overriding LocalDensity.fontScale. 1.0 = system default. */
+    private val _fontScale = MutableStateFlow(1.0f)
+    val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
+
     /** Notification-sound toggles (iOS SoundService parity). */
     private val _soundMaster = MutableStateFlow(true)
     val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
@@ -104,6 +110,7 @@ object LocalStores {
         // Global (app-wide) settings only; per-account flows load in bindAccount.
         _themeMode.value = runCatching { ThemeMode.valueOf(prefs.getString(K_THEME, null) ?: "SYSTEM") }
             .getOrDefault(ThemeMode.SYSTEM)
+        _fontScale.value = prefs.getFloat(K_FONT_SCALE, 1.0f)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
@@ -165,6 +172,12 @@ object LocalStores {
         if (acct == null || uin in _removed.value) return
         _removed.value = _removed.value + uin
         prefs.edit().putStringSet(pk(K_REMOVED), _removed.value.map(Int::toString).toSet()).apply()
+    }
+
+    fun setFontScale(scale: Float) {
+        val clamped = scale.coerceIn(0.85f, 1.5f)
+        _fontScale.value = clamped
+        prefs.edit().putFloat(K_FONT_SCALE, clamped).apply()
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -312,6 +325,7 @@ object LocalStores {
     private const val K_ARCH = "archived"
     private const val K_REMOVED = "removed"
     private const val K_THEME = "theme_mode"
+    private const val K_FONT_SCALE = "font_scale"
     private const val K_UNREAD = "unread"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
