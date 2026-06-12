@@ -27,10 +27,50 @@ object SingBoxTransport {
     const val LOCAL_PORT = 1089
     private const val PREFS = "rcq_singbox"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_ENTRY = "onion_entry"   // sticky onion guard (O4)
 
     @Volatile
     var isActive = false
         private set
+
+    // App context captured at startup so the onion config build can read/write
+    // the sticky-entry pref without threading a Context through start().
+    @Volatile
+    private var appCtx: Context? = null
+
+    fun init(ctx: Context) { appCtx = ctx.applicationContext }
+
+    private fun prefs(): android.content.SharedPreferences? =
+        appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Sticky onion ENTRY guard (Tor lesson: pin the entry, don't reshuffle it
+     *  every launch). Returns the persisted entry tag if it's still a VLESS
+     *  relay in [pool]; otherwise picks the highest-priority VLESS (pool is
+     *  priority-sorted), persists it, and returns that. */
+    private fun stickyEntry(pool: List<Relay>): Relay {
+        val persisted = prefs()?.getString(KEY_ENTRY, null)
+        pool.firstOrNull { it.tag == persisted }?.let { return it }
+        val pick = pool.first()
+        prefs()?.edit()?.putString(KEY_ENTRY, pick.tag)?.apply()
+        return pick
+    }
+
+    /** Rotate the onion ENTRY guard to the next VLESS relay (round-robin),
+     *  persisting the choice. Called when the current entry is confirmed
+     *  blocked/dead (the whole onion path dies with its single entry). Returns
+     *  true when a different entry was selected. Caller restarts the transport
+     *  to rebuild the chain. */
+    fun rotateEntry(): Boolean {
+        val vless = relays().filter { it.proto == "vless" }
+        if (vless.size < 2) return false
+        val cur = prefs()?.getString(KEY_ENTRY, null)
+        val idx = vless.indexOfFirst { it.tag == cur }
+        val next = vless[(idx + 1).mod(vless.size)]
+        if (next.tag == cur) return false
+        prefs()?.edit()?.putString(KEY_ENTRY, next.tag)?.apply()
+        android.util.Log.i("RCQsingbox", "onion entry rotated -> ${next.tag}")
+        return true
+    }
 
     private var box: rcqbox.BoxService? = null
 
@@ -140,9 +180,10 @@ object SingBoxTransport {
         val vless = rs.filter { it.proto == "vless" }
         // ONION (M3): when the signed config turns it on AND we have ≥2 VLESS
         // relays, route through a 2-hop chain so no single relay sees the
-        // client IP AND the destination island together. A STICKY entry (the
-        // first VLESS relay — O4 will refine selection) carries opaque tunnels
-        // to a set of EXIT relays (each `detour`ed through the entry); a urltest
+        // client IP AND the destination island together. A STICKY entry (O4:
+        // a persisted guard, [stickyEntry], rotated only on confirmed block)
+        // carries opaque tunnels to a set of EXIT relays (each `detour`ed
+        // through the entry); a urltest
         // races the EXIT chains so the exit rotates while the entry stays
         // sticky (Tor guard lesson). The entry sees only "forward to the exit
         // relay"; the exit sees only "from the entry IP → island". Falls back
@@ -150,8 +191,8 @@ object SingBoxTransport {
         // relays, so connectivity is never worse than today. Proven via a local
         // sing-box prototype (RCQ/docs/onion-design.md).
         if (RelayConfigStore.onionEnabled && vless.size >= 2) {
-            val entry = vless.first()
-            val exits = vless.drop(1)
+            val entry = stickyEntry(vless)          // O4: persisted guard, not just vless.first()
+            val exits = vless.filter { it.tag != entry.tag }
             outbounds.put(JSONObject().apply {
                 put("type", "urltest")
                 put("tag", "out")

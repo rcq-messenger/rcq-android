@@ -663,6 +663,35 @@ class Session(context: Context) {
                 runCatching { drainVisitedQueuesOnce() }
             }
         }
+        // O4b onion ENTRY-guard rotation: when onion is active but the backend
+        // is unreachable through the current route for two consecutive checks,
+        // the sticky ENTRY relay is likely blocked (the whole 2-hop path dies
+        // with its single entry) — rotate to the next entry and rebuild the
+        // transport so a blocked guard self-heals. DORMANT unless onion is on
+        // (off by default), so it's a no-op for everyone until the O5 cohort
+        // flip. Won't fire on plain single-hop (onionEnabled gate).
+        scope.launch {
+            val transport = app.rcq.android.net.SingBoxTransport
+            var deadStreak = 0
+            while (true) {
+                delay(60_000)
+                if (!transport.isActive || !app.rcq.android.net.RelayConfigStore.onionEnabled) { deadStreak = 0; continue }
+                val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) }
+                if (ok) { deadStreak = 0; continue }
+                deadStreak++
+                if (deadStreak >= 2 && transport.rotateEntry()) {
+                    deadStreak = 0
+                    withContext(Dispatchers.IO) {
+                        transport.stop()
+                        app.rcq.android.net.RelayConfigStore.prime(appCtx)
+                        transport.start()
+                    }
+                    api = newApi()
+                    socket = newSocket()
+                    socket.reconnectNow()
+                }
+            }
+        }
         scope.launch {
             // Obfuscated transport (censorship circumvention), engaged BEFORE
             // the socket/API connect so they ride the sing-box tunnel. Engage

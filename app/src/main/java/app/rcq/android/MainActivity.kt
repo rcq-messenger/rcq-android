@@ -154,6 +154,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         enableEdgeToEdge()
         app.rcq.android.data.LanguageManager.init(applicationContext)
         LocalStores.init(applicationContext)
+        app.rcq.android.net.SingBoxTransport.init(applicationContext)
         app.rcq.android.data.VisitStore.init(applicationContext)
         app.rcq.android.media.SoundService.init(applicationContext)
         // Load the account roster (migrating a pre-multi-account install to
