@@ -1821,7 +1821,11 @@ class Session(context: Context) {
                 // Lone member, or every other key is unusable — nothing to send.
                 RcqApi.SendResponse(delivered = false)
             } else {
-                withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads) }
+                // owner_only groups attach our token so the server can verify
+                // we're the owner (sealed sender hides nothing here — every
+                // broadcast post is known to be the owner's); 'all' groups stay
+                // anonymous to preserve sealed sender.
+                withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, authed = group.postPolicy == "owner_only") }
             }
             updateGroupMsgState(groupId, id, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
             // Mirror the message to the user's other devices (best-effort).

@@ -587,13 +587,17 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
     data class GroupPayload(val to_uin: Int, val payload: String)
     data class GroupSendBody(val group_id: Int, val envelope_type: String, val payloads: List<GroupPayload>)
 
-    /** Group send: per-recipient fan-out (anonymous, like 1:1 sealed). */
-    suspend fun sendGroupSealed(groupId: Int, payloads: List<GroupPayload>, envelopeType: String = "message"): SendResponse =
+    /** Group send: per-recipient fan-out (anonymous, like 1:1 sealed).
+     *  [authed] attaches our bearer token — used ONLY for owner_only
+     *  (broadcast) groups, where the server must verify the poster IS the
+     *  owner. For normal 'all' groups it stays false so sealed sender keeps
+     *  hiding which member sent the message. */
+    suspend fun sendGroupSealed(groupId: Int, payloads: List<GroupPayload>, envelopeType: String = "message", authed: Boolean = false): SendResponse =
         withContext(Dispatchers.IO) {
             post(
                 "/messages/group-sealed",
                 gson.toJson(GroupSendBody(groupId, envelopeType, payloads)),
-                authed = false,
+                authed = authed,
                 SendResponse::class.java,
             )
         }
