@@ -780,6 +780,7 @@
     <string name="add_search_prompt">Search for people and groups to add. A bare number is on your island; for another island type number@island.</string>
     <string name="add_on_own_island">Send request · on %1$s</string>
     <string name="add_ci_row">Contact on another island</string>
+    <string name="add_ci_self">This is you — your account on this island</string>
     <string name="add_searching">Searching…</string>
     <string name="add_no_results">Nothing found.</string>
     <string name="add_already_contact">already in contacts</string>

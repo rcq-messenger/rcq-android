@@ -310,6 +310,15 @@ class Session(context: Context) {
     /** The server this identity lives on (for display in Settings). */
     val currentServer: String get() = serverHost()
 
+    /** True when `uin@host` is one of MY OWN homes (primary or a backup island
+     *  registered via multihoming). Used to stop a user "adding"/"friending"
+     *  their own other-island copy: a backup is the SAME identity, not a second
+     *  account, so a request to it just hangs forever. */
+    fun isOwnAddress(uin: Int, host: String): Boolean {
+        if (uin == store.uin && host == serverHost()) return true
+        return backupHomes.value.any { it.uin == uin && it.host == host }
+    }
+
     /** Normalize a user-typed server into a bare host (drop scheme/path).
      *  Blank / the default host → null (= default public server). */
     private fun normalizeHost(input: String?): String? =

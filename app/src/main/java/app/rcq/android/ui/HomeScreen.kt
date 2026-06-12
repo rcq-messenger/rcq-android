@@ -1344,9 +1344,16 @@ private fun AddContactDialog(
                                 ?.takeIf { it.host != session.currentServer }
                         }
                         if (ci != null) {
-                            AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_row), accent = true) {
-                                scope.launch {
-                                    if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
+                            // A backup island is the SAME identity, not a second
+                            // account — "adding" your own copy just hangs as a
+                            // self-request. Surface it as you, don't add.
+                            if (session.isOwnAddress(ci.uin, ci.host)) {
+                                AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_self)) {}
+                            } else {
+                                AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_row), accent = true) {
+                                    scope.launch {
+                                        if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
+                                    }
                                 }
                             }
                         }

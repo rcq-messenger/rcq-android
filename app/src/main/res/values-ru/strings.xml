@@ -779,6 +779,7 @@
     <string name="add_search_prompt">Ищите людей и группы. Просто номер действует на вашем острове; для другого острова введите номер@остров.</string>
     <string name="add_on_own_island">Отправить запрос · на %1$s</string>
     <string name="add_ci_row">Контакт с другого острова</string>
+    <string name="add_ci_self">Это вы, ваш аккаунт на этом острове</string>
     <string name="add_searching">Поиск…</string>
     <string name="add_no_results">Ничего не найдено.</string>
     <string name="add_already_contact">уже в контактах</string>
