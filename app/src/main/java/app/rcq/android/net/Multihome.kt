@@ -262,6 +262,21 @@ object Multihome {
             RcqFederation.Home(h.get("host").asString, h.get("uin").asInt)
         }
 
+    /** Apply a contact's SELF-PUSHED home-island record (gossip B1): verify it
+     *  is signed by [senderSigningPub] (the same Ed25519 key that signed the
+     *  envelope it arrived in — binds the record to its real sender), reject a
+     *  ts rollback against what we've already cached, and cache the homes for
+     *  future sends. Returns true when the cache was updated. Never throws. */
+    fun applyPushedRecord(senderUin: Int, senderSigningPub: ByteArray, rec: JsonObject): Boolean = runCatching {
+        val expectedSk = Base64.encodeToString(senderSigningPub, Base64.NO_WRAP)
+        val prevTs = MultihomeStore.cachedPeerHomes(senderUin)?.recTs ?: 0
+        val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = expectedSk, minTs = prevTs.takeIf { it > 0 })
+        if (v !is RcqFederation.VerifyResult.Ok) return false
+        val ts = v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+        MultihomeStore.cachePeerHomes(senderUin, homesOf(v.doc), ts)
+        true
+    }.getOrDefault(false)
+
     /** Resolve a peer's home list. Sources, in order: (1) OUR island's by-uin
      *  owner record (peer is on / multi-homed onto us), seeded into our gossip
      *  store on success; (2) OUR island's GOSSIP mirror by sk (some contact
@@ -283,7 +298,7 @@ object Multihome {
                 if (v is RcqFederation.VerifyResult.Ok) {
                     mirrorRecord(ownHost, body)  // seed gossip so other islands can serve it by sk
                     val homes = homesOf(v.doc)
-                    MultihomeStore.cachePeerHomes(peerUin, homes)
+                    MultihomeStore.cachePeerHomes(peerUin, homes, v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0)
                     return homes
                 }
                 null
@@ -295,7 +310,7 @@ object Multihome {
             val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = peerSigningKeyB64)
             if (v is RcqFederation.VerifyResult.Ok) {
                 val homes = homesOf(v.doc)
-                MultihomeStore.cachePeerHomes(peerUin, homes)
+                MultihomeStore.cachePeerHomes(peerUin, homes, v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0)
                 return homes
             }
         }

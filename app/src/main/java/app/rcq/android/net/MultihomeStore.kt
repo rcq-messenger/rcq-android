@@ -31,8 +31,10 @@ object MultihomeStore {
     )
 
     /** Resolved peer homes + when. Stale entries are still served — a stale
-     *  cache IS the failover path when the primary island is unreachable. */
-    data class PeerHomes(val homes: List<RcqFederation.Home>, val ts: Long)
+     *  cache IS the failover path when the primary island is unreachable.
+     *  [recTs] is the signed record's OWN ts (Unix seconds, 0 if unknown), used
+     *  as the anti-rollback floor for a self-pushed record (gossip B1). */
+    data class PeerHomes(val homes: List<RcqFederation.Home>, val ts: Long, val recTs: Int = 0)
 
     private const val PREFS = "rcq_multihome"
     private const val KEY_HOMES = "homes"
@@ -88,13 +90,13 @@ object MultihomeStore {
         map[peerUin.toString()]
     }.getOrNull()
 
-    fun cachePeerHomes(peerUin: Int, homes: List<RcqFederation.Home>) {
+    fun cachePeerHomes(peerUin: Int, homes: List<RcqFederation.Home>, recTs: Int = 0) {
         runCatching {
             val raw = prefs.getString(KEY_PEER_CACHE, null)
             val map: MutableMap<String, PeerHomes> =
                 if (raw == null) mutableMapOf()
                 else gson.fromJson(raw, object : TypeToken<MutableMap<String, PeerHomes>>() {}.type) ?: mutableMapOf()
-            map[peerUin.toString()] = PeerHomes(homes, System.currentTimeMillis())
+            map[peerUin.toString()] = PeerHomes(homes, System.currentTimeMillis(), recTs)
             prefs.edit().putString(KEY_PEER_CACHE, gson.toJson(map)).apply()
         }
     }

@@ -770,6 +770,48 @@ class Session(context: Context) {
         }
     }
 
+    /** Federation gossip B1 (second half) — SELF-PUSH the signed home-island
+     *  record to every contact as a v=1-sealed `homerec` envelope, so contacts
+     *  cache where to reach us even if our island later dies (the server mirror
+     *  can't cover "both my islands gone at once"). Call AFTER a record change
+     *  (add/remove backup, promote) — NOT on every boot. Best-effort per
+     *  contact; never throws. Only ever shares OUR OWN homes with people who are
+     *  already our contacts, so nothing about the social graph leaks. */
+    private suspend fun pushHomeRecordToContacts() = withContext(Dispatchers.IO) {
+        runCatching {
+            val uin = store.uin ?: return@withContext
+            val signingPriv = store.signingPrivate ?: return@withContext
+            if (!signalStores.hasLocalIdentity()) return@withContext
+            val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
+            val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
+            val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
+            val homes = listOf(RcqFederation.Home(api.islandHost(), uin)) +
+                MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
+            val ts = (System.currentTimeMillis() / 1000).toInt()
+            val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
+            val env = Envelope.HomeRecord(doc)
+            val ownHost = api.islandHost()
+            for (c in _contacts.value) {
+                if (c.blocked || c.uin == uin || c.identityKey.isEmpty()) continue
+                runCatching {
+                    val ci = CrossIslandStore.findByUin(c.uin)
+                    if (ci != null) {
+                        // Cross-island contact: deliver to their home(s) (v=1, gossip-aware).
+                        CrossIslandSender.deliver(ci, env, uin, signingPriv, skPub, ownHost)
+                    } else {
+                        // Flagship contact: v=1-seal (NOT v=2 — the receiver binds the
+                        // record to the v=1 `spub`) and deposit. Non-pushable type so
+                        // it doesn't buzz their device.
+                        val payload = SealedSender.encryptV1(
+                            env, Base64.decode(c.identityKey, Base64.NO_WRAP), uin, signingPriv, skPub, ownHost,
+                        )
+                        api.sendSealed(c.uin, payload, envelopeType = "homerec")
+                    }
+                }
+            }
+        }
+    }
+
     // ── multihoming (federation v1) ──────────────────────────────────
 
     /** This account's backup island homes, for the Settings surface. */
@@ -798,6 +840,7 @@ class Session(context: Context) {
         }
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
+        scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
         // Pull whatever is already waiting in the new mailbox.
         scope.launch { drainBackupQueuesOnce() }
     }
@@ -809,6 +852,7 @@ class Session(context: Context) {
         MultihomeStore.remove(uin, host)
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
+        scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
     }
 
     /** §5a.5: make backup [host] the PRIMARY home — one-tap disaster recovery
@@ -843,7 +887,10 @@ class Session(context: Context) {
         rebindTo(accountId)
         start()
         // start() republishes the record after the signal bootstrap, so senders
-        // learn the new home order (new primary first, old primary demoted).
+        // learn the new home order (new primary first, old primary demoted). Also
+        // self-push it to contacts (gossip B1) — start() loads the cached roster
+        // synchronously, so _contacts is populated by the time this runs.
+        scope.launch { pushHomeRecordToContacts() }
     }
 
     /** The auto-backup toggle's ON action: pick a healthy island from the
@@ -869,6 +916,7 @@ class Session(context: Context) {
         }
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
+        scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
         scope.launch { drainBackupQueuesOnce() }
         return host
     }
@@ -880,6 +928,7 @@ class Session(context: Context) {
         MultihomeStore.list(uin).filter { it.auto }.forEach { MultihomeStore.remove(uin, it.host) }
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
+        scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
     }
 
     /** Drain every backup mailbox into the normal ingest path. Copies of
@@ -1891,6 +1940,7 @@ class Session(context: Context) {
                 is Envelope.ScreenshotTaken -> Unit
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
+                is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
                 is Envelope.Unknown -> Unit
             }
         }.onFailure { logDecryptFailure(payloadB64, it) }
@@ -2613,6 +2663,15 @@ class Session(context: Context) {
                 calls.onSignal(cs.sig, sigObj)
                 return@runCatching
             }
+            // Federation gossip B1 self-push: a contact handed us their fresh
+            // signed home-island record. Verify it's signed by the SAME key that
+            // signed this envelope (binds it to the real sender), reject a ts
+            // rollback, cache their homes. Intercepted here so it never reaches
+            // the message store or the cross-island quarantine.
+            (dec.envelope as? Envelope.HomeRecord)?.let { hr ->
+                Multihome.applyPushedRecord(dec.senderUin, dec.senderSigningPub, hr.rec)
+                return@runCatching
+            }
             // Variant A consent: a 1:1 message from an un-accepted CROSS-ISLAND
             // sender (its from_host isn't ours and we haven't added them) is
             // QUARANTINED as a request instead of landing in the chat list.
@@ -2671,6 +2730,7 @@ class Session(context: Context) {
                 }
                 is Envelope.Poll -> Unit       // polls are group-only; ignore in 1:1
                 is Envelope.CallSignal -> Unit // intercepted above, never reaches here
+                is Envelope.HomeRecord -> Unit // intercepted above, never reaches here
                 is Envelope.Carbon ->
                     // A message I sent from ANOTHER device, echoed to my own uin.
                     // Only honour my own carbon; file the inner message as fromMe

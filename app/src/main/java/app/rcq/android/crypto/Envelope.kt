@@ -126,6 +126,13 @@ sealed interface Envelope {
         val data: Map<String, String>,
     ) : Envelope
 
+    /** Home-island record self-push (federation gossip B1, wire kind "homerec").
+     *  Carries the SENDER's own signed home-island record so a contact caches
+     *  where to reach them even after the sender's island dies. [rec] is the
+     *  signed record JSON (verified against the sender's pinned signing key on
+     *  receipt); never rendered as a message. Cross-client identical. */
+    data class HomeRecord(val rec: com.google.gson.JsonObject) : Envelope
+
     data class Unknown(val kind: String) : Envelope
 
     /** Serialize to the exact JSON bytes that get signed and shipped.
@@ -240,6 +247,10 @@ sealed interface Envelope {
             addProperty("cid", cid)
             addProperty("ts", ts)
             add("data", JsonObject().apply { data.forEach { (k, v) -> addProperty(k, v) } })
+        }.toString().toByteArray(Charsets.UTF_8)
+        is HomeRecord -> JsonObject().apply {
+            addProperty("kind", "homerec")
+            add("rec", rec)
         }.toString().toByteArray(Charsets.UTF_8)
         is Unknown -> JsonObject().apply { addProperty("kind", kind) }
             .toString().toByteArray(Charsets.UTF_8)
@@ -380,6 +391,7 @@ sealed interface Envelope {
                         ?.let { fromJsonBytes(it.toString().toByteArray(Charsets.UTF_8)) }
                         ?: Unknown("carbon"),
                 )
+                "homerec" -> obj.getAsJsonObject("rec")?.let { HomeRecord(it) } ?: Unknown("homerec")
                 else -> Unknown(kind ?: "unknown")
             }
         }
