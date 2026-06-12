@@ -171,7 +171,13 @@ object CrossIslandSender {
         val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
         val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
         var delivered = false
-        for (h in resolveHomes(contact.host, contact.uin)) {
+        // Gossip-aware home resolution anchored to the LOCALLY-pinned signing
+        // key (not a live card fetch), so the send reaches the peer via our
+        // gossip mirror even when their own island is blocked or dead. Floor to
+        // the single address we have when nothing verifies anywhere.
+        val homes = Multihome.resolveAndMirrorHomes(ownHost, contact.host, contact.uin, contact.signingKey)
+            .ifEmpty { listOf(RcqFederation.Home(contact.host, contact.uin)) }
+        for (h in homes) {
             val body = JsonObject().apply {
                 addProperty("to_uin", h.uin)
                 addProperty("envelope_type", "message")
