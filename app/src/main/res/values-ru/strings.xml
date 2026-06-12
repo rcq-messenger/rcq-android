@@ -139,7 +139,7 @@
     <string name="addlink_failed">Не удалось добавить контакт. Проверьте соединение и попробуйте снова.</string>
     <string name="addlink_request_sent">Запрос отправлен</string>
     <string name="settings_row_linked_devices">Подключённые устройства</string>
-    <string name="settings_row_backup_island">Резервный остров</string>
+    <string name="settings_row_backup_island">Резервная копия на другом острове</string>
     <string name="backup_island_body">Ваш аккаунт может жить ещё и на втором, независимом острове RCQ (сервере). Сообщения доставляются сразу в оба почтовых ящика: если один остров упадёт, ничего не потеряется — второй продолжит принимать.</string>
     <string name="backup_island_row_uin">ваш номер там: #%1$d</string>
     <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
