@@ -807,9 +807,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
                         ) {
-                            EmoticonGif(asset, Modifier.size(20.dp), animate = false)
+                            // 30dp (was 20): the smiley is the subject of the
+                            // group, 20dp read as tiny (founder report).
+                            EmoticonGif(asset, Modifier.size(30.dp), animate = false)
                             Spacer(Modifier.width(8.dp))
-                            Text("${entries.size}", color = c.textSecondary, fontSize = 12.sp)
+                            Text("${entries.size}", color = c.textSecondary, fontSize = 14.sp)
                         }
                         entries.forEach { (uin, _) ->
                             val name = group?.memberName(uin) ?: session.contactName(uin)

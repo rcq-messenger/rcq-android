@@ -301,7 +301,12 @@ internal fun EmoticonText(
                     if (t.asset !in inlineMap) {
                         val asset = t.asset
                         inlineMap[asset] = InlineTextContent(
-                            Placeholder(width = 1.4.em, height = 1.4.em, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter),
+                            // 1.7em (was 1.4): founder asked for bigger inline
+                            // smileys in chat bubbles. em-relative, so captions
+                            // and the smaller-font chats scale proportionally;
+                            // reaction chips and the picker render their own
+                            // fixed sizes and are not affected.
+                            Placeholder(width = 1.7.em, height = 1.7.em, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter),
                         ) { EmoticonGif(asset, Modifier.fillMaxSize(), animate = false) }
                     }
                 }
