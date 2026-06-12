@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.content.FileProvider
 import app.rcq.android.BuildConfig
+import app.rcq.android.R
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -248,6 +249,29 @@ object UpdateChecker {
             it.header("Content-Length")?.toLongOrNull() ?: -1L
         }
     }.getOrDefault(-1L)
+
+    /** Share THIS installed app's own APK so anyone who has RCQ can sideload it
+     *  to a friend OFFLINE (Bluetooth / Nearby / file / Telegram). This is the
+     *  only answer to the FIRST-install bootstrap when rcq.app is blocked: a new
+     *  user can't reach the download or the relays (those live inside the app),
+     *  so they get the APK hand-to-hand from someone who already has it. */
+    fun shareApk(context: Context): Boolean = runCatching {
+        val src = File(context.applicationInfo.sourceDir)
+        val dir = File(context.cacheDir, "files").apply { mkdirs() }
+        val out = File(dir, "RCQ-${BuildConfig.VERSION_NAME}.apk")
+        src.copyTo(out, overwrite = true)
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", out)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/vnd.android.package-archive"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(
+            Intent.createChooser(send, context.getString(R.string.share_app))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    }.getOrDefault(false)
 
     /** Hand the finished APK to the system package installer (the user still
      *  confirms the sideload install). */

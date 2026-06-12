@@ -381,6 +381,8 @@
     <string name="settings_row_blocked">Blocked users</string>
     <string name="settings_row_clear_history">Clear chat history</string>
     <string name="settings_row_about">About RCQ</string>
+    <string name="settings_row_share_app">Share RCQ app</string>
+    <string name="share_app">Share RCQ</string>
     <string name="settings_row_report_bug">Report a bug</string>
     <string name="bug_report_hint">Describe what went wrong. Your platform and app version are attached automatically.</string>
     <string name="bug_report_placeholder">What happened?</string>

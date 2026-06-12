@@ -380,6 +380,8 @@
     <string name="settings_row_blocked">Заблокированные</string>
     <string name="settings_row_clear_history">Очистить историю чатов</string>
     <string name="settings_row_about">О RCQ</string>
+    <string name="settings_row_share_app">Поделиться приложением RCQ</string>
+    <string name="share_app">Поделиться RCQ</string>
     <string name="settings_row_report_bug">Сообщить о баге</string>
     <string name="bug_report_hint">Опишите, что пошло не так. Платформа и версия приложения добавятся автоматически.</string>
     <string name="bug_report_placeholder">Что случилось?</string>

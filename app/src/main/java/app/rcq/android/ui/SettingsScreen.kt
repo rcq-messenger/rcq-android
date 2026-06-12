@@ -311,6 +311,14 @@ private fun SettingsRoot(
             SectionLabel(stringResource(R.string.settings_sec_about))
             SettingsGroup {
                 SettingsRow(Icons.Filled.Info, stringResource(R.string.settings_row_about), value = appVersion(context)) { showAbout = true }
+                Divider()
+                // Hand the APK to a friend offline — the only way to install RCQ
+                // first-time when rcq.app is blocked (the relays live inside the
+                // app, so a brand-new user can't reach the download otherwise).
+                SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app)) {
+                    app.rcq.android.net.UpdateChecker.shareApk(context)
+                }
+                Divider()
                 SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) { bugText = ""; bugSent = false; showBugReport = true }
             }
 
