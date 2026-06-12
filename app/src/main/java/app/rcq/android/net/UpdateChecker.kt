@@ -53,9 +53,19 @@ import java.util.concurrent.TimeUnit
  *   }
  */
 object UpdateChecker {
-    private const val MANIFEST_URL = "https://rcq.app/android/latest.json"
+    // Manifest is fetched from rcq.app first, then the GitHub-release mirror as a
+    // fallback so a blocked/dead rcq.app doesn't kill updates. (Both also ride
+    // the sing-box proxy via client() when bypass is on.) GitHub
+    // releases/latest/download/ always tracks the newest published release.
+    private val MANIFEST_URLS = listOf(
+        "https://rcq.app/android/latest.json",
+        "https://github.com/rcq-messenger/rcq-android/releases/latest/download/latest.json",
+    )
 
-    data class Update(val versionCode: Int, val versionName: String, val notes: String, val apkUrl: String)
+    /** [mirrorUrl] = the same APK on the GitHub release (byte-identical signed
+     *  file); the downloader alternates hosts per attempt, and Range-resume
+     *  continues across them, so one blocked host can't stall an update. */
+    data class Update(val versionCode: Int, val versionName: String, val notes: String, val apkUrl: String, val mirrorUrl: String? = null)
 
     /** Process-level download state so the download survives navigating away /
      *  closing the dialog and the UI can show a non-blocking progress bar. */
@@ -136,21 +146,29 @@ object UpdateChecker {
         return b.build()
     }
 
-    /** The hosted update when it's newer than this build, else null. */
+    /** The hosted update when it's newer than this build, else null. Tries each
+     *  manifest host in turn (rcq.app, then the GitHub mirror). */
     suspend fun check(): Update? = withContext(Dispatchers.IO) {
-        runCatching {
-            val req = Request.Builder().url(MANIFEST_URL).build()
-            client().newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val obj = JsonParser.parseString(resp.body!!.string()).asJsonObject
-                val vc = obj.get("versionCode")?.asInt ?: return@use null
-                if (vc <= BuildConfig.VERSION_CODE) return@use null
-                val abis = obj.getAsJsonObject("abis")
-                val abiUrl = Build.SUPPORTED_ABIS.firstNotNullOfOrNull { abi -> abis?.get(abi)?.asString }
-                val url = abiUrl ?: obj.get("url")?.asString ?: return@use null
-                Update(vc, obj.get("versionName")?.asString ?: "$vc", obj.get("notes")?.asString.orEmpty(), url)
-            }
-        }.getOrNull()
+        for (manifestUrl in MANIFEST_URLS) {
+            val u = runCatching {
+                val req = Request.Builder().url(manifestUrl).build()
+                client().newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val obj = JsonParser.parseString(resp.body!!.string()).asJsonObject
+                    val vc = obj.get("versionCode")?.asInt ?: return@use null
+                    if (vc <= BuildConfig.VERSION_CODE) return@use null
+                    val abis = obj.getAsJsonObject("abis")
+                    val abiUrl = Build.SUPPORTED_ABIS.firstNotNullOfOrNull { abi -> abis?.get(abi)?.asString }
+                    val url = abiUrl ?: obj.get("url")?.asString ?: return@use null
+                    // mirror_base + the primary URL's filename = the same APK on
+                    // the GitHub release (byte-identical), used as a fallback host.
+                    val mirror = obj.get("mirror_base")?.asString?.let { it + url.substringAfterLast('/') }
+                    Update(vc, obj.get("versionName")?.asString ?: "$vc", obj.get("notes")?.asString.orEmpty(), url, mirror)
+                }
+            }.getOrNull()
+            if (u != null) return@withContext u
+        }
+        null
     }
 
     /** Download the APK to cacheDir/files/ and launch the system installer.
@@ -170,8 +188,11 @@ object UpdateChecker {
         // Reuse an already-finished download: if the user cancelled the system
         // install dialog and re-tapped, the APK is still on disk — install it
         // again rather than re-download the whole thing (tester #40).
+        // Candidate hosts (primary + GitHub mirror). The signed APKs are
+        // byte-identical, so Range-resume continues across hosts.
+        val urls = listOfNotNull(update.apkUrl, update.mirrorUrl)
         if (apk.exists()) {
-            val expected = headContentLength(update.apkUrl)
+            val expected = urls.firstNotNullOfOrNull { headContentLength(it).takeIf { n -> n > 0 } } ?: -1L
             if (expected > 0) {
                 if (apk.length() == expected) { onProgress(1f); return@withContext install(context, apk) }
                 if (apk.length() > expected) apk.delete() // corrupt/overshoot → restart
@@ -187,7 +208,10 @@ object UpdateChecker {
         for (attempt in 1..maxAttempts) {
             cs.ensureActive()
             val have = if (apk.exists()) apk.length() else 0L
-            val rb = Request.Builder().url(update.apkUrl)
+            // Alternate hosts each attempt so a blocked/dead primary fails over
+            // to the mirror (and back) while Range-resume keeps the bytes.
+            val dlUrl = urls[(attempt - 1) % urls.size]
+            val rb = Request.Builder().url(dlUrl)
             if (have > 0) rb.header("Range", "bytes=$have-")
             val done = try {
                 val call = client().newCall(rb.build())
