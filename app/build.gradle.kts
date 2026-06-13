@@ -51,6 +51,12 @@ android {
             // (libsignal + rcqbox) that R8 can't touch. Sign for release so the
             // APK installs + can self-update.
             isMinifyEnabled = false
+            // Reproducible builds (Track V): no resource shrinker (its output can
+            // vary across machines), and don't embed the git commit hash AGP 8.3+
+            // writes to META-INF/version-control-info.textproto (it changes every
+            // commit + leaks repo state). See docs/REPRODUCIBLE-BUILDS.md.
+            isShrinkResources = false
+            vcsInfo { include = false }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (keystoreProps.isNotEmpty()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
@@ -64,6 +70,17 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     buildFeatures { compose = true; buildConfig = true }
+
+    // Reproducible builds (verifiability / Track V): AGP embeds a signed,
+    // version-stamped dependency-metadata blob in the APK by default. It is both
+    // a source of build non-determinism AND a privacy leak (it enumerates every
+    // dependency + version to anyone who unzips the APK). Drop it so a from-source
+    // build of a release tag is byte-reproducible on the documented toolchain.
+    // See docs/REPRODUCIBLE-BUILDS.md.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 
     // Split the APK by ABI so a device downloads only its own native libs.
     // libsignal + rcqbox (sing-box) each ship a ~40MB .so per ABI, so a
