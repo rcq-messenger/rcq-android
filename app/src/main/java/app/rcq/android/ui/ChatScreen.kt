@@ -152,6 +152,7 @@ import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.CrossIslandStore
+import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.crypto.Reply
 import app.rcq.android.media.MediaSaver
 import app.rcq.android.media.VoiceRecorder
@@ -248,6 +249,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // A picked photo/video waiting in the pre-send preview (tap to blur).
     var pendingSend by remember { mutableStateOf<PendingSend?>(null) }
     var showGroupPicker by remember { mutableStateOf(false) }
+    var showRelayPicker by remember { mutableStateOf(false) }
     // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
     var fullscreenImage by remember { mutableStateOf<ByteArray?>(null) }
     val listState = rememberLazyListState()
@@ -933,6 +935,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     MessageAction(stringResource(R.string.chat_attach_location)) { attachMenu = false; shareLocation() }
                     MessageAction(stringResource(R.string.chat_attach_group)) { attachMenu = false; showGroupPicker = true }
                     if (isGroup) MessageAction(stringResource(R.string.poll_create)) { attachMenu = false; showPollComposer = true }
+                    if (!isGroup) MessageAction(stringResource(R.string.relay_share_attach)) { attachMenu = false; showRelayPicker = true }
                 }
             },
             confirmButton = {},
@@ -992,6 +995,32 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { showGroupPicker = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+        )
+    }
+
+    // In-chat bridge sharing: pick a relay from your pool to hand the peer so
+    // they can route through it when their own relays are blocked.
+    if (showRelayPicker) {
+        val pool = remember { session.shareableRelays() }
+        AlertDialog(
+            onDismissRequest = { showRelayPicker = false },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.relay_share_pick_title), color = c.textPrimary) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.relay_share_pick_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        pool.forEach { r ->
+                            MessageAction("${r.proto.uppercase()} · ${r.server}:${r.port}") {
+                                showRelayPicker = false
+                                peer?.let { p -> scope.launch { runCatching { session.shareRelay(p, r) } } }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showRelayPicker = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
         )
     }
 
@@ -1243,6 +1272,7 @@ private fun previewOf(m: ChatMessage, context: android.content.Context): String 
     "location" -> context.getString(R.string.chat_prev_location)
     "poll" -> app.rcq.android.model.PollContent.fromJson(m.body)?.question?.take(100)
         ?: context.getString(R.string.poll_create)
+    "relay" -> context.getString(R.string.relay_share_title)
     else -> m.body.take(100)
 }
 
@@ -2030,6 +2060,8 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
             VoiceBubble(session, m, onLongPress)
         } else if (m.kind == "location") {
             LocationBubble(m, onLongPress)
+        } else if (m.kind == "relay") {
+            RelayBubble(m, onLongPress)
         } else {
             Column(
                 Modifier
@@ -2437,6 +2469,58 @@ private fun LocationBubble(m: ChatMessage, onLongPress: () -> Unit) {
         Column {
             Text(if (m.body.isNotEmpty()) m.body else stringResource(R.string.chat_prev_location), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text("%.5f, %.5f".format(lat, lng), color = c.textSecondary, fontSize = 11.sp)
+        }
+    }
+}
+
+/** In-chat bridge sharing: a relay a contact handed you (or you sent). Incoming
+ *  shows an Add button → [ContactRelayStore.add] (augments the transport pool);
+ *  outgoing/added/invalid show a status line. See RCQ/docs/bridge-sharing-design.md. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RelayBubble(m: ChatMessage, onLongPress: () -> Unit) {
+    val c = RcqTheme.colors
+    val relay = remember(m.id) {
+        ContactRelayStore.parseJsonElement(m.body)?.let { ContactRelayStore.relayFromJson(it) }
+    }
+    var added by remember(m.id) { mutableStateOf(relay?.let { ContactRelayStore.has(it) } ?: false) }
+    Column(
+        Modifier
+            .widthIn(max = 280.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
+            .combinedClickable(onClick = {}, onLongClick = onLongPress)
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Filled.Shield, null, tint = c.accent, modifier = Modifier.size(22.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.relay_share_title), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                if (relay != null) {
+                    Text(
+                        "${relay.proto.uppercase()} · ${relay.server}:${relay.port}",
+                        color = c.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        when {
+            relay == null ->
+                Text(stringResource(R.string.relay_share_invalid), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            m.fromMe ->
+                Text(stringResource(R.string.relay_share_sent_note), color = c.textSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+            added ->
+                Text(stringResource(R.string.relay_share_added), color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            else -> Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(c.accent)
+                    .clickable { added = ContactRelayStore.add(relay, m.peerUin, null) || true }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(stringResource(R.string.relay_share_add), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }

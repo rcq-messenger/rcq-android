@@ -112,6 +112,7 @@ import app.rcq.android.security.BiometricGate
 import app.rcq.android.data.LanguageManager
 import app.rcq.android.data.LocalStores
 import app.rcq.android.net.MultihomeStore
+import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
@@ -929,6 +930,72 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                         }
                     },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
+
+            // In-chat bridge sharing: relays a contact shared / you imported,
+            // augmenting the transport pool. See RCQ/docs/bridge-sharing-design.md.
+            var relayImportOpen by remember { mutableStateOf(false) }
+            var sharedRelays by remember { mutableStateOf(ContactRelayStore.list()) }
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.relay_shared_section), color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            if (sharedRelays.isEmpty()) {
+                Text(stringResource(R.string.relay_shared_empty), color = c.textSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+            } else {
+                sharedRelays.forEach { e ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${e.relay.proto.uppercase()} · ${e.relay.server}:${e.relay.port}", color = c.textPrimary, fontSize = 13.sp)
+                            Text(
+                                if (e.fromUin == 0) stringResource(R.string.relay_shared_imported)
+                                else stringResource(R.string.relay_shared_from, e.fromUin),
+                                color = c.textSecondary, fontSize = 11.sp,
+                            )
+                        }
+                        TextButton(onClick = {
+                            ContactRelayStore.remove(e.relay.tag)
+                            sharedRelays = ContactRelayStore.list()
+                        }) { Text(stringResource(R.string.relay_shared_remove), color = c.accent, fontSize = 12.sp) }
+                    }
+                }
+            }
+            TextButton(onClick = { relayImportOpen = true }) {
+                Text(stringResource(R.string.relay_import_title), color = c.accent, fontSize = 13.sp)
+            }
+
+            if (relayImportOpen) {
+                var token by remember { mutableStateOf("") }
+                var err by remember { mutableStateOf(false) }
+                AlertDialog(
+                    onDismissRequest = { relayImportOpen = false },
+                    containerColor = c.bgSecondary,
+                    title = { Text(stringResource(R.string.relay_import_title), color = c.textPrimary) },
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.relay_import_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                            OutlinedTextField(
+                                value = token,
+                                onValueChange = { token = it; err = false },
+                                placeholder = { Text("rcq-relay://...", color = c.textSecondary) },
+                                isError = err,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (err) Text(stringResource(R.string.relay_import_bad), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val r = ContactRelayStore.relayFromToken(token)
+                            if (r == null) {
+                                err = true
+                            } else {
+                                ContactRelayStore.add(r, 0, null)
+                                sharedRelays = ContactRelayStore.list()
+                                relayImportOpen = false
+                            }
+                        }) { Text(stringResource(R.string.relay_import_add), color = c.accent) }
+                    },
+                    dismissButton = { TextButton(onClick = { relayImportOpen = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
                 )
             }
         }

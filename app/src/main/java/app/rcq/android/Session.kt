@@ -31,6 +31,9 @@ import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.VisitedIslandsStore
 import app.rcq.android.net.Multihome
 import app.rcq.android.net.CrossIslandRequestsStore
+import app.rcq.android.net.ContactRelayStore
+import app.rcq.android.net.SingBoxTransport
+import app.rcq.android.net.RelayConfigStore
 import app.rcq.android.net.MultihomeStore
 import app.rcq.android.net.RcqApi
 import app.rcq.android.net.RcqFederation
@@ -2090,6 +2093,7 @@ class Session(context: Context) {
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
                 is Envelope.Skdm -> Unit         // intercepted in ingestGroup before routing
                 is Envelope.Sknack -> Unit       // intercepted in ingestGroup before routing
+                is Envelope.RelayShare -> Unit   // in-chat bridge sharing is 1:1 only
                 is Envelope.Unknown -> Unit
             }
     }
@@ -2287,6 +2291,24 @@ class Session(context: Context) {
         store(ChatMessage(env.id, toUin, fromMe = true, body = text, sentAt = System.currentTimeMillis(), state = DeliveryState.SENDING, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id))
         sendEnvelope(env, env.id, toUin)
     }
+
+    /** In-chat bridge sharing: hand [toUin] a relay descriptor from your known
+     *  pool so they can route through it when their own relays are blocked
+     *  (censorship-resistance — distribute off-config relays peer-to-peer).
+     *  Renders as a kind="relay" card on both sides; the recipient taps Add.
+     *  See RCQ/docs/bridge-sharing-design.md. */
+    suspend fun shareRelay(toUin: Int, relay: SingBoxTransport.Relay) {
+        val relayJson = ContactRelayStore.relayToJson(relay)
+        val env = Envelope.relayShare(relayJson)
+        store(ChatMessage(env.id, toUin, fromMe = true, body = relayJson.toString(), sentAt = System.currentTimeMillis(), state = DeliveryState.SENDING, kind = "relay"))
+        sendEnvelope(env, env.id, toUin)
+    }
+
+    /** Relays the user can hand to a contact: the signed-config pool + already
+     *  imported/shared relays, deduped by proto:server:port. */
+    fun shareableRelays(): List<SingBoxTransport.Relay> =
+        (RelayConfigStore.currentRelays() + ContactRelayStore.relays())
+            .distinctBy { "${it.proto}:${it.server}:${it.port}" }
 
     /** Local-only delete (removes from this device; no wire message). */
     fun deleteLocal(msg: ChatMessage) {
@@ -2934,6 +2956,12 @@ class Session(context: Context) {
                     if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now)
                 is Envelope.Skdm -> Unit       // sender-keys distribution is group-only
                 is Envelope.Sknack -> Unit     // sender-keys recovery is group-only
+                is Envelope.RelayShare ->
+                    // In-chat bridge sharing: a contact handed us a relay to
+                    // augment our transport pool. Render as a kind="relay" card
+                    // the user can Add; never auto-apply. Drop malformed shares.
+                    if (ContactRelayStore.relayFromJson(env.relay) != null)
+                        store(ChatMessage(env.id, dec.senderUin, false, env.relay.toString(), now, kind = "relay"))
                 is Envelope.Unknown -> Unit
             }
         }.onFailure { logDecryptFailure(payloadB64, it) }

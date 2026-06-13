@@ -145,6 +145,14 @@ sealed interface Envelope {
      *  I don't hold; the kid's owner re-seals a fresh SKDM. Per-member sealed. */
     data class Sknack(val gid: Int, val kid: String) : Envelope
 
+    /** In-chat bridge share (wire kind "relay_share"): a contact hands you a
+     *  relay descriptor to AUGMENT your transport pool (censorship-resistance:
+     *  distribute off-config relays peer-to-peer). [relay] is the terse relay
+     *  object (ContactRelayStore.relayToJson). Stored as a kind="relay" chat
+     *  message + rendered as an Add card; never auto-applied. Cross-client
+     *  identical. See RCQ/docs/bridge-sharing-design.md. */
+    data class RelayShare(val id: String, val relay: com.google.gson.JsonObject, val note: String? = null) : Envelope
+
     data class Unknown(val kind: String) : Envelope
 
     /** Serialize to the exact JSON bytes that get signed and shipped.
@@ -277,6 +285,12 @@ sealed interface Envelope {
             addProperty("gid", gid)
             addProperty("kid", kid)
         }.toString().toByteArray(Charsets.UTF_8)
+        is RelayShare -> JsonObject().apply {
+            addProperty("kind", "relay_share")
+            addProperty("id", id)
+            add("relay", relay)
+            if (!note.isNullOrEmpty()) addProperty("note", note)
+        }.toString().toByteArray(Charsets.UTF_8)
         is Unknown -> JsonObject().apply { addProperty("kind", kind) }
             .toString().toByteArray(Charsets.UTF_8)
     }
@@ -324,6 +338,11 @@ sealed interface Envelope {
 
         fun screenshotTaken(): ScreenshotTaken =
             ScreenshotTaken(UUID.randomUUID().toString().uppercase())
+
+        /** Build an in-chat relay share carrying [relay] (the terse relay
+         *  object from ContactRelayStore.relayToJson). */
+        fun relayShare(relay: com.google.gson.JsonObject, note: String? = null): RelayShare =
+            RelayShare(UUID.randomUUID().toString().uppercase(), relay, note)
 
         fun fromJsonBytes(bytes: ByteArray): Envelope {
             val obj = JsonParser.parseString(String(bytes, Charsets.UTF_8)).asJsonObject
@@ -428,6 +447,9 @@ sealed interface Envelope {
                     gid = obj.get("gid")?.asInt ?: 0,
                     kid = obj.get("kid")?.asString.orEmpty(),
                 )
+                "relay_share" -> obj.getAsJsonObject("relay")?.let {
+                    RelayShare(id, it, obj.get("note")?.asString)
+                } ?: Unknown("relay_share")
                 else -> Unknown(kind ?: "unknown")
             }
         }

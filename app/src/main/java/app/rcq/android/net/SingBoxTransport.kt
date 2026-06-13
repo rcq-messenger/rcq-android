@@ -104,8 +104,13 @@ object SingBoxTransport {
     )
 
     /** Relay pool: the verified remote list when available, else the bundled
-     *  fallback — both resolved by [RelayConfigStore]. */
-    private fun relays(): List<Relay> = RelayConfigStore.currentRelays()
+     *  fallback (both resolved by [RelayConfigStore]), PLUS any relays a contact
+     *  shared / the user imported ([ContactRelayStore]). Shared relays append at
+     *  the BACK of the priority-sorted list = extra fallback capacity that never
+     *  displaces a canary-verified relay nor becomes the onion sticky entry; if
+     *  every signed-config relay is blocked, the urltest race lets a working
+     *  shared relay win. */
+    private fun relays(): List<Relay> = RelayConfigStore.currentRelays() + ContactRelayStore.relays()
 
     /** SOCKS proxy pointing at the local sing-box inbound, or null when the
      *  transport is off (OkHttp treats null as a direct connection). */
