@@ -1705,9 +1705,28 @@ class Session(context: Context) {
         return g
     }
 
-    suspend fun addGroupMember(id: Int, uin: Int) {
+    /** Returns null on success, else a localized reason. The server returns 403
+     *  for THREE distinct reasons (the owner blocked the user / the invitee only
+     *  accepts invites from contacts / the invitee accepts no invites); inspect
+     *  the 403 body instead of swallowing it or collapsing the reasons. */
+    suspend fun addGroupMember(id: Int, uin: Int): String? {
         val ctx = groupCtx(id)
-        runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, uin))) }
+        return runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, uin))); null }
+            .getOrElse { addMemberReason(it.message) }
+    }
+
+    /** Map the IOException message ("HTTP <code>: <body>" from RcqApi.execute) to
+     *  a localized string by matching the distinct 403 detail substrings the
+     *  groups router emits. Non-403 -> generic add-failed. */
+    fun addMemberReason(message: String?): String {
+        val m = message ?: ""
+        val res = when {
+            m.contains("the group owner has blocked this user") -> R.string.gi_add_blocked
+            m.contains("only accepts group invites from their contacts") -> R.string.gi_add_contacts_only
+            m.contains("does not accept group invites") -> R.string.gi_add_nobody
+            else -> R.string.gi_add_failed
+        }
+        return appCtx.getString(res)
     }
 
     /** §5c owner-initiated cross-island add: put a contact who lives on ANOTHER

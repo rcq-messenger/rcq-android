@@ -768,7 +768,7 @@ private fun Registering() {
     val c = RcqTheme.colors
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         CircularProgressIndicator(color = c.accent)
-        Text("Creating your account…", color = c.textSecondary, fontSize = 14.sp)
+        Text(stringResource(R.string.boot_registering), color = c.textSecondary, fontSize = 14.sp)
     }
 }
 
@@ -780,8 +780,8 @@ private fun Failed(message: String, onRetry: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.padding(32.dp),
     ) {
-        Text("Couldn't connect", color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.boot_connect_failed_title), color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(message, color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
-        CapsuleButton("Try again", onClick = onRetry)
+        CapsuleButton(stringResource(R.string.boot_connect_retry), onClick = onRetry)
     }
 }

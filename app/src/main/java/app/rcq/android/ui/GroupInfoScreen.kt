@@ -423,7 +423,8 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                                             val err = if (ci != null) session.addCrossIslandGroupMember(groupId, ci) else "no card"
                                             if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
                                         } else {
-                                            runCatching { session.addGroupMember(groupId, ct.uin) }
+                                            val err = session.addGroupMember(groupId, ct.uin)
+                                            if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
                                         }
                                     }
                                     showAddMember = false

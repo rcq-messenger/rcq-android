@@ -488,12 +488,18 @@ internal fun HomeScreen(
                     runCatching { session.createGroup(name, members) }
                         .onSuccess { onOpenGroup(it.id) }
                         .onFailure { e ->
-                            // Previously swallowed — a 403 (an invitee's group-invite
-                            // policy blocks you) or a transient error just closed the
-                            // dialog with no feedback ("group not created"). Surface it.
-                            val msg = if ((e.message ?: "").contains("403"))
-                                context.getString(R.string.group_create_blocked)
-                            else context.getString(R.string.group_create_failed)
+                            // A 403 here can mean THREE different things (the owner
+                            // blocked the invitee / the invitee only accepts invites
+                            // from contacts / the invitee accepts no invites). Inspect
+                            // the body instead of collapsing them into one message.
+                            val em = e.message ?: ""
+                            val msg = when {
+                                em.contains("the group owner has blocked this user") -> context.getString(R.string.gi_add_blocked)
+                                em.contains("only accepts group invites from their contacts") -> context.getString(R.string.gi_add_contacts_only)
+                                em.contains("does not accept group invites") -> context.getString(R.string.gi_add_nobody)
+                                em.contains("403") -> context.getString(R.string.group_create_blocked)
+                                else -> context.getString(R.string.group_create_failed)
+                            }
                             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
                         }
                 }

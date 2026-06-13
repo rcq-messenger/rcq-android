@@ -847,4 +847,14 @@
     <string name="home_report_title">Report %1$s</string>
     <string name="home_report_reason">Reason</string>
     <string name="home_report_submit">Submit</string>
+
+    <!-- group add-member: distinct 403 reasons (was a single "blocked" message / silent swallow) -->
+    <string name="gi_add_blocked">The group owner has blocked this user.</string>
+    <string name="gi_add_contacts_only">This user only accepts group invites from their contacts.</string>
+    <string name="gi_add_nobody">This user doesn\'t accept group invites.</string>
+    <string name="gi_add_failed">Couldn\'t add this member. Try again.</string>
+    <!-- boot connection-error / registration screens (were hardcoded English) -->
+    <string name="boot_connect_failed_title">Couldn\'t connect</string>
+    <string name="boot_connect_retry">Try again</string>
+    <string name="boot_registering">Creating your account…</string>
 </resources>

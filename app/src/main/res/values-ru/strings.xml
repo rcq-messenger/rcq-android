@@ -131,7 +131,7 @@
     <string name="weblink_body">Сайт войдёт под вашим аккаунтом, чтобы можно было переписываться из браузера. Продолжайте, только если вы сами открыли это с QR-кода на chat.rcq.app.</string>
     <string name="weblink_confirm">Подключить</string>
     <string name="weblink_done">Веб подключён. Браузер должен войти.</string>
-    <string name="weblink_failed">Не удалось подключить веб. Код мог истечь — попробуйте снова.</string>
+    <string name="weblink_failed">Не удалось подключить веб. Код мог истечь, попробуйте снова.</string>
     <string name="weblink_taken">Эта ссылка уже использована. Обновите QR на сайте и отсканируйте новый.</string>
     <string name="common_add">Добавить</string>
     <string name="kind_message">Новое сообщение</string>
@@ -146,7 +146,7 @@
     <string name="addlink_request_sent">Запрос отправлен</string>
     <string name="settings_row_linked_devices">Подключённые устройства</string>
     <string name="settings_row_backup_island">Резервная копия на другом острове</string>
-    <string name="backup_island_body">Ваш аккаунт может жить ещё и на втором, независимом острове RCQ (сервере). Сообщения доставляются сразу в оба почтовых ящика: если один остров упадёт, ничего не потеряется — второй продолжит принимать.</string>
+    <string name="backup_island_body">Ваш аккаунт может жить ещё и на втором, независимом острове RCQ (сервере). Сообщения доставляются сразу в оба почтовых ящика: если один остров упадёт, ничего не потеряется, второй продолжит принимать.</string>
     <string name="backup_island_row_uin">ваш номер там: #%1$d</string>
     <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
     <string name="backup_island_auto_sub">Остров подбирается автоматически из публичного каталога</string>
@@ -209,7 +209,7 @@
     <string name="restore_hint">Введите фразу восстановления (24 слова, или 48 для старого аккаунта), чтобы восстановить аккаунт на этом устройстве.</string>
     <string name="restore_phrase_ph">слово слово слово …</string>
     <string name="restore_wordcount">%1$d / 24 слов</string>
-    <string name="restore_server_ph">Сервер (пусто — сервер по умолчанию)</string>
+    <string name="restore_server_ph">Сервер (пусто: сервер по умолчанию)</string>
     <string name="restore_button">Восстановить</string>
     <string name="restore_restoring">Восстановление…</string>
     <string name="restore_err_invalid">Это не похоже на корректную фразу из 24 слов.</string>
@@ -846,4 +846,12 @@
     <string name="home_report_title">Пожаловаться на %1$s</string>
     <string name="home_report_reason">Причина</string>
     <string name="home_report_submit">Отправить</string>
+
+    <string name="gi_add_blocked">Владелец группы заблокировал этого пользователя.</string>
+    <string name="gi_add_contacts_only">Этот пользователь принимает приглашения в группы только от своих контактов.</string>
+    <string name="gi_add_nobody">Этот пользователь не принимает приглашения в группы.</string>
+    <string name="gi_add_failed">Не удалось добавить участника. Попробуйте снова.</string>
+    <string name="boot_connect_failed_title">Не удалось подключиться</string>
+    <string name="boot_connect_retry">Повторить</string>
+    <string name="boot_registering">Создаём аккаунт…</string>
 </resources>
