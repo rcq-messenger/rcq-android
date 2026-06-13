@@ -68,7 +68,7 @@ private val DANGER = Color(0xFFE5484D)
  *  message, and any visibility-gated profile fields the server returns,
  *  plus per-contact actions (favorite, mute, block, remove). */
 @Composable
-internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, onRemoved: () -> Unit) {
+internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, onRemoved: () -> Unit, onOpenChat: (Int) -> Unit = {}) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -82,6 +82,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     val isMuted = thread in muted
 
     var profile by remember { mutableStateOf<RcqApi.MeProfile?>(null) }
+    var requestSent by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     var showSafety by remember { mutableStateOf(false) }
     var safetyNumber by remember { mutableStateOf<String?>(null) }
@@ -136,7 +137,38 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 statusMessage?.let { Text(it, color = c.textPrimary, fontSize = 14.sp, textAlign = TextAlign.Center) }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
+
+            // Primary action. A contact gets "Message" (opens the 1:1); a
+            // non-contact (this profile is opened from the add-contact search
+            // BEFORE requesting) gets "Send request". Cross-island peers are
+            // already added on resolve, so they only ever show Message.
+            if (contact != null && !blocked) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accent)
+                        .clickable { onOpenChat(uin) }.padding(14.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.ci_message), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(12.dp))
+            } else if (contact == null && crossIslandHost == null) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(if (requestSent) c.bgSecondary else c.accent)
+                        .clickable(enabled = !requestSent) {
+                            scope.launch { runCatching { session.addContact(uin) } }; requestSent = true
+                        }.padding(14.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(if (requestSent) R.string.add_request_sent else R.string.ci_send_request),
+                        color = if (requestSent) c.textSecondary else Color.White,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             // UIN row (copyable).
             Row(

@@ -1580,6 +1580,14 @@ class Session(context: Context) {
             .sortedByDescending { it.createdAt ?: 0L }
     }
 
+    /** Optimistically swap a group's pinned text in the local state so the chat
+     *  banner updates INSTANTLY when pinning from a message, before patchGroup
+     *  round-trips. The PATCH response reconciles it. Blank clears the pin. */
+    fun applyPinnedTextLocally(groupId: Int, text: String) {
+        val trimmed = text.trim().ifBlank { null }
+        _groups.value = _groups.value.map { if (it.id == groupId) it.copy(pinnedText = trimmed) else it }
+    }
+
     // ── Cross-island groups (§5c): guest context ─────────────────────
 
     /** Resolution of (api client, server-side id, island, my uin THERE) for a

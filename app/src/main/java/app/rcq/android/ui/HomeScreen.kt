@@ -143,6 +143,9 @@ internal fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
+    // Open ANOTHER user's profile (peer). Used by add-contact so a search
+    // result opens the profile preview before you send the request.
+    onOpenPeerInfo: (Int) -> Unit = {},
     onOpenNews: () -> Unit = {},
     onOpenOutgoing: () -> Unit = {},
     onOpenSaved: () -> Unit = {},
@@ -461,6 +464,7 @@ internal fun HomeScreen(
             contacts = contacts,
             onAddUin = { target -> scope.launch { runCatching { session.addContact(target) } } },
             onOpenChat = { u -> showAdd = false; onOpenChat(u) },
+            onOpenProfile = { u -> showAdd = false; onOpenPeerInfo(u) },
             onOpenGroup = { g -> showAdd = false; onOpenGroup(g) },
             onDismiss = { showAdd = false },
         )
@@ -836,11 +840,10 @@ private fun HomeHeader(
                 modifier = Modifier.size(26.dp).clip(CircleShape).clickable { overflowMenu = true },
             )
             DropdownMenu(expanded = overflowMenu, onDismissRequest = { overflowMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(if (stealthActive) R.string.home_menu_bypass_disable else R.string.home_menu_bypass_enable), color = c.textPrimary) },
-                    leadingIcon = { Icon(Icons.Filled.Shield, null, tint = if (stealthActive) c.accent else c.textSecondary) },
-                    onClick = { overflowMenu = false; onToggleBypass(!stealthActive) },
-                )
+                // Censorship bypass is no longer a manual menu item — it engages
+                // AUTOMATICALLY when a direct connection is blocked (Session.start
+                // probes direct first). The override still lives in Settings →
+                // Privacy for power users. See the obfuscation/onion design.
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.diag_title), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.NetworkCheck, null, tint = c.accent) },
@@ -1283,6 +1286,7 @@ private fun AddContactDialog(
     contacts: List<Contact>,
     onAddUin: (Int) -> Unit,
     onOpenChat: (Int) -> Unit,
+    onOpenProfile: (Int) -> Unit,
     onOpenGroup: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1331,7 +1335,9 @@ private fun AddContactDialog(
                             // is2 typing an api number must see the mismatch
                             // (beta report: the request "never arrived").
                             AddResultRow("#$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
-                                onAddUin(digits); sentTo = sentTo + digits
+                                // Open the profile first so you can preview before
+                                // sending the request (the profile has the button).
+                                onOpenProfile(digits)
                             }
                         }
                         // Federation (F2): an explicit `uin@host` whose host is NOT
@@ -1365,7 +1371,9 @@ private fun AddContactDialog(
                                 else -> "#${u.uin}"
                             }
                             AddResultRow(u.nickname ?: "#${u.uin}", sub) {
-                                if (already) onOpenChat(u.uin) else { onAddUin(u.uin); sentTo = sentTo + u.uin }
+                                // Contact → open chat; not yet a contact → open the
+                                // profile preview where you can send the request.
+                                if (already) onOpenChat(u.uin) else onOpenProfile(u.uin)
                             }
                         }
                         groups.forEach { g ->

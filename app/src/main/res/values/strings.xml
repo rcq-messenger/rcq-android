@@ -650,6 +650,8 @@
 
     <!-- Contact info -->
     <string name="ci_title">Contact info</string>
+    <string name="ci_message">Message</string>
+    <string name="ci_send_request">Send request</string>
     <string name="ci_remove_fav">Remove from favorites</string>
     <string name="ci_add_fav">Add to favorites</string>
     <string name="ci_unmute">Unmute</string>

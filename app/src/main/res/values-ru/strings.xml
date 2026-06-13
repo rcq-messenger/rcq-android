@@ -649,6 +649,8 @@
 
     <!-- Contact info -->
     <string name="ci_title">Профиль контакта</string>
+    <string name="ci_message">Написать</string>
+    <string name="ci_send_request">Отправить запрос</string>
     <string name="ci_remove_fav">Убрать из избранного</string>
     <string name="ci_add_fav">В избранное</string>
     <string name="ci_unmute">Включить звук</string>

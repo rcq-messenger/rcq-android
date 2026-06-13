@@ -107,6 +107,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -757,13 +758,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     lastVisible < info.totalItemsCount - 1
                 }
             }
-            // #15: how many message rows sit below the fold — shown as a badge
-            // on the arrow so the user knows there's unread content down there.
+            // #15: badge on the arrow counting unread messages BELOW the fold.
+            // We track a high-water mark — the deepest row the user has actually
+            // scrolled into view — and count messages below THAT, not below the
+            // current viewport. So the count only decreases as you scroll down,
+            // never re-counts rows you already passed, and never grows when you
+            // scroll back up. Only genuinely-new messages arriving below the
+            // mark push it up again. (Matches the iOS unreadBelow behavior; fixes
+            // the count re-counting after reaching bottom / inflating on scroll-up.)
+            var deepestSeen by remember(threadKey) { mutableStateOf(-1) }
+            LaunchedEffect(threadKey) {
+                snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+                    .collect { last -> if (last > deepestSeen) deepestSeen = last }
+            }
             val belowCount by remember(rows) {
                 derivedStateOf {
-                    val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf 0
-                    if (last >= rows.lastIndex) 0
-                    else (last + 1..rows.lastIndex).count { rows[it] is ChatRow.Single || rows[it] is ChatRow.Album }
+                    if (deepestSeen < 0) return@derivedStateOf 0
+                    val from = deepestSeen + 1
+                    if (from > rows.lastIndex) 0
+                    else (from..rows.lastIndex).count { rows[it] is ChatRow.Single || rows[it] is ChatRow.Album }
                 }
             }
             if (showJumpDown) {
@@ -937,6 +950,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         val pinFallback = stringResource(R.string.chat_pinned_media)
                         MessageAction(stringResource(R.string.chat_pin)) {
                             val text = m.body.ifBlank { pinFallback }
+                            // Optimistic + instant: replace the displayed pin now,
+                            // then PATCH (the response reconciles it).
+                            session.applyPinnedTextLocally(group.id, text)
                             scope.launch { runCatching { session.patchGroup(group.id, pinnedText = text) } }
                             actionMsg = null
                         }

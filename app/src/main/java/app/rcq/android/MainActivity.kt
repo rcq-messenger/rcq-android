@@ -363,6 +363,7 @@ private fun RcqApp(session: Session) {
                 session, peerInfo,
                 onBack = { peerInfoUin = null },
                 onRemoved = { peerInfoUin = null; chatTarget = null },
+                onOpenChat = { peerInfoUin = null; chatTarget = ChatTarget.Peer(it) },
             )
             s is UiState.Registered && infoId != null -> GroupInfoScreen(
                 session, infoId,
@@ -424,6 +425,7 @@ private fun RcqApp(session: Session) {
                 onOpenSettings = { settingsToDiagnostics = false; showSettings = true },
                 onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
                 onOpenProfile = { showProfile = true },
+                onOpenPeerInfo = { peerInfoUin = it },
                 onOpenNews = { showNews = true },
                 onOpenOutgoing = { showOutgoing = true },
                 onOpenSaved = { session.uin?.let { chatTarget = ChatTarget.Peer(it) } },
