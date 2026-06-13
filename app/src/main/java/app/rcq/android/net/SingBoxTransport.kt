@@ -110,7 +110,9 @@ object SingBoxTransport {
      *  displaces a canary-verified relay nor becomes the onion sticky entry; if
      *  every signed-config relay is blocked, the urltest race lets a working
      *  shared relay win. */
-    private fun relays(): List<Relay> = RelayConfigStore.currentRelays() + ContactRelayStore.relays()
+    private fun relays(): List<Relay> =
+        (RelayConfigStore.currentRelays() + ContactRelayStore.relays() + BrokerRelayStore.relays())
+            .distinctBy { "${it.proto}:${it.server}:${it.port}" }
 
     /** SOCKS proxy pointing at the local sing-box inbound, or null when the
      *  transport is off (OkHttp treats null as a direct connection). */

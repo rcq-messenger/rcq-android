@@ -729,6 +729,9 @@ class Session(context: Context) {
             // best-effort, never blocks the connect. So a rotated relay is
             // picked up without an app update.
             launch { runCatching { app.rcq.android.net.RelayConfigStore.refresh(appCtx) } }
+            // Pull a few broker bridges (anti-enumeration channel) alongside —
+            // best-effort, merged into the transport pool as off-config fallback.
+            launch(Dispatchers.IO) { runCatching { app.rcq.android.net.BrokerRelayStore.refresh() } }
         }
     }
 
