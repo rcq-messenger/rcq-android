@@ -19,6 +19,9 @@ data class GroupMember(
     val presence: UserStatus get() = UserStatus.from(status)
     /** True if this member may delete anyone's message (owner OR `delete` cap). */
     fun canDelete(ownerUin: Int): Boolean = uin == ownerUin || "delete" in permissions
+    /** True if this member may manage group info — pin, rename, etc. (owner OR
+     *  `info` cap). Used to gate pinning a message from the chat. */
+    fun canManageInfo(ownerUin: Int): Boolean = uin == ownerUin || "info" in permissions
 }
 
 /**

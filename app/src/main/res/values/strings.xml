@@ -728,6 +728,8 @@
     <string name="media_save">Save</string>
     <string name="media_saved">Saved</string>
     <string name="media_save_failed">Couldn\'t save</string>
+    <string name="chat_pin">Pin</string>
+    <string name="chat_pinned_media">📎 Attachment</string>
     <string name="chat_edit">Edit</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_delete_all">Delete for everyone</string>

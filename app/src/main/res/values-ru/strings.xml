@@ -727,6 +727,8 @@
     <string name="media_save">Сохранить</string>
     <string name="media_saved">Сохранено</string>
     <string name="media_save_failed">Не удалось сохранить</string>
+    <string name="chat_pin">Закрепить</string>
+    <string name="chat_pinned_media">📎 Вложение</string>
     <string name="chat_edit">Изменить</string>
     <string name="chat_retry">Повторить</string>
     <string name="chat_delete_all">Удалить у всех</string>

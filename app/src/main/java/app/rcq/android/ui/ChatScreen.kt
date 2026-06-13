@@ -930,6 +930,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         MessageAction(stringResource(R.string.media_share)) { shareMessageMedia(m); actionMsg = null }
                         MessageAction(stringResource(R.string.media_save)) { saveMessageMedia(m); actionMsg = null }
                     }
+                    // Pin from chat (owner / info-moderator): copies this message's
+                    // text into the single group pin slot, replacing whatever was
+                    // there (a chat pin or the settings-entered text — one slot).
+                    if (group != null && group.members.firstOrNull { it.uin == ownUin }?.canManageInfo(group.ownerUin) == true) {
+                        val pinFallback = stringResource(R.string.chat_pinned_media)
+                        MessageAction(stringResource(R.string.chat_pin)) {
+                            val text = m.body.ifBlank { pinFallback }
+                            scope.launch { runCatching { session.patchGroup(group.id, pinnedText = text) } }
+                            actionMsg = null
+                        }
+                    }
                     if (m.kind == "text") MessageAction(stringResource(R.string.chat_copy)) {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(ClipData.newPlainText("message", m.body))
