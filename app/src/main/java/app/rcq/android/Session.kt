@@ -1553,17 +1553,26 @@ class Session(context: Context) {
 
     private suspend fun refreshGroups() {
         val own = api.groups().map(::mapGroup)
-        // §5c: groups joined on other islands, fetched with the guest creds;
-        // ids rewritten to the local alias at this boundary. A failing island
-        // degrades to "no groups from there" — never blocks the own list (the
-        // 30s drain refreshes expired guest creds; next refresh recovers).
-        val foreign = VisitedIslandsStore.list().flatMap { v ->
+        // §5c: groups hosted on OTHER islands, fetched with that island's creds;
+        // ids rewritten to the local alias at this boundary. The host can be a
+        // visited/guest island OR one of our BACKUP islands (multihome) — a group
+        // on a backup island MUST be listed here too or it shows up message-only
+        // with no name/roster. Dedup hosts (one can be both) + never let a
+        // failing island block the own list (the drain refreshes creds; next
+        // refresh recovers).
+        val me = store.uin
+        val foreignHosts = (
+            VisitedIslandsStore.list().map { it.host to it.jwt } +
+                (me?.let { MultihomeStore.list(it).map { h -> h.host to h.jwt } } ?: emptyList())
+            ).filter { !it.first.equals(serverHost(), ignoreCase = true) }
+            .distinctBy { it.first.lowercase() }
+        val foreign = foreignHosts.flatMap { (host, jwt) ->
             runCatching {
-                val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
-                guest.groups().map { mapGroup(it).copy(id = VisitedIslandsStore.aliasFor(v.host, it.id), host = v.host) }
+                val guest = RcqApi("https://$host").apply { setToken(jwt) }
+                guest.groups().map { mapGroup(it).copy(id = VisitedIslandsStore.aliasFor(host, it.id), host = host) }
             }.getOrElse { emptyList() }
         }
-        _groups.value = (own + foreign).sortedByDescending { it.createdAt ?: 0L }
+        _groups.value = (own + foreign).distinctBy { it.id }.sortedByDescending { it.createdAt ?: 0L }
         // Persist the roster so groups are reachable offline (report #7).
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
     }
@@ -1572,8 +1581,9 @@ class Session(context: Context) {
      *  contains us (we left / were removed), drop it locally instead —
      *  mirrors the iOS GroupService.upsert rule. */
     private fun upsertGroup(g: RcqGroup) {
-        // Foreign group (§5c): in ITS roster we are our per-island guest uin.
-        val me = if (g.host != null) VisitedIslandsStore.get(g.host)?.uin else store.uin
+        // Foreign group (§5c): in ITS roster we are our per-island uin (a guest
+        // entry OR our backup-island uin if the group is hosted on a backup).
+        val me = if (g.host != null) foreignCreds(g.host)?.first else store.uin
         // Self-removal rule: drop a group we're no longer a member of. Guard
         // on a non-empty roster so a partial/empty WS payload (e.g. the
         // server echoing group_created back to the creator) can't nuke a
@@ -1601,13 +1611,25 @@ class Session(context: Context) {
      *  alias of a foreign group → the guest client + remote id. */
     private data class GroupCtx(val api: RcqApi, val gid: Int, val host: String?, val myUin: Int)
 
+    /** Creds for a foreign host: a visited/guest island OR one of our BACKUP
+     *  islands (multihome). A cross-island group can be hosted on EITHER — both
+     *  stores hold this identity's (uin, jwt) for that host. Without the backup
+     *  fallback, a group on your backup island has no roster/name and its sends
+     *  misroute to your own island (the "Группа / 0 участников / не дошло" bug). */
+    private fun foreignCreds(host: String): Pair<Int, String>? {
+        VisitedIslandsStore.get(host)?.let { return it.uin to it.jwt }
+        val me = store.uin ?: return null
+        return MultihomeStore.list(me).firstOrNull { it.host.equals(host, ignoreCase = true) }
+            ?.let { it.uin to it.jwt }
+    }
+
     private fun groupCtx(groupId: Int): GroupCtx {
         if (groupId >= 0) return GroupCtx(api, groupId, null, store.uin ?: 0)
         val ref = VisitedIslandsStore.refByAlias(groupId)
-        val v = ref?.let { VisitedIslandsStore.get(it.host) }
-        if (ref == null || v == null) return GroupCtx(api, groupId, null, store.uin ?: 0)
-        val guest = RcqApi("https://${ref.host}").apply { setToken(v.jwt) }
-        return GroupCtx(guest, ref.remoteId, ref.host, v.uin)
+        val creds = ref?.let { foreignCreds(it.host) }
+        if (ref == null || creds == null) return GroupCtx(api, groupId, null, store.uin ?: 0)
+        val guest = RcqApi("https://${ref.host}").apply { setToken(creds.second) }
+        return GroupCtx(guest, ref.remoteId, ref.host, creds.first)
     }
 
     /** The island a foreign group lives on (null for own-island groups) — for
