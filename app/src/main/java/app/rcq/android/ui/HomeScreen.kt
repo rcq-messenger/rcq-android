@@ -990,7 +990,12 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            GroupAvatar(group, session, 28.dp)
+            // Animate the group's GIF avatar here too (founder: it animated in
+            // the chat but not on the home list). Safe: the chat list is a
+            // LazyColumn, so only the handful of on-screen group rows compose,
+            // and SafeAnimatedGif memoizes its decoder per instance — far lighter
+            // than the emoticon-dense-message churn that caused the old OOM.
+            GroupAvatar(group, session, 28.dp, animated = true)
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd))
         }
         Column(Modifier.weight(1f)) {
