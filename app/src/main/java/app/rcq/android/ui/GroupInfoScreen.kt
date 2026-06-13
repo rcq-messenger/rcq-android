@@ -88,7 +88,7 @@ private fun PermChip(label: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit, onLeft: () -> Unit, onOpenPeerInfo: (Int) -> Unit) {
+internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit, onLeft: () -> Unit, onOpenPeerInfo: (Int) -> Unit, onOpenGroup: (Int) -> Unit = {}) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -159,12 +159,22 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             }
         }
 
-        // Non-owners see the pin read-only; owners get the editable row below.
-        if (!isOwner) group.pinnedText?.takeIf { it.isNotBlank() }?.let { pin ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Filled.PushPin, null, tint = c.accent, modifier = Modifier.size(16.dp))
-                Text(pin, color = c.textPrimary, fontSize = 13.sp)
-            }
+        // Pin display for EVERYONE: the same rich, bounded viewer as the chat
+        // banner. A single compact line (so a pin listing many groups can't blow
+        // up the field); tap opens the scrollable sheet with clickable mentions/
+        // URLs + group join-cards. Owners ALSO get the editable row in Settings.
+        group.pinnedText?.takeIf { it.isNotBlank() }?.let { pin ->
+            PinnedAnnouncement(
+                session = session,
+                pin = pin,
+                members = group.members,
+                ownUin = ownUin,
+                onOpenPeerInfo = onOpenPeerInfo,
+                onOpenGroup = onOpenGroup,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp),
+                textColor = c.textPrimary,
+                iconTint = c.accent,
+            )
         }
 
         // Notifications (#11) — every member: All / Mentions only / None.

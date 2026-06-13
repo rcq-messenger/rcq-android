@@ -157,6 +157,7 @@ import app.rcq.android.media.MediaSaver
 import app.rcq.android.media.VoiceRecorder
 import app.rcq.android.model.ChatMessage
 import app.rcq.android.model.DeliveryState
+import app.rcq.android.model.GroupMember
 import app.rcq.android.model.UserStatus
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -585,114 +586,21 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
         }
 
-        // Pinned banner (groups). Links are tappable, and a #<uin> that's a
-        // CURRENT member renders as their clickable nick (tap → their profile);
-        // a #<uin> NOT in the group stays plain digits so the announcement
-        // can't point the group at an outsider.
+        // Pinned banner (groups). Single compact line that never reflows the
+        // chat; tap opens the full scrollable sheet with clickable mentions/URLs
+        // + group join-cards. Shared with GroupInfoScreen (same rich viewer).
         group?.pinnedText?.takeIf { it.isNotBlank() }?.let { pin ->
-            val members = group?.members ?: emptyList()
-            val annotated = remember(pin, members) { buildPinnedAnnotated(pin, members, c.accent) }
-            // Group-invite links in the pin are stripped from the text (above)
-            // and rendered as tappable join cards (iOS parity); tapping a card
-            // opens the in-app join sheet instead of a browser.
-            val pinGroupIds = remember(pin) { GroupLinkParser.parseAll(pin) }
-            val hasPinText = annotated.text.isNotBlank()
-            val uriHandler = LocalUriHandler.current
-            // The banner is ALWAYS a single compact line, so it never reflows the
-            // chat. The full text + the group join-cards open in an OVERLAY sheet
-            // that floats over the messages — the message list never moves
-            // (founder: expanding the pin inline shoved the top message up under
-            // the pin icon). A pin can list many groups; they all live in the sheet.
-            var showPinSheet by remember(pin, threadKey) { mutableStateOf(false) }
-            val expandable = pinGroupIds.isNotEmpty() || pin.length > 48
-            Column(Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.PushPin, null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
-                    Box(Modifier.weight(1f)) {
-                        if (hasPinText) {
-                            ClickableText(
-                                text = annotated,
-                                style = TextStyle(color = c.textSecondary, fontSize = 12.sp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                onClick = { offset ->
-                                    // A mention of yourself isn't actionable (opening
-                                    // your own profile would offer add/block/report
-                                    // against yourself).
-                                    annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                                        val mUin = it.item.toInt()
-                                        if (mUin != ownUin) onOpenPeerInfo(mUin)
-                                        return@ClickableText
-                                    }
-                                    annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let {
-                                        runCatching { uriHandler.openUri(it.item) }
-                                        return@ClickableText
-                                    }
-                                    // Tap the text → open the pin sheet (overlay).
-                                    if (expandable) showPinSheet = true
-                                },
-                            )
-                        } else {
-                            // Pin is only group links — label it with the count.
-                            Text(
-                                if (pinGroupIds.isEmpty()) stringResource(R.string.gi_pinned)
-                                else "${stringResource(R.string.gi_pinned)} · ${pinGroupIds.size}",
-                                color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable(enabled = expandable) { showPinSheet = true },
-                            )
-                        }
-                    }
-                    if (expandable) {
-                        if (pinGroupIds.isNotEmpty()) {
-                            Text("${pinGroupIds.size}", color = c.textSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        }
-                        Icon(
-                            Icons.Filled.ExpandMore,
-                            stringResource(R.string.gi_pinned),
-                            tint = c.textSecondary,
-                            modifier = Modifier.size(20.dp).clip(CircleShape).clickable { showPinSheet = true },
-                        )
-                    }
-                }
-            }
-            if (showPinSheet) {
-                AlertDialog(
-                    onDismissRequest = { showPinSheet = false },
-                    confirmButton = {
-                        TextButton(onClick = { showPinSheet = false }) {
-                            Text(stringResource(R.string.common_close), color = c.accent)
-                        }
-                    },
-                    icon = { Icon(Icons.Filled.PushPin, null, tint = c.accent) },
-                    title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
-                    text = {
-                        // Scrollable: a dialog caps its own height, so a long pin
-                        // (text + a dozen group chips) was CLIPPED with no way to
-                        // see the rest (founder report #16).
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            if (hasPinText) {
-                                ClickableText(
-                                    text = annotated,
-                                    style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
-                                    onClick = { offset ->
-                                        annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                                            val mUin = it.item.toInt()
-                                            if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
-                                            return@ClickableText
-                                        }
-                                        annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
-                                    },
-                                )
-                            }
-                            pinGroupIds.forEach { gref ->
-                                Spacer(Modifier.height(6.dp))
-                                PinnedGroupChip(session, gref, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
-                            }
-                        }
-                    },
-                    containerColor = c.bgSecondary,
-                )
-            }
+            PinnedAnnouncement(
+                session = session,
+                pin = pin,
+                members = group?.members ?: emptyList(),
+                ownUin = ownUin,
+                onOpenPeerInfo = onOpenPeerInfo,
+                onOpenGroup = onOpenGroup,
+                modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp),
+                textColor = c.textSecondary,
+                iconTint = c.textSecondary,
+            )
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -1550,11 +1458,117 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
     }
 }
 
+/** Rich pinned-announcement preview: a single compact line (never reflows its
+ *  container) whose text has clickable @mentions + URLs, with an expand affordance
+ *  when there's more. Tapping opens a scrollable sheet showing the full pin text
+ *  plus group-invite join CARDS (not bare links). Shared by the chat banner and
+ *  GroupInfoScreen so both render the pin identically. [modifier] styles the
+ *  outer row (the chat uses an edge-to-edge bar, group info a rounded card). */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun PinnedAnnouncement(
+    session: Session,
+    pin: String,
+    members: List<GroupMember>,
+    ownUin: Int,
+    onOpenPeerInfo: (Int) -> Unit,
+    onOpenGroup: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    textColor: Color,
+    iconTint: Color,
+) {
+    val c = RcqTheme.colors
+    val annotated = remember(pin, members) { buildPinnedAnnotated(pin, members, c.accent) }
+    val pinGroupIds = remember(pin) { GroupLinkParser.parseAll(pin) }
+    val hasPinText = annotated.text.isNotBlank()
+    val uriHandler = LocalUriHandler.current
+    var showPinSheet by remember(pin) { mutableStateOf(false) }
+    val expandable = pinGroupIds.isNotEmpty() || pin.length > 48
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.PushPin, null, tint = iconTint, modifier = Modifier.size(14.dp))
+        Box(Modifier.weight(1f)) {
+            if (hasPinText) {
+                ClickableText(
+                    text = annotated,
+                    style = TextStyle(color = textColor, fontSize = 13.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    onClick = { offset ->
+                        annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
+                            val mUin = it.item.toInt()
+                            if (mUin != ownUin) onOpenPeerInfo(mUin)
+                            return@ClickableText
+                        }
+                        annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let {
+                            runCatching { uriHandler.openUri(it.item) }
+                            return@ClickableText
+                        }
+                        if (expandable) showPinSheet = true
+                    },
+                )
+            } else {
+                Text(
+                    if (pinGroupIds.isEmpty()) stringResource(R.string.gi_pinned)
+                    else "${stringResource(R.string.gi_pinned)} · ${pinGroupIds.size}",
+                    color = textColor, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable(enabled = expandable) { showPinSheet = true },
+                )
+            }
+        }
+        if (expandable) {
+            if (pinGroupIds.isNotEmpty()) {
+                Text("${pinGroupIds.size}", color = textColor, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+            Icon(
+                Icons.Filled.ExpandMore,
+                stringResource(R.string.gi_pinned),
+                tint = textColor,
+                modifier = Modifier.size(20.dp).clip(CircleShape).clickable { showPinSheet = true },
+            )
+        }
+    }
+    if (showPinSheet) {
+        AlertDialog(
+            onDismissRequest = { showPinSheet = false },
+            confirmButton = {
+                TextButton(onClick = { showPinSheet = false }) {
+                    Text(stringResource(R.string.common_close), color = c.accent)
+                }
+            },
+            icon = { Icon(Icons.Filled.PushPin, null, tint = c.accent) },
+            title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (hasPinText) {
+                        ClickableText(
+                            text = annotated,
+                            style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
+                            onClick = { offset ->
+                                annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
+                                    val mUin = it.item.toInt()
+                                    if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
+                                    return@ClickableText
+                                }
+                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
+                            },
+                        )
+                    }
+                    pinGroupIds.forEach { gref ->
+                        Spacer(Modifier.height(6.dp))
+                        PinnedGroupChip(session, gref, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
+                    }
+                }
+            },
+            containerColor = c.bgSecondary,
+        )
+    }
+}
+
 /** Compact join card for a group-invite link inside a pinned announcement
  *  (iOS PinnedGroupChip parity): avatar + name + member count. Tap opens the
  *  in-app join sheet (NOT a browser); joining jumps into that group. */
 @Composable
-private fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, onOpenGroup: (Int) -> Unit) {
+internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, onOpenGroup: (Int) -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     var showJoin by remember { mutableStateOf(false) }
@@ -1720,7 +1734,7 @@ private sealed interface ChatRow {
  *  member's nickname, tagged "MENTION"=uin (tap -> their profile); a `#<uin>`
  *  not in the group stays inert plain digits, so the pin can't point the
  *  group at an outsider. URLs are tagged "URL"=url. */
-private fun buildPinnedAnnotated(
+internal fun buildPinnedAnnotated(
     text: String,
     members: List<app.rcq.android.model.GroupMember>,
     accent: androidx.compose.ui.graphics.Color,

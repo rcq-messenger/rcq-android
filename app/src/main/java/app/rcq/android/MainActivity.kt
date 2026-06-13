@@ -370,6 +370,7 @@ private fun RcqApp(session: Session) {
                 onBack = { groupInfoId = null },
                 onLeft = { groupInfoId = null; chatTarget = null },
                 onOpenPeerInfo = { peerInfoUin = it },
+                onOpenGroup = { groupInfoId = null; chatTarget = ChatTarget.Group(it) },
             )
             s is UiState.Registered && target != null -> ChatScreen(
                 session, target,
