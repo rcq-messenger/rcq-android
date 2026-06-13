@@ -714,20 +714,27 @@ private fun UpdateDialog(
         containerColor = c.bgSecondary,
         title = { Text(stringResource(R.string.update_title, update.versionName), color = c.textPrimary) },
         text = {
-            // Cap the height and scroll — long patch notes used to stretch the
-            // dialog so tall the buttons were pushed off-screen (founder report).
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
-            ) {
-                if (update.notes.isNotBlank()) Text(update.notes, color = c.textSecondary, fontSize = 14.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // The NOTES scroll within a cap (long patch notes used to push the
+                // buttons off-screen). The download progress is PINNED BELOW the
+                // scroll, NOT inside it — previously it sat after the notes inside
+                // the same scroll area, so with long notes it was below the fold
+                // and invisible after tapping Download (on a slow network it
+                // looked like the indicator was gone — user report). The notes
+                // cap shrinks while downloading to keep the bar comfortably in view.
+                if (update.notes.isNotBlank()) {
+                    Text(
+                        update.notes, color = c.textSecondary, fontSize = 14.sp,
+                        modifier = Modifier
+                            .heightIn(max = if (active != null) 170.dp else 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
                 if (active != null) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
-                        else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())
-                        Text(stringResource(R.string.update_downloading_pct, (active.progress.coerceAtLeast(0f) * 100).toInt()), color = c.textSecondary, fontSize = 13.sp)
-                        Text(stringResource(R.string.update_bg_hint), color = c.textSecondary, fontSize = 11.sp)
-                    }
+                    if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
+                    else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.update_downloading_pct, (active.progress.coerceAtLeast(0f) * 100).toInt()), color = c.textSecondary, fontSize = 13.sp)
+                    Text(stringResource(R.string.update_bg_hint), color = c.textSecondary, fontSize = 11.sp)
                 }
             }
         },
