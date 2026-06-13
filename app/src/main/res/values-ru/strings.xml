@@ -623,6 +623,10 @@
     <string name="gi_hide">Скрыть список участников</string>
     <string name="gi_hide_desc">Только вы видите полный список</string>
     <string name="gi_members">УЧАСТНИКИ</string>
+    <string name="gi_member_search">Поиск участников</string>
+    <string name="gi_members_collapse">Свернуть</string>
+    <string name="gi_members_no_matches">Участники не найдены</string>
+    <string name="gi_members_show_all">Показать всех (+%1$d)</string>
     <string name="gi_owner">владелец</string>
     <string name="gi_admin">админ</string>
     <string name="gi_moderator">модератор</string>

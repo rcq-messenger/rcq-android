@@ -624,6 +624,10 @@
     <string name="gi_hide">Hide member list</string>
     <string name="gi_hide_desc">Only you see the full roster</string>
     <string name="gi_members">MEMBERS</string>
+    <string name="gi_member_search">Search members</string>
+    <string name="gi_members_collapse">Show less</string>
+    <string name="gi_members_no_matches">No members found</string>
+    <string name="gi_members_show_all">Show all (+%1$d)</string>
     <string name="gi_owner">owner</string>
     <string name="gi_admin">admin</string>
     <string name="gi_moderator">moderator</string>

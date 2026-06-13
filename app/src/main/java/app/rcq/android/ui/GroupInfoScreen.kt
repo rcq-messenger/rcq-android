@@ -33,6 +33,10 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -103,6 +107,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     var showPin by remember { mutableStateOf(false) }
     // Member the owner/moderator is about to remove (drives the confirm dialog).
     var memberToRemove by remember { mutableStateOf<GroupMember?>(null) }
+    // Roster fold + search (parity with iOS): big groups show a preview, expand
+    // to all, and can be searched + collapsed without scrolling to the bottom.
+    var showAllMembers by remember { mutableStateOf(false) }
+    var memberSearch by remember { mutableStateOf("") }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
@@ -236,12 +244,46 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         val sortedMembers = remember(group.members) {
             group.members.sortedBy { when (it.role) { "owner" -> 0; "admin" -> 1; else -> 2 } }
         }
+        val previewLimit = 8
+        val q = memberSearch.trim().lowercase()
+        val searching = q.isNotEmpty()
+        val filtered = if (searching) sortedMembers.filter { it.nickname.lowercase().contains(q) || it.uin.toString().contains(q) } else sortedMembers
+        val visibleMembers = if (searching || showAllMembers || filtered.size <= previewLimit) filtered else filtered.take(previewLimit)
+        val hiddenCount = if (searching) 0 else (sortedMembers.size - visibleMembers.size).coerceAtLeast(0)
+        val bigGroup = sortedMembers.size > previewLimit
         // Plain Column (not a weight(1f) LazyColumn): the whole screen is now
         // verticalScroll-able, and a weight(1f) lazy list inside that got
         // starved to ~0px by the tall owner-settings block + per-member perm
         // chips, hiding the roster + delete button from the owner.
         Column(Modifier.fillMaxWidth()) {
-            sortedMembers.forEach { m ->
+            // Search field — only on a group big enough to warrant it.
+            if (bigGroup) {
+                OutlinedTextField(
+                    value = memberSearch,
+                    onValueChange = { memberSearch = it },
+                    placeholder = { Text(stringResource(R.string.gi_member_search), color = c.textSecondary) },
+                    leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.textSecondary, modifier = Modifier.size(18.dp)) },
+                    trailingIcon = {
+                        if (memberSearch.isNotEmpty()) Icon(Icons.Filled.Close, stringResource(R.string.common_close), tint = c.textSecondary, modifier = Modifier.size(18.dp).clickable { memberSearch = "" })
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+            // Collapse control at the TOP (no need to scroll to the bottom to fold).
+            if (showAllMembers && !searching && bigGroup) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { showAllMembers = false }.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(Icons.Filled.ExpandLess, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                    Text(stringResource(R.string.gi_members_collapse), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            if (searching && filtered.isEmpty()) {
+                Text(stringResource(R.string.gi_members_no_matches), color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            }
+            visibleMembers.forEach { m ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
                     Row(
                         Modifier.fillMaxWidth().clickable(enabled = m.uin != ownUin) { onOpenPeerInfo(m.uin) },
@@ -288,6 +330,15 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             PermChip(stringResource(R.string.gi_perm_info), "info" in m.permissions) { toggle("info") }
                         }
                     }
+                }
+            }
+            if (hiddenCount > 0 && !showAllMembers) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { showAllMembers = true }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(Icons.Filled.ExpandMore, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                    Text(stringResource(R.string.gi_members_show_all, hiddenCount), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
