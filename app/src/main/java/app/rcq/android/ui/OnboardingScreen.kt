@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.VpnLock
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -95,7 +97,8 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
         OnbPage(R.string.onboard_mesh_kicker, R.string.onboard_mesh_title, R.string.onboard_mesh_body, Hero.Sym(Icons.Filled.SettingsInputAntenna)),
         OnbPage(R.string.onboard_chat_kicker, R.string.onboard_chat_title, R.string.onboard_chat_body, Hero.Sym(Icons.Filled.Lock)),
         OnbPage(R.string.onboard_pin_kicker, R.string.onboard_pin_title, R.string.onboard_pin_body, Hero.Sym(Icons.Filled.Shield)),
-        OnbPage(R.string.onboard_status_kicker, R.string.onboard_status_title, R.string.onboard_status_body, Hero.StatusRow),
+        OnbPage(R.string.onboard_federation_kicker, R.string.onboard_federation_title, R.string.onboard_federation_body, Hero.Sym(Icons.Filled.Hub)),
+        OnbPage(R.string.onboard_relay_kicker, R.string.onboard_relay_title, R.string.onboard_relay_body, Hero.Sym(Icons.Filled.VpnLock)),
     )
     val pager = rememberPagerState(pageCount = { pages.size })
     val lastPage = pager.currentPage == pages.size - 1

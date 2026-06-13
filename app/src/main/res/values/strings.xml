@@ -31,6 +31,12 @@
     <string name="onboard_status_kicker">STATUS</string>
     <string name="onboard_status_title">Pick your status</string>
     <string name="onboard_status_body">Online, Away, DND, Invisible, Offline. The classic five, and they actually mean something. Tap your status icon to switch.</string>
+    <string name="onboard_federation_kicker">FEDERATION</string>
+    <string name="onboard_federation_title">No single owner</string>
+    <string name="onboard_federation_body">RCQ isn\'t one company\'s server. Every server is an independent island, and anyone can run one. Your account lives on the island you pick, and you keep your number if you move.</string>
+    <string name="onboard_relay_kicker">CIRCUMVENTION</string>
+    <string name="onboard_relay_title">Built to get through</string>
+    <string name="onboard_relay_body">When the network blocks RCQ, the app routes itself through a relay, disguised as ordinary traffic. The relay network is community-run, and onion routing chains it so no single relay sees both you and your island.</string>
 
     <string name="onboard_server_label">Server</string>
     <string name="onboard_language">Language</string>

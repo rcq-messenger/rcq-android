@@ -30,6 +30,12 @@
     <string name="onboard_status_kicker">СТАТУС</string>
     <string name="onboard_status_title">Выберите статус</string>
     <string name="onboard_status_body">В сети, Отошёл, Не беспокоить, Невидимый, Не в сети. Те самые пять, и они правда работают. Тапните по статусу, чтобы сменить.</string>
+    <string name="onboard_federation_kicker">ФЕДЕРАЦИЯ</string>
+    <string name="onboard_federation_title">Без единого владельца</string>
+    <string name="onboard_federation_body">RCQ это не сервер одной компании. Каждый сервер это независимый остров, поднять его может любой. Ваш аккаунт живёт на выбранном острове, при переезде номер сохраняется.</string>
+    <string name="onboard_relay_kicker">ОБХОД</string>
+    <string name="onboard_relay_title">Проходит сквозь блокировки</string>
+    <string name="onboard_relay_body">Когда сеть блокирует RCQ, приложение само идёт через реле, маскируясь под обычный трафик. Сеть реле держит сообщество, а луковичная маршрутизация связывает их так, что ни одно реле не видит и вас, и ваш остров.</string>
 
     <string name="onboard_server_label">Сервер</string>
     <string name="onboard_language">Язык</string>
