@@ -34,9 +34,11 @@ import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -68,6 +70,7 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.model.GroupMember
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -111,6 +114,8 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // to all, and can be searched + collapsed without scrolling to the bottom.
     var showAllMembers by remember { mutableStateOf(false) }
     var memberSearch by remember { mutableStateOf("") }
+    // Copy-link transient feedback (label flips to "Link copied" for ~1.6s).
+    var linkCopied by remember { mutableStateOf(false) }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
@@ -242,7 +247,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.gi_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            if (isOwner) {
+            if (canManageMembers) {
                 Row(Modifier.clip(RoundedCornerShape(percent = 50)).clickable { showAddMember = true }.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Filled.PersonAdd, null, tint = c.accent, modifier = Modifier.size(16.dp))
                     Text(stringResource(R.string.home_bar_add), color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -351,6 +356,29 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     Text(stringResource(R.string.gi_members_show_all, hiddenCount), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+        }
+
+        // Copy group link — EVERY member (parity with iOS Manage section). The
+        // link always carries the host (§5c) so it works from any island; paste
+        // it into a chat or a pinned announcement to surface a tappable join card.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(10.dp)).background(c.bgSecondary)
+                .clickable {
+                    val (rid, host) = session.groupShareRef(groupId)
+                    val link = GroupLinkParser.canonicalUrl(rid, host)
+                    (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("group link", link))
+                    linkCopied = true
+                    scope.launch { delay(1600); linkCopied = false }
+                }.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(if (linkCopied) Icons.Filled.Check else Icons.Filled.Link, null, tint = c.accent, modifier = Modifier.size(18.dp))
+            Text(
+                stringResource(if (linkCopied) R.string.gi_link_copied else R.string.gi_copy_link),
+                color = if (linkCopied) c.accent else c.textPrimary, fontSize = 15.sp,
+            )
         }
 
         Box(

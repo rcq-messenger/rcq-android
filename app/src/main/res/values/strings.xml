@@ -656,6 +656,8 @@
     <string name="gi_remove_member_cta">Remove</string>
     <string name="gi_add_member">Add member</string>
     <string name="gi_all_in">All your contacts are already in this group.</string>
+    <string name="gi_copy_link">Copy group link</string>
+    <string name="gi_link_copied">Link copied</string>
     <string name="gi_edit">Edit group</string>
     <string name="gi_name">Name</string>
     <string name="gi_description">Description</string>

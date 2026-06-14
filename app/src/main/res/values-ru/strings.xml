@@ -655,6 +655,8 @@
     <string name="gi_remove_member_cta">Удалить</string>
     <string name="gi_add_member">Добавить участника</string>
     <string name="gi_all_in">Все ваши контакты уже в этой группе.</string>
+    <string name="gi_copy_link">Копировать ссылку группы</string>
+    <string name="gi_link_copied">Ссылка скопирована</string>
     <string name="gi_edit">Редактировать группу</string>
     <string name="gi_name">Название</string>
     <string name="gi_description">Описание</string>
