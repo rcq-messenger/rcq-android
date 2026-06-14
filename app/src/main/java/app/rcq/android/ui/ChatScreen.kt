@@ -2067,7 +2067,9 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
             .padding(vertical = 3.dp, horizontal = 2.dp),
         horizontalAlignment = if (m.fromMe) Alignment.End else Alignment.Start,
     ) {
-        if (senderName != null) {
+        // Media/voice/file/poll/location/relay keep the sender name ABOVE the
+        // bubble; a plain text bubble renders it INSIDE, at the top (Telegram).
+        if (senderName != null && !isPlainText) {
             Text(
                 senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 4.dp, bottom = 1.dp)
@@ -2111,6 +2113,14 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     .combinedClickable(onClick = { if (failed) onRetry() }, onLongClick = onLongPress)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
+                // Sender name as the first line INSIDE the bubble (Telegram-style).
+                if (senderName != null) {
+                    Text(
+                        senderName, color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                            .then(if (onSenderClick != null) Modifier.clickable { onSenderClick() } else Modifier),
+                    )
+                }
                 if (m.replyToSnippet != null) {
                     val tappable = m.replyToId != null && onTapReply != null
                     Column(
