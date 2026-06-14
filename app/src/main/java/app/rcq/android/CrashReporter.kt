@@ -98,14 +98,49 @@ object CrashReporter {
         if (stage.isNullOrBlank()) return
         // A JVM crash already wrote a real stack — don't clobber it.
         if (File(appCtx.filesDir, FILE).exists()) return
+        // Android 11+ keeps a tombstone for the previous process exit. When it
+        // was a NATIVE crash this names the actual signal + backtrace — far more
+        // useful than the breadcrumb, which only says which startup STAGE we
+        // reached (e.g. every post-drain crash collapses onto "drain_done").
+        val exit = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            runCatching { recentExitInfo(appCtx) }.getOrNull() else null
         val report = buildString {
             append("RCQ launch crash (suspected NATIVE — no JVM stack)\n")
             append("app: ${BuildConfig.VERSION_NAME} (vc ${BuildConfig.VERSION_CODE})\n")
             append("android: ${Build.VERSION.RELEASE} (sdk ${Build.VERSION.SDK_INT})\n")
             append("device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
             append("last stage before crash: $stage\n")
+            if (!exit.isNullOrBlank()) { append('\n'); append(exit) }
         }
-        runCatching { File(appCtx.filesDir, FILE).writeText(report) }
+        runCatching { File(appCtx.filesDir, FILE).writeText(report.take(MAX)) }
+    }
+
+    /** The OS-recorded reason for the most recent previous process exit
+     *  (Android 11+). For a native crash it includes the signal description and
+     *  the tombstone backtrace — the actual faulting frame. */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun recentExitInfo(context: Context): String? {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager ?: return null
+        val info = am.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull() ?: return null
+        val reason = when (info.reason) {
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "CRASH_NATIVE"
+            android.app.ApplicationExitInfo.REASON_SIGNALED -> "SIGNALED"
+            android.app.ApplicationExitInfo.REASON_CRASH -> "CRASH(JVM)"
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
+            android.app.ApplicationExitInfo.REASON_ANR -> "ANR"
+            else -> "reason=${info.reason}"
+        }
+        return buildString {
+            append("exit: $reason status=${info.status} importance=${info.importance}\n")
+            info.description?.let { append("exit desc: $it\n") }
+            if (info.reason == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE) {
+                runCatching { info.traceInputStream?.bufferedReader()?.use { it.readText() } }
+                    .getOrNull()?.takeIf { it.isNotBlank() }?.let {
+                        append("--- native tombstone ---\n")
+                        append(it.take(10_000))
+                    }
+            }
+        }
     }
 
     /** The saved crash report from a previous run, or null if none. */
