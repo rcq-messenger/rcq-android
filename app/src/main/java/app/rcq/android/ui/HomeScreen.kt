@@ -266,6 +266,10 @@ internal fun HomeScreen(
     val secArchive = stringResource(R.string.home_sec_archive)
 
     Box(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        // Optional home/chat-list wallpaper (separate from the chat one). Renders
+        // behind the list; transparent rows show it, headers stay opaque. No-op
+        // on the default ("").
+        HomeBackground()
         Column(Modifier.fillMaxSize()) {
             HomeHeader(
                 nickname = session.nickname,

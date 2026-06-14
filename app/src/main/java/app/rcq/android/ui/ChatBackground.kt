@@ -76,13 +76,25 @@ internal object ChatBackgrounds {
 internal fun ChatBackground() {
     val bg by LocalStores.chatBackground.collectAsState()
     val context = LocalContext.current
+    WallpaperBackground(bg, remember { LocalStores.chatBgFile(context) })
+}
+
+/** Same wallpaper, but for the HOME / chat-list screen (separate selection). */
+@Composable
+internal fun HomeBackground() {
+    val bg by LocalStores.homeBackground.collectAsState()
+    val context = LocalContext.current
+    WallpaperBackground(bg, remember { LocalStores.homeBgFile(context) })
+}
+
+@Composable
+private fun WallpaperBackground(bg: String, file: java.io.File) {
     when {
         bg.startsWith("preset:") ->
             ChatBackgrounds.preset(bg.removePrefix("preset:"))?.let {
                 Box(Modifier.fillMaxSize().background(it.brush))
             }
         bg == "custom" -> {
-            val file = remember { LocalStores.chatBgFile(context) }
             // Re-read when the file is replaced (lastModified changes).
             val stamp = file.lastModified()
             val img by produceState<ImageBitmap?>(initialValue = null, stamp) {
@@ -98,19 +110,42 @@ internal fun ChatBackground() {
 /** Settings picker: None + built-in presets + a custom image from the gallery.
  *  Global wallpaper (applies to all chats). */
 @Composable
-internal fun ChatBackgroundScreen(onBack: () -> Unit) {
+internal fun ChatBackgroundScreen(onBack: () -> Unit) = BackgroundPickerScreen(
+    stringResource(R.string.settings_row_chat_bg), LocalStores.chatBackground,
+    onSelect = { LocalStores.setChatBackground(it) },
+    onSaveImage = { ctx, bytes -> LocalStores.saveChatBackgroundImage(ctx, bytes) },
+    onBack,
+)
+
+/** Same picker for the HOME / chat-list wallpaper (separate selection). */
+@Composable
+internal fun HomeBackgroundScreen(onBack: () -> Unit) = BackgroundPickerScreen(
+    stringResource(R.string.settings_row_home_bg), LocalStores.homeBackground,
+    onSelect = { LocalStores.setHomeBackground(it) },
+    onSaveImage = { ctx, bytes -> LocalStores.saveHomeBackgroundImage(ctx, bytes) },
+    onBack,
+)
+
+@Composable
+private fun BackgroundPickerScreen(
+    title: String,
+    selectedFlow: kotlinx.coroutines.flow.StateFlow<String>,
+    onSelect: (String) -> Unit,
+    onSaveImage: (android.content.Context, ByteArray) -> Unit,
+    onBack: () -> Unit,
+) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val selected by LocalStores.chatBackground.collectAsState()
+    val selected by selectedFlow.collectAsState()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
             val bytes = withContext(Dispatchers.IO) { compressImageFor(context, uri) }
-            if (bytes != null) LocalStores.saveChatBackgroundImage(context, bytes)
+            if (bytes != null) onSaveImage(context, bytes)
         }
     }
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
-        SettingsTopBar(stringResource(R.string.settings_row_chat_bg), onBack)
+        SettingsTopBar(title, onBack)
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             modifier = Modifier.fillMaxSize().padding(12.dp),
@@ -119,7 +154,7 @@ internal fun ChatBackgroundScreen(onBack: () -> Unit) {
         ) {
             item {
                 BgTile(stringResource(R.string.chat_bg_none), selected == "",
-                    swatch = Modifier.background(c.bgSecondary)) { LocalStores.setChatBackground("") }
+                    swatch = Modifier.background(c.bgSecondary)) { onSelect("") }
             }
             item {
                 BgTile(stringResource(R.string.chat_bg_custom), selected == "custom",
@@ -127,7 +162,7 @@ internal fun ChatBackgroundScreen(onBack: () -> Unit) {
             }
             items(ChatBackgrounds.presets) { p ->
                 BgTile(p.label, selected == "preset:${p.id}",
-                    swatch = Modifier.background(p.brush)) { LocalStores.setChatBackground("preset:${p.id}") }
+                    swatch = Modifier.background(p.brush)) { onSelect("preset:${p.id}") }
             }
         }
     }

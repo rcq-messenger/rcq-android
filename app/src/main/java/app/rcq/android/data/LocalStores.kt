@@ -87,6 +87,11 @@ object LocalStores {
     private val _chatBackground = MutableStateFlow("")
     val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
 
+    /** Same as [chatBackground] but for the HOME / chat-list screen (a separate
+     *  wallpaper, founder's choice). "" / "preset:<id>" / "custom" ([homeBgFile]). */
+    private val _homeBackground = MutableStateFlow("")
+    val homeBackground: StateFlow<String> = _homeBackground.asStateFlow()
+
     /** In-app text-size multiplier ON TOP of the OS font scale (accessibility:
      *  the audience skews 30+ with imperfect vision). Applied app-wide by
      *  overriding LocalDensity.fontScale. 1.0 = system default. */
@@ -138,6 +143,7 @@ object LocalStores {
         _themeMode.value = runCatching { ThemeMode.valueOf(prefs.getString(K_THEME, null) ?: "SYSTEM") }
             .getOrDefault(ThemeMode.SYSTEM)
         _chatBackground.value = prefs.getString(K_CHAT_BG, "") ?: ""
+        _homeBackground.value = prefs.getString(K_HOME_BG, "") ?: ""
         _fontScale.value = prefs.getFloat(K_FONT_SCALE, 1.0f)
         _lockGrace.value = prefs.getInt(K_LOCK_GRACE, 0)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
@@ -271,6 +277,20 @@ object LocalStores {
     fun saveChatBackgroundImage(context: Context, bytes: ByteArray) {
         runCatching { chatBgFile(context).writeBytes(bytes) }
         setChatBackground("custom")
+    }
+
+    /** Home / chat-list wallpaper — parallel to the chat one. */
+    fun setHomeBackground(value: String) {
+        _homeBackground.value = value
+        prefs.edit().putString(K_HOME_BG, value).apply()
+    }
+
+    fun homeBgFile(context: Context): java.io.File =
+        java.io.File(context.applicationContext.filesDir, "home_bg.jpg")
+
+    fun saveHomeBackgroundImage(context: Context, bytes: ByteArray) {
+        runCatching { homeBgFile(context).writeBytes(bytes) }
+        setHomeBackground("custom")
     }
 
     // ── sound toggles ────────────────────────────────────────────────
@@ -416,6 +436,7 @@ object LocalStores {
     private const val K_BLOCKED = "blocked"
     private const val K_THEME = "theme_mode"
     private const val K_CHAT_BG = "chat_background"
+    private const val K_HOME_BG = "home_background"
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"

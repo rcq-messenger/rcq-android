@@ -436,6 +436,7 @@
     <string name="settings_text_size">Размер текста</string>
     <string name="settings_row_app_icon">Иконка приложения</string>
     <string name="settings_row_chat_bg">Фон чата</string>
+    <string name="settings_row_home_bg">Фон главного экрана</string>
     <string name="chat_bg_none">Без фона</string>
     <string name="chat_bg_custom">Из галереи</string>
     <string name="app_icon_default">По умолчанию</string>

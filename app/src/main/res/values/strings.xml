@@ -437,6 +437,7 @@
     <string name="settings_text_size">Text size</string>
     <string name="settings_row_app_icon">App icon</string>
     <string name="settings_row_chat_bg">Chat background</string>
+    <string name="settings_row_home_bg">Home background</string>
     <string name="chat_bg_none">None</string>
     <string name="chat_bg_custom">Gallery</string>
     <string name="app_icon_default">Default</string>
