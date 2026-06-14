@@ -257,7 +257,7 @@ private fun SettingsRoot(
                 Column(Modifier.weight(1f)) {
                     Text(session.nickname, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("#$uin", color = c.textMono, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                        Text("#$uin", color = c.textMono, fontSize = 13.sp)
                         Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
                             modifier = Modifier.size(15.dp).clickable { copyUin() })
                     }
@@ -510,7 +510,7 @@ private fun SettingsRoot(
                         .simpleVerticalScrollbar(aboutScroll, c.textSecondary),
                 ) {
                     Text(stringResource(R.string.cs_about_tagline), color = c.textSecondary, fontSize = 14.sp)
-                    Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                    Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp)
                     Text(stringResource(R.string.cs_about_features), color = c.textSecondary, fontSize = 12.sp)
                     Divider()
                     val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
@@ -647,7 +647,7 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                 Column {
                     Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("#$ownUin", color = c.textMono, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                        Text("#$ownUin", color = c.textMono, fontSize = 13.sp)
                         Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
                             modifier = Modifier.size(15.dp).clickable { copyText("UIN", "$ownUin") })
                         Icon(Icons.Filled.Share, stringResource(R.string.qr_share), tint = c.textSecondary,
@@ -669,7 +669,7 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                Text(h.host, color = c.textPrimary, fontSize = 13.sp)
                                 Text(stringResource(R.string.backup_island_row_uin, h.uin), color = c.textSecondary, fontSize = 12.sp)
                             }
                             Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
@@ -691,7 +691,7 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                     Text(stringResource(R.string.pe_views_title), color = c.textPrimary, fontSize = 15.sp)
                     Text(stringResource(R.string.pe_views_desc), color = c.textSecondary, fontSize = 11.sp)
                 }
-                Text("$profileViews", color = c.accent, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                Text("$profileViews", color = c.accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
 
             Field(stringResource(R.string.pe_nickname), nickname) { nickname = it }
@@ -1252,7 +1252,7 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
                         StatusIcon(ct.presence, size = 26.dp)
                         Column(Modifier.weight(1f)) {
                             Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
-                            Text("#${ct.uin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Text("#${ct.uin}", color = c.textMono, fontSize = 12.sp)
                         }
                         TextButton(onClick = { scope.launch { runCatching { session.toggleBlock(ct.uin) } } }) {
                             Text(stringResource(R.string.blocked_unblock), color = c.accent)
@@ -1410,7 +1410,7 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
             // Current server card.
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.csrv_current), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Text(current, color = c.textPrimary, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+                Text(current, color = c.textPrimary, fontSize = 15.sp)
             }
 
             Field(stringResource(R.string.csrv_host), draft) { draft = it }
@@ -1625,7 +1625,7 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                     autoHomes.forEachIndexed { index, h ->
                         if (index > 0) Divider()
                         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
-                            Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace)
+                            Text(h.host, color = c.textPrimary)
                             Text(
                                 stringResource(R.string.backup_island_row_uin, h.uin),
                                 color = c.textSecondary, fontSize = 12.sp,
@@ -1653,7 +1653,7 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(h.host, color = c.textPrimary, fontFamily = FontFamily.Monospace)
+                                    Text(h.host, color = c.textPrimary)
                                     Text(
                                         stringResource(R.string.backup_island_row_uin, h.uin),
                                         color = c.textSecondary, fontSize = 12.sp,

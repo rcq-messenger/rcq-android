@@ -124,8 +124,8 @@ internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit, onAddByS
                                 )
                             }
                         }
-                        Text(host, color = c.textSecondary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                        uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+                        Text(host, color = c.textSecondary, fontSize = 12.sp)
+                        uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                     }
                     if (isActive) {
                         Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(20.dp))

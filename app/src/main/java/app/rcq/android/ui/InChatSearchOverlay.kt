@@ -107,7 +107,7 @@ internal fun InChatSearchOverlay(
                         Icon(iconFor(m.kind), null, tint = c.accent, modifier = Modifier.size(20.dp))
                         Column(Modifier.weight(1f)) {
                             Text(m.body, color = c.textPrimary, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(dayFmt.format(Date(m.sentAt)), color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Text(dayFmt.format(Date(m.sentAt)), color = c.textMono, fontSize = 12.sp)
                         }
                     }
                 }

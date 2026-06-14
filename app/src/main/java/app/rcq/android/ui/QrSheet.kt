@@ -89,7 +89,6 @@ fun QrDialog(uin: Int, qrPayload: String, shareLink: String, onDismiss: () -> Un
                     "$uin",
                     color = c.textPrimary,
                     fontSize = 22.sp,
-                    fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                 )
                 // Copy the UIN, or share a Telegram-style https link anyone can tap.

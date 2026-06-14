@@ -182,7 +182,6 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
                     textStyle = TextStyle(
                         color = c.textPrimary,
                         fontSize = 46.sp,
-                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
                     ),
@@ -196,7 +195,6 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
                                     "—",
                                     color = c.textSecondary.copy(alpha = 0.32f),
                                     fontSize = 46.sp,
-                                    fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
@@ -222,7 +220,6 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
                         stringResource(R.string.uin_shop_info_current, own.toString()),
                         color = c.textSecondary.copy(alpha = 0.7f),
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
                     )
                 }
             }

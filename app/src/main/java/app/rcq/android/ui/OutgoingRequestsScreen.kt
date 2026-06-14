@@ -100,7 +100,7 @@ private fun OutgoingRow(req: OutgoingRequest, onCancel: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(req.toNickname, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("#${req.toUin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text("#${req.toUin}", color = c.textMono, fontSize = 12.sp)
                 Text(
                     stringResource(if (declined) R.string.outgoing_state_declined else R.string.outgoing_state_pending),
                     color = if (declined) c.statusBusy else c.textSecondary,

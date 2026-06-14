@@ -224,7 +224,7 @@ private fun ServerPickerDialog(server: String, onPick: (String) -> Unit, onDismi
                     if (draft.isEmpty()) Text("server host", color = c.textSecondary, fontSize = 14.sp)
                     BasicTextField(
                         value = draft, onValueChange = { draft = it }, singleLine = true,
-                        textStyle = TextStyle(color = c.textPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace),
+                        textStyle = TextStyle(color = c.textPrimary, fontSize = 14.sp),
                         cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth(),
                     )
                 }

@@ -748,7 +748,7 @@ private fun HomeHeader(
                             Column {
                                 Text(a.nickname, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                                 Text(a.host, color = c.textSecondary, fontSize = 12.sp)
-                                a.uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+                                a.uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                             }
                         },
                         leadingIcon = {
@@ -821,7 +821,7 @@ private fun HomeHeader(
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenProfile).padding(horizontal = 6.dp, vertical = 4.dp),
             ) {
                 Text(nickname, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
-                Text("#$uin", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+                Text("#$uin", color = c.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
             }
             // Right of the nick/UIN: a status-width slot holding the stealth
             // shield when the censorship bypass is engaged (iOS StealthHeaderBadge
@@ -1065,7 +1065,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("#${contact.uin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text("#${contact.uin}", color = c.textMono, fontSize = 12.sp)
                 val ctx = LocalContext.current
                 val sub = when {
                     // §5c: a cross-island peer shows its island (presence/last_seen
@@ -1118,7 +1118,7 @@ private fun CiPendingRow(tag: String, preview: String, onAccept: () -> Unit, onB
             Icon(Icons.Filled.Public, null, tint = c.accent, modifier = Modifier.size(24.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(tag, color = c.textPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+            Text(tag, color = c.textPrimary, fontSize = 14.sp)
             if (preview.isNotEmpty()) Text(preview, color = c.textSecondary, fontSize = 12.sp, maxLines = 1)
         }
         Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
@@ -1237,7 +1237,7 @@ private fun PreviewOverlay(
                 avatar()
                 Column {
                     Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text(subtitle, color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    Text(subtitle, color = c.textMono, fontSize = 12.sp)
                 }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
@@ -1289,7 +1289,7 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
                     StatusIcon(ct.presence, size = 26.dp)
                     Column {
                         Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
-                        Text("#${ct.uin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Text("#${ct.uin}", color = c.textMono, fontSize = 12.sp)
                     }
                 }
             }

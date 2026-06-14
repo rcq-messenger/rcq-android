@@ -133,7 +133,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     presence == UserStatus.OFFLINE && contact?.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen!!, context))
                     else -> stringResource(presence.labelRes).lowercase()
                 }
-                Text(sub, color = c.textSecondary, fontSize = 13.sp, fontFamily = if (crossIslandHost != null) FontFamily.Monospace else FontFamily.Default)
+                Text(sub, color = c.textSecondary, fontSize = 13.sp)
                 statusMessage?.let { Text(it, color = c.textPrimary, fontSize = 14.sp, textAlign = TextAlign.Center) }
             }
 
@@ -177,7 +177,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("UIN", color = c.textSecondary, fontSize = 12.sp)
-                    Text("#$uin", color = c.textMono, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+                    Text("#$uin", color = c.textMono, fontSize = 15.sp)
                 }
                 Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary, modifier = Modifier.size(18.dp))
             }
@@ -299,7 +299,6 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                             Text(
                                 safetyNumber!!,
                                 color = c.textPrimary,
-                                fontFamily = FontFamily.Monospace,
                                 fontSize = 16.sp,
                                 lineHeight = 26.sp,
                             )

@@ -1153,7 +1153,7 @@ private fun Composer(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(mbr.nickname, color = c.textPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                                Text("#${mbr.uin}", color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                Text("#${mbr.uin}", color = c.textMono, fontSize = 12.sp)
                             }
                         }
                     }
@@ -1454,7 +1454,7 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (foreignHost != null) {
-                Text(foreignHost, color = c.textMono, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(foreignHost, color = c.textMono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (p != null) {
                 Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary, fontSize = 12.sp)
@@ -1560,7 +1560,7 @@ internal fun PinnedAnnouncement(
         }
         if (expandable) {
             if (pinGroupIds.isNotEmpty()) {
-                Text("${pinGroupIds.size}", color = textColor, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                Text("${pinGroupIds.size}", color = textColor, fontSize = 11.sp)
             }
             Icon(
                 Icons.Filled.ExpandMore,
@@ -1655,10 +1655,10 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
                 color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            if (foreignHost != null) Text(foreignHost, color = c.textMono, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (foreignHost != null) Text(foreignHost, color = c.textMono, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (p != null) Text(
                 pluralStringResource(R.plurals.members, p.member_count, p.member_count),
-                color = c.textSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                color = c.textSecondary, fontSize = 11.sp,
             )
         }
     }
@@ -1889,7 +1889,7 @@ private fun DateDividerRow(label: String) {
         // show a centered Telegram-style contrast pill instead.
         Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
             Text(
-                label, color = c.textPrimary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                label, color = c.textPrimary, fontSize = 11.sp,
                 modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 3.dp),
             )
         }
@@ -1897,7 +1897,7 @@ private fun DateDividerRow(label: String) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.divider))
-        Text(label, color = c.textSecondary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(horizontal = 8.dp))
+        Text(label, color = c.textSecondary, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp))
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.divider))
     }
 }
