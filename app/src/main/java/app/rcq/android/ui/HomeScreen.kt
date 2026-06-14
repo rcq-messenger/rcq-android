@@ -1309,6 +1309,7 @@ private fun AddContactDialog(
 ) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var users by remember { mutableStateOf<List<RcqApi.UserInfo>>(emptyList()) }
     var groups by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
@@ -1316,10 +1317,11 @@ private fun AddContactDialog(
     var sentTo by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
     // Debounced server-side search of people AND joinable groups (iOS Add
-    // overlay parity — the old dialog only accepted a raw UIN).
+    // overlay parity — the old dialog only accepted a raw UIN). A pasted group
+    // link is handled separately (below), so don't waste a search on it.
     LaunchedEffect(query) {
         val q = query.trim()
-        if (q.length < 2) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
+        if (q.length < 2 || GroupLinkParser.parse(q) != null) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
         searching = true
         delay(300)
         users = session.searchUsers(q)
@@ -1343,8 +1345,42 @@ private fun AddContactDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 val digits = query.trim().toIntOrNull()
+                // A pasted GROUP invite link (https://rcq.app/g/<id>@<host> or
+                // rcq://group/<id>) → JOIN it, including a group on ANOTHER island.
+                // This is the entry point for a user handed a link who isn't in any
+                // shared chat (the only other joinable place was GroupLinkBubble).
+                val groupRef = remember(query) { GroupLinkParser.parse(query.trim()) }
                 Box(Modifier.heightIn(max = 320.dp).padding(top = 8.dp)) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
+                        if (groupRef != null) {
+                            val foreignHost = groupRef.host?.takeIf { it != session.currentServer }
+                            val gp by produceState<RcqApi.GroupPreviewOut?>(initialValue = null, groupRef) {
+                                value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupRef.id)
+                                        else session.previewGroup(groupRef.id)
+                            }
+                            val pv = gp
+                            val closed = pv?.is_closed == true
+                            AddResultRow(
+                                pv?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_loading),
+                                when {
+                                    closed -> stringResource(R.string.group_invite_closed)
+                                    pv != null -> pluralStringResource(R.plurals.members, pv.member_count, pv.member_count)
+                                    foreignHost != null -> foreignHost
+                                    else -> stringResource(R.string.group_invite_tap_join)
+                                },
+                                isGroup = true, session = session,
+                                avatarMediaId = pv?.avatar_media_id, avatarMediaKey = pv?.avatar_media_key,
+                            ) {
+                                if (closed) {
+                                    android.widget.Toast.makeText(context, context.getString(R.string.group_invite_closed_hint), android.widget.Toast.LENGTH_LONG).show()
+                                } else scope.launch {
+                                    val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, groupRef.id)
+                                                 else session.joinGroup(groupRef.id)?.let { groupRef.id }
+                                    if (opened != null) onOpenGroup(opened)
+                                    else android.widget.Toast.makeText(context, context.getString(R.string.group_invite_join_failed), android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
                         // Exact-UIN add stays possible even for users whose
                         // profile isn't searchable (privacy-gated).
                         if (digits != null && users.none { it.uin == digits }) {
@@ -1366,7 +1402,7 @@ private fun AddContactDialog(
                                 ?.let { runCatching { RcqFederation.parseAddress(it) }.getOrNull() }
                                 ?.takeIf { it.host != session.currentServer }
                         }
-                        if (ci != null) {
+                        if (ci != null && groupRef == null) {
                             // A backup island is the SAME identity, not a second
                             // account — "adding" your own copy just hangs as a
                             // self-request. Surface it as you, don't add.
@@ -1407,7 +1443,7 @@ private fun AddContactDialog(
                         }
                         if (searching) {
                             Text(stringResource(R.string.add_searching), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
-                        } else if (query.trim().length >= 2 && users.isEmpty() && groups.isEmpty() && digits == null) {
+                        } else if (query.trim().length >= 2 && users.isEmpty() && groups.isEmpty() && digits == null && groupRef == null) {
                             Text(stringResource(R.string.add_no_results), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
                         } else if (query.isEmpty()) {
                             Text(stringResource(R.string.add_search_prompt), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
