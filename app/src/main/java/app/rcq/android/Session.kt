@@ -3436,7 +3436,7 @@ class Session(context: Context) {
 
     /** True when [body] @mentions me — by `@<my nick>` or `#<my uin>` — used to
      *  gate sound/banner for groups in "mentions only" notify mode. */
-    private fun bodyMentionsMe(body: String): Boolean {
+    fun bodyMentionsMe(body: String): Boolean {
         if (body.isEmpty()) return false
         store.uin?.let { if (body.contains("#$it")) return true }
         val nick = store.nickname?.takeIf { it.isNotBlank() } ?: return false
@@ -3567,6 +3567,9 @@ class Session(context: Context) {
                     val thread = LocalStores.peerThread(peer)
                     if (asset != null && reactorUin != store.uin && m.fromMe && thread != activeThread) {
                         LocalStores.markReaction(thread)
+                        // Also record WHICH of my messages got reacted, for the
+                        // reaction-jump on chat open (scroll to + flash it).
+                        LocalStores.markReactedMsg(thread, targetId)
                     }
                     m.copy(reactions = r)
                 } else m
@@ -3613,6 +3616,9 @@ class Session(context: Context) {
                     val thread = LocalStores.groupThread(groupId)
                     if (asset != null && reactorUin != store.uin && m.fromMe && thread != activeThread) {
                         LocalStores.markReaction(thread)
+                        // Also record WHICH of my messages got reacted, for the
+                        // reaction-jump on chat open (scroll to + flash it).
+                        LocalStores.markReactedMsg(thread, targetId)
                     }
                     m.copy(reactions = r)
                 } else m

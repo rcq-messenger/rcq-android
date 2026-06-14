@@ -75,6 +75,13 @@ object LocalStores {
     private val _reactionInbox = MutableStateFlow<Set<String>>(emptySet())
     val reactionInbox: StateFlow<Set<String>> = _reactionInbox.asStateFlow()
 
+    /** Per-thread message ids (of MY messages) that got an UNSEEN reaction while
+     *  I was away — drives the reaction-jump on chat open (scroll to + flash the
+     *  reacted message). Keyed thread -> set of message ids. Persisted next to
+     *  [reactionInbox], account-scoped. Cleared once the jump consumes it. */
+    private val _reactedMsgIds = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val reactedMsgIds: StateFlow<Map<String, Set<String>>> = _reactedMsgIds.asStateFlow()
+
     /** Group threads where I was @mentioned and haven't looked yet (iOS parity).
      *  Keyed "group:<id>"; marked on an inbound group message that @mentions me
      *  in a thread I'm not looking at, cleared when the chat opens. Drives the
@@ -180,6 +187,7 @@ object LocalStores {
             _blocked.value = emptySet()
             _unread.value = emptyMap()
             _reactionInbox.value = emptySet()
+            _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
             _presenceWindow.value = null
             _secureThreads.value = emptySet()
@@ -193,6 +201,7 @@ object LocalStores {
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
+        _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
         _presenceWindow.value = prefs.getLong(pk(K_PRES_WIN), 0L).takeIf { it > 0L }
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
@@ -386,6 +395,43 @@ object LocalStores {
     fun markMention(thread: String) = addTo(_mentionInbox, K_MENTION_INBOX, thread)
     fun clearMention(thread: String) = removeFrom(_mentionInbox, K_MENTION_INBOX, thread)
 
+    /** Record [msgId] (one of MY messages) as having an unseen reaction in
+     *  [thread], for the reaction-jump on chat open. Paired with [markReaction]. */
+    fun markReactedMsg(thread: String, msgId: String) {
+        if (acct == null) return
+        val cur = _reactedMsgIds.value[thread] ?: emptySet()
+        if (msgId in cur) return
+        _reactedMsgIds.value = _reactedMsgIds.value + (thread to (cur + msgId))
+        persistReactedMsgIds()
+    }
+
+    /** Drop all recorded reacted-message ids for [thread] (the jump consumed
+     *  them, so they don't re-flash on reopen). */
+    fun clearReactedMsgs(thread: String) {
+        if (_reactedMsgIds.value[thread] == null) return
+        _reactedMsgIds.value = _reactedMsgIds.value - thread
+        persistReactedMsgIds()
+    }
+
+    /** Encode the thread -> ids map as a "thread|id1,id2" StringSet for prefs. */
+    private fun persistReactedMsgIds() {
+        if (acct == null) return
+        val encoded = _reactedMsgIds.value
+            .filterValues { it.isNotEmpty() }
+            .map { "${it.key}|${it.value.joinToString(",")}" }
+            .toSet()
+        prefs.edit().putStringSet(pk(K_REACTED_MSGS), encoded).apply()
+    }
+
+    private fun loadReactedMsgIds(key: String): Map<String, Set<String>> =
+        prefs.getStringSet(key, emptySet())!!.mapNotNull { entry ->
+            val i = entry.indexOf('|')
+            if (i <= 0) return@mapNotNull null
+            val thread = entry.substring(0, i)
+            val ids = entry.substring(i + 1).split(',').filter { it.isNotBlank() }.toSet()
+            if (ids.isEmpty()) null else thread to ids
+        }.toMap()
+
     /** Add [thread] to [flow] (copied-Set + persist), no-op if already present. */
     private fun addTo(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
         if (acct == null || thread in flow.value) return
@@ -416,7 +462,7 @@ object LocalStores {
     fun migrateLegacyToAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_REACT_INBOX, K_MENTION_INBOX).forEach { k ->
+        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX).forEach { k ->
             if (prefs.contains(k)) {
                 prefs.getStringSet(k, emptySet())?.let { e.putStringSet("$accountId.$k", it.toSet()) }
                 e.remove(k)
@@ -462,7 +508,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_BLOCKED, K_UNREAD, K_REACT_INBOX, K_MENTION_INBOX, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_BLOCKED, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -479,6 +525,7 @@ object LocalStores {
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
     private const val K_REACT_INBOX = "reaction_inbox"
+    private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_MENTION_INBOX = "mention_inbox"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"

@@ -66,6 +66,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Campaign
@@ -487,6 +488,39 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             listState.scrollToItem((if (u >= 0) u else rows.lastIndex).coerceAtLeast(0))
         }
     }
+
+    // Reaction-jump on open: if someone reacted to one of my messages while I was
+    // away, scroll to + flash the FIRST (lowest row index) reacted message once
+    // the open-scroll has settled, then consume the queue so it doesn't re-flash
+    // on reopen. (The home-heart for this thread is already cleared in openThread;
+    // we clear the message-id queue here, AFTER the jump consumes it.) Snapshot
+    // the ids at open so a reaction landing while we're already inside the chat
+    // doesn't yank the view (that path keeps the live reaction chip visible).
+    val reactedAtOpen = remember(target) {
+        app.rcq.android.data.LocalStores.reactedMsgIds.value[thisThread] ?: emptySet()
+    }
+    var didReactionJump by remember(target) { mutableStateOf(false) }
+    LaunchedEffect(rows.size, didInitialScroll) {
+        if (didReactionJump || !didInitialScroll || reactedAtOpen.isEmpty()) return@LaunchedEffect
+        didReactionJump = true
+        val idx = rows.indexOfFirst { r ->
+            (r is ChatRow.Single && r.m.id in reactedAtOpen) ||
+                (r is ChatRow.Album && r.items.any { it.id in reactedAtOpen })
+        }
+        if (idx >= 0) {
+            val rid = when (val r = rows[idx]) {
+                is ChatRow.Single -> r.m.id
+                is ChatRow.Album -> r.items.first { it.id in reactedAtOpen }.id
+                else -> null
+            }
+            listState.animateScrollToItem(idx)
+            if (rid != null) {
+                highlightId = rid
+                scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
+            }
+        }
+        app.rcq.android.data.LocalStores.clearReactedMsgs(thisThread)
+    }
     // New message: stick to the bottom ONLY if the user is already near it
     // (don't yank them up while reading, #5); an own send always follows.
     LaunchedEffect(messages.lastOrNull()?.id) {
@@ -510,6 +544,18 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
         }
     }
+
+    // Mention-jump (Telegram-style @-FAB): ordered ids of messages in THIS open
+    // thread that @mention me and aren't mine. Group-only by nature — a 1:1 body
+    // can't @mention you as a third party (the gate is the same as the home-row
+    // mention inbox). Tapping the @-FAB steps through these in order.
+    val mentionIds = remember(messages, isGroup) {
+        if (!isGroup) emptyList()
+        else messages.filter { !it.fromMe && session.bodyMentionsMe(it.body) }.map { it.id }
+    }
+    var mentionCursor by remember(target) { mutableStateOf(0) }
+    // Keep the cursor in range as the list grows/shrinks under it.
+    val safeCursor = if (mentionIds.isEmpty()) 0 else mentionCursor % mentionIds.size
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
         // Header.
@@ -714,6 +760,44 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         Icon(Icons.Filled.KeyboardArrowDown, null, tint = c.textPrimary, modifier = Modifier.size(26.dp))
                     }
                     UnreadBadge(belowCount, Modifier.align(Alignment.TopEnd))
+                }
+            }
+            // Mention-jump FAB (@): a second circular button directly ABOVE the
+            // jump-down FAB, shown whenever the open group thread has messages
+            // that @mention me — INDEPENDENT of scroll position (Telegram-style).
+            // Each tap scrolls to + flashes the next @-mention, stepping in order.
+            if (mentionIds.isNotEmpty()) {
+                Box(
+                    // Stack above the jump-down FAB: its 40dp circle + 6dp badge
+                    // gap sits at bottom=10dp, so clear ~64dp to leave an ~8dp gap.
+                    Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 64.dp),
+                    contentAlignment = Alignment.TopEnd,
+                ) {
+                    Box(
+                        Modifier.padding(top = 6.dp, end = 0.dp)
+                            .size(40.dp).clip(CircleShape).background(c.bgSecondary)
+                            .border(1.dp, c.divider, CircleShape)
+                            .clickable {
+                                val rid = mentionIds[safeCursor]
+                                val idx = rows.indexOfFirst { r ->
+                                    (r is ChatRow.Single && r.m.id == rid) ||
+                                        (r is ChatRow.Album && r.items.any { it.id == rid })
+                                }
+                                if (idx >= 0) {
+                                    scope.launch { listState.animateScrollToItem(idx) }
+                                    highlightId = rid
+                                    scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
+                                }
+                                // Advance so the next tap steps to the following
+                                // @-mention, wrapping at the end (Telegram parity).
+                                mentionCursor = (safeCursor + 1) % mentionIds.size
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.AlternateEmail, null, tint = c.textPrimary, modifier = Modifier.size(24.dp))
+                    }
+                    // Remaining un-stepped @-mentions, like the jump-down badge.
+                    UnreadBadge(mentionIds.size - safeCursor, Modifier.align(Alignment.TopEnd))
                 }
             }
         }
