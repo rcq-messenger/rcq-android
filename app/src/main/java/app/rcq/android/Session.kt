@@ -2391,10 +2391,16 @@ class Session(context: Context) {
     // in a shareable list just helps a censor enumerate them. Share community
     // relays - handed to us by a contact or pulled from the broker - the point
     // of the hydra (гидра) P2P channel: distribute bridges with no central list
-    // to seize.
-    fun shareableRelays(): List<SingBoxTransport.Relay> =
-        (ContactRelayStore.relays() + app.rcq.android.net.BrokerRelayStore.relays())
+    // to seize. NB: official relays are ALSO registered with the broker, so we
+    // subtract the signed-config set explicitly (else they leak back in via
+    // BrokerRelayStore).
+    fun shareableRelays(): List<SingBoxTransport.Relay> {
+        val official = RelayConfigStore.currentRelays()
+            .mapTo(HashSet()) { "${it.proto}:${it.server}:${it.port}" }
+        return (ContactRelayStore.relays() + app.rcq.android.net.BrokerRelayStore.relays())
             .distinctBy { "${it.proto}:${it.server}:${it.port}" }
+            .filterNot { "${it.proto}:${it.server}:${it.port}" in official }
+    }
 
     /** Local-only delete (removes from this device; no wire message). */
     fun deleteLocal(msg: ChatMessage) {
