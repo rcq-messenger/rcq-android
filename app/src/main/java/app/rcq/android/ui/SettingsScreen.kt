@@ -1227,7 +1227,10 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val contacts by session.contacts.collectAsState()
-    val blocked = contacts.filter { it.blocked }
+    val blockedSet by app.rcq.android.data.LocalStores.blocked.collectAsState()
+    // Union of server-blocked contacts + the local blocked set (incl. blocked
+    // strangers with no contact row, rendered as #uin stubs).
+    val blocked = remember(contacts, blockedSet) { session.blockedContacts() }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_blocked), onBack)

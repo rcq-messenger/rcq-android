@@ -1294,8 +1294,13 @@ class Session(context: Context) {
 
     // ── contact moderation ───────────────────────────────────────────
 
-    /** Toggle block server-side, then refresh the roster. */
+    /** Toggle block. The LOCAL blocked set is the source of truth (it works for
+     *  non-contacts / strangers and drives ingest filtering + the Blocked list,
+     *  since sealed sender means the server can't filter for us). The server
+     *  call is best-effort: /contacts/{uin}/block toggles the contact `blocked`
+     *  flag for real contacts and 404s (harmlessly swallowed) for strangers. */
     suspend fun toggleBlock(uin: Int) {
+        LocalStores.setBlocked(uin, !LocalStores.isBlocked(uin))
         runCatching { api.blockContact(uin) }
         runCatching { refreshContacts() }
     }
@@ -1886,8 +1891,18 @@ class Session(context: Context) {
         return updated
     }
 
-    /** Contacts the user has blocked (for the Blocked Users settings screen). */
-    fun blockedContacts(): List<Contact> = _contacts.value.filter { it.blocked }
+    /** Contacts the user has blocked (for the Blocked Users settings screen).
+     *  Union of the server `blocked` contact flag and the LOCAL blocked set, so
+     *  blocked strangers (no contact row) show up too — rendered as a #uin stub
+     *  when we have no roster entry for them. */
+    fun blockedContacts(): List<Contact> {
+        val byUin = _contacts.value.associateBy { it.uin }
+        val uins = LocalStores.blocked.value + _contacts.value.filter { it.blocked }.map { it.uin }
+        return uins.toSet().map { uin ->
+            byUin[uin]?.copy(blocked = true)
+                ?: Contact(uin = uin, nickname = "#$uin", identityKey = "", signingKey = null, blocked = true)
+        }.sortedBy { it.nickname.lowercase() }
+    }
 
     suspend fun sendGroupText(groupId: Int, text: String, replyTo: app.rcq.android.crypto.Reply? = null) {
         val env = Envelope.text(text, replyTo)
@@ -2084,6 +2099,11 @@ class Session(context: Context) {
      *  per-member path (ingestGroup) and the sender-keys broadcast (ingestGmsg);
      *  [senderUin] is the authenticated sender from either path. */
     private fun routeGroupEnvelope(envelope: Envelope, groupId: Int, senderUin: Int) {
+        // Blocked sender → drop their group content entirely (messages,
+        // reactions, edits, deletes). Sealed sender means the server can't
+        // filter, so we gate on the decrypted sender here. Sender-key control
+        // (SKDM/SKNACK) is handled before this call, so chain recovery is safe.
+        if (LocalStores.isBlocked(senderUin)) return
         val dec = SenderUin(senderUin)
         val now = System.currentTimeMillis()
         when (val env = envelope) {
@@ -2898,7 +2918,7 @@ class Session(context: Context) {
             val dec = decryptInbound(payloadB64)
             // Removed contacts are silently dropped — sealed sender means
             // the server can't filter by sender, so we gate on receipt.
-            if (LocalStores.isRemoved(dec.senderUin)) return@runCatching
+            if (LocalStores.isRemoved(dec.senderUin) || LocalStores.isBlocked(dec.senderUin)) return@runCatching
             // §5d cross-island call signaling rides sealed envelopes (kind
             // "call") — route to the call state machine, never the message
             // store, and never the request quarantine (signals are ephemeral).

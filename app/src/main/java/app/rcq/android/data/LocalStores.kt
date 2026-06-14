@@ -55,6 +55,13 @@ object LocalStores {
     private val _removed = MutableStateFlow<Set<Int>>(emptySet())
     val removed: StateFlow<Set<Int>> = _removed.asStateFlow()
 
+    /** UINs the user blocked — incoming sealed 1:1 AND group messages from them
+     *  are dropped client-side (sealed sender = the server can't filter). Local
+     *  + persisted so it works for non-contacts/strangers too, unlike the
+     *  server `blocked` contact flag. Mirrors iOS BlockedContactsStore. */
+    private val _blocked = MutableStateFlow<Set<Int>>(emptySet())
+    val blocked: StateFlow<Set<Int>> = _blocked.asStateFlow()
+
     /** Persistent per-thread unread counters, keyed "peer:<uin>"/"group:<id>".
      *  Mirrors the iOS UnreadStore: survives cold starts, bumped on inbound
      *  message, cleared when the chat opens. */
@@ -142,6 +149,7 @@ object LocalStores {
             _mentionsOnly.value = emptySet()
             _archived.value = emptySet()
             _removed.value = emptySet()
+            _blocked.value = emptySet()
             _unread.value = emptyMap()
             _presenceWindow.value = null
             _secureThreads.value = emptySet()
@@ -152,6 +160,7 @@ object LocalStores {
         _mentionsOnly.value = prefs.getStringSet(pk(K_MENTIONS), emptySet())!!.toSet()
         _archived.value = prefs.getStringSet(pk(K_ARCH), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
+        _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
         _presenceWindow.value = prefs.getLong(pk(K_PRES_WIN), 0L).takeIf { it > 0L }
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
@@ -215,6 +224,13 @@ object LocalStores {
         if (acct == null || uin in _removed.value) return
         _removed.value = _removed.value + uin
         prefs.edit().putStringSet(pk(K_REMOVED), _removed.value.map(Int::toString).toSet()).apply()
+    }
+
+    fun isBlocked(uin: Int) = uin in _blocked.value
+    fun setBlocked(uin: Int, on: Boolean) {
+        if (acct == null || on == (uin in _blocked.value)) return
+        _blocked.value = if (on) _blocked.value + uin else _blocked.value - uin
+        prefs.edit().putStringSet(pk(K_BLOCKED), _blocked.value.map(Int::toString).toSet()).apply()
     }
 
     fun setFontScale(scale: Float) {
@@ -364,7 +380,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_UNREAD, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_BLOCKED, K_UNREAD, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -373,6 +389,7 @@ object LocalStores {
     private const val K_MENTIONS = "mentions_only"
     private const val K_ARCH = "archived"
     private const val K_REMOVED = "removed"
+    private const val K_BLOCKED = "blocked"
     private const val K_THEME = "theme_mode"
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"

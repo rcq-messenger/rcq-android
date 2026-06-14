@@ -331,7 +331,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
     }
 
-    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    // OpenDocument (ACTION_OPEN_DOCUMENT / SAF DocumentsUI) shows EVERY file
+    // type incl. APKs/docs; the old GetContent (ACTION_GET_CONTENT) is
+    // media-skewed on modern Android and hid arbitrary files, so picking a
+    // file "did nothing". Matches iOS UIDocumentPicker([.item]).
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             val picked = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
             if (picked != null) runCatching {
@@ -931,7 +935,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         attachMenu = false
                         albumPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                     }
-                    MessageAction(stringResource(R.string.chat_attach_file)) { attachMenu = false; filePicker.launch("*/*") }
+                    MessageAction(stringResource(R.string.chat_attach_file)) { attachMenu = false; filePicker.launch(arrayOf("*/*")) }
                     MessageAction(stringResource(R.string.chat_attach_location)) { attachMenu = false; shareLocation() }
                     MessageAction(stringResource(R.string.chat_attach_group)) { attachMenu = false; showGroupPicker = true }
                     if (isGroup) MessageAction(stringResource(R.string.poll_create)) { attachMenu = false; showPollComposer = true }

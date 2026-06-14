@@ -846,10 +846,16 @@ private fun HomeHeader(
                 modifier = Modifier.size(26.dp).clip(CircleShape).clickable { overflowMenu = true },
             )
             DropdownMenu(expanded = overflowMenu, onDismissRequest = { overflowMenu = false }) {
-                // Censorship bypass is no longer a manual menu item — it engages
-                // AUTOMATICALLY when a direct connection is blocked (Session.start
-                // probes direct first). The override still lives in Settings →
-                // Privacy for power users. See the obfuscation/onion design.
+                // Censorship bypass: manual override, back by request. It also
+                // engages automatically when a direct connection looks blocked,
+                // but auto-detection can be wrong ("green" indicator yet no real
+                // traffic), so the manual on/off lives here too — it engages/drops
+                // sing-box LIVE (setObfuscation) without an app restart.
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (stealthActive) R.string.home_menu_bypass_disable else R.string.home_menu_bypass_enable), color = c.textPrimary) },
+                    leadingIcon = { Icon(Icons.Filled.Shield, null, tint = if (stealthActive) c.accent else c.textSecondary) },
+                    onClick = { overflowMenu = false; onToggleBypass(!stealthActive) },
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.diag_title), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.NetworkCheck, null, tint = c.accent) },
