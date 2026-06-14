@@ -66,7 +66,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Check
@@ -985,15 +985,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 } else {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         groups.forEach { g ->
-                            MessageAction(g.name) {
-                                showGroupPicker = false
-                                val (shareId, shareHost) = session.groupShareRef(g.id)
-                                val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
-                                scope.launch {
-                                    runCatching {
-                                        if (isGroup) session.sendGroupText(groupId!!, url) else session.sendText(peer!!, url)
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    showGroupPicker = false
+                                    val (shareId, shareHost) = session.groupShareRef(g.id)
+                                    val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
+                                    scope.launch {
+                                        runCatching {
+                                            if (isGroup) session.sendGroupText(groupId!!, url) else session.sendText(peer!!, url)
+                                        }
                                     }
-                                }
+                                }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                GroupAvatar(g, session, 28.dp, animated = true)
+                                Text(g.name, color = c.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -1176,7 +1183,7 @@ private fun Composer(
                 }
             } else {
                 Icon(
-                    Icons.Filled.AddPhotoAlternate, stringResource(R.string.chat_attach), tint = c.textSecondary,
+                    Icons.Filled.AttachFile, stringResource(R.string.chat_attach), tint = c.textSecondary,
                     modifier = Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onAttach).padding(8.dp),
                 )
                 Icon(
