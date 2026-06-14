@@ -744,6 +744,7 @@
     <string name="media_share">Поделиться</string>
     <string name="media_save">Сохранить</string>
     <string name="media_saved">Сохранено</string>
+    <string name="media_saved_to">Сохранено в %1$s</string>
     <string name="media_save_failed">Не удалось сохранить</string>
     <string name="chat_pin">Закрепить</string>
     <string name="chat_pinned_media">📎 Вложение</string>

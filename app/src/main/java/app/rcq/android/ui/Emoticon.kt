@@ -42,6 +42,7 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
@@ -123,6 +124,7 @@ internal object Emoticons {
      *  email's `@domain`) stays plain text. Mirrors the iOS MentionParser
      *  pattern: letters/digits/underscore/dot/hyphen (so ".Dev" resolves). */
     val MENTION_AT_RE = Regex("@([\\p{L}\\p{N}_.\\-]+)")
+    val URL_RE = Regex("https?://\\S+")
 
     /** Split [text] into text runs + known `:asset:` emoticons. Returns a single
      *  Text token when there are no emoticons (the common case). */
@@ -273,8 +275,11 @@ internal fun EmoticonText(
     val hasMention =
         (mentionNick != null && body.contains('#') && Emoticons.MENTION_RE.containsMatchIn(body)) ||
         (mentionUin != null && body.contains('@') && Emoticons.MENTION_AT_RE.containsMatchIn(body))
-    // Fast path: a pure-text body with no resolvable mentions.
-    if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention) {
+    // http(s) links are made tappable in the body too (report: links in chats
+    // weren't clickable). Cheap "://" gate before the regex.
+    val hasUrl = body.contains("://") && Emoticons.URL_RE.containsMatchIn(body)
+    // Fast path: a pure-text body with no resolvable mentions and no links.
+    if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention && !hasUrl) {
         Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
         return
     }
@@ -337,21 +342,25 @@ private fun AnnotatedString.Builder.appendWithMentions(
     onMentionClick: ((Int) -> Unit)?,
     accent: Color,
 ) {
-    if (mentionNick == null && mentionUin == null) { append(text); return }
-    data class Hit(val range: IntRange, val uin: Int, val display: String)
+    // url=true -> a tappable http(s) link (display = the URL); otherwise a
+    // mention (uin + display nick). Both kinds are merged in source order.
+    data class Hit(val range: IntRange, val url: Boolean, val uin: Int, val display: String)
     val hits = ArrayList<Hit>()
     if (mentionNick != null) {
         for (m in Emoticons.MENTION_RE.findAll(text)) {
             val uin = m.groupValues[1].toIntOrNull() ?: continue
             val nick = mentionNick(uin) ?: continue
-            hits.add(Hit(m.range, uin, nick))
+            hits.add(Hit(m.range, false, uin, nick))
         }
     }
     if (mentionUin != null) {
         for (m in Emoticons.MENTION_AT_RE.findAll(text)) {
             val uin = mentionUin(m.groupValues[1]) ?: continue
-            hits.add(Hit(m.range, uin, m.value)) // keep the typed "@nick"
+            hits.add(Hit(m.range, false, uin, m.value)) // keep the typed "@nick"
         }
+    }
+    for (m in Emoticons.URL_RE.findAll(text)) {
+        hits.add(Hit(m.range, true, 0, m.value))
     }
     if (hits.isEmpty()) { append(text); return }
     hits.sortBy { it.range.first }
@@ -359,8 +368,16 @@ private fun AnnotatedString.Builder.appendWithMentions(
     for (h in hits) {
         if (h.range.first < cursor) continue // skip overlaps
         if (h.range.first > cursor) append(text.substring(cursor, h.range.first))
-        withLink(LinkAnnotation.Clickable(tag = "m${h.uin}", linkInteractionListener = { onMentionClick?.invoke(h.uin) })) {
-            withStyle(SpanStyle(color = accent)) { append(h.display) }
+        if (h.url) {
+            // LinkAnnotation.Url auto-opens via the platform UriHandler (and a
+            // rcq.app/g/ link is caught by our deep-link filter -> opens in-app).
+            withLink(LinkAnnotation.Url(h.display)) {
+                withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(h.display) }
+            }
+        } else {
+            withLink(LinkAnnotation.Clickable(tag = "m${h.uin}", linkInteractionListener = { onMentionClick?.invoke(h.uin) })) {
+                withStyle(SpanStyle(color = accent)) { append(h.display) }
+            }
         }
         cursor = h.range.last + 1
     }

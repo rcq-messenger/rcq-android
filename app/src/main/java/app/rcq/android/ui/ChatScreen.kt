@@ -299,9 +299,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     fun saveMessageMedia(m: ChatMessage) = mediaBytes(m) { bytes ->
         val (name, mime) = mediaNameMime(m, bytes)
         runSave {
-            val ok = if (m.kind == "photo" || m.kind == "video") MediaSaver.saveToGallery(context, bytes, name, mime)
+            val isGallery = m.kind == "photo" || m.kind == "video"
+            val ok = if (isGallery) MediaSaver.saveToGallery(context, bytes, name, mime)
                      else MediaSaver.saveToDownloads(context, bytes, name, mime)
-            android.widget.Toast.makeText(context, if (ok) savedToast else saveFailToast, android.widget.Toast.LENGTH_SHORT).show()
+            val where = if (m.kind == "video") "Movies/RCQ" else if (isGallery) "Pictures/RCQ" else "Downloads/RCQ"
+            val msg = if (ok) context.getString(R.string.media_saved_to, where) else saveFailToast
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -783,7 +786,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                    else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
                 runSave {
                     val ok = MediaSaver.saveToGallery(context, it, name, mime)
-                    android.widget.Toast.makeText(context, if (ok) savedToast else saveFailToast, android.widget.Toast.LENGTH_SHORT).show()
+                    val msg = if (ok) context.getString(R.string.media_saved_to, "Pictures/RCQ") else saveFailToast
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
             onDismiss = { fullscreenImage = null },

@@ -3,4 +3,8 @@
     <!-- Decrypted attachments are written to cacheDir/files/ before being
          handed to a viewer via FileProvider (see ChatScreen.openFile). -->
     <cache-path name="files" path="files/" />
+    <!-- MediaSaver.share() writes to cacheDir/share/ before exposing it to the
+         system share sheet (ACTION_SEND) via FileProvider. Without this path
+         getUriForFile throws and the share button silently did nothing. -->
+    <cache-path name="share" path="share/" />
 </paths>

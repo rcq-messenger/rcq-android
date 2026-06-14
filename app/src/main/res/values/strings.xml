@@ -745,6 +745,7 @@
     <string name="media_share">Share</string>
     <string name="media_save">Save</string>
     <string name="media_saved">Saved</string>
+    <string name="media_saved_to">Saved to %1$s</string>
     <string name="media_save_failed">Couldn\'t save</string>
     <string name="chat_pin">Pin</string>
     <string name="chat_pinned_media">📎 Attachment</string>
