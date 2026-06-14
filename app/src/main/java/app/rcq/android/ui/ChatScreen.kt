@@ -151,6 +151,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
+import app.rcq.android.data.LocalStores
 import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.crypto.Reply
@@ -2020,6 +2021,10 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
 private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionUin: ((String) -> Int?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
+    // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
+    // (not on a bubble), so the gray text washes out on a gradient — give it a
+    // bubble-like pill for contrast. No-op on the default (no-wallpaper) chat.
+    val onWallpaper = LocalStores.chatBackground.collectAsState().value.isNotEmpty()
     // Cap a bubble so a long message leaves a gap to the far edge — keeps the
     // L/R alignment (mine vs theirs) readable, not just the colour (tester #7).
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
@@ -2139,7 +2144,9 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            modifier = Modifier
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+                .then(if (onWallpaper) Modifier.clip(RoundedCornerShape(8.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 6.dp, vertical = 1.dp) else Modifier),
         ) {
             Text(formatTime(m.sentAt), color = c.textSecondary, fontSize = 10.sp)
             if (m.edited) Text(stringResource(R.string.chat_edited), color = c.textSecondary, fontSize = 10.sp)

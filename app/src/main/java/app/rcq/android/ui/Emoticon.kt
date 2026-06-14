@@ -228,10 +228,10 @@ internal fun ReactionChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        // Static first frame: inline reaction chips persist in the message
-        // list, so animating them piles up GIF decoders the same way the
-        // message-history emoticons did (the large-group OOM). See EmoticonText.
-        if (isEmoticon) EmoticonGif(asset, Modifier.size(16.dp), animate = false)
+        // Animated via the shared-frame cache (AnimatedEmoticon) — safe even
+        // with many chips on screen because frames decode ONCE process-wide and
+        // cells just cycle them (no per-chip decoder, so not the old OOM).
+        if (isEmoticon) AnimatedEmoticon(asset, Modifier.size(16.dp))
         else Text(asset, fontSize = 13.sp, color = c.textPrimary)
         // A single reactor needs no "1" — show the number only once it grows
         // past one (founder feedback). Radio/Hood pass null (never numbered).
