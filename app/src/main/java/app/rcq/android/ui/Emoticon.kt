@@ -284,7 +284,7 @@ internal fun EmoticonText(
     // the inline-in-text / picker churn that forced static frames elsewhere.
     (tokens.singleOrNull() as? Emoticons.Token.Emo)?.let { emo ->
         if (!hasMention) {
-            EmoticonGif(emo.asset, Modifier.size(34.dp), animate = true)
+            AnimatedEmoticon(emo.asset, Modifier.size(28.dp))
             return
         }
     }
@@ -308,13 +308,15 @@ internal fun EmoticonText(
                     if (t.asset !in inlineMap) {
                         val asset = t.asset
                         inlineMap[asset] = InlineTextContent(
-                            // 1.7em (was 1.4): founder asked for bigger inline
-                            // smileys in chat bubbles. em-relative, so captions
-                            // and the smaller-font chats scale proportionally;
-                            // reaction chips and the picker render their own
-                            // fixed sizes and are not affected.
-                            Placeholder(width = 1.7.em, height = 1.7.em, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter),
-                        ) { EmoticonGif(asset, Modifier.fillMaxSize(), animate = false) }
+                            // 1.45em — slightly smaller than before (founder).
+                            // em-relative so captions / smaller-font chats scale.
+                            // ANIMATED via the shared-frame cache (AnimatedEmoticon):
+                            // frames decode ONCE process-wide and cells just cycle
+                            // them, so even the IME-recompose storm never re-decodes
+                            // (the old OOM) — no per-cell decoder. Bounded by the
+                            // LazyColumn (only visible rows compose).
+                            Placeholder(width = 1.45.em, height = 1.45.em, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter),
+                        ) { AnimatedEmoticon(asset, Modifier.fillMaxSize()) }
                     }
                 }
             }
@@ -395,17 +397,19 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
             Box(
                 Modifier.size(46.dp).clip(RoundedCornerShape(8.dp)).clickable { onPick(":$asset:") },
                 contentAlignment = Alignment.Center,
-            ) { PanelEmoticon(asset, Modifier.size(30.dp)) }
+            ) { AnimatedEmoticon(asset, Modifier.size(30.dp)) }
         }
     }
 }
 
-/** A single picker cell that ANIMATES from the shared pre-decoded frame cache
- *  ([decodeGifFrames]). Safe to have the whole grid of these on screen at once:
- *  no cell owns a decoder and playback allocates nothing — it only cycles cached
- *  frames. Shows the static first frame while decoding (or for a 1-frame asset). */
+/** An emoticon that ANIMATES from the shared pre-decoded frame cache
+ *  ([decodeGifFrames]). Safe to have MANY on screen at once (the whole picker
+ *  grid, or every inline emoticon across the visible chat rows): no cell owns a
+ *  decoder and playback allocates nothing — it only cycles cached frames, and
+ *  frames are decoded ONCE process-wide, so even a recompose storm never
+ *  re-decodes. Shows the static first frame while decoding (or a 1-frame asset). */
 @Composable
-private fun PanelEmoticon(name: String, modifier: Modifier) {
+internal fun AnimatedEmoticon(name: String, modifier: Modifier) {
     val context = LocalContext.current
     val bytes by produceState<ByteArray?>(initialValue = null, name) {
         value = Emoticons.bytes(context, name)

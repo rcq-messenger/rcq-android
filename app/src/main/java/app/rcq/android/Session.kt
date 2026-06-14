@@ -654,9 +654,12 @@ class Session(context: Context) {
         val token = store.token ?: return
         started = true
         CrashReporter.crumb(appCtx, "session_start")
-        bindDb(AccountManager.activeId.value ?: "")
-        CrashReporter.crumb(appCtx, "load_db")
-        loadMessagesFromDb()
+        // Seed the chat list from the cached roster FIRST (cheap, DB-free) so it
+        // paints immediately. The heavy SQLCipher open + full history read move
+        // into the connect coroutine below (off the main thread) instead of
+        // blocking the first frame behind ~1s of DB work (the "Connecting…"
+        // delay on launch). db is opened there BEFORE connectAndSync, which is
+        // the only ingest path that writes to it.
         loadCachedRoster()
         refreshBackupHomes()
         refreshCiRequests()
@@ -700,6 +703,14 @@ class Session(context: Context) {
             }
         }
         scope.launch {
+            // Open the encrypted DB + load history OFF the main thread (this was
+            // the ~1s synchronous block that delayed the first frame). Must run
+            // before connectAndSync, the only ingest path that writes to db.
+            withContext(Dispatchers.IO) {
+                bindDb(AccountManager.activeId.value ?: "")
+                loadMessagesFromDb()
+            }
+            CrashReporter.crumb(appCtx, "load_db")
             // Obfuscated transport (censorship circumvention), engaged BEFORE
             // the socket/API connect so they ride the sing-box tunnel. Engage
             // when the user forced it on OR — the chicken-and-egg fix — when a
