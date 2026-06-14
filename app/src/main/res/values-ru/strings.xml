@@ -435,6 +435,9 @@
     <string name="settings_foot_appearance">Светлая, тёмная или как в системе.</string>
     <string name="settings_text_size">Размер текста</string>
     <string name="settings_row_app_icon">Иконка приложения</string>
+    <string name="settings_row_chat_bg">Фон чата</string>
+    <string name="chat_bg_none">Без фона</string>
+    <string name="chat_bg_custom">Из галереи</string>
     <string name="app_icon_default">По умолчанию</string>
     <string name="app_icon_footer">Выберите другую иконку на рабочем столе. При смене иконка может на миг мигнуть, пока система обновляет её.</string>
     <string name="settings_foot_privacy">Кто вас видит, кто может с вами связаться и на каком вы сервере.</string>

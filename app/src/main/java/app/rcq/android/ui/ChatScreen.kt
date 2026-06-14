@@ -610,6 +610,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
+        ChatBackground()  // global chat wallpaper (behind the messages); no-op when default
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(
                 rows,

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.DeleteForever
@@ -117,7 +118,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
+private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
 
 @Composable
 internal fun SettingsScreen(
@@ -167,6 +168,7 @@ internal fun SettingsScreen(
         SettingsRoute.SOUNDS -> SoundsScreen { route = SettingsRoute.ROOT }
         SettingsRoute.LANGUAGE -> LanguageScreen { route = SettingsRoute.ROOT }
         SettingsRoute.APP_ICON -> AppIconScreen { route = SettingsRoute.ROOT }
+        SettingsRoute.CHAT_BG -> ChatBackgroundScreen { route = SettingsRoute.ROOT }
         SettingsRoute.BLOCKED -> BlockedUsersScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.PIN_CODES -> PinCodesScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.RECOVERY_PHRASE -> RecoveryPhraseScreen(session) { route = SettingsRoute.ROOT }
@@ -277,6 +279,8 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.Language, stringResource(R.string.onboard_language), value = LanguageManager.displayName(lang)) { onOpen(SettingsRoute.LANGUAGE) }
                 Divider()
                 SettingsRow(Icons.Filled.Apps, stringResource(R.string.settings_row_app_icon)) { onOpen(SettingsRoute.APP_ICON) }
+                Divider()
+                SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_chat_bg)) { onOpen(SettingsRoute.CHAT_BG) }
             }
 
             Spacer(Modifier.height(22.dp))
@@ -1734,7 +1738,7 @@ private fun hofAvatarDataUri(context: android.content.Context, uri: android.net.
 }
 
 @Composable
-private fun SettingsTopBar(title: String, onBack: () -> Unit, trailing: @Composable (() -> Unit)? = null) {
+internal fun SettingsTopBar(title: String, onBack: () -> Unit, trailing: @Composable (() -> Unit)? = null) {
     val c = RcqTheme.colors
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent, modifier = Modifier.size(26.dp).clickable(onClick = onBack))

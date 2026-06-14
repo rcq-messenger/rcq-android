@@ -80,6 +80,13 @@ object LocalStores {
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
+    /** Chat wallpaper, applied to every chat's message area (global, not
+     *  per-chat — founder's choice). "" = default theme background;
+     *  "preset:<id>" = a built-in (see ChatBackgrounds); "custom" = the image
+     *  saved at [chatBgFile]. */
+    private val _chatBackground = MutableStateFlow("")
+    val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
+
     /** In-app text-size multiplier ON TOP of the OS font scale (accessibility:
      *  the audience skews 30+ with imperfect vision). Applied app-wide by
      *  overriding LocalDensity.fontScale. 1.0 = system default. */
@@ -130,6 +137,7 @@ object LocalStores {
         // Global (app-wide) settings only; per-account flows load in bindAccount.
         _themeMode.value = runCatching { ThemeMode.valueOf(prefs.getString(K_THEME, null) ?: "SYSTEM") }
             .getOrDefault(ThemeMode.SYSTEM)
+        _chatBackground.value = prefs.getString(K_CHAT_BG, "") ?: ""
         _fontScale.value = prefs.getFloat(K_FONT_SCALE, 1.0f)
         _lockGrace.value = prefs.getInt(K_LOCK_GRACE, 0)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
@@ -247,6 +255,22 @@ object LocalStores {
     fun setThemeMode(mode: ThemeMode) {
         _themeMode.value = mode
         prefs.edit().putString(K_THEME, mode.name).apply()
+    }
+
+    /** "" (default) / "preset:<id>" / "custom". */
+    fun setChatBackground(value: String) {
+        _chatBackground.value = value
+        prefs.edit().putString(K_CHAT_BG, value).apply()
+    }
+
+    /** The saved custom chat-wallpaper image file. */
+    fun chatBgFile(context: Context): java.io.File =
+        java.io.File(context.applicationContext.filesDir, "chat_bg.jpg")
+
+    /** Persist a picked image as the custom chat wallpaper and select it. */
+    fun saveChatBackgroundImage(context: Context, bytes: ByteArray) {
+        runCatching { chatBgFile(context).writeBytes(bytes) }
+        setChatBackground("custom")
     }
 
     // ── sound toggles ────────────────────────────────────────────────
@@ -391,6 +415,7 @@ object LocalStores {
     private const val K_REMOVED = "removed"
     private const val K_BLOCKED = "blocked"
     private const val K_THEME = "theme_mode"
+    private const val K_CHAT_BG = "chat_background"
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"

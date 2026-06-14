@@ -436,6 +436,9 @@
     <string name="settings_foot_appearance">Choose light, dark, or follow the system theme.</string>
     <string name="settings_text_size">Text size</string>
     <string name="settings_row_app_icon">App icon</string>
+    <string name="settings_row_chat_bg">Chat background</string>
+    <string name="chat_bg_none">None</string>
+    <string name="chat_bg_custom">Gallery</string>
     <string name="app_icon_default">Default</string>
     <string name="app_icon_footer">Pick a different launcher icon. The home screen may flicker for a moment while it updates.</string>
     <string name="settings_foot_privacy">Control who can see you, who can reach you, and which server you\'re on.</string>
