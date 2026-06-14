@@ -872,4 +872,8 @@
     <!-- home-row reaction / mention indicators -->
     <string name="home_reaction_indicator">New reaction to your message</string>
     <string name="home_mention_indicator">You were mentioned</string>
+    <string name="push_channel_messages">Messages</string>
+    <string name="push_channel_messages_desc">New message notifications</string>
+    <string name="push_new_message">New message</string>
+    <string name="push_new_group_message">New group message</string>
 </resources>

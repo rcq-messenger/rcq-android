@@ -831,6 +831,14 @@ class Session(context: Context) {
         // Advertise sender-keys support so others broadcast to us (encrypt-once)
         // instead of the legacy per-member fan-out. Fire-and-forget.
         scope.launch { runCatching { api.advertiseCapabilities(senderKeys = true) } }
+        // Re-register our UnifiedPush endpoint with this account's island so it
+        // can wake the device for offline messages/calls. Idempotent upsert;
+        // covers an endpoint obtained before login + account/island switches.
+        scope.launch {
+            runCatching {
+                app.rcq.android.push.Push.savedEndpoint(appCtx)?.let { api.setPushToken(it) }
+            }
+        }
         // Ensure our libsignal prekey bundle is published so peers can start
         // v=2 sessions with us. Best-effort: failure leaves us on v=1.
         scope.launch {

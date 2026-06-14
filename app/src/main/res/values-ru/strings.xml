@@ -869,4 +869,8 @@
     <!-- home-row reaction / mention indicators -->
     <string name="home_reaction_indicator">Новая реакция на ваше сообщение</string>
     <string name="home_mention_indicator">Вас упомянули</string>
+    <string name="push_channel_messages">Сообщения</string>
+    <string name="push_channel_messages_desc">Уведомления о новых сообщениях</string>
+    <string name="push_new_message">Новое сообщение</string>
+    <string name="push_new_group_message">Новое сообщение в группе</string>
 </resources>

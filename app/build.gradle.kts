@@ -187,6 +187,19 @@ dependencies {
     // the iOS client uses, signalling rides the existing WS dumb-relay.
     implementation(libs.stream.webrtc.android)
 
+    // UnifiedPush connector — Android push wake without FCM (the distributor,
+    // e.g. ntfy, relays the server's POST to the device). Pure Kotlin, no .so.
+    implementation(libs.unifiedpush.connector) {
+        // The connector depends on the JVM `tink` artifact (for WebPush payload
+        // encryption), which duplicates the `tink-android` we already ship via
+        // androidx.security.crypto (EncryptedSharedPreferences). Drop the JVM
+        // variant and unify on tink-android at the connector's version below.
+        exclude(group = "com.google.crypto.tink", module = "tink")
+    }
+    // Pin the Android tink variant to the connector's required version (1.21.0);
+    // androidx.security.crypto's older 1.8.0 resolves up compatibly.
+    implementation("com.google.crypto.tink:tink-android:1.21.0")
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)

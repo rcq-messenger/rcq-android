@@ -628,6 +628,21 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
             postNoContent("/users/me/capabilities", gson.toJson(CapabilitiesBody(senderKeys)), authed = true)
         }
 
+    data class PushTokenBody(val token: String, val platform: String = "android-up")
+
+    /** Register this device's UnifiedPush endpoint URL so the server can POST
+     *  offline wakes to it. Idempotent upsert server-side (uin, token). */
+    suspend fun setPushToken(endpoint: String): Unit =
+        withContext(Dispatchers.IO) {
+            postNoContent("/users/me/push-token", gson.toJson(PushTokenBody(endpoint)), authed = true)
+        }
+
+    /** Drop a UnifiedPush endpoint (distributor unregistered / logout). */
+    suspend fun deletePushToken(endpoint: String): Unit =
+        withContext(Dispatchers.IO) {
+            sendNoResult("DELETE", "/users/me/push-token", gson.toJson(PushTokenBody(endpoint)), authed = true)
+        }
+
     // ── presence + account (rcq-spec 3.3 / 2.4) ──────────────────────
 
     data class StatusBody(val status: String, val status_message: String? = null)

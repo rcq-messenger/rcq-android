@@ -30,6 +30,11 @@ class RcqApp : Application() {
         // reclaims the cached process — arming here turned every such reclaim
         // into a phantom "launch crash" report.
         PanicPinService.initLockState(this)
+        // Account roster + notification channel made available process-wide,
+        // including on headless starts — the UnifiedPush push service reads the
+        // roster to register/resolve accounts and posts message notifications.
+        app.rcq.android.data.AccountManager.init(this)
+        app.rcq.android.push.Push.ensureChannels(this)
         // Optional PIN-lock grace (#10): users asked not to re-enter the PIN on
         // every quick app switch. With a grace > 0 we DON'T lock on background;
         // instead we lock on RETURN if the app was away longer than the grace

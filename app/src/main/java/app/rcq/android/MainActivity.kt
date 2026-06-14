@@ -184,6 +184,19 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         LocalStores.bindAccount(activeAccountId)
         app.rcq.android.data.VisitStore.bindAccount(activeAccountId)
         session = Session(applicationContext)
+        // Push: request the notification runtime permission (API 33+) and ask
+        // the active UnifiedPush distributor (ntfy, …) for an endpoint if one is
+        // set up. A device with no distributor simply gets no push (degrades to
+        // the foreground-only behaviour) — non-intrusive, never forces a picker.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 0,
+            )
+        }
+        app.rcq.android.push.Push.registerDistributor(this)
         // Apply screenshot-blocking before the first frame if it's already on.
         if (LocalStores.screenSecurityOn()) {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)

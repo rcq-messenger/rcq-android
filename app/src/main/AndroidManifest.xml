@@ -103,6 +103,16 @@
             </intent-filter>
         </activity>
 
+        <!-- UnifiedPush: the distributor (ntfy, …) delivers the server's POSTed
+             wake payload here. exported=false; the distributor binds by action. -->
+        <service
+            android:name=".push.RcqPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
