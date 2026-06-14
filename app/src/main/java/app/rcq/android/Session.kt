@@ -2386,8 +2386,14 @@ class Session(context: Context) {
 
     /** Relays the user can hand to a contact: the signed-config pool + already
      *  imported/shared relays, deduped by proto:server:port. */
+    // Only OFF-CONFIG relays are worth sharing peer-to-peer: the signed-config
+    // pool (RelayConfigStore) already reaches every user, and surfacing its IPs
+    // in a shareable list just helps a censor enumerate them. Share community
+    // relays - handed to us by a contact or pulled from the broker - the point
+    // of the hydra (гидра) P2P channel: distribute bridges with no central list
+    // to seize.
     fun shareableRelays(): List<SingBoxTransport.Relay> =
-        (RelayConfigStore.currentRelays() + ContactRelayStore.relays())
+        (ContactRelayStore.relays() + app.rcq.android.net.BrokerRelayStore.relays())
             .distinctBy { "${it.proto}:${it.server}:${it.port}" }
 
     /** Local-only delete (removes from this device; no wire message). */
