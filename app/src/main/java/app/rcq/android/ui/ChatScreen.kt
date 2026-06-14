@@ -1903,6 +1903,9 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
+    // Match MessageBubble: on a chat wallpaper the time/ticks footer washes out
+    // on the gradient, so give it the same contrast pill. No-op on default chat.
+    val onWallpaper = LocalStores.chatBackground.collectAsState().value.isNotEmpty()
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (first.fromMe) Alignment.End else Alignment.Start) {
         if (senderName != null) {
             Text(
@@ -1921,7 +1924,8 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                .then(if (onWallpaper) Modifier.clip(RoundedCornerShape(8.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 6.dp, vertical = 1.dp) else Modifier),
         ) {
             Text(formatTime(last.sentAt), color = c.textSecondary, fontSize = 10.sp)
             if (first.fromMe) DeliveryTicks(last.state)
