@@ -247,7 +247,11 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.gi_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            if (canManageMembers) {
+            // Any member can add to an OPEN group (you could equally share the
+            // link; the server already allows it, gated only by the invitee's
+            // own invite policy + the owner's block list). A CLOSED group locks
+            // adds to the owner / members-moderator.
+            if (!group.isClosed || canManageMembers) {
                 Row(Modifier.clip(RoundedCornerShape(percent = 50)).clickable { showAddMember = true }.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Filled.PersonAdd, null, tint = c.accent, modifier = Modifier.size(16.dp))
                     Text(stringResource(R.string.home_bar_add), color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
