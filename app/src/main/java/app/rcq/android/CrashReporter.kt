@@ -98,12 +98,19 @@ object CrashReporter {
         if (stage.isNullOrBlank()) return
         // A JVM crash already wrote a real stack — don't clobber it.
         if (File(appCtx.filesDir, FILE).exists()) return
-        // Android 11+ keeps a tombstone for the previous process exit. When it
-        // was a NATIVE crash this names the actual signal + backtrace — far more
-        // useful than the breadcrumb, which only says which startup STAGE we
-        // reached (e.g. every post-drain crash collapses onto "drain_done").
-        val exit = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-            runCatching { recentExitInfo(appCtx) }.getOrNull() else null
+        // The breadcrumb only tells us the app didn't reach launchComplete — but
+        // that ALSO happens on a BENIGN exit (the user swiped the app away mid-
+        // launch, a low-memory reclaim, or just a slow device that took >8s),
+        // which we were FALSE-reporting as a crash. On Android 11+ confirm with
+        // ApplicationExitInfo: synthesise a report ONLY when the previous exit
+        // was an actual crash/ANR/signal, and attach the native tombstone (the
+        // real faulting frame). Pre-11 we can't tell, so keep the best-effort
+        // breadcrumb report.
+        var exit: String? = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            exit = runCatching { recentExitInfo(appCtx) }.getOrNull()
+            if (exit == null) return // previous exit wasn't a crash → false positive, skip
+        }
         val report = buildString {
             append("RCQ launch crash (suspected NATIVE — no JVM stack)\n")
             append("app: ${BuildConfig.VERSION_NAME} (vc ${BuildConfig.VERSION_CODE})\n")
@@ -116,17 +123,28 @@ object CrashReporter {
     }
 
     /** The OS-recorded reason for the most recent previous process exit
-     *  (Android 11+). For a native crash it includes the signal description and
-     *  the tombstone backtrace — the actual faulting frame. */
+     *  (Android 11+) — but ONLY when it was an actual crash (returns null for a
+     *  benign exit, so the caller can skip a false-positive report). For a
+     *  native crash it includes the signal description and the tombstone
+     *  backtrace — the actual faulting frame. */
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun recentExitInfo(context: Context): String? {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager ?: return null
         val info = am.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull() ?: return null
+        val isCrash = when (info.reason) {
+            android.app.ApplicationExitInfo.REASON_CRASH,
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE,
+            android.app.ApplicationExitInfo.REASON_ANR -> true
+            // SIGNALED is a crash for SIGSEGV/SIGABRT/etc. but a benign OS kill
+            // for SIGKILL(9) — exclude that one.
+            android.app.ApplicationExitInfo.REASON_SIGNALED -> info.status != 9
+            else -> false // USER_REQUESTED / LOW_MEMORY / OTHER / FREEZER / ... = not a crash
+        }
+        if (!isCrash) return null
         val reason = when (info.reason) {
             android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "CRASH_NATIVE"
             android.app.ApplicationExitInfo.REASON_SIGNALED -> "SIGNALED"
             android.app.ApplicationExitInfo.REASON_CRASH -> "CRASH(JVM)"
-            android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "LOW_MEMORY"
             android.app.ApplicationExitInfo.REASON_ANR -> "ANR"
             else -> "reason=${info.reason}"
         }
