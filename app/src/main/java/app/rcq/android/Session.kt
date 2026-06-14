@@ -2072,12 +2072,13 @@ class Session(context: Context) {
     /** Decrypt + store an inbound group message under its group thread. */
     private fun ingestGroup(payloadB64: String, groupId: Int) {
         runCatching {
+            val me = store.uin ?: return
             val dec = decryptInbound(payloadB64)
             when (val env = dec.envelope) {
                 // Sender-keys distribution / recovery (never rendered). SKDM binds
                 // the chain to its authenticated sender; SKNACK asks the kid owner
                 // to re-distribute. Both ride the per-member sealed path.
-                is Envelope.Skdm -> SenderKeyStore.acceptSkdm(env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck)
+                is Envelope.Skdm -> SenderKeyStore.acceptSkdm(me, env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck)
                 is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
                 else -> routeGroupEnvelope(env, groupId, dec.senderUin)
             }
@@ -2090,11 +2091,12 @@ class Session(context: Context) {
      *  replayed message. */
     private fun ingestGmsg(payloadB64: String, groupId: Int) {
         runCatching {
+            val me = store.uin ?: return
             val hdr = SenderKeys.parseGmsgHeader(payloadB64) ?: return
-            if (SenderKeyStore.ownsKid(hdr.kid)) return // my own broadcast echoed back
-            val key = SenderKeyStore.deriveInbound(hdr.kid, hdr.epoch, hdr.index)
+            if (SenderKeyStore.ownsKid(me, hdr.kid)) return // my own broadcast echoed back
+            val key = SenderKeyStore.deriveInbound(me, hdr.kid, hdr.epoch, hdr.index)
             if (key == null) {
-                if (!SenderKeyStore.knowsKid(hdr.kid)) sendSknack(groupId, hdr.kid)
+                if (!SenderKeyStore.knowsKid(me, hdr.kid)) sendSknack(groupId, hdr.kid)
                 return
             }
             val opened = SenderKeys.openGmsg(payloadB64, groupId, key.mk, key.spub)
