@@ -42,11 +42,22 @@ object Multihome {
     private const val PEER_CACHE_TTL_MS = 10 * 60 * 1000L
 
     private val JSON = "application/json".toMediaType()
-    private val client = OkHttpClient.Builder()
+    private val baseClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
         .build()
+    @Volatile private var proxiedClient: OkHttpClient? = null
+
+    /** Like RcqApi, ride the sing-box SOCKS proxy when the obfuscated/onion
+     *  transport is engaged so cross-island gossip/record/media calls work on a
+     *  censored network (and don't leak the foreign host + our IP outside the
+     *  tunnel). Direct (unchanged) when the transport is off. The RcqApi-based
+     *  paths here are already proxy-aware; this covers the raw-client calls. */
+    private fun http(): OkHttpClient {
+        val p = SingBoxTransport.proxy() ?: return baseClient
+        return proxiedClient ?: baseClient.newBuilder().proxy(p).build().also { proxiedClient = it }
+    }
 
     /** Re-authenticate on [host] by proving possession of the signing key
      *  (same challenge-response as seed-phrase recovery). Returns null when
@@ -126,12 +137,12 @@ object Multihome {
     /** Raw response bytes (the exact bytes the signature covers), or null. */
     private fun httpBytes(url: String): ByteArray? = runCatching {
         val req = Request.Builder().url(url).header("Cache-Control", "no-cache").get().build()
-        client.newCall(req).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
+        http().newCall(req).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
     }.getOrNull()
 
     private fun healthy(host: String): Boolean = runCatching {
         val req = Request.Builder().url("https://$host/health").get().build()
-        client.newCall(req).execute().use { it.isSuccessful }
+        http().newCall(req).execute().use { it.isSuccessful }
     }.getOrDefault(false)
 
     /** `is2.rcq.app`, `https://is2.rcq.app/x` → `is2.rcq.app`. */
@@ -241,7 +252,7 @@ object Multihome {
                 .url("https://$host/federation/gossip-record")
                 .put(recordJson.toRequestBody(JSON))
                 .build()
-            client.newCall(req).execute().use { }
+            http().newCall(req).execute().use { }
         }
     }
 
@@ -250,7 +261,7 @@ object Multihome {
     fun fetchGossipRecord(host: String, signingKeyB64: String): JsonObject? = runCatching {
         val sk = java.net.URLEncoder.encode(signingKeyB64, "UTF-8")
         val req = Request.Builder().url("https://$host/federation/gossip-record?sk=$sk").get().build()
-        client.newCall(req).execute().use { resp ->
+        http().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null
             JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
         }
@@ -289,7 +300,7 @@ object Multihome {
         // (1) by-uin owner record on our island.
         runCatching {
             val req = Request.Builder().url("https://$ownHost/federation/island-record/$peerUin").get().build()
-            client.newCall(req).execute().use { resp ->
+            http().newCall(req).execute().use { resp ->
                 if (resp.code == 404) return@runCatching null
                 if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
                 val body = resp.body?.string() ?: ""
@@ -328,7 +339,7 @@ object Multihome {
     fun resolveAndMirrorHomes(ownHost: String, peerHost: String, peerUin: Int, peerSigningKeyB64: String): List<RcqFederation.Home> {
         runCatching {
             val req = Request.Builder().url("https://$peerHost/federation/island-record/$peerUin").get().build()
-            client.newCall(req).execute().use { resp ->
+            http().newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val body = resp.body?.string() ?: ""
                     val doc = JsonParser.parseString(body).asJsonObject
@@ -377,7 +388,7 @@ object Multihome {
                     addProperty("payload", payload)
                 }.toString().toRequestBody(JSON)
                 val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()
-                runCatching { client.newCall(req).execute().use { if (it.isSuccessful) delivered++ } }
+                runCatching { http().newCall(req).execute().use { if (it.isSuccessful) delivered++ } }
             }
             delivered
         } catch (e: Exception) {

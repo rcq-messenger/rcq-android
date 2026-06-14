@@ -27,11 +27,23 @@ object CrossIslandSender {
 
     private val JSON = "application/json".toMediaType()
     private val OCTET = "application/octet-stream".toMediaType()
-    private val client = OkHttpClient.Builder()
+    private val baseClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
         .build()
+    @Volatile private var proxiedClient: OkHttpClient? = null
+
+    /** Cross-island HTTP must ride the sing-box SOCKS proxy when the
+     *  obfuscated/onion transport is engaged: on a censored network the direct
+     *  foreign-island deposit is blocked (the recipient never gets the message),
+     *  and a direct call would also leak the foreign host + our real IP outside
+     *  the tunnel. Mirrors RcqApi's `.proxy(SingBoxTransport.proxy())`. Direct
+     *  (unchanged) whenever the transport is off. */
+    private fun http(): OkHttpClient {
+        val p = SingBoxTransport.proxy() ?: return baseClient
+        return proxiedClient ?: baseClient.newBuilder().proxy(p).build().also { proxiedClient = it }
+    }
 
     data class Card(
         val identityKey: String,
@@ -50,7 +62,7 @@ object CrossIslandSender {
     /** Fetch a peer's open public-key card from their island (no auth). */
     fun fetchCard(host: String, uin: Int): Card? {
         val req = Request.Builder().url("https://$host/federation/keys/$uin").get().build()
-        client.newCall(req).execute().use { resp ->
+        http().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null
             val o = JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject
             return Card(
@@ -72,7 +84,7 @@ object CrossIslandSender {
         val url = "https://$host/federation/uin-for-key?signing_key=" +
             java.net.URLEncoder.encode(signingKeyB64, "UTF-8")
         val req = Request.Builder().url(url).get().build()
-        client.newCall(req).execute().use { resp ->
+        http().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null
             return runCatching {
                 JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject.get("uin").asInt
@@ -92,7 +104,7 @@ object CrossIslandSender {
         }
         val req = Request.Builder().url("https://$host/auth/register")
             .post(body.toString().toRequestBody(JSON)).build()
-        client.newCall(req).execute().use { resp ->
+        http().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null
             return runCatching {
                 JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject.get("uin").asInt
@@ -106,7 +118,7 @@ object CrossIslandSender {
         val fallback = listOf(RcqFederation.Home(host, uin))
         val card = fetchCard(host, uin) ?: return fallback
         val req = Request.Builder().url("https://$host/federation/island-record/$uin").get().build()
-        client.newCall(req).execute().use { resp ->
+        http().newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return fallback
             val doc = runCatching {
                 JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
@@ -132,7 +144,7 @@ object CrossIslandSender {
             .addFormDataPart("blob", "photo.bin", blob.toRequestBody(OCTET))
             .build()
         val req = Request.Builder().url("https://$host/media/$mediaId").put(body).build()
-        return runCatching { client.newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
+        return runCatching { http().newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
     }
 
     /** §5d cross-island call signaling: v=1-seal a call envelope and deposit it
@@ -155,7 +167,7 @@ object CrossIslandSender {
             addProperty("payload", payload)
         }.toString().toRequestBody(JSON)
         val req = Request.Builder().url("https://${contact.host}/messages/sealed").post(body).build()
-        return runCatching { client.newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
+        return runCatching { http().newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
     }
 
     /** Deliver [env] to a cross-island [contact]: v=1-seal to their identity key
@@ -184,7 +196,7 @@ object CrossIslandSender {
                 addProperty("payload", payload)
             }.toString().toRequestBody(JSON)
             val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()
-            runCatching { client.newCall(req).execute().use { if (it.isSuccessful) delivered = true } }
+            runCatching { http().newCall(req).execute().use { if (it.isSuccessful) delivered = true } }
         }
         return delivered
     }
