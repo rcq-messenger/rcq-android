@@ -23,9 +23,12 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +49,10 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 
 /**
  * The classic KOLOBOK emoticon set, bundled in `assets/emoticons/<name>.gif`
@@ -358,14 +365,18 @@ private fun AnnotatedString.Builder.appendWithMentions(
     if (cursor < text.length) append(text.substring(cursor))
 }
 
-/** The composer smiley panel: a scrollable grid of the palette emoticons.
- *  Tapping one calls [onPick] with its `:asset:` code to splice into the draft.
+/** The composer smiley panel: a scrollable grid of the palette emoticons, each
+ *  ANIMATED (iOS parity) so you see exactly what the recipient gets before
+ *  sending. Tapping one calls [onPick] with its `:asset:` code to splice into
+ *  the draft.
  *
- *  Rendered as STATIC first frames (animate=false): animating all ~40 palette
- *  GIFs at once spins up dozens of AnimatedImageDrawables, which OOM-crashed the
- *  app when the panel opened on low-RAM devices (e.g. Redmi Note 7 / Android 10)
- *  — the "crashes when using smileys" report. Static frames share the cached
- *  bitmap (see EmoticonGif) and don't pile up decoders. */
+ *  The whole grid animates SAFELY via [PanelEmoticon]/[decodeGifFrames]: every
+ *  asset's frames are decoded ONCE into a shared, process-wide cache and the
+ *  cells just cycle the pre-decoded bitmaps — no per-cell decoder, no per-frame
+ *  allocation. This is the crash-safe replacement for the old per-cell
+ *  [SafeAnimatedGif] approach, which spun up ~40 live decoders churning a fresh
+ *  bitmap every frame (rofl.gif is 136) and OOM-crashed low-RAM devices (the
+ *  "crashes when using smileys" report on Redmi Note 7 / Android 10). */
 @Composable
 internal fun EmoticonPanel(onPick: (String) -> Unit) {
     val c = RcqTheme.colors
@@ -384,7 +395,39 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
             Box(
                 Modifier.size(46.dp).clip(RoundedCornerShape(8.dp)).clickable { onPick(":$asset:") },
                 contentAlignment = Alignment.Center,
-            ) { EmoticonGif(asset, Modifier.size(30.dp), animate = false) }
+            ) { PanelEmoticon(asset, Modifier.size(30.dp)) }
         }
     }
+}
+
+/** A single picker cell that ANIMATES from the shared pre-decoded frame cache
+ *  ([decodeGifFrames]). Safe to have the whole grid of these on screen at once:
+ *  no cell owns a decoder and playback allocates nothing — it only cycles cached
+ *  frames. Shows the static first frame while decoding (or for a 1-frame asset). */
+@Composable
+private fun PanelEmoticon(name: String, modifier: Modifier) {
+    val context = LocalContext.current
+    val bytes by produceState<ByteArray?>(initialValue = null, name) {
+        value = Emoticons.bytes(context, name)
+    }
+    val b = bytes ?: return
+    val frames by produceState<GifFrames?>(initialValue = null, name, b) {
+        value = withContext(Dispatchers.Default) { decodeGifFrames(name, b) }
+    }
+    val f = frames
+    if (f == null || f.frames.size <= 1) {
+        // Decoding, or a single-frame asset → the shared static first frame.
+        val img = remember(name) { staticEmoticonBitmap(name, b) }
+        if (img != null) Image(bitmap = img, contentDescription = null, modifier = modifier)
+        return
+    }
+    var idx by remember(name) { mutableStateOf(0) }
+    LaunchedEffect(f) {
+        idx = 0
+        while (isActive) {
+            delay(f.delaysMs[idx.coerceIn(0, f.delaysMs.lastIndex)].toLong())
+            idx = (idx + 1) % f.frames.size
+        }
+    }
+    Image(bitmap = f.frames[idx.coerceIn(0, f.frames.lastIndex)], contentDescription = null, modifier = modifier)
 }

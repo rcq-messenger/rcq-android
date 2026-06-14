@@ -55,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.RcqApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.OffsetDateTime
@@ -83,6 +84,14 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     var bytes by remember { mutableStateOf<ByteArray?>(null) }
     var showViewers by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // Ignore the left/right navigation taps for a beat after the viewer appears.
+    // The full-screen tap zones compose right under the finger that opened the
+    // viewer; without this gate a tap landing in the right two-thirds fires
+    // next() — which for a single-story group is onClose() — so the viewer
+    // "flashes and disappears" the instant you open it. A deliberate tap a
+    // moment later still pages/closes as expected (Instagram-style).
+    var inputReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(400); inputReady = true }
 
     val story = stories.getOrNull(index) ?: run { onClose(); return }
     val progress = remember(index) { Animatable(0f) }
@@ -124,8 +133,8 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
 
         // Tap zones: left third = back, right two-thirds = forward.
         Row(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxHeight().weight(1f).noRippleClickable { prev() })
-            Box(Modifier.fillMaxHeight().weight(2f).noRippleClickable { next() })
+            Box(Modifier.fillMaxHeight().weight(1f).noRippleClickable { if (inputReady) prev() })
+            Box(Modifier.fillMaxHeight().weight(2f).noRippleClickable { if (inputReady) next() })
         }
 
         // Top overlay: progress segments + byline + close.

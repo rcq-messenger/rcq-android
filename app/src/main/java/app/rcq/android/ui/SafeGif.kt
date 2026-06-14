@@ -106,3 +106,48 @@ internal fun SafeAnimatedGif(bytes: ByteArray, modifier: Modifier) {
         Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier)
     }
 }
+
+// ---------------------------------------------------------------------------
+// SHARED-FRAME emoticon animation. Animating the WHOLE picker grid (iOS parity)
+// the naive way — one [SafeAnimatedGif] per cell — spins up ~40 live decoders,
+// each allocating a fresh Bitmap EVERY frame (rofl.gif is 136 frames) with no
+// pool, so the GC can't keep up → the low-RAM OOM (Redmi Note 7) that forced the
+// panel to render static first-frames. Instead we decode each asset's frames
+// ONCE into a process-wide cache; cells then cycle the PRE-DECODED bitmaps —
+// zero per-frame allocation, no live decoder, so the whole grid can animate.
+// Frames are tiny (~30px); the full set is a few MB, bounded and stable.
+// ---------------------------------------------------------------------------
+
+/** All decoded frames of one GIF plus each frame's display delay (ms). */
+internal class GifFrames(val frames: List<ImageBitmap>, val delaysMs: IntArray)
+
+/** Defensive cap so a pathological asset can't blow the cache. The shipped
+ *  Kolobok set tops out at ~136 frames (rofl). */
+private const val MAX_GIF_FRAMES = 300
+
+private val gifFramesCache = HashMap<String, GifFrames?>()
+
+/** Decode EVERY frame of [bytes] once, COPYING each (the pure-Java decoder
+ *  reuses its canvas across frames, so the returned bitmap mutates on the next
+ *  advance — we must copy before caching). Cached by [key]; later calls are
+ *  free. Returns null on a malformed/empty GIF. Call OFF the main thread. */
+internal fun decodeGifFrames(key: String, bytes: ByteArray): GifFrames? {
+    synchronized(gifFramesCache) { if (gifFramesCache.containsKey(key)) return gifFramesCache[key] }
+    val result = runCatching {
+        val dec = newGifDecoder(bytes) ?: return@runCatching null
+        val count = dec.frameCount.coerceAtMost(MAX_GIF_FRAMES)
+        if (count <= 0) return@runCatching null
+        val frames = ArrayList<ImageBitmap>(count)
+        val delays = ArrayList<Int>(count)
+        for (i in 0 until count) {
+            dec.advance()
+            val src = dec.nextFrame ?: continue
+            val copy = src.copy(src.config ?: Bitmap.Config.ARGB_8888, false) ?: continue
+            frames.add(copy.asImageBitmap())
+            delays.add(dec.nextDelay.coerceIn(20, 1000))
+        }
+        if (frames.isEmpty()) null else GifFrames(frames, delays.toIntArray())
+    }.getOrNull()
+    synchronized(gifFramesCache) { gifFramesCache[key] = result }
+    return result
+}

@@ -144,7 +144,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(contentAlignment = Alignment.BottomEnd) {
                 Box(Modifier.then(if (isOwner) Modifier.clickable { avatarPicker.launch("image/*") } else Modifier)) {
-                    GroupAvatar(group, session, 72.dp, glyphSize = 40.dp)
+                    GroupAvatar(group, session, 72.dp, glyphSize = 40.dp, animated = true)
                 }
                 if (isOwner) {
                     Box(Modifier.size(26.dp).clip(CircleShape).background(c.accent).clickable { avatarPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
