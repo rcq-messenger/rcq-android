@@ -873,4 +873,6 @@
     <string name="push_channel_messages_desc">Уведомления о новых сообщениях</string>
     <string name="push_new_message">Новое сообщение</string>
     <string name="push_new_group_message">Новое сообщение в группе</string>
+    <string name="push_channel_calls">Звонки</string>
+    <string name="push_channel_calls_desc">Уведомления о входящих звонках</string>
 </resources>

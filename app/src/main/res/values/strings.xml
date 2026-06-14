@@ -876,4 +876,6 @@
     <string name="push_channel_messages_desc">New message notifications</string>
     <string name="push_new_message">New message</string>
     <string name="push_new_group_message">New group message</string>
+    <string name="push_channel_calls">Calls</string>
+    <string name="push_channel_calls_desc">Incoming call notifications</string>
 </resources>

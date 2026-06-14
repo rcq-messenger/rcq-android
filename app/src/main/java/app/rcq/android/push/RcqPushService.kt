@@ -28,7 +28,8 @@ class RcqPushService : PushService() {
         }.getOrNull() ?: return
         when (json.get("type")?.takeIf { !it.isJsonNull }?.asString) {
             "msg" -> Push.showMessage(applicationContext, json)
-            // "call" / "call_end" — Stage 2 (full-screen incoming-call wake).
+            // {type:"call"} = incoming-call wake (kind:"end" = caller cancelled).
+            "call" -> Push.showIncomingCall(applicationContext, json)
             else -> Unit
         }
     }

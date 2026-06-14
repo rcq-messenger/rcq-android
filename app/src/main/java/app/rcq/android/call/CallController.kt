@@ -272,7 +272,7 @@ class CallController(
         }
     }
 
-    private fun handleIncomingOffer(from: Int, callId: String, obj: JsonObject) {
+    private fun handleIncomingOffer(from: Int, callId: String, obj: JsonObject, ring: Boolean = true) {
         if (_state.value.active) {
             send(signal("call_end", from, callId, mapOf("reason" to "busy")))
             return
@@ -283,8 +283,22 @@ class CallController(
         pendingRemoteOffer = sdp
         pendingRemoteIce.clear()
         _state.value = State.Incoming(call)
-        ringer.startIncoming()
-        armRingTimeout(call)
+        // The push-accept path already rang on the lock screen and accepts
+        // immediately, so skip the in-app ringer + ring watchdog there.
+        if (ring) {
+            ringer.startIncoming()
+            armRingTimeout(call)
+        }
+    }
+
+    /** Feed a push-delivered offer the user already accepted on the lock-screen
+     *  [IncomingCallActivity]: set up Incoming state WITHOUT re-ringing, then
+     *  accept. Called from MainActivity once the WS is connected. */
+    fun onPushOffer(obj: JsonObject) {
+        val from = obj.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
+        val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
+        handleIncomingOffer(from, callId, obj, ring = false)
+        accept()
     }
 
     private fun handleAnswer(callId: String, sdp: String) {

@@ -6,6 +6,8 @@
          installer (the user still confirms the install). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Full-screen incoming-call UI over the lock screen (UnifiedPush call wake). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Detect when the user screenshots a notify-mode secure chat (Android 14+). -->
     <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
@@ -102,6 +104,18 @@
                 <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/g/" />
             </intent-filter>
         </activity>
+
+        <!-- Full-screen incoming-call UI, shown over the lock screen when a
+             UnifiedPush call wake arrives. Launched via a full-screen-intent
+             notification; hands off to MainActivity on accept. -->
+        <activity
+            android:name=".call.IncomingCallActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.RCQ" />
 
         <!-- UnifiedPush: the distributor (ntfy, …) delivers the server's POSTed
              wake payload here. exported=false; the distributor binds by action. -->

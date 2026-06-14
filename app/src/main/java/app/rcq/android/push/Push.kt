@@ -11,6 +11,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import app.rcq.android.MainActivity
 import app.rcq.android.R
+import app.rcq.android.call.IncomingCallActivity
+import app.rcq.android.call.IncomingCallStore
 import app.rcq.android.data.AccountManager
 import app.rcq.android.data.SecureStore
 import app.rcq.android.net.RcqApi
@@ -37,6 +39,9 @@ import org.unifiedpush.android.connector.UnifiedPush
  */
 object Push {
     const val CHANNEL_MESSAGES = "rcq_messages"
+    const val CHANNEL_CALLS = "rcq_calls"
+    const val CHANNEL_CALLS_RING = "rcq_calls_ring"
+    private const val CALL_NOTIF_ID = 0x2C01
 
     private const val PREFS = "rcq_push"
     private const val K_ENDPOINT = "endpoint"
@@ -59,6 +64,43 @@ object Push {
                     ctx.getString(R.string.push_channel_messages),
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply { description = ctx.getString(R.string.push_channel_messages_desc) },
+            )
+        }
+        if (nm.getNotificationChannel(CHANNEL_CALLS) == null) {
+            nm.createNotificationChannel(
+                // High importance so a full-screen-intent fires; silent because
+                // IncomingCallActivity drives its own ringtone via Ringer.
+                NotificationChannel(
+                    CHANNEL_CALLS,
+                    ctx.getString(R.string.push_channel_calls),
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = ctx.getString(R.string.push_channel_calls_desc)
+                    setSound(null, null)
+                    enableVibration(false)
+                },
+            )
+        }
+        if (nm.getNotificationChannel(CHANNEL_CALLS_RING) == null) {
+            nm.createNotificationChannel(
+                // Audible fallback: used when the full-screen intent can't launch
+                // (Android 14+ without USE_FULL_SCREEN_INTENT granted) so the call
+                // still RINGS as a heads-up instead of being a silent dropped call.
+                NotificationChannel(
+                    CHANNEL_CALLS_RING,
+                    ctx.getString(R.string.push_channel_calls),
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = ctx.getString(R.string.push_channel_calls_desc)
+                    val ring = android.media.RingtoneManager
+                        .getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+                    val attrs = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    setSound(ring, attrs)
+                    enableVibration(true)
+                },
             )
         }
     }
@@ -128,5 +170,76 @@ object Push {
         // into one "New message" (the sealed wake doesn't reveal the sender).
         val id = (str("group_id") ?: "dm").hashCode()
         runCatching { NotificationManagerCompat.from(ctx).notify(id, notif) }
+    }
+
+    /** Raise a full-screen incoming-call wake for a {type:"call"} payload, or
+     *  dismiss it when kind=="end". The full-screen-intent surfaces
+     *  [IncomingCallActivity] over the lock screen; on accept it hands off to
+     *  MainActivity which runs the WebRTC answer through the live Session. */
+    fun showIncomingCall(ctx: Context, json: JsonObject) {
+        fun str(k: String): String? =
+            json.get(k)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+        val callId = str("call_id") ?: return
+        if (str("kind") == "end") { dismissIncomingCall(ctx, callId); return }
+        val sdp = str("sdp") ?: return
+        val fromUin = json.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
+        ensureChannels(ctx)
+        val nickname = str("nickname") ?: "#$fromUin"
+        IncomingCallStore.offer(
+            IncomingCallStore.Pending(
+                callId = callId,
+                fromUin = fromUin,
+                nickname = nickname,
+                media = str("media") ?: "video",
+                sdp = sdp,
+            ),
+        )
+        val full = Intent(ctx, IncomingCallActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+        }
+        val pi = PendingIntent.getActivity(
+            ctx, 1, full,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        // On Android 14+ USE_FULL_SCREEN_INTENT is special-access and may be
+        // ungranted, so setFullScreenIntent silently degrades to a heads-up. Use
+        // the audible ring channel in that case so the call still rings instead
+        // of being a silent dropped call; the silent channel only when the FSI
+        // can actually launch IncomingCallActivity (which rings via Ringer).
+        val fsiOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+            (ctx.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true)
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
+            android.util.Log.w("RCQpush", "incoming call: notifications disabled — call UI cannot be shown")
+        }
+        val notif = NotificationCompat.Builder(ctx, if (fsiOk) CHANNEL_CALLS else CHANNEL_CALLS_RING)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(nickname)
+            .setContentText(ctx.getString(R.string.call_incoming))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setFullScreenIntent(pi, true)
+            .setContentIntent(pi)
+            .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(CALL_NOTIF_ID, notif) }
+    }
+
+    fun cancelCallNotification(ctx: Context) {
+        runCatching { NotificationManagerCompat.from(ctx).cancel(CALL_NOTIF_ID) }
+    }
+
+    /** Caller cancelled before pickup ({kind:"end"}): drop the offer, remove the
+     *  notification, and tell a showing IncomingCallActivity to finish. */
+    fun dismissIncomingCall(ctx: Context, callId: String) {
+        IncomingCallStore.clearIf(callId)
+        cancelCallNotification(ctx)
+        runCatching {
+            ctx.sendBroadcast(
+                Intent(IncomingCallActivity.ACTION_CANCEL)
+                    .setPackage(ctx.packageName)
+                    .putExtra(IncomingCallActivity.EXTRA_CALL_ID, callId),
+            )
+        }
     }
 }

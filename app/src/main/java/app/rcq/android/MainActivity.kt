@@ -289,6 +289,37 @@ private fun RcqApp(session: Session) {
         if (state is UiState.Registered && !locked) session.start()
     }
 
+    // Push-woken incoming call: the user already tapped Accept on the
+    // lock-screen IncomingCallActivity. Once the WS is connected, feed the
+    // parked offer into the live CallController and accept it — that's the only
+    // place that can run the WebRTC answer + send replies + fetch TURN. Keyed on
+    // the observable acceptedCallId so a second call re-fires this even when
+    // nothing else changed; bound to that exact call id + an age bound so a late
+    // unlock/connect doesn't answer a different or already-dead call.
+    val wsConnected by session.connected.collectAsState()
+    val acceptedCallId by app.rcq.android.call.IncomingCallStore.acceptedCallId.collectAsState()
+    LaunchedEffect(state, locked, wsConnected, acceptedCallId) {
+        if (state is UiState.Registered && !locked && wsConnected) {
+            val cid = acceptedCallId ?: return@LaunchedEffect
+            val p = app.rcq.android.call.IncomingCallStore.pending
+            if (p != null && p.callId == cid) {
+                app.rcq.android.call.IncomingCallStore.clear()
+                // Caller rings for 60s; a parked offer older than that is dead
+                // (e.g. accepted after a slow unlock) — drop it, don't ghost-connect.
+                if (android.os.SystemClock.elapsedRealtime() - p.ts < 60_000L) {
+                    session.calls.onPushOffer(
+                        com.google.gson.JsonObject().apply {
+                            addProperty("from_uin", p.fromUin)
+                            addProperty("call_id", p.callId)
+                            addProperty("media", p.media)
+                            addProperty("sdp", p.sdp)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
