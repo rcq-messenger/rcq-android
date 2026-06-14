@@ -36,6 +36,8 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bookmark
@@ -998,6 +1000,11 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
     // (was a one-shot read → the bell only appeared after leaving + re-entering).
     val mutedSet by LocalStores.muted.collectAsState()
     val muted = LocalStores.groupThread(group.id) in mutedSet
+    val reactSet by LocalStores.reactionInbox.collectAsState()
+    val mentionSet by LocalStores.mentionInbox.collectAsState()
+    val thread = LocalStores.groupThread(group.id)
+    val hasReaction = thread in reactSet
+    val hasMention = thread in mentionSet
     Row(
         Modifier.fillMaxWidth().scale(scale)
             .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
@@ -1027,6 +1034,12 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        if (hasMention || hasReaction) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (hasMention) Icon(Icons.Filled.AlternateEmail, stringResource(R.string.home_mention_indicator), tint = c.accent, modifier = Modifier.size(14.dp))
+                if (hasReaction) Icon(Icons.Filled.Favorite, stringResource(R.string.home_reaction_indicator), tint = Color(0xFFE5484D), modifier = Modifier.size(14.dp))
+            }
+        }
     }
 }
 
@@ -1039,6 +1052,11 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
     val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
     val mutedSet by LocalStores.muted.collectAsState()
     val muted = LocalStores.peerThread(contact.uin) in mutedSet
+    val reactSet by LocalStores.reactionInbox.collectAsState()
+    val mentionSet by LocalStores.mentionInbox.collectAsState()
+    val thread = LocalStores.peerThread(contact.uin)
+    val hasReaction = thread in reactSet
+    val hasMention = thread in mentionSet
 
     Row(
         modifier = Modifier
@@ -1089,6 +1107,12 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+        }
+        if (hasMention || hasReaction) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (hasMention) Icon(Icons.Filled.AlternateEmail, stringResource(R.string.home_mention_indicator), tint = c.accent, modifier = Modifier.size(14.dp))
+                if (hasReaction) Icon(Icons.Filled.Favorite, stringResource(R.string.home_reaction_indicator), tint = Color(0xFFE5484D), modifier = Modifier.size(14.dp))
             }
         }
     }

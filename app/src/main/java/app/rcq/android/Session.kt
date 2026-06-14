@@ -3455,6 +3455,11 @@ class Session(context: Context) {
         // chat heard nothing.
         if (thread == activeThread) LocalStores.clearUnread(thread)
         else LocalStores.bumpUnread(thread)
+        // Home-row @ indicator (iOS parity, GROUP-ONLY): an inbound group message
+        // that @mentions me in a thread I'm not looking at raises the mention inbox.
+        if (msg.groupId != null && !msg.fromMe && thread != activeThread && bodyMentionsMe(msg.body)) {
+            LocalStores.markMention(LocalStores.groupThread(msg.groupId))
+        }
         // Skip the receive sound during the post-connect backfill window so a
         // pile of messages missed while away doesn't ring N times on open.
         val live = System.currentTimeMillis() >= soundsSuppressedUntil
@@ -3499,6 +3504,8 @@ class Session(context: Context) {
     fun openThread(thread: String) {
         activeThread = thread
         LocalStores.clearUnread(thread)
+        LocalStores.clearReaction(thread)
+        LocalStores.clearMention(thread)
     }
 
     fun closeThread() {
@@ -3554,6 +3561,13 @@ class Session(context: Context) {
                 if (r != m.reactions) {
                     changed = true
                     db.updateReactions(targetId, r)
+                    // Home-row reaction-heart (iOS parity): someone else reacting
+                    // (asset != null = set, not a clear) to MY message in a thread
+                    // I'm not looking at raises the inbox indicator.
+                    val thread = LocalStores.peerThread(peer)
+                    if (asset != null && reactorUin != store.uin && m.fromMe && thread != activeThread) {
+                        LocalStores.markReaction(thread)
+                    }
                     m.copy(reactions = r)
                 } else m
             } else m
@@ -3593,6 +3607,13 @@ class Session(context: Context) {
                 if (r != m.reactions) {
                     changed = true
                     db.updateReactions(targetId, r)
+                    // Home-row reaction-heart (iOS parity): someone else reacting
+                    // (asset != null = set, not a clear) to MY message in a thread
+                    // I'm not looking at raises the inbox indicator.
+                    val thread = LocalStores.groupThread(groupId)
+                    if (asset != null && reactorUin != store.uin && m.fromMe && thread != activeThread) {
+                        LocalStores.markReaction(thread)
+                    }
                     m.copy(reactions = r)
                 } else m
             } else m

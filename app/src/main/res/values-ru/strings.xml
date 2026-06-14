@@ -865,4 +865,8 @@
     <string name="boot_connect_failed_title">Не удалось подключиться</string>
     <string name="boot_connect_retry">Повторить</string>
     <string name="boot_registering">Создаём аккаунт…</string>
+
+    <!-- home-row reaction / mention indicators -->
+    <string name="home_reaction_indicator">Новая реакция на ваше сообщение</string>
+    <string name="home_mention_indicator">Вас упомянули</string>
 </resources>

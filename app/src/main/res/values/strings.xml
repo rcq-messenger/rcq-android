@@ -868,4 +868,8 @@
     <string name="boot_connect_failed_title">Couldn\'t connect</string>
     <string name="boot_connect_retry">Try again</string>
     <string name="boot_registering">Creating your account…</string>
+
+    <!-- home-row reaction / mention indicators -->
+    <string name="home_reaction_indicator">New reaction to your message</string>
+    <string name="home_mention_indicator">You were mentioned</string>
 </resources>

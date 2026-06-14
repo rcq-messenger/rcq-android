@@ -68,6 +68,20 @@ object LocalStores {
     private val _unread = MutableStateFlow<Map<String, Int>>(emptyMap())
     val unread: StateFlow<Map<String, Int>> = _unread.asStateFlow()
 
+    /** Threads with an UNSEEN reaction on one of MY messages (iOS reaction-inbox
+     *  parity). Keyed "peer:<uin>"/"group:<id>"; marked when someone else reacts
+     *  to my message in a thread I'm not looking at, cleared when the chat opens.
+     *  Drives the home-row heart indicator. */
+    private val _reactionInbox = MutableStateFlow<Set<String>>(emptySet())
+    val reactionInbox: StateFlow<Set<String>> = _reactionInbox.asStateFlow()
+
+    /** Group threads where I was @mentioned and haven't looked yet (iOS parity).
+     *  Keyed "group:<id>"; marked on an inbound group message that @mentions me
+     *  in a thread I'm not looking at, cleared when the chat opens. Drives the
+     *  home-row @ indicator. */
+    private val _mentionInbox = MutableStateFlow<Set<String>>(emptySet())
+    val mentionInbox: StateFlow<Set<String>> = _mentionInbox.asStateFlow()
+
     /** Presence "stay online for N hours after exit" window: the epoch-millis
      *  moment that window EXPIRES, or null when the feature is off. Local-only
      *  affordance anchored when the user enables/changes it in Privacy
@@ -165,6 +179,8 @@ object LocalStores {
             _removed.value = emptySet()
             _blocked.value = emptySet()
             _unread.value = emptyMap()
+            _reactionInbox.value = emptySet()
+            _mentionInbox.value = emptySet()
             _presenceWindow.value = null
             _secureThreads.value = emptySet()
             return
@@ -176,6 +192,8 @@ object LocalStores {
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
+        _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
+        _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
         _presenceWindow.value = prefs.getLong(pk(K_PRES_WIN), 0L).takeIf { it > 0L }
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
     }
@@ -362,6 +380,26 @@ object LocalStores {
             k to v
         }.toMap()
 
+    // ── reaction / mention home-row inboxes ──────────────────────────
+    fun markReaction(thread: String) = addTo(_reactionInbox, K_REACT_INBOX, thread)
+    fun clearReaction(thread: String) = removeFrom(_reactionInbox, K_REACT_INBOX, thread)
+    fun markMention(thread: String) = addTo(_mentionInbox, K_MENTION_INBOX, thread)
+    fun clearMention(thread: String) = removeFrom(_mentionInbox, K_MENTION_INBOX, thread)
+
+    /** Add [thread] to [flow] (copied-Set + persist), no-op if already present. */
+    private fun addTo(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
+        if (acct == null || thread in flow.value) return
+        flow.value = flow.value + thread
+        prefs.edit().putStringSet(pk(key), flow.value.toSet()).apply()
+    }
+
+    /** Remove [thread] from [flow] (copied-Set + persist), no-op if absent. */
+    private fun removeFrom(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
+        if (acct == null || thread !in flow.value) return
+        flow.value = flow.value - thread
+        prefs.edit().putStringSet(pk(key), flow.value.toSet()).apply()
+    }
+
     private fun toggle(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
         if (acct == null) return
         flow.value = if (thread in flow.value) flow.value - thread else flow.value + thread
@@ -378,7 +416,7 @@ object LocalStores {
     fun migrateLegacyToAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD).forEach { k ->
+        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_REACT_INBOX, K_MENTION_INBOX).forEach { k ->
             if (prefs.contains(k)) {
                 prefs.getStringSet(k, emptySet())?.let { e.putStringSet("$accountId.$k", it.toSet()) }
                 e.remove(k)
@@ -424,7 +462,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_BLOCKED, K_UNREAD, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_BLOCKED, K_UNREAD, K_REACT_INBOX, K_MENTION_INBOX, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -440,6 +478,8 @@ object LocalStores {
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
+    private const val K_REACT_INBOX = "reaction_inbox"
+    private const val K_MENTION_INBOX = "mention_inbox"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"
