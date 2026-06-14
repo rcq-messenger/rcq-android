@@ -837,7 +837,10 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
 
             // Hall of Fame opt-in + optional public avatar. Just consent to be
             // considered; the founder curates who actually appears on rcq.app/hof.
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Hidden on self-hosted islands (a flagship-only surface) — gated on
+            // the server's hall_of_fame capability, exactly like the UIN shop.
+            val hofEnabled by session.hallOfFameEnabled.collectAsState()
+            if (hofEnabled) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.pv_hall_of_fame), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)

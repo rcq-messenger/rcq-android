@@ -279,6 +279,12 @@ class Session(context: Context) {
     private val _uinShopEnabled = MutableStateFlow(true)
     val uinShopEnabled: StateFlow<Boolean> = _uinShopEnabled.asStateFlow()
 
+    /** Hall of Fame opt-in surface. Flagship advertises hall_of_fame=true;
+     *  self-host rcq-server-ref returns false → the Privacy settings opt-in
+     *  hides. Permissive default (true) until the first /server/info lands. */
+    private val _hallOfFameEnabled = MutableStateFlow(true)
+    val hallOfFameEnabled: StateFlow<Boolean> = _hallOfFameEnabled.asStateFlow()
+
     val nickname: String get() = store.nickname ?: "—"
 
     // uin -> recipient X25519 identity public (raw), from contacts or lookup.
@@ -827,7 +833,13 @@ class Session(context: Context) {
         scope.launch { runCatching { refreshStories() } }
         // Optional-surface flags for this server (UIN shop). Best-effort:
         // failure keeps the permissive default so the shop stays reachable.
-        scope.launch { runCatching { _uinShopEnabled.value = api.serverInfo().capabilities.uin_shop } }
+        scope.launch {
+            runCatching {
+                val caps = api.serverInfo().capabilities
+                _uinShopEnabled.value = caps.uin_shop
+                _hallOfFameEnabled.value = caps.hall_of_fame
+            }
+        }
         // Advertise sender-keys support so others broadcast to us (encrypt-once)
         // instead of the legacy per-member fan-out. Fire-and-forget.
         scope.launch { runCatching { api.advertiseCapabilities(senderKeys = true) } }

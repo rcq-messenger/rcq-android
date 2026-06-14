@@ -696,7 +696,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
 
     // ── server capability discovery (GET /server/info, unauthenticated) ──
 
-    data class ServerCapabilities(val uin_shop: Boolean = false, val registration_policy: String = "open")
+    data class ServerCapabilities(val uin_shop: Boolean = false, val hall_of_fame: Boolean = false, val registration_policy: String = "open")
     data class ServerInfoResponse(val name: String = "", val capabilities: ServerCapabilities = ServerCapabilities())
 
     /** Server metadata + optional-surface flags. api.rcq.app advertises
