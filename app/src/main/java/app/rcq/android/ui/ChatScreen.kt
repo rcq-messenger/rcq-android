@@ -602,6 +602,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 pin = pin,
                 members = group?.members ?: emptyList(),
                 ownUin = ownUin,
+                groupHost = group?.id?.let { session.groupHost(it) },
                 onOpenPeerInfo = onOpenPeerInfo,
                 onOpenGroup = onOpenGroup,
                 modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -1419,6 +1420,17 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
         else session.previewGroup(groupId)
     }
     val p = preview
+    // Already a member? Resolve the LOCAL group id via a pure reverse lookup
+    // (refByAlias never allocates an alias) so tapping a group you're already
+    // in OPENS it instead of re-asking you to join (founder report).
+    val groups by session.groups.collectAsState()
+    val joinedLocalId = remember(groups, foreignHost, groupId) {
+        if (foreignHost != null) groups.firstOrNull { g ->
+            app.rcq.android.net.VisitedIslandsStore.refByAlias(g.id)
+                ?.let { it.host.equals(foreignHost, ignoreCase = true) && it.remoteId == groupId } == true
+        }?.id
+        else groups.firstOrNull { it.id == groupId }?.id
+    }
     // Minimal RcqGroup so the shared GroupAvatar can render the real avatar
     // (or fall back to the generic glyph for groups without one).
     val avatarGroup = remember(p) {
@@ -1436,7 +1448,11 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
             .width(260.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(c.bubbleOther)
-            .combinedClickable(onClick = { if (p != null || foreignHost != null) showJoin = true }, onLongClick = onLongPress)
+            .combinedClickable(onClick = {
+                val open = joinedLocalId
+                if (open != null) onOpenGroup(open)
+                else if (p != null || foreignHost != null) showJoin = true
+            }, onLongClick = onLongPress)
             .padding(10.dp),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
@@ -1459,11 +1475,15 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
             if (p != null) {
                 Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary, fontSize = 12.sp)
                 Text(
-                    stringResource(if (p.is_closed) R.string.group_invite_closed else R.string.group_invite_tap_join),
-                    color = if (p.is_closed) Color(0xFFE5484D) else c.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    stringResource(
+                        if (joinedLocalId != null) R.string.group_invite_tap_open
+                        else if (p.is_closed) R.string.group_invite_closed
+                        else R.string.group_invite_tap_join,
+                    ),
+                    color = if (p.is_closed && joinedLocalId == null) Color(0xFFE5484D) else c.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 )
             } else if (foreignHost != null) {
-                Text(stringResource(R.string.group_invite_tap_join), color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text(stringResource(if (joinedLocalId != null) R.string.group_invite_tap_open else R.string.group_invite_tap_join), color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             } else {
                 Text(stringResource(R.string.group_invite_link), color = c.textSecondary, fontSize = 12.sp)
             }
@@ -1514,6 +1534,7 @@ internal fun PinnedAnnouncement(
     pin: String,
     members: List<GroupMember>,
     ownUin: Int,
+    groupHost: String? = null,
     onOpenPeerInfo: (Int) -> Unit,
     onOpenGroup: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -1522,7 +1543,10 @@ internal fun PinnedAnnouncement(
 ) {
     val c = RcqTheme.colors
     val annotated = remember(pin, members) { buildPinnedAnnotated(pin, members, c.accent) }
-    val pinGroupIds = remember(pin) { GroupLinkParser.parseAll(pin) }
+    // Inject the viewing group's host into BARE group links (`/g/<id>` with no
+    // @host) so a pinned link to a sibling group on the SAME foreign island
+    // resolves cross-island instead of blank-fetching from our own island.
+    val pinGroupIds = remember(pin, groupHost) { GroupLinkParser.parseAll(pin).map { it.copy(host = it.host ?: groupHost) } }
     val hasPinText = annotated.text.isNotBlank()
     val uriHandler = LocalUriHandler.current
     var showPinSheet by remember(pin) { mutableStateOf(false) }
@@ -1623,6 +1647,15 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
         else session.previewGroup(groupId)
     }
     val p = preview
+    // Same membership check as GroupLinkBubble: open instead of re-join.
+    val groups by session.groups.collectAsState()
+    val joinedLocalId = remember(groups, foreignHost, groupId) {
+        if (foreignHost != null) groups.firstOrNull { g ->
+            app.rcq.android.net.VisitedIslandsStore.refByAlias(g.id)
+                ?.let { it.host.equals(foreignHost, ignoreCase = true) && it.remoteId == groupId } == true
+        }?.id
+        else groups.firstOrNull { it.id == groupId }?.id
+    }
     val avatarGroup = remember(p) {
         p?.let {
             app.rcq.android.model.RcqGroup(
@@ -1638,7 +1671,10 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(c.bgPrimary)
-            .clickable(enabled = p != null || foreignHost != null) { showJoin = true }
+            .clickable(enabled = p != null || foreignHost != null || joinedLocalId != null) {
+                val open = joinedLocalId
+                if (open != null) onOpenGroup(open) else showJoin = true
+            }
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
