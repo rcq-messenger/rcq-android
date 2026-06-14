@@ -6,6 +6,7 @@ import app.rcq.android.net.RcqApi
 import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -81,15 +82,32 @@ class CallController(
     private var outgoingVideoUpgradePending = false
     private var connectedSince = 0L
 
+    // ICE-recovery state. Touched from IO-pool timers + the rtc callbacks, so
+    // the decision points are guarded by recoveryLock.
+    private val recoveryLock = Any()
+    private var disconnectGraceJob: Job? = null
+    private var calleeFailsafeJob: Job? = null
+    private var iceRestarting = false
+    private var iceRestartAttempts = 0
+    // Bumped on every confirmed (re)connect so a restart-timeout that lost the
+    // lock race against onRtcConnected sees a stale epoch and no-ops.
+    private var iceRestartEpoch = 0
+
     init {
         rtc.onLocalIceCandidate = { json -> shipIce(json) }
-        rtc.onFailed = { scope.launch { onRtcFailed() } }
         // Media actually started flowing (ICE connected). Until this fires the
         // UI shows "Connecting…" instead of a running timer — the old code
         // marked the call connected the instant the SDP answer landed, so a
         // call that never completed ICE (dead TURN path, symmetric NAT) showed
         // a ticking timer with silence ("соединяется и тишина").
         rtc.onConnected = { scope.launch { onRtcConnected() } }
+        // ICE recovery: a transient DISCONNECTED gets a grace window to
+        // self-heal; a hard FAILED triggers one or two caller-initiated ICE
+        // restarts (glare-avoided) before the call is declared dead. Previously
+        // any FAILED ended the call instantly — a brief network blip killed a
+        // live call that ICE could have recovered.
+        rtc.onDisconnected = { scope.launch { onIceDisconnected() } }
+        rtc.onFailed = { scope.launch { onIceFailed() } }
     }
 
     // ── public API ──────────────────────────────────────────────────────
@@ -223,6 +241,34 @@ class CallController(
             "call_renegotiate" -> handleRenegotiate(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_answer" -> handleRenegotiateAnswer(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_decline" -> handleRenegotiateDecline(callId)
+            "call_ice_restart" -> handleIceRestart(callId, obj.get("sdp")?.asString ?: "")
+            "call_ice_restart_answer" -> handleIceRestartAnswer(callId, obj.get("sdp")?.asString ?: "")
+        }
+    }
+
+    /** Peer's ICE-restart offer (its connection dropped and it re-gathered);
+     *  answer it in place so media resumes without re-ringing. */
+    private fun handleIceRestart(callId: String, sdp: String) {
+        val s = _state.value as? State.Connected ?: return
+        if (s.info.id != callId || sdp.isEmpty()) return
+        // Don't answer a restart while our own renegotiation (video upgrade) is
+        // mid-handshake — the pc isn't in a stable signaling state, so applying
+        // a remote offer would throw. The caller retries after the upgrade settles.
+        if (outgoingVideoUpgradePending || pendingRenegotiationOffer != null || _incomingVideoUpgrade.value) return
+        scope.launch {
+            runCatching {
+                val answer = rtc.handleIceRestartOffer(sdp)
+                send(signal("call_ice_restart_answer", s.info.peerUin, s.info.id, mapOf("sdp" to answer)))
+            }.onFailure { android.util.Log.e("RCQcall", "handleIceRestart failed: ${it.message}") }
+        }
+    }
+
+    private fun handleIceRestartAnswer(callId: String, sdp: String) {
+        val s = _state.value as? State.Connected ?: return
+        if (s.info.id != callId || sdp.isEmpty()) return
+        scope.launch {
+            runCatching { rtc.handleIceRestartAnswer(sdp) }
+                .onFailure { android.util.Log.e("RCQcall", "handleIceRestartAnswer failed: ${it.message}") }
         }
     }
 
@@ -326,21 +372,135 @@ class CallController(
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
+        resetRecoveryState()
         scope.launch {
             delay(2500)
             if (_state.value is State.Ended) _state.value = State.Idle
         }
     }
 
-    private suspend fun onRtcFailed() {
-        val call = _state.value.info ?: return
-        if (_state.value is State.Connected) finishEnded(call, "peer_disconnected")
+    /** ICE connected → media is flowing. Start the call timer for real (the
+     *  "Connecting…" status flips to the running duration) and clear any
+     *  in-flight recovery — we are healthy again. */
+    private fun onRtcConnected() {
+        cancelRecoveryTimers()
+        // Recovery succeeded (or first connect): clear the in-flight flag, restore
+        // the per-incident restart budget (it's per-drop, not per-call), and bump
+        // the epoch so a racing restart-timeout drops out.
+        synchronized(recoveryLock) { iceRestarting = false; iceRestartAttempts = 0; iceRestartEpoch++ }
+        if (_state.value is State.Connected && connectedSince == 0L) markConnected()
     }
 
-    /** ICE connected → media is flowing. Start the call timer for real (the
-     *  "Connecting…" status flips to the running duration). */
-    private fun onRtcConnected() {
-        if (_state.value is State.Connected && connectedSince == 0L) markConnected()
+    // ── ICE recovery ────────────────────────────────────────────────────────
+    /** Transient DISCONNECTED on an established call: give ICE a short grace to
+     *  re-establish on its own before forcing a restart, so a momentary network
+     *  hiccup (handoff, brief loss) doesn't tear down a working call. */
+    private fun onIceDisconnected() {
+        val call = _state.value.info ?: return
+        if (_state.value !is State.Connected || connectedSince == 0L) return
+        synchronized(recoveryLock) {
+            if (disconnectGraceJob != null) return
+            disconnectGraceJob = scope.launch {
+                delay(ICE_DISCONNECT_GRACE_MS)
+                synchronized(recoveryLock) { disconnectGraceJob = null }
+                if (_state.value.info?.id == call.id && _state.value is State.Connected) {
+                    attemptIceRestartOrEnd(call)
+                }
+            }
+        }
+    }
+
+    /** Hard ICE FAILED. Before media ever flowed this is a setup failure (the
+     *  old immediate-end behaviour). On an established call, try to recover. */
+    private fun onIceFailed() {
+        val call = _state.value.info ?: return
+        if (_state.value !is State.Connected) return
+        if (connectedSince == 0L) { finishEnded(call, "peer_disconnected"); return }
+        cancelDisconnectGrace()
+        attemptIceRestartOrEnd(call)
+    }
+
+    /** Recovery policy for an established call whose ICE dropped. Only the
+     *  original caller re-offers (glare avoidance); the callee waits for that
+     *  re-offer and ends the call if it never recovers. The caller retries up
+     *  to [MAX_ICE_RESTARTS] times, then gives up with "peer_disconnected". */
+    private fun attemptIceRestartOrEnd(call: CallInfo) {
+        // An ICE restart reuses the offer/answer machinery; don't collide with
+        // a video-upgrade renegotiation mid-handshake — just end if one's live.
+        if (outgoingVideoUpgradePending || pendingRenegotiationOffer != null || _incomingVideoUpgrade.value) {
+            finishEnded(call, "peer_disconnected"); return
+        }
+        if (!call.outgoing) { scheduleCalleeFailsafe(call); return }
+        var doRestart = false
+        var doEnd = false
+        synchronized(recoveryLock) {
+            when {
+                iceRestarting -> Unit // a restart is already in flight; let it run
+                iceRestartAttempts >= MAX_ICE_RESTARTS -> doEnd = true
+                else -> { iceRestarting = true; iceRestartAttempts++; doRestart = true }
+            }
+        }
+        if (doEnd) { finishEnded(call, "peer_disconnected"); return }
+        if (!doRestart) return
+        scope.launch {
+            try {
+                val sdp = rtc.restartIce()
+                send(signal("call_ice_restart", call.peerUin, call.id, mapOf("sdp" to sdp)))
+                armIceRestartTimeout(call)
+            } catch (e: Exception) {
+                android.util.Log.e("RCQcall", "ICE restart offer failed: ${e.message}")
+                synchronized(recoveryLock) { iceRestarting = false }
+                finishEnded(call, "peer_disconnected")
+            }
+        }
+    }
+
+    /** If a caller's ICE restart hasn't reconnected within the window, retry it
+     *  (within the attempt budget) or give up. No-op once media reconnects
+     *  (onRtcConnected clears `iceRestarting`). */
+    private fun armIceRestartTimeout(call: CallInfo) {
+        val epoch = synchronized(recoveryLock) { iceRestartEpoch }
+        scope.launch {
+            delay(ICE_RESTART_TIMEOUT_MS)
+            val stuck = synchronized(recoveryLock) {
+                if (iceRestarting && iceRestartEpoch == epoch) { iceRestarting = false; true } else false
+            }
+            if (stuck && _state.value.info?.id == call.id && _state.value is State.Connected) {
+                attemptIceRestartOrEnd(call)
+            }
+        }
+    }
+
+    /** Callee side: the caller owns the restart, so just wait. If the call
+     *  hasn't recovered after a generous window (covers the caller's full
+     *  restart budget), end it rather than sit on dead media forever. */
+    private fun scheduleCalleeFailsafe(call: CallInfo) {
+        synchronized(recoveryLock) {
+            if (calleeFailsafeJob != null) return
+            calleeFailsafeJob = scope.launch {
+                delay(CALLEE_FAILSAFE_MS)
+                synchronized(recoveryLock) { calleeFailsafeJob = null }
+                if (_state.value.info?.id == call.id && _state.value is State.Connected) {
+                    finishEnded(call, "peer_disconnected")
+                }
+            }
+        }
+    }
+
+    private fun cancelDisconnectGrace() {
+        synchronized(recoveryLock) { disconnectGraceJob?.cancel(); disconnectGraceJob = null }
+    }
+
+    private fun cancelRecoveryTimers() {
+        synchronized(recoveryLock) {
+            disconnectGraceJob?.cancel(); disconnectGraceJob = null
+            calleeFailsafeJob?.cancel(); calleeFailsafeJob = null
+        }
+    }
+
+    private fun resetRecoveryState() {
+        cancelRecoveryTimers()
+        synchronized(recoveryLock) { iceRestarting = false; iceRestartAttempts = 0 }
     }
 
     /** Ringing watchdog, both directions. Outgoing: the offer can be silently
@@ -385,6 +545,7 @@ class CallController(
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
+        resetRecoveryState()
         _state.value = State.Idle
     }
 
@@ -408,11 +569,30 @@ class CallController(
         send(signal("call_ice", call.peerUin, call.id, mapOf("candidate" to candidateJSON)))
     }
 
-    private suspend fun refreshTurn() {
-        runCatching {
-            val c = withContext(Dispatchers.IO) { turn() }
-            rtc.setTurn(c.urls, c.username, c.credential)
-        }.onFailure { rtc.setTurn(emptyList(), "", "") }
+    /** Fetch fresh TURN credentials, retrying a transient fetch failure a few
+     *  times before giving up. A single blip used to silently leave the call
+     *  STUN-only, which dooms a cross-NAT (symmetric) call to the connect
+     *  timeout; we retry it away. If TURN is genuinely unreachable we proceed
+     *  STUN-only (better than refusing the call) but log loudly so it's
+     *  diagnosable. @return true if real TURN servers were configured. */
+    private suspend fun refreshTurn(): Boolean {
+        repeat(TURN_FETCH_ATTEMPTS) { attempt ->
+            val creds = withContext(Dispatchers.IO) { runCatching { turn() } }.getOrNull()
+            if (creds != null) {
+                rtc.setTurn(creds.urls, creds.username, creds.credential)
+                if (creds.urls.isEmpty()) {
+                    android.util.Log.w("RCQcall", "TURN endpoint returned no servers — STUN-only call")
+                }
+                return creds.urls.isNotEmpty()
+            }
+            if (attempt < TURN_FETCH_ATTEMPTS - 1) delay(TURN_RETRY_DELAY_MS)
+        }
+        rtc.setTurn(emptyList(), "", "")
+        android.util.Log.e(
+            "RCQcall",
+            "TURN fetch failed after $TURN_FETCH_ATTEMPTS attempts — STUN-only (cross-NAT may fail)",
+        )
+        return false
     }
 
     private fun signal(type: String, toUin: Int, callId: String, extras: Map<String, String>): JsonObject =
@@ -448,4 +628,17 @@ class CallController(
     private fun formatDuration(secs: Long): String = "%d:%02d".format(secs / 60, secs % 60)
 
     private fun Media.toRtc() = if (this == Media.VIDEO) WebRtcClient.Media.VIDEO else WebRtcClient.Media.AUDIO
+
+    companion object {
+        private const val TURN_FETCH_ATTEMPTS = 3
+        private const val TURN_RETRY_DELAY_MS = 800L
+        // ICE recovery tuning. A transient drop self-heals within the grace
+        // window most of the time; otherwise the caller re-offers (up to MAX),
+        // each attempt given the restart timeout to reconnect. The callee's
+        // failsafe spans the caller's whole budget so it doesn't end early.
+        private const val ICE_DISCONNECT_GRACE_MS = 4_000L
+        private const val ICE_RESTART_TIMEOUT_MS = 12_000L
+        private const val MAX_ICE_RESTARTS = 2
+        private const val CALLEE_FAILSAFE_MS = 32_000L
+    }
 }

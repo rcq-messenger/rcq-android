@@ -56,7 +56,9 @@ class WebRtcClient(private val appContext: Context) {
     var onLocalIceCandidate: ((String) -> Unit)? = null
     /** ICE reached a connected/completed state (media is flowing). */
     var onConnected: (() -> Unit)? = null
-    /** ICE failed/disconnected (the call dropped). */
+    /** ICE dropped to DISCONNECTED — transient; may self-heal or escalate. */
+    var onDisconnected: (() -> Unit)? = null
+    /** ICE FAILED — connectivity checks exhausted; needs a restart/teardown. */
     var onFailed: (() -> Unit)? = null
 
     private var pc: PeerConnection? = null
@@ -105,6 +107,33 @@ class WebRtcClient(private val appContext: Context) {
     }
 
     suspend fun handleAnswer(remoteSdp: String) {
+        pc?.setRemote(SessionDescription(SessionDescription.Type.ANSWER, remoteSdp))
+    }
+
+    // ── ICE restart (recover a dropped connection without losing tracks) ────
+    /** Caller side: re-offer with fresh ICE credentials (new ufrag/pwd) so a
+     *  stalled/failed connection re-gathers candidates. Tracks are untouched —
+     *  this is purely a transport recovery, not a renegotiation of media. */
+    suspend fun restartIce(): String {
+        val pc = pc ?: error("no active peer connection")
+        val media = if (_localVideo.value != null) Media.VIDEO else Media.AUDIO
+        val offer = pc.createSdp(offer = true, media, iceRestart = true)
+        pc.setLocal(offer)
+        return offer.description
+    }
+
+    /** Callee side: answer the caller's ICE-restart offer (no track changes;
+     *  the new remote ufrag triggers our side's ICE restart automatically). */
+    suspend fun handleIceRestartOffer(remoteSdp: String): String {
+        val pc = pc ?: error("no active peer connection")
+        val media = if (_localVideo.value != null) Media.VIDEO else Media.AUDIO
+        pc.setRemote(SessionDescription(SessionDescription.Type.OFFER, remoteSdp))
+        val answer = pc.createSdp(offer = false, media)
+        pc.setLocal(answer)
+        return answer.description
+    }
+
+    suspend fun handleIceRestartAnswer(remoteSdp: String) {
         pc?.setRemote(SessionDescription(SessionDescription.Type.ANSWER, remoteSdp))
     }
 
@@ -273,7 +302,11 @@ class WebRtcClient(private val appContext: Context) {
         mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (media == Media.VIDEO) "true" else "false"))
     }
 
-    private suspend fun PeerConnection.createSdp(offer: Boolean, media: Media): SessionDescription =
+    private suspend fun PeerConnection.createSdp(
+        offer: Boolean,
+        media: Media,
+        iceRestart: Boolean = false,
+    ): SessionDescription =
         suspendCancellableCoroutine { cont ->
             val obs = object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription) { if (cont.isActive) cont.resume(sdp) }
@@ -281,7 +314,10 @@ class WebRtcClient(private val appContext: Context) {
                 override fun onSetSuccess() {}
                 override fun onSetFailure(e: String?) {}
             }
-            if (offer) createOffer(obs, mediaConstraints(media)) else createAnswer(obs, mediaConstraints(media))
+            val constraints = mediaConstraints(media).apply {
+                if (iceRestart) mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+            }
+            if (offer) createOffer(obs, constraints) else createAnswer(obs, constraints)
         }
 
     private suspend fun PeerConnection.setLocal(sdp: SessionDescription): Unit =
@@ -319,8 +355,10 @@ class WebRtcClient(private val appContext: Context) {
             when (state) {
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> onConnected?.invoke()
-                PeerConnection.IceConnectionState.FAILED,
-                PeerConnection.IceConnectionState.CLOSED -> onFailed?.invoke()
+                PeerConnection.IceConnectionState.DISCONNECTED -> onDisconnected?.invoke()
+                PeerConnection.IceConnectionState.FAILED -> onFailed?.invoke()
+                // CLOSED arrives only when we tear the pc down ourselves; the
+                // call is already ending, so there is nothing to recover.
                 else -> Unit
             }
         }

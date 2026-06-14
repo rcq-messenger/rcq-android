@@ -3348,7 +3348,8 @@ class Session(context: Context) {
                 }
             }
             "call_offer", "call_answer", "call_ice", "call_end",
-            "call_renegotiate", "call_renegotiate_answer", "call_renegotiate_decline" ->
+            "call_renegotiate", "call_renegotiate_answer", "call_renegotiate_decline",
+            "call_ice_restart", "call_ice_restart_answer" ->
                 calls.onSignal(type, obj)
             "room_roster", "room_member_entered", "room_member_left", "room_offer",
             "room_answer", "room_ice", "room_speaking", "room_enter_rejected", "room_deleted" ->
