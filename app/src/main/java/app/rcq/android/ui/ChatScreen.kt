@@ -1876,6 +1876,18 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
 @Composable
 private fun DateDividerRow(label: String) {
     val c = RcqTheme.colors
+    val onWallpaper = LocalStores.chatBackground.collectAsState().value.isNotEmpty()
+    if (onWallpaper) {
+        // The flanking lines + gray label wash out on a gradient wallpaper, so
+        // show a centered Telegram-style contrast pill instead.
+        Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(
+                label, color = c.textPrimary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 3.dp),
+            )
+        }
+        return
+    }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.divider))
         Text(label, color = c.textSecondary, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(horizontal = 8.dp))
@@ -2034,6 +2046,20 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
     val maxW = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
     // A text body that is just a group-invite URL renders as a join card.
     val groupLinkId = if (m.kind == "text") GroupLinkParser.parse(m.body) else null
+    // Telegram-style: a plain text bubble carries the time/ticks INSIDE itself
+    // (readable on the bubble bg, no wallpaper washout, no separate row below).
+    // Media/voice/file/poll/location/relay keep the row BELOW the bubble with the
+    // wallpaper contrast pill (those bubbles have no good inline slot).
+    val isPlainText = groupLinkId == null &&
+        m.kind !in listOf("photo", "poll", "file", "video", "voice", "location", "relay")
+    val meta: @Composable () -> Unit = {
+        Text(formatTime(m.sentAt), color = c.textSecondary, fontSize = 10.sp)
+        if (m.edited) Text(stringResource(R.string.chat_edited), color = c.textSecondary, fontSize = 10.sp)
+        if (m.fromMe) {
+            if (failed) Text(stringResource(R.string.chat_failed_retry), color = Color(0xFFE5484D), fontSize = 10.sp, modifier = Modifier.clickable(onClick = onRetry))
+            else DeliveryTicks(m.state)
+        }
+    }
     Column(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
@@ -2121,6 +2147,12 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                         modifier = Modifier.padding(top = 2.dp).clickable { bodyExpanded = true },
                     )
                 }
+                // Telegram-style: time/ticks inside the bubble, bottom-right.
+                Row(
+                    modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) { meta() }
             }
         }
         if (m.reactions.isNotEmpty()) {
@@ -2145,19 +2177,17 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 }
             }
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier
-                .padding(horizontal = 4.dp, vertical = 2.dp)
-                .then(if (onWallpaper) Modifier.clip(RoundedCornerShape(8.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 6.dp, vertical = 1.dp) else Modifier),
-        ) {
-            Text(formatTime(m.sentAt), color = c.textSecondary, fontSize = 10.sp)
-            if (m.edited) Text(stringResource(R.string.chat_edited), color = c.textSecondary, fontSize = 10.sp)
-            if (m.fromMe) {
-                if (failed) Text(stringResource(R.string.chat_failed_retry), color = Color(0xFFE5484D), fontSize = 10.sp, modifier = Modifier.clickable(onClick = onRetry))
-                else DeliveryTicks(m.state)
-            }
+        // Non-text bubbles (media/voice/file/poll/location/relay) keep the meta
+        // BELOW the bubble, with the wallpaper contrast pill. Plain text bubbles
+        // render it inline (above), so skip the below-row for them.
+        if (!isPlainText) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                    .then(if (onWallpaper) Modifier.clip(RoundedCornerShape(8.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 6.dp, vertical = 1.dp) else Modifier),
+            ) { meta() }
         }
     }
 }
