@@ -790,6 +790,7 @@
     <string name="group_invite_title">Приглашение в группу</string>
     <string name="group_invite_join">Вступить</string>
     <string name="group_invite_none">У вас нет групп, чтобы поделиться.</string>
+    <string name="group_join_confirm">Войти в эту группу?</string>
     <string name="group_invite_closed_hint">Группа только по приглашению. Попросите участника добавить вас.</string>
     <string name="group_invite_join_failed">Не удалось войти. Остров недоступен или группа только по приглашению.</string>
     <string name="chat_recording">Запись  %1$s</string>

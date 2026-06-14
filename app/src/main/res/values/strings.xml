@@ -791,6 +791,7 @@
     <string name="group_invite_title">Group invite</string>
     <string name="group_invite_join">Join</string>
     <string name="group_invite_none">You have no groups to share.</string>
+    <string name="group_join_confirm">Join this group?</string>
     <string name="group_invite_closed_hint">Invite-only group. Ask a member to add you.</string>
     <string name="group_invite_join_failed">Couldn\'t join. The island may be unreachable or the group is invite-only.</string>
     <string name="chat_recording">Recording  %1$s</string>

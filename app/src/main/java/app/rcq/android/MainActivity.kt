@@ -115,6 +115,21 @@ object WebLinkRequest {
     }
 }
 
+/** A pending group-join from an opened invite link — `rcq://group/<id>@<host>`
+ *  or `https://rcq.app/g/<id>@<host>`. Reuses the in-chat GroupLinkParser. RcqApp
+ *  confirms, then joins: foreign host → joinForeignGroup (guest-registers there),
+ *  same island → joinGroup; then opens the group chat. The privacy-safe path —
+ *  the user holds the link (no discovery). */
+object GroupJoinLink {
+    data class Req(val id: Int, val host: String?)
+    val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+
+    fun fromUri(uri: android.net.Uri?): Req? {
+        val ref = app.rcq.android.ui.GroupLinkParser.parse(uri?.toString() ?: return null) ?: return null
+        return Req(ref.id, ref.host)
+    }
+}
+
 // FragmentActivity (not the bare ComponentActivity) so BiometricPrompt can host
 // its dialog for the panic-PIN biometric unlock. FragmentActivity is itself a
 // ComponentActivity, so setContent / enableEdgeToEdge still apply.
@@ -135,6 +150,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         ServerJoinLink.fromUri(intent.data)?.let { ServerJoinLink.pending.value = it }
         WebLinkRequest.fromUri(intent.data)?.let { WebLinkRequest.pending.value = it }
         ContactAddLink.fromUri(intent.data)?.let { ContactAddLink.pending.value = it }
+        GroupJoinLink.fromUri(intent.data)?.let { GroupJoinLink.pending.value = it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -151,6 +167,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         ServerJoinLink.fromUri(intent?.data)?.let { ServerJoinLink.pending.value = it }
         WebLinkRequest.fromUri(intent?.data)?.let { WebLinkRequest.pending.value = it }
         ContactAddLink.fromUri(intent?.data)?.let { ContactAddLink.pending.value = it }
+        GroupJoinLink.fromUri(intent?.data)?.let { GroupJoinLink.pending.value = it }
         enableEdgeToEdge()
         app.rcq.android.data.LanguageManager.init(applicationContext)
         LocalStores.init(applicationContext)
@@ -616,6 +633,28 @@ private fun RcqApp(session: Session) {
                 }
             }
         }
+
+        // Group-invite deep link: confirm, then join (foreign host guest-
+        // registers + joins; same island joins directly) and open the chat.
+        val groupReq by GroupJoinLink.pending.collectAsState()
+        if (s is UiState.Registered && !locked) {
+            groupReq?.let { req ->
+                val foreignHost = req.host?.takeIf { it != session.currentServer }
+                GroupJoinDialog(
+                    host = foreignHost,
+                    onConfirm = {
+                        GroupJoinLink.pending.value = null
+                        scope.launch {
+                            val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, req.id)
+                                         else session.joinGroup(req.id)?.let { req.id }
+                            if (opened != null) chatTarget = ChatTarget.Group(opened)
+                            else Toast.makeText(context, context.getString(R.string.group_invite_join_failed), Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    onDismiss = { GroupJoinLink.pending.value = null },
+                )
+            }
+        }
     }
 }
 
@@ -664,6 +703,26 @@ private fun ContactAddDialog2(address: String, onConfirm: () -> Unit, onDismiss:
         title = { Text(stringResource(R.string.addlink_title), color = c.textPrimary) },
         text = { Text(stringResource(R.string.addlink_body, address), color = c.textSecondary, fontSize = 14.sp) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.common_add), color = c.accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+    )
+}
+
+/** Confirm sheet for a group-invite deep link. [host] non-null = a group on
+ *  another island (joining guest-registers your key there). */
+@Composable
+private fun GroupJoinDialog(host: String?, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        title = { Text(stringResource(if (host != null) R.string.group_invite_island else R.string.group_invite_title), color = c.textPrimary) },
+        text = {
+            Text(
+                if (host != null) stringResource(R.string.group_invite_island_hint, host) else stringResource(R.string.group_join_confirm),
+                color = c.textSecondary, fontSize = 14.sp,
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.group_invite_join), color = c.accent) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
     )
 }

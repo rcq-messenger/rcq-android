@@ -86,6 +86,21 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/u/" />
             </intent-filter>
+            <!-- Group-invite deep link: rcq://group/<id>@<host> + the https form
+                 https://rcq.app/g/<id>@<host>. Opening a shared link opens the
+                 app into the group-join confirm (foreign host guest-registers). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="rcq" android:host="group" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/g/" />
+            </intent-filter>
         </activity>
 
         <provider
