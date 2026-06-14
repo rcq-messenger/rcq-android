@@ -1697,13 +1697,16 @@ class Session(context: Context) {
         alias
     }.getOrNull()
 
-    /** §5c invite-card preview for a group on another island. Privacy rule:
-     *  only islands we already VISITED may be queried — an unvisited island is
-     *  never touched before the user taps Join (returns null → minimal card). */
+    /** §5c invite-card preview for a group on another island. The invite LINK is
+     *  the capability, so we read the foreign island's PUBLIC card (name/avatar/
+     *  member count) even when the island isn't visited yet — the server's
+     *  /groups/{id}/preview is optional-auth. Sends the guest token if we have
+     *  one (visited), otherwise unauthenticated; rides the proxy when onion is on.
+     *  So a received cross-island invite shows the real group, not a blank card. */
     suspend fun previewForeignGroup(host: String, remoteId: Int): RcqApi.GroupPreviewOut? {
-        val v = VisitedIslandsStore.get(host) ?: return null
+        val v = VisitedIslandsStore.get(host)
         return runCatching {
-            RcqApi("https://${v.host}").apply { setToken(v.jwt) }.previewGroup(remoteId)
+            RcqApi("https://$host").apply { v?.let { setToken(it.jwt) } }.previewGroup(remoteId)
         }.getOrNull()
     }
 
