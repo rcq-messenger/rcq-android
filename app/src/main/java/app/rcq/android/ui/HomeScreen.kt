@@ -1019,7 +1019,7 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
             Text(
                 pluralStringResource(R.plurals.members, group.members.size, group.members.size) +
                     (group.host?.let { " · $it" } ?: ""),
-                color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                color = c.textSecondary, fontSize = 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
