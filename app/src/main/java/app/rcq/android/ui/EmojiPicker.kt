@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -101,11 +100,13 @@ internal fun EmojiPickerDialog(onDismiss: () -> Unit) {
                 items(Emoticons.fullSet.size) { i ->
                     val asset = Emoticons.fullSet[i]
                     val selected = asset in activeSet
+                    // Selection is shown by the green background tint alone — no
+                    // check badge (founder: the tint is enough to read "chosen").
                     Box(
                         Modifier
                             .size(46.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (selected) c.accent.copy(alpha = 0.22f) else Color.Transparent)
+                            .background(if (selected) c.accent.copy(alpha = 0.30f) else Color.Transparent)
                             .clickable {
                                 // Toggle membership in the ACTIVE set, respecting
                                 // the cap (at the cap, an add is a no-op). Writes
@@ -130,12 +131,6 @@ internal fun EmojiPickerDialog(onDismiss: () -> Unit) {
                         contentAlignment = Alignment.Center,
                     ) {
                         AnimatedEmoticon(asset, Modifier.size(30.dp))
-                        if (selected) {
-                            Box(
-                                Modifier.align(Alignment.TopEnd).size(15.dp).clip(CircleShape).background(c.accent),
-                                contentAlignment = Alignment.Center,
-                            ) { Text("✓", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-                        }
                     }
                 }
             }
