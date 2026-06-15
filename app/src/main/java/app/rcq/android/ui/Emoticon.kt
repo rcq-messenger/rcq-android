@@ -9,7 +9,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,9 +23,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -36,9 +41,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -54,6 +61,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import app.rcq.android.R
+import app.rcq.android.data.LocalStores
 
 /**
  * The classic KOLOBOK emoticon set, bundled in `assets/emoticons/<name>.gif`
@@ -64,14 +73,22 @@ import kotlinx.coroutines.withContext
  * iOS couldn't render and iOS sent an emoticon name Android showed as text.
  */
 internal object Emoticons {
-    /** The six offered as message reactions (like/love/haha/wow/sad/angry).
-     *  Asset names match iOS exactly so a reaction renders identically. */
-    val reactions = listOf(
-        "good", "give_heart", "biggrin", "rofl", "shok", "cray",
-        "mad", "diablo", "cool", "kiss", "give_rose", "man_in_love",
+    /** Default reactions when the user hasn't customised their set (mirrors the
+     *  historical fixed list). The user can now pick up to 6 of their own in the
+     *  emoji-customise sheet; see LocalStores.reactionEmojis. */
+    val defaultReactions = listOf("good", "give_heart", "biggrin", "shok", "cray", "mad")
+
+    /** Extra koloboks (from the full Kolobok library) the user can pick into
+     *  their panel / reactions, on top of the original set below. Asset names
+     *  are the `:code:` wire form and MUST be bundled identically on iOS+Android. */
+    val extraKoloboks = listOf(
+        "Cherna_01", "FinouCat_02", "Koshechka_06", "Laie_74", "Mauridia_02",
+        "Rulezzz_03", "WhiteVoid_1", "d_clock", "kirtsun_05", "l_girl_kiss",
+        "l_lovers", "l_teddy", "snoozer_likelinux_man", "viannen_03", "viannen_06",
+        "viannen_09", "viannen_35", "viannen_48", "viannen_76", "viannen_88",
     )
 
-    /** The composer palette: (asset, display name), Kolobok ICQ "set 14".
+    /** The original composer palette: (asset, display name), Kolobok ICQ "set 14".
      *  Codes are the `:asset:` form; must match the iOS `Emoticons.entries`. */
     val palette: List<Pair<String, String>> = listOf(
         "smile" to "Happy", "biggrin" to "Laughing", "lol" to "LOL", "rofl" to "ROFL",
@@ -86,8 +103,13 @@ internal object Emoticons {
         "diablo" to "Devil", "bomb" to "Bomb", "girl_angel" to "Angel", "hang1" to "Hang",
     )
 
-    /** Asset names that have a `:code:` (for tokenizing message bodies). */
-    private val codes: Set<String> = palette.map { it.first }.toSet()
+    /** The full pickable set the customise sheet offers: the original palette
+     *  plus the extra koloboks. Order = palette first, then extras. */
+    val fullSet: List<String> = palette.map { it.first } + extraKoloboks
+
+    /** Asset names that have a `:code:` (for tokenizing message bodies) — the
+     *  WHOLE bundled set, so a `:viannen_03:` from a peer renders too. */
+    private val codes: Set<String> = fullSet.toSet()
 
     private val cache = HashMap<String, ByteArray?>()
 
@@ -384,37 +406,78 @@ private fun AnnotatedString.Builder.appendWithMentions(
     if (cursor < text.length) append(text.substring(cursor))
 }
 
-/** The composer smiley panel: a scrollable grid of the palette emoticons, each
- *  ANIMATED (iOS parity) so you see exactly what the recipient gets before
- *  sending. Tapping one calls [onPick] with its `:asset:` code to splice into
- *  the draft.
+/** The composer smiley panel — now showing the user's OWN chosen emoticons
+ *  ([LocalStores.panelEmojis]) rather than the whole palette. It starts EMPTY
+ *  with a centered "Choose" CTA that opens [EmojiPickerDialog] (where the user
+ *  also picks their quick reactions); once a set is chosen the grid shows those
+ *  assets plus a small "Edit" affordance to reopen the picker. Tapping an
+ *  emoticon calls [onPick] with its `:asset:` code to splice into the draft.
  *
- *  The whole grid animates SAFELY via [PanelEmoticon]/[decodeGifFrames]: every
- *  asset's frames are decoded ONCE into a shared, process-wide cache and the
- *  cells just cycle the pre-decoded bitmaps — no per-cell decoder, no per-frame
+ *  Cells ANIMATE SAFELY via [AnimatedEmoticon]/[decodeGifFrames]: every asset's
+ *  frames are decoded ONCE into a shared, process-wide cache and the cells just
+ *  cycle the pre-decoded bitmaps — no per-cell decoder, no per-frame
  *  allocation. This is the crash-safe replacement for the old per-cell
- *  [SafeAnimatedGif] approach, which spun up ~40 live decoders churning a fresh
- *  bitmap every frame (rofl.gif is 136) and OOM-crashed low-RAM devices (the
- *  "crashes when using smileys" report on Redmi Note 7 / Android 10). */
+ *  [SafeAnimatedGif] approach, which spun up live decoders churning a fresh
+ *  bitmap every frame and OOM-crashed low-RAM devices (the "crashes when using
+ *  smileys" report on Redmi Note 7 / Android 10). */
 @Composable
 internal fun EmoticonPanel(onPick: (String) -> Unit) {
     val c = RcqTheme.colors
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 46.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-            .background(c.bgSecondary)
-            .padding(6.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        items(Emoticons.palette.size) { i ->
-            val asset = Emoticons.palette[i].first
-            Box(
-                Modifier.size(46.dp).clip(RoundedCornerShape(8.dp)).clickable { onPick(":$asset:") },
-                contentAlignment = Alignment.Center,
-            ) { AnimatedEmoticon(asset, Modifier.size(30.dp)) }
+    val panel by LocalStores.panelEmojis.collectAsState()
+    var showPicker by remember { mutableStateOf(false) }
+    if (showPicker) EmojiPickerDialog(onDismiss = { showPicker = false })
+
+    if (panel.isEmpty()) {
+        // Empty by default: a centered CTA inviting the user to choose their own
+        // panel set (and, in the same window, their quick reactions).
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(c.bgSecondary)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                stringResource(R.string.emoji_choose_cta),
+                color = c.textSecondary,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = { showPicker = true }) {
+                Text(stringResource(R.string.emoji_choose_btn))
+            }
+        }
+        return
+    }
+
+    Column(Modifier.fillMaxWidth().background(c.bgSecondary)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = { showPicker = true }) {
+                Text(stringResource(R.string.emoji_edit), color = c.accent, fontSize = 13.sp)
+            }
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 46.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(168.dp)
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            items(panel.size) { i ->
+                val asset = panel[i]
+                Box(
+                    Modifier.size(46.dp).clip(RoundedCornerShape(8.dp)).clickable { onPick(":$asset:") },
+                    contentAlignment = Alignment.Center,
+                ) { AnimatedEmoticon(asset, Modifier.size(30.dp)) }
+            }
         }
     }
 }

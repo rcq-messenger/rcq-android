@@ -899,4 +899,13 @@
     <string name="chat_menu_all_media">All media</string>
     <string name="chat_all_media_title">Media</string>
     <string name="chat_all_media_empty">No photos or videos yet</string>
+    <!-- Emoji customise (composer panel + quick reactions) -->
+    <string name="emoji_choose_cta">Choose the emoticons for your panel</string>
+    <string name="emoji_choose_btn">Choose</string>
+    <string name="emoji_edit">Edit</string>
+    <string name="emoji_picker_title">Your emoticons</string>
+    <string name="emoji_tab_panel">Panel</string>
+    <string name="emoji_tab_reactions">Reactions</string>
+    <string name="emoji_pick_panel_hint">Tap to add emoticons to your composer panel (up to 40).</string>
+    <string name="emoji_pick_reactions_hint">Tap to choose your quick reactions (up to 6).</string>
 </resources>

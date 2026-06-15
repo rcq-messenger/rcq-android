@@ -157,6 +157,27 @@ object LocalStores {
     private val _secureThreads = MutableStateFlow<Set<String>>(emptySet())
     val secureThreads: StateFlow<Set<String>> = _secureThreads.asStateFlow()
 
+    /** Historical fixed reaction set — the default until the user customises
+     *  their own. Asset names match iOS exactly so a reaction renders the same
+     *  GIF on both clients. Defined inline (not imported from the `ui`
+     *  Emoticons) to keep this `data` store free of UI deps. MUST stay declared
+     *  before [_reactionEmojis] so it's initialised first. */
+    private val DEFAULT_REACTION_EMOJIS = listOf("good", "give_heart", "biggrin", "shok", "cray", "mad")
+
+    /** The user's chosen composer-panel emoticons (asset names, in pick order).
+     *  EMPTY by default → the composer panel shows a "Choose" CTA until the user
+     *  picks their own set. Global (one set across accounts), like the
+     *  wallpapers. The `:asset:` codes are the wire form and render anywhere the
+     *  asset is bundled. */
+    private val _panelEmojis = MutableStateFlow<List<String>>(emptyList())
+    val panelEmojis: StateFlow<List<String>> = _panelEmojis.asStateFlow()
+
+    /** The user's chosen quick reactions (asset names, ≤6) offered on the
+     *  long-press reaction row. Defaults to [DEFAULT_REACTION_EMOJIS] until
+     *  customised. */
+    private val _reactionEmojis = MutableStateFlow(DEFAULT_REACTION_EMOJIS)
+    val reactionEmojis: StateFlow<List<String>> = _reactionEmojis.asStateFlow()
+
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = context.applicationContext.getSharedPreferences("rcq_local", Context.MODE_PRIVATE)
@@ -172,6 +193,13 @@ object LocalStores {
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
         _sectionFlags.value = prefs.getStringSet(K_SECTION_FLAGS, emptySet())!!.toSet()
+        // Stored as comma-joined asset names (asset names never contain commas).
+        // Panel: absent/"" → empty (the CTA shows). Reactions: absent → the
+        // default six; "" → the user deliberately cleared them all.
+        _panelEmojis.value = prefs.getString(K_PANEL_EMOJI, "")!!.split(",").filter { it.isNotBlank() }
+        _reactionEmojis.value = prefs.getString(K_REACTION_EMOJI, null)
+            ?.split(",")?.filter { it.isNotBlank() }
+            ?: DEFAULT_REACTION_EMOJIS
     }
 
     /** Point the per-account flows at [accountId]'s slots and reload them.
@@ -318,6 +346,23 @@ object LocalStores {
     fun saveHomeBackgroundImage(context: Context, bytes: ByteArray) {
         runCatching { homeBgFile(context).writeBytes(bytes) }
         setHomeBackground("custom")
+    }
+
+    // ── emoji customisation (global) ─────────────────────────────────────
+    /** Set the composer-panel emoticon set (asset names, pick order; capped at
+     *  40, de-duplicated). Persisted as a comma-joined string. */
+    fun setPanelEmojis(list: List<String>) {
+        val capped = list.distinct().take(40)
+        _panelEmojis.value = capped
+        if (::prefs.isInitialized) prefs.edit().putString(K_PANEL_EMOJI, capped.joinToString(",")).apply()
+    }
+
+    /** Set the quick-reaction set (asset names, pick order; capped at 6,
+     *  de-duplicated). Persisted as a comma-joined string. */
+    fun setReactionEmojis(list: List<String>) {
+        val capped = list.distinct().take(6)
+        _reactionEmojis.value = capped
+        if (::prefs.isInitialized) prefs.edit().putString(K_REACTION_EMOJI, capped.joinToString(",")).apply()
     }
 
     // ── sound toggles ────────────────────────────────────────────────
@@ -521,6 +566,8 @@ object LocalStores {
     private const val K_THEME = "theme_mode"
     private const val K_CHAT_BG = "chat_background"
     private const val K_HOME_BG = "home_background"
+    private const val K_PANEL_EMOJI = "panel_emojis"
+    private const val K_REACTION_EMOJI = "reaction_emojis"
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"

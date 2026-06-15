@@ -896,4 +896,13 @@
     <string name="chat_menu_all_media">Все медиа</string>
     <string name="chat_all_media_title">Медиа</string>
     <string name="chat_all_media_empty">Пока нет фото и видео</string>
+    <!-- Emoji customise (composer panel + quick reactions) -->
+    <string name="emoji_choose_cta">Выберите смайлики для панели</string>
+    <string name="emoji_choose_btn">Выбрать</string>
+    <string name="emoji_edit">Изменить</string>
+    <string name="emoji_picker_title">Ваши смайлики</string>
+    <string name="emoji_tab_panel">Панель</string>
+    <string name="emoji_tab_reactions">Реакции</string>
+    <string name="emoji_pick_panel_hint">Нажмите, чтобы добавить смайлики в панель ввода (до 40).</string>
+    <string name="emoji_pick_reactions_hint">Нажмите, чтобы выбрать быстрые реакции (до 6).</string>
 </resources>

@@ -351,12 +351,15 @@ private fun RadioBubble(m: RadioMessage, onLongPress: () -> Unit) {
 @Composable
 private fun ReactionPickerDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
     val c = RcqTheme.colors
+    // The user's chosen quick reactions (≤6); defaults to the historical six
+    // until customised in the emoji picker.
+    val reactionSet by app.rcq.android.data.LocalStores.reactionEmojis.collectAsState()
     Dialog(onDismissRequest = onDismiss) {
         Row(
             Modifier.clip(RoundedCornerShape(28.dp)).background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            app.rcq.android.ui.Emoticons.reactions.forEach { asset ->
+            reactionSet.forEach { asset ->
                 EmoticonGif(asset, modifier = Modifier.size(34.dp).clickable { onPick(asset) }, animate = false)
             }
         }

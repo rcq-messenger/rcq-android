@@ -324,6 +324,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val secureThreads by app.rcq.android.data.LocalStores.secureThreads.collectAsState()
     val chatSecure = !isGroup && !isSelf && peer != null &&
         app.rcq.android.data.LocalStores.peerThread(peer) in secureThreads
+    // The user's chosen quick reactions (≤6); defaults to the historical six
+    // until customised in the emoji picker. Drives the long-press reaction row.
+    val reactionSet by LocalStores.reactionEmojis.collectAsState()
 
     val youLabel = stringResource(R.string.chat_you)
     fun authorName(m: ChatMessage): String = when {
@@ -949,7 +952,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
                     ) {
-                        Emoticons.reactions.forEach { asset ->
+                        reactionSet.forEach { asset ->
                             Box(
                                 modifier = Modifier.clip(CircleShape).clickable {
                                     scope.launch { runCatching { session.sendReaction(m, asset) } }
