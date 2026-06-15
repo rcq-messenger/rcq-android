@@ -498,11 +498,18 @@ object LocalStores {
         prefs.edit().putStringSet(pk(key), flow.value.toSet()).apply()
     }
 
-    /** Remove [thread] from [flow] (copied-Set + persist), no-op if absent. */
+    /** Remove [thread] from [flow] (copied-Set + persist), no-op if absent.
+     *  Persisted with a SYNCHRONOUS commit() (not apply): clearing the @-mention
+     *  / reaction inbox happens once, on chat open, so an async apply() that
+     *  hadn't flushed when the app was killed right after reading left the
+     *  indicator to resurface on next launch (report: "mention reappears after
+     *  relaunch"). The unread counter never showed this because it's re-cleared
+     *  on every message render; these inboxes get a single clear, so it must be
+     *  durable. The set is tiny, so the main-thread write is negligible. */
     private fun removeFrom(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
         if (acct == null || thread !in flow.value) return
         flow.value = flow.value - thread
-        prefs.edit().putStringSet(pk(key), flow.value.toSet()).apply()
+        prefs.edit().putStringSet(pk(key), flow.value.toSet()).commit()
     }
 
     private fun toggle(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
