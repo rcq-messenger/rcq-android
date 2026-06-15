@@ -46,6 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.rcq.android.security.PanicPinService
@@ -292,6 +293,24 @@ class Session(context: Context) {
      *  reverts the UI on failure). */
     suspend fun setContactRequestsPush(on: Boolean): Boolean =
         runCatching { api.setPushPreferences(RcqApi.PushPrefsBody(contact_requests = on)) }.isSuccess
+
+    /** Push the local per-account mute set up to the server so the push fan-out
+     *  (is_group_muted / should_push_for) SKIPS the APNs/UnifiedPush wake for a
+     *  muted thread. Without this a muted group still woke the device — the mute
+     *  was client-only and the server (which gates on muted_group_ids) never
+     *  knew. Observed off [LocalStores.muted] in [start], so it both reconciles
+     *  existing mutes once on launch and re-syncs on every mute/unmute. */
+    private suspend fun syncPushMutes() {
+        if (!LocalStores.isAccountBound()) return
+        runCatching {
+            api.setPushPreferences(
+                RcqApi.PushPrefsBody(
+                    muted_group_ids = LocalStores.mutedGroupIds(),
+                    muted_uins = LocalStores.mutedPeerUins(),
+                ),
+            )
+        }
+    }
 
     val nickname: String get() = store.nickname ?: "—"
 
@@ -677,6 +696,11 @@ class Session(context: Context) {
         loadCachedRoster()
         refreshBackupHomes()
         refreshCiRequests()
+        // Keep the server's push-suppression list in lock-step with the local
+        // mute set: the StateFlow replays its current value on subscribe (one
+        // reconcile after login — fixes mutes the server never learned about)
+        // and re-fires on every mute/unmute. Single collector per Session.
+        scope.launch { LocalStores.muted.collect { syncPushMutes() } }
         // Multihoming v1: poll the backup-island mailboxes. Deliberately
         // independent of the primary socket — when the primary island is down,
         // this loop IS the delivery path.

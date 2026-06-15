@@ -285,6 +285,20 @@ object LocalStores {
             .apply()
     }
 
+    /** Whether an account is bound (post-login). Guards the push-mute sync from
+     *  PUTting an empty set before the muted threads have loaded. */
+    fun isAccountBound(): Boolean = acct != null
+
+    /** Group ids the user has FULLY muted (NotifyMode.NONE), for the server
+     *  push-suppression sync (`muted_group_ids`). The server's `is_group_muted`
+     *  gate reads this so a muted group never wakes the device. */
+    fun mutedGroupIds(): List<Int> =
+        _muted.value.mapNotNull { if (it.startsWith("group:")) it.substringAfter("group:").toIntOrNull() else null }
+
+    /** Peer uins the user has fully muted, for the server `muted_uins` sync. */
+    fun mutedPeerUins(): List<Int> =
+        _muted.value.mapNotNull { if (it.startsWith("peer:")) it.substringAfter("peer:").toIntOrNull() else null }
+
     fun isArchived(thread: String) = thread in _archived.value
     fun toggleArchive(thread: String) = toggle(_archived, K_ARCH, thread)
 

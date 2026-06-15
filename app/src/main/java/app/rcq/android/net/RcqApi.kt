@@ -658,6 +658,13 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         val contact_requests: Boolean? = null,
         val trades_from_contacts: Boolean? = null,
         val trades_from_strangers: Boolean? = null,
+        // Full lists of fully-muted groups / peers. The server's push fan-out
+        // (is_group_muted / should_push_for) reads these to SKIP the APNs /
+        // UnifiedPush wake for a muted thread. Null = field omitted by Gson =
+        // untouched (partial update), so a contact_requests-only PUT never
+        // clears the mute lists, and vice-versa.
+        val muted_group_ids: List<Int>? = null,
+        val muted_uins: List<Int>? = null,
     )
 
     suspend fun getPushPreferences(): PushPrefs = withContext(Dispatchers.IO) {
@@ -956,6 +963,11 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         val b = Request.Builder().url("$baseUrl$path")
         when (method) {
             "POST" -> b.post((json ?: "{}").toRequestBody(JSON))
+            // PUT/PATCH used to fall through to GET (the `else`), so every
+            // result-less PUT — push-preferences (mute sync + contact-request
+            // toggle) — silently sent a bodyless GET that 200s without writing.
+            "PUT" -> b.put((json ?: "{}").toRequestBody(JSON))
+            "PATCH" -> b.patch((json ?: "{}").toRequestBody(JSON))
             "DELETE" -> b.delete()
             else -> b.get()
         }
