@@ -1529,7 +1529,12 @@ private fun AddResultRow(
 @Composable
 private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var host by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
+    var checking by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
@@ -1544,10 +1549,40 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
                     placeholder = { Text(app.rcq.android.net.RcqApi.DEFAULT_HOST, color = c.textSecondary) },
                     singleLine = true,
                 )
+                // Optional access token for a private (closed/masquerade) island.
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it.trim(); err = null },
+                    label = { Text(stringResource(R.string.access_token_label), color = c.textSecondary) },
+                    singleLine = true,
+                )
+                Text(stringResource(R.string.access_token_hint), color = c.textSecondary, fontSize = 11.sp)
+                err?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onAdd(host.ifBlank { null }) }) {
+            TextButton(enabled = !checking, onClick = {
+                val h = host.ifBlank { null }
+                if (h != null && token.isNotBlank()) {
+                    // Redeem the access token for this host FIRST (stores the
+                    // durable token so the registration call passes the gate),
+                    // then proceed. A bad token blocks so the user can fix it.
+                    checking = true; err = null
+                    scope.launch {
+                        val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            app.rcq.android.net.AccessRedeemer.redeem(ctx, h, token)
+                        }
+                        checking = false
+                        if (res is app.rcq.android.net.RedeemResult.BadToken) {
+                            err = ctx.getString(R.string.access_token_bad)
+                        } else {
+                            onAdd(h)
+                        }
+                    }
+                } else {
+                    onAdd(h)
+                }
+            }) {
                 Text(stringResource(R.string.add_account_create), color = c.accent)
             }
         },

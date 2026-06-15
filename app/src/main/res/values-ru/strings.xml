@@ -86,6 +86,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Создаёт новую анонимную личность рядом с текущей. Оставьте поле сервера пустым, чтобы использовать публичный сервер.</string>
     <string name="add_account_create">Создать</string>
+    <string name="access_token_label">Токен доступа (необязательно)</string>
+    <string name="access_token_hint">Для приватного (закрытого) острова вставьте выданный токен доступа.</string>
+    <string name="access_token_bad">Неверный или просроченный токен доступа для острова.</string>
     <string name="manage_accounts_intro">Аккаунты на этом устройстве. Переключайтесь между ними кнопкой аккаунта на главном экране. Удаление аккаунта здесь убирает его только с этого устройства, личность остаётся на сервере.</string>
     <string name="manage_accounts_active">Активный</string>
     <string name="manage_accounts_add_by_phrase">Добавить аккаунт по фразе восстановления</string>

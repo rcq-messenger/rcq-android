@@ -87,6 +87,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Creates a new anonymous identity alongside your current one. Leave the server blank to use the public server.</string>
     <string name="add_account_create">Create</string>
+    <string name="access_token_label">Access token (optional)</string>
+    <string name="access_token_hint">For a private (closed) island, paste the access token you were given.</string>
+    <string name="access_token_bad">Invalid or expired access token for this island.</string>
     <string name="manage_accounts_intro">Accounts on this device. Switch between them from the account button on the home screen. Deleting an account here removes it from this device only — its identity stays on the server.</string>
     <string name="manage_accounts_active">Active</string>
     <string name="manage_accounts_add_by_phrase">Add account by recovery phrase</string>
