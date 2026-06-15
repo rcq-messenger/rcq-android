@@ -1346,6 +1346,9 @@ private fun AddContactDialog(
     var groups by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var sentTo by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    // Optional access token for adding a contact on a foreign PRIVATE (closed)
+    // island — shown only when a uin@host on another island is detected.
+    var ciToken by remember { mutableStateOf("") }
 
     // Debounced server-side search of people AND joinable groups (iOS Add
     // overlay parity — the old dialog only accepted a raw UIN). A pasted group
@@ -1440,8 +1443,28 @@ private fun AddContactDialog(
                             if (session.isOwnAddress(ci.uin, ci.host)) {
                                 AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_self)) {}
                             } else {
+                                // Optional access token for a foreign PRIVATE island.
+                                OutlinedTextField(
+                                    value = ciToken,
+                                    onValueChange = { ciToken = it.trim() },
+                                    label = { Text(stringResource(R.string.access_token_label), color = c.textSecondary) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                )
                                 AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_row), accent = true) {
                                     scope.launch {
+                                        // Redeem the access token for the host FIRST (stores the
+                                        // durable token so fetchCard/deposit pass the gate). A bad
+                                        // token aborts with a toast so the user can fix it.
+                                        if (ciToken.isNotBlank()) {
+                                            val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                app.rcq.android.net.AccessRedeemer.redeem(context, ci.host, ciToken)
+                                            }
+                                            if (res is app.rcq.android.net.RedeemResult.BadToken) {
+                                                android.widget.Toast.makeText(context, context.getString(R.string.access_token_bad), android.widget.Toast.LENGTH_LONG).show()
+                                                return@launch
+                                            }
+                                        }
                                         if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
                                     }
                                 }
