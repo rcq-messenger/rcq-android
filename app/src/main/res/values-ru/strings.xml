@@ -887,4 +887,7 @@
     <string name="notif_contact_requests">Новые заявки в контакты</string>
     <string name="notif_contact_requests_desc">Будить телефон, когда вас хотят добавить</string>
     <string name="notif_perchat_note">Чтобы заглушить отдельный чат, удерживайте его на главном экране.</string>
+    <string name="chat_menu_all_media">Все медиа</string>
+    <string name="chat_all_media_title">Медиа</string>
+    <string name="chat_all_media_empty">Пока нет фото и видео</string>
 </resources>

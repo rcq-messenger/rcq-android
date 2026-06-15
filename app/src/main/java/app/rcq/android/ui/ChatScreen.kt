@@ -21,6 +21,11 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -247,6 +252,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var attachMenu by remember { mutableStateOf(false) }
     var showPollComposer by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
+    var showAllMedia by remember { mutableStateOf(false) }
     var chatMenu by remember { mutableStateOf(false) }
     // A picked photo/video waiting in the pre-send preview (tap to blur).
     var pendingSend by remember { mutableStateOf<PendingSend?>(null) }
@@ -630,6 +636,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         text = { Text(stringResource(R.string.chat_search_hint), color = c.textPrimary) },
                         leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.accent) },
                         onClick = { chatMenu = false; showSearch = true },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.chat_menu_all_media), color = c.textPrimary) },
+                        leadingIcon = { Icon(Icons.Filled.Image, null, tint = c.accent) },
+                        onClick = { chatMenu = false; showAllMedia = true },
                     )
                     if (!isGroup && !isSelf && peer != null) {
                         DropdownMenuItem(
@@ -1150,6 +1161,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (idx >= 0) listState.animateScrollToItem(idx)
                 }
             },
+        )
+    }
+    if (showAllMedia) {
+        BackHandler { showAllMedia = false }
+        AllMediaOverlay(
+            session = session,
+            messages = messages,
+            onClose = { showAllMedia = false },
+            onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = it } },
+            onOpenVideo = { m -> mediaBytes(m) { openFile(context, it, "video-${m.id}.mp4", "video/mp4") } },
         )
     }
 }
@@ -2793,6 +2814,97 @@ private fun readPickedVideo(context: Context, uri: Uri): PickedVideo? = runCatch
 
 /** Write decrypted bytes to the cache and hand them to a viewer via a
  *  FileProvider URI (chooser fallback so the user can always save it). */
+/** "Show all media" gallery: a 3-column grid of every photo/video in the
+ *  thread (newest first), built from the in-memory message list (iOS parity).
+ *  Photo tap opens the fullscreen viewer; video tap opens the external player. */
+@Composable
+private fun AllMediaOverlay(
+    session: Session,
+    messages: List<ChatMessage>,
+    onClose: () -> Unit,
+    onOpenPhoto: (ChatMessage) -> Unit,
+    onOpenVideo: (ChatMessage) -> Unit,
+) {
+    val c = RcqTheme.colors
+    val media = remember(messages) {
+        messages.filter { it.kind == "photo" || it.kind == "video" }.asReversed()
+    }
+    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                Icons.Filled.Close, contentDescription = null, tint = c.textPrimary,
+                modifier = Modifier.clickable(onClick = onClose).padding(4.dp),
+            )
+            Text(stringResource(R.string.chat_all_media_title), color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (media.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.chat_all_media_empty), color = c.textSecondary, fontSize = 14.sp)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                gridItems(media, key = { it.id }) { m ->
+                    MediaTile(session, m) { if (m.kind == "video") onOpenVideo(m) else onOpenPhoto(m) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaTile(session: Session, m: ChatMessage, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    val isVideo = m.kind == "video"
+    val bmp = if (isVideo) {
+        // Video poster straight from the stored base64 thumbnail (no fetch).
+        remember(m.id) {
+            m.thumbB64?.takeIf { it.isNotEmpty() }?.let {
+                runCatching {
+                    val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP)
+                    BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
+                }.getOrNull()
+            }
+        }
+    } else {
+        val bytes by produceState<ByteArray?>(null, m.id) {
+            val mid = m.mediaId
+            val key = m.mediaKey
+            value = if (mid != null && key != null) {
+                runCatching { session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) }) }.getOrNull()
+            } else {
+                null
+            }
+        }
+        remember(bytes) {
+            bytes?.let {
+                runCatching {
+                    (if (it.isGif()) gifFirstFrame(it) else decodeSampled(it, 360))?.asImageBitmap()
+                }.getOrNull()
+            }
+        }
+    }
+    Box(
+        Modifier.aspectRatio(1f).background(c.bgSecondary).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bmp != null) {
+            Image(bitmap = bmp, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        if (isVideo) {
+            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(34.dp))
+        }
+    }
+}
+
 private fun openFile(context: Context, bytes: ByteArray, fileName: String, mime: String) {
     runCatching {
         val dir = java.io.File(context.cacheDir, "files").apply { mkdirs() }

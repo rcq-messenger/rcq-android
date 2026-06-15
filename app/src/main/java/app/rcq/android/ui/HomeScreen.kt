@@ -317,6 +317,8 @@ internal fun HomeScreen(
                     items(pending, key = { "p${it.requestId}" }) { req ->
                         PendingRow(
                             name = req.fromNickname,
+                            fromUin = req.fromUin,
+                            onOpenProfile = onOpenPeerInfo,
                             onAccept = { scope.launch { runCatching { session.respond(req.requestId, true) } } },
                             onDecline = { scope.launch { runCatching { session.respond(req.requestId, false) } } },
                         )
@@ -1119,7 +1121,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
 }
 
 @Composable
-private fun PendingRow(name: String, onAccept: () -> Unit, onDecline: () -> Unit) {
+private fun PendingRow(name: String, fromUin: Int, onOpenProfile: (Int) -> Unit, onAccept: () -> Unit, onDecline: () -> Unit) {
     val c = RcqTheme.colors
     Row(
         Modifier.fillMaxWidth().background(c.bgPrimary).padding(horizontal = 10.dp, vertical = 8.dp),
@@ -1128,7 +1130,8 @@ private fun PendingRow(name: String, onAccept: () -> Unit, onDecline: () -> Unit
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.PersonAdd, null, tint = c.accent, modifier = Modifier.size(24.dp))
         }
-        Text(name, color = c.textPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        // Tap the name to see who's adding you, before deciding (iOS parity).
+        Text(name, color = c.textPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f).clickable { onOpenProfile(fromUin) }.padding(vertical = 4.dp))
         Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(R.string.home_decline), color = c.textSecondary, modifier = Modifier.clickable(onClick = onDecline).padding(8.dp))
