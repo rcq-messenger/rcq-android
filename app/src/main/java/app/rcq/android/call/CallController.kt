@@ -397,6 +397,11 @@ class CallController(
      *  "Connecting…" status flips to the running duration) and clear any
      *  in-flight recovery — we are healthy again. */
     private fun onRtcConnected() {
+        // Media is flowing now — a connected call must never still be ringing.
+        // accept()/handleAnswer() already stop the ringer, but guarantee it here
+        // too so no path or race (duplicate offer, push+WS double-deliver) can
+        // leave the ringtone/ringback looping after the call connects.
+        ringer.stop()
         cancelRecoveryTimers()
         // Recovery succeeded (or first connect): clear the in-flight flag, restore
         // the per-incident restart budget (it's per-drop, not per-call), and bump
