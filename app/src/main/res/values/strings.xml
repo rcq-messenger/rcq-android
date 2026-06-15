@@ -887,6 +887,9 @@
     <string name="notif_push_enable">Enable push</string>
     <string name="notif_push_ntfy_hint">Android can\'t use Google push here. Install ntfy once (a small free app) to get background messages and incoming calls.</string>
     <string name="notif_push_install_ntfy">Install ntfy</string>
+    <string name="notif_push_change">Change or reset provider</string>
+    <string name="notif_push_choose_title">Push provider</string>
+    <string name="notif_push_disable">Disable push</string>
     <string name="notif_contact_requests">New contact requests</string>
     <string name="notif_contact_requests_desc">Wake the phone when someone asks to add you</string>
     <string name="notif_perchat_note">To silence a specific chat, long-press it on the home screen.</string>

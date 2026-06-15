@@ -148,6 +148,40 @@ object Push {
         return true
     }
 
+    /** Installed UnifiedPush distributors (package names). */
+    fun availableDistributors(ctx: Context): List<String> = UnifiedPush.getDistributors(ctx)
+
+    /** Human-readable label for a distributor package — its app name, falling
+     *  back to the last path segment (e.g. "ntfy"). */
+    fun distributorLabel(ctx: Context, pkg: String): String =
+        runCatching {
+            val pm = ctx.packageManager
+            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: pkg.substringAfterLast('.')
+
+    /** Switch to a SPECIFIC distributor the user picked. Drops the old
+     *  registration + endpoint first (so the server stops waking a stale
+     *  provider); the new endpoint arrives async in [RcqPushService.onNewEndpoint]. */
+    fun chooseDistributor(ctx: Context, pkg: String) {
+        val old = savedEndpoint(ctx)
+        runCatching { UnifiedPush.unregister(ctx) }
+        if (old != null) deregisterWithBackend(ctx, old)
+        clearEndpoint(ctx)
+        UnifiedPush.saveDistributor(ctx, pkg)
+        UnifiedPush.register(ctx)
+    }
+
+    /** Forget the current distributor + endpoint so the user can pick another
+     *  (or none). Unregisters, clears the saved choice + our endpoint, and
+     *  best-effort removes the token from every island. */
+    fun resetDistributor(ctx: Context) {
+        val old = savedEndpoint(ctx)
+        runCatching { UnifiedPush.unregister(ctx) }
+        runCatching { UnifiedPush.removeDistributor(ctx) }
+        clearEndpoint(ctx)
+        if (old != null) deregisterWithBackend(ctx, old)
+    }
+
     /** Open the store page for ntfy (Play first, F-Droid web fallback). */
     fun openNtfyInstall(ctx: Context) {
         val play = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=$NTFY_PKG"))
@@ -173,6 +207,22 @@ object Push {
                 val host = store.serverHost ?: RcqApi.DEFAULT_HOST
                 runCatching {
                     RcqApi("https://$host").apply { setToken(token) }.setPushToken(endpoint)
+                }
+            }
+        }
+    }
+
+    /** DELETE [endpoint] from every local account's island — used when the user
+     *  resets or switches the push provider so the server stops trying to wake a
+     *  now-dead endpoint. Fire-and-forget, headless-safe. */
+    fun deregisterWithBackend(ctx: Context, endpoint: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            for (acct in AccountManager.accounts.value) {
+                val store = SecureStore(ctx, acct.id)
+                val token = store.token ?: continue
+                val host = store.serverHost ?: RcqApi.DEFAULT_HOST
+                runCatching {
+                    RcqApi("https://$host").apply { setToken(token) }.deletePushToken(endpoint)
                 }
             }
         }

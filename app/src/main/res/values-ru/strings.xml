@@ -884,6 +884,9 @@
     <string name="notif_push_enable">Включить push</string>
     <string name="notif_push_ntfy_hint">Google-push здесь недоступен. Поставьте ntfy один раз (маленькое бесплатное приложение), чтобы получать сообщения и входящие звонки в фоне.</string>
     <string name="notif_push_install_ntfy">Установить ntfy</string>
+    <string name="notif_push_change">Сменить или сбросить провайдер</string>
+    <string name="notif_push_choose_title">Провайдер пушей</string>
+    <string name="notif_push_disable">Отключить пуши</string>
     <string name="notif_contact_requests">Новые заявки в контакты</string>
     <string name="notif_contact_requests_desc">Будить телефон, когда вас хотят добавить</string>
     <string name="notif_perchat_note">Чтобы заглушить отдельный чат, удерживайте его на главном экране.</string>

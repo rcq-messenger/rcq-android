@@ -1221,6 +1221,7 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var pushState by remember { mutableStateOf(app.rcq.android.push.Push.pushState(ctx)) }
+    var showDistChooser by remember { mutableStateOf(false) }
     var contactReq by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { contactReq = session.loadPushPrefs()?.contact_requests }
 
@@ -1234,8 +1235,16 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                     when (pushState) {
                         app.rcq.android.push.Push.PushState.CONNECTED -> {
                             Text(stringResource(R.string.notif_push_on), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                            val dist = app.rcq.android.push.Push.savedDistributor(ctx)?.substringAfterLast('.') ?: ""
+                            val dist = app.rcq.android.push.Push.savedDistributor(ctx)
+                                ?.let { app.rcq.android.push.Push.distributorLabel(ctx, it) } ?: ""
                             Text(stringResource(R.string.notif_push_via, dist), color = c.textSecondary, fontSize = 12.sp)
+                            // Change / reset the provider — the missing "switch
+                            // distributor" affordance. Opens a chooser when more
+                            // than one is installed, else lets you disable.
+                            Text(
+                                stringResource(R.string.notif_push_change), color = c.accent, fontSize = 14.sp,
+                                modifier = Modifier.padding(top = 4.dp).clickable { showDistChooser = true },
+                            )
                         }
                         app.rcq.android.push.Push.PushState.DISTRIBUTOR_AVAILABLE -> {
                             Text(stringResource(R.string.notif_push_off), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -1243,7 +1252,13 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                             Text(
                                 stringResource(R.string.notif_push_enable), color = c.accent, fontSize = 14.sp,
                                 modifier = Modifier.padding(top = 4.dp).clickable {
-                                    if (app.rcq.android.push.Push.enablePush(ctx)) pushState = app.rcq.android.push.Push.pushState(ctx)
+                                    // More than one installed -> let the user pick;
+                                    // otherwise just enable the only one.
+                                    if (app.rcq.android.push.Push.availableDistributors(ctx).size > 1) {
+                                        showDistChooser = true
+                                    } else if (app.rcq.android.push.Push.enablePush(ctx)) {
+                                        pushState = app.rcq.android.push.Push.pushState(ctx)
+                                    }
                                 },
                             )
                         }
@@ -1257,6 +1272,48 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+            if (showDistChooser) {
+                val dists = app.rcq.android.push.Push.availableDistributors(ctx)
+                val saved = app.rcq.android.push.Push.savedDistributor(ctx)
+                AlertDialog(
+                    onDismissRequest = { showDistChooser = false },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(onClick = { showDistChooser = false }) {
+                            Text(stringResource(R.string.common_cancel), color = c.accent)
+                        }
+                    },
+                    title = { Text(stringResource(R.string.notif_push_choose_title), color = c.textPrimary) },
+                    text = {
+                        Column {
+                            if (dists.isEmpty()) {
+                                Text(stringResource(R.string.notif_push_ntfy_hint), color = c.textSecondary, fontSize = 13.sp)
+                            }
+                            dists.forEach { pkg ->
+                                val current = pkg == saved
+                                Text(
+                                    app.rcq.android.push.Push.distributorLabel(ctx, pkg) + if (current) "  ✓" else "",
+                                    color = if (current) c.accent else c.textPrimary, fontSize = 15.sp,
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        app.rcq.android.push.Push.chooseDistributor(ctx, pkg)
+                                        showDistChooser = false
+                                        pushState = app.rcq.android.push.Push.pushState(ctx)
+                                    }.padding(vertical = 10.dp),
+                                )
+                            }
+                            Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp).background(c.divider))
+                            Text(
+                                stringResource(R.string.notif_push_disable), color = c.statusBusy, fontSize = 15.sp,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    app.rcq.android.push.Push.resetDistributor(ctx)
+                                    showDistChooser = false
+                                    pushState = app.rcq.android.push.Push.pushState(ctx)
+                                }.padding(vertical = 10.dp),
+                            )
+                        }
+                    },
+                )
             }
             // ── Categories (parity with the iOS Notifications screen) ──
             SectionLabel(stringResource(R.string.notif_categories))
