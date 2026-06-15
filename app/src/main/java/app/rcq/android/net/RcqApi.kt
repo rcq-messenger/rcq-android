@@ -643,6 +643,28 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
             sendNoResult("DELETE", "/users/me/push-token", gson.toJson(PushTokenBody(endpoint)), authed = true)
         }
 
+    // Server push preferences (the per-category toggles the iOS Notifications
+    // screen also drives). Defaults mirror the server's hydration defaults.
+    data class PushPrefs(
+        val contact_requests: Boolean = true,
+        val trades_from_contacts: Boolean = true,
+        val trades_from_strangers: Boolean = false,
+    )
+
+    data class PushPrefsBody(
+        val contact_requests: Boolean? = null,
+        val trades_from_contacts: Boolean? = null,
+        val trades_from_strangers: Boolean? = null,
+    )
+
+    suspend fun getPushPreferences(): PushPrefs = withContext(Dispatchers.IO) {
+        get("/users/me/push-preferences", authed = true, PushPrefs::class.java)
+    }
+
+    suspend fun setPushPreferences(body: PushPrefsBody): Unit = withContext(Dispatchers.IO) {
+        sendNoResult("PUT", "/users/me/push-preferences", gson.toJson(body), authed = true)
+    }
+
     // ── presence + account (rcq-spec 3.3 / 2.4) ──────────────────────
 
     data class StatusBody(val status: String, val status_message: String? = null)

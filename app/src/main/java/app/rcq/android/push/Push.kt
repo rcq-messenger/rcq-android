@@ -121,6 +121,47 @@ object Push {
         }
     }
 
+    /** ntfy — the recommended UnifiedPush distributor we point users to. */
+    private const val NTFY_PKG = "io.heckel.ntfy"
+
+    enum class PushState { CONNECTED, DISTRIBUTOR_AVAILABLE, NO_DISTRIBUTOR }
+
+    /** Current push-delivery state, for the Notifications settings screen. */
+    fun pushState(ctx: Context): PushState = when {
+        UnifiedPush.getSavedDistributor(ctx) != null && savedEndpoint(ctx) != null -> PushState.CONNECTED
+        UnifiedPush.getDistributors(ctx).isNotEmpty() -> PushState.DISTRIBUTOR_AVAILABLE
+        else -> PushState.NO_DISTRIBUTOR
+    }
+
+    fun savedDistributor(ctx: Context): String? = UnifiedPush.getSavedDistributor(ctx)
+
+    /** Pick the first installed distributor (if none chosen yet) and register —
+     *  the Settings "Enable" action. Returns false if none is installed. */
+    fun enablePush(ctx: Context): Boolean {
+        if (UnifiedPush.getSavedDistributor(ctx) != null) {
+            UnifiedPush.register(ctx)
+            return true
+        }
+        val pick = UnifiedPush.getDistributors(ctx).firstOrNull() ?: return false
+        UnifiedPush.saveDistributor(ctx, pick)
+        UnifiedPush.register(ctx)
+        return true
+    }
+
+    /** Open the store page for ntfy (Play first, F-Droid web fallback). */
+    fun openNtfyInstall(ctx: Context) {
+        val play = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=$NTFY_PKG"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { ctx.startActivity(play) }.onFailure {
+            runCatching {
+                ctx.startActivity(
+                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://f-droid.org/packages/$NTFY_PKG/"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
+
     /** POST [endpoint] to every local account's island so each can wake this
      *  device. Idempotent server-side (upsert on uin+token). Fire-and-forget;
      *  callable headless (reads per-account creds straight from SecureStore). */

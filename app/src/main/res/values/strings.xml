@@ -878,4 +878,16 @@
     <string name="push_new_group_message">New group message</string>
     <string name="push_channel_calls">Calls</string>
     <string name="push_channel_calls_desc">Incoming call notifications</string>
+    <string name="notif_delivery">Push delivery</string>
+    <string name="notif_categories">Categories</string>
+    <string name="notif_push_on">Push is on</string>
+    <string name="notif_push_via">Delivered via %1$s</string>
+    <string name="notif_push_off">Push is off</string>
+    <string name="notif_push_enable_hint">A push distributor is installed. Enable it to get messages and calls while RCQ is in the background.</string>
+    <string name="notif_push_enable">Enable push</string>
+    <string name="notif_push_ntfy_hint">Android can\'t use Google push here. Install ntfy once (a small free app) to get background messages and incoming calls.</string>
+    <string name="notif_push_install_ntfy">Install ntfy</string>
+    <string name="notif_contact_requests">New contact requests</string>
+    <string name="notif_contact_requests_desc">Wake the phone when someone asks to add you</string>
+    <string name="notif_perchat_note">To silence a specific chat, long-press it on the home screen.</string>
 </resources>

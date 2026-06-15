@@ -285,6 +285,14 @@ class Session(context: Context) {
     private val _hallOfFameEnabled = MutableStateFlow(true)
     val hallOfFameEnabled: StateFlow<Boolean> = _hallOfFameEnabled.asStateFlow()
 
+    /** Load the server push-preference toggles (Notifications settings). */
+    suspend fun loadPushPrefs(): RcqApi.PushPrefs? = runCatching { api.getPushPreferences() }.getOrNull()
+
+    /** Flip the "push for new contact requests" preference (optimistic; caller
+     *  reverts the UI on failure). */
+    suspend fun setContactRequestsPush(on: Boolean): Boolean =
+        runCatching { api.setPushPreferences(RcqApi.PushPrefsBody(contact_requests = on)) }.isSuccess
+
     val nickname: String get() = store.nickname ?: "—"
 
     // uin -> recipient X25519 identity public (raw), from contacts or lookup.

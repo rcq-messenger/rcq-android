@@ -875,4 +875,16 @@
     <string name="push_new_group_message">Новое сообщение в группе</string>
     <string name="push_channel_calls">Звонки</string>
     <string name="push_channel_calls_desc">Уведомления о входящих звонках</string>
+    <string name="notif_delivery">Доставка push</string>
+    <string name="notif_categories">Категории</string>
+    <string name="notif_push_on">Push включён</string>
+    <string name="notif_push_via">Через %1$s</string>
+    <string name="notif_push_off">Push выключен</string>
+    <string name="notif_push_enable_hint">Дистрибьютор push установлен. Включите, чтобы получать сообщения и звонки, когда RCQ свёрнут.</string>
+    <string name="notif_push_enable">Включить push</string>
+    <string name="notif_push_ntfy_hint">Google-push здесь недоступен. Поставьте ntfy один раз (маленькое бесплатное приложение), чтобы получать сообщения и входящие звонки в фоне.</string>
+    <string name="notif_push_install_ntfy">Установить ntfy</string>
+    <string name="notif_contact_requests">Новые заявки в контакты</string>
+    <string name="notif_contact_requests_desc">Будить телефон, когда вас хотят добавить</string>
+    <string name="notif_perchat_note">Чтобы заглушить отдельный чат, удерживайте его на главном экране.</string>
 </resources>

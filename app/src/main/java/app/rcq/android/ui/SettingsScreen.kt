@@ -164,7 +164,7 @@ internal fun SettingsScreen(
         SettingsRoute.DIAGNOSTICS -> DiagnosticsScreen(session) {
             if (openDiagnostics) onBack() else route = SettingsRoute.PRIVACY
         }
-        SettingsRoute.NOTIFICATIONS -> NotificationsScreen { route = SettingsRoute.ROOT }
+        SettingsRoute.NOTIFICATIONS -> NotificationsScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.SOUNDS -> SoundsScreen { route = SettingsRoute.ROOT }
         SettingsRoute.LANGUAGE -> LanguageScreen { route = SettingsRoute.ROOT }
         SettingsRoute.APP_ICON -> AppIconScreen { route = SettingsRoute.ROOT }
@@ -1216,15 +1216,73 @@ private fun LanguageScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun NotificationsScreen(onBack: () -> Unit) {
+private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pushState by remember { mutableStateOf(app.rcq.android.push.Push.pushState(ctx)) }
+    var contactReq by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) { contactReq = session.loadPushPrefs()?.contact_requests }
+
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_notifications), onBack)
-        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Spacer(Modifier.height(40.dp))
-            Icon(Icons.Filled.Notifications, null, tint = c.textSecondary, modifier = Modifier.size(44.dp))
-            Text(stringResource(R.string.notif_push), color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text(stringResource(R.string.notif_desc), color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // ── Push delivery (UnifiedPush / ntfy) ──
+            SectionLabel(stringResource(R.string.notif_delivery))
+            SettingsGroup {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    when (pushState) {
+                        app.rcq.android.push.Push.PushState.CONNECTED -> {
+                            Text(stringResource(R.string.notif_push_on), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            val dist = app.rcq.android.push.Push.savedDistributor(ctx)?.substringAfterLast('.') ?: ""
+                            Text(stringResource(R.string.notif_push_via, dist), color = c.textSecondary, fontSize = 12.sp)
+                        }
+                        app.rcq.android.push.Push.PushState.DISTRIBUTOR_AVAILABLE -> {
+                            Text(stringResource(R.string.notif_push_off), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.notif_push_enable_hint), color = c.textSecondary, fontSize = 12.sp)
+                            Text(
+                                stringResource(R.string.notif_push_enable), color = c.accent, fontSize = 14.sp,
+                                modifier = Modifier.padding(top = 4.dp).clickable {
+                                    if (app.rcq.android.push.Push.enablePush(ctx)) pushState = app.rcq.android.push.Push.pushState(ctx)
+                                },
+                            )
+                        }
+                        app.rcq.android.push.Push.PushState.NO_DISTRIBUTOR -> {
+                            Text(stringResource(R.string.notif_push_off), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.notif_push_ntfy_hint), color = c.textSecondary, fontSize = 12.sp)
+                            Text(
+                                stringResource(R.string.notif_push_install_ntfy), color = c.accent, fontSize = 14.sp,
+                                modifier = Modifier.padding(top = 4.dp).clickable { app.rcq.android.push.Push.openNtfyInstall(ctx) },
+                            )
+                        }
+                    }
+                }
+            }
+            // ── Categories (parity with the iOS Notifications screen) ──
+            SectionLabel(stringResource(R.string.notif_categories))
+            SettingsGroup {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.notif_contact_requests), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.notif_contact_requests_desc), color = c.textSecondary, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = contactReq ?: true,
+                        enabled = contactReq != null,
+                        onCheckedChange = { v ->
+                            val prev = contactReq
+                            contactReq = v
+                            scope.launch { if (!session.setContactRequestsPush(v)) contactReq = prev }
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.notif_perchat_note),
+                color = c.textSecondary, fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            )
         }
     }
 }
