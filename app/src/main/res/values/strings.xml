@@ -636,6 +636,7 @@
     <string name="gi_closed_desc">New members can\'t self-join via search</string>
     <string name="gi_hide">Hide member list</string>
     <string name="gi_hide_desc">Only you see the full roster</string>
+    <string name="gi_members_hidden">The member list is hidden by the owner.</string>
     <string name="gi_members">MEMBERS</string>
     <string name="gi_member_search">Search members</string>
     <string name="gi_members_collapse">Show less</string>

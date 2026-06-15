@@ -271,6 +271,18 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         val visibleMembers = if (searching || showAllMembers || filtered.size <= previewLimit) filtered else filtered.take(previewLimit)
         val hiddenCount = if (searching) 0 else (sortedMembers.size - visibleMembers.size).coerceAtLeast(0)
         val bigGroup = sortedMembers.size > previewLimit
+        // Owner hid the roster: non-owners see a notice instead of the member
+        // list (iOS parity — GroupInfoView does the same `membersHidden && !owner`
+        // gate). The member COUNT above still shows; only the per-member rows are
+        // withheld. Client-side hide for now (the server still sends the list);
+        // server redaction is the deeper privacy follow-up.
+        if (group.membersHidden && !isOwner) {
+            Text(
+                stringResource(R.string.gi_members_hidden),
+                color = c.textSecondary, fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        } else
         // Plain Column (not a weight(1f) LazyColumn): the whole screen is now
         // verticalScroll-able, and a weight(1f) lazy list inside that got
         // starved to ~0px by the tall owner-settings block + per-member perm

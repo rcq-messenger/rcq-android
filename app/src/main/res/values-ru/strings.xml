@@ -635,6 +635,7 @@
     <string name="gi_closed_desc">Новые участники не могут вступить через поиск</string>
     <string name="gi_hide">Скрыть список участников</string>
     <string name="gi_hide_desc">Только вы видите полный список</string>
+    <string name="gi_members_hidden">Список участников скрыт владельцем.</string>
     <string name="gi_members">УЧАСТНИКИ</string>
     <string name="gi_member_search">Поиск участников</string>
     <string name="gi_members_collapse">Свернуть</string>
