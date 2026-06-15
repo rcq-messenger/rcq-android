@@ -560,8 +560,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         else messages.filter { !it.fromMe && session.bodyMentionsMe(it.body) }.map { it.id }
     }
     var mentionCursor by remember(target) { mutableStateOf(0) }
-    // Keep the cursor in range as the list grows/shrinks under it.
-    val safeCursor = if (mentionIds.isEmpty()) 0 else mentionCursor % mentionIds.size
+    // The @-FAB steps through mentions and HIDES once the cursor passes the
+    // last one (NO wrap) — tapping the final mention dismisses the FAB instead
+    // of restarting the count back to the total. A newly arriving mention grows
+    // the list past the cursor and brings the FAB back for that one.
+    val mentionsLeft = (mentionIds.size - mentionCursor).coerceAtLeast(0)
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
         // Header.
@@ -777,7 +780,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // jump-down FAB, shown whenever the open group thread has messages
             // that @mention me — INDEPENDENT of scroll position (Telegram-style).
             // Each tap scrolls to + flashes the next @-mention, stepping in order.
-            if (mentionIds.isNotEmpty()) {
+            if (mentionsLeft > 0 && mentionCursor < mentionIds.size) {
                 Box(
                     // Stack above the jump-down FAB: its 40dp circle + 6dp badge
                     // gap sits at bottom=10dp, so clear ~64dp to leave an ~8dp gap.
@@ -789,7 +792,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             .size(40.dp).clip(CircleShape).background(c.bgSecondary)
                             .border(1.dp, c.divider, CircleShape)
                             .clickable {
-                                val rid = mentionIds[safeCursor]
+                                val rid = mentionIds[mentionCursor]
                                 val idx = rows.indexOfFirst { r ->
                                     (r is ChatRow.Single && r.m.id == rid) ||
                                         (r is ChatRow.Album && r.items.any { it.id == rid })
@@ -799,16 +802,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                     highlightId = rid
                                     scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
                                 }
-                                // Advance so the next tap steps to the following
-                                // @-mention, wrapping at the end (Telegram parity).
-                                mentionCursor = (safeCursor + 1) % mentionIds.size
+                                // Advance WITHOUT wrapping: stepping past the last
+                                // mention takes the cursor to size, which hides the
+                                // FAB (badge 0) instead of resetting to the total.
+                                mentionCursor += 1
                             },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Filled.AlternateEmail, null, tint = c.textPrimary, modifier = Modifier.size(24.dp))
                     }
                     // Remaining un-stepped @-mentions, like the jump-down badge.
-                    UnreadBadge(mentionIds.size - safeCursor, Modifier.align(Alignment.TopEnd))
+                    UnreadBadge(mentionsLeft, Modifier.align(Alignment.TopEnd))
                 }
             }
         }
