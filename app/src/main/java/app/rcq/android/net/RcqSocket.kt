@@ -25,6 +25,9 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         // (null = direct). Captured at build; Session rebuilds the socket after
         // engaging so it picks the proxy up.
         .proxy(SingBoxTransport.proxy())
+        // Stamp X-RCQ-Auth on the WS upgrade so a closed (masquerade) island's
+        // socket passes the gate (OkHttp runs the handshake through interceptors).
+        .addInterceptor(AccessTokenInterceptor)
         .build()
 
     private var ws: WebSocket? = null

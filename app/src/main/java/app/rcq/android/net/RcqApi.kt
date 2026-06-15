@@ -35,6 +35,9 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         // Captured at build time; Session rebuilds this RcqApi after engaging
         // the transport so the new instance picks the proxy up.
         .proxy(SingBoxTransport.proxy())
+        // Stamp X-RCQ-Auth from the per-host store so a closed (masquerade)
+        // island — own OR foreign — is reachable; no token = no header.
+        .addInterceptor(AccessTokenInterceptor)
         .build()
     private val gson = Gson()
 

@@ -31,6 +31,10 @@ object CrossIslandSender {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
+        // Stamp X-RCQ-Auth on every foreign-host call so a closed (masquerade)
+        // island is reachable; no token for the host = no header (public
+        // islands unaffected). proxiedClient inherits this via newBuilder().
+        .addInterceptor(AccessTokenInterceptor)
         .build()
     @Volatile private var proxiedClient: OkHttpClient? = null
 

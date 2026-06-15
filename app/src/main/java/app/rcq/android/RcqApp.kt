@@ -34,6 +34,9 @@ class RcqApp : Application() {
         // including on headless starts — the UnifiedPush push service reads the
         // roster to register/resolve accounts and posts message notifications.
         app.rcq.android.data.AccountManager.init(this)
+        // Per-host access-token store for closed (masquerade) islands — seed the
+        // in-memory map so the OkHttp interceptor can stamp X-RCQ-Auth.
+        app.rcq.android.net.AccessTokenStore.init(this)
         app.rcq.android.push.Push.ensureChannels(this)
         // Optional PIN-lock grace (#10): users asked not to re-enter the PIN on
         // every quick app switch. With a grace > 0 we DON'T lock on background;
