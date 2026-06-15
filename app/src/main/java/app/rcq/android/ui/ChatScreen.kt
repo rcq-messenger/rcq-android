@@ -486,6 +486,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
     var didInitialScroll by remember(target) { mutableStateOf(false) }
     var highlightId by remember(target) { mutableStateOf<String?>(null) }
+    // #1 reply-jump return: the scroll position the user was at when they tapped
+    // a reply quote. While set, the jump-down arrow takes them BACK here (where
+    // they jumped FROM) instead of to the latest message — Telegram-style.
+    var replyReturnIndex by remember(target) { mutableStateOf<Int?>(null) }
+    var replyReturnOffset by remember(target) { mutableStateOf(0) }
 
     // Initial position: at the first unread (or the bottom). INSTANT (no
     // animation) — the old animateScroll-on-every-size-change was the "mota к
@@ -548,6 +553,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             (r is ChatRow.Single && r.m.id == rid) || (r is ChatRow.Album && r.items.any { it.id == rid })
         }
         if (idx >= 0) {
+            // Remember where we jumped FROM so the down-arrow returns here, not to
+            // the bottom of the chat (report — "стрелка кидает в конец").
+            replyReturnIndex = listState.firstVisibleItemIndex
+            replyReturnOffset = listState.firstVisibleItemScrollOffset
             scope.launch { listState.animateScrollToItem(idx) }
             highlightId = rid
             scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
@@ -741,6 +750,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     lastVisible < info.totalItemsCount - 1
                 }
             }
+            // A reply-jump return target only makes sense while scrolled up; once
+            // the user reaches the bottom on their own, drop it so the arrow goes
+            // back to its plain scroll-to-latest role.
+            LaunchedEffect(showJumpDown) { if (!showJumpDown) replyReturnIndex = null }
             // #15: badge on the arrow counting unread messages BELOW the fold.
             // We track a high-water mark — the deepest row the user has actually
             // scrolled into view — and count messages below THAT, not below the
@@ -771,7 +784,18 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         Modifier.padding(top = 6.dp, end = 0.dp)
                             .size(40.dp).clip(CircleShape).background(c.bgSecondary)
                             .border(1.dp, c.divider, CircleShape)
-                            .clickable { scope.launch { listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0)) } },
+                            .clickable {
+                                scope.launch {
+                                    val ret = replyReturnIndex
+                                    if (ret != null) {
+                                        // Return to where a reply-quote jump came FROM.
+                                        listState.animateScrollToItem(ret.coerceIn(0, rows.lastIndex.coerceAtLeast(0)), replyReturnOffset)
+                                        replyReturnIndex = null
+                                    } else {
+                                        listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+                                    }
+                                }
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Filled.KeyboardArrowDown, null, tint = c.textPrimary, modifier = Modifier.size(26.dp))
