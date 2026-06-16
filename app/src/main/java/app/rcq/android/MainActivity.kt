@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import app.rcq.android.data.LocalStores
 import app.rcq.android.net.RcqApi
 import app.rcq.android.ui.CapsuleButton
+import app.rcq.android.ui.ChatLockGate
 import app.rcq.android.ui.ChatScreen
 import app.rcq.android.ui.ChatTarget
 import app.rcq.android.ui.ContactInfoScreen
@@ -269,8 +270,15 @@ private fun RcqApp(session: Session) {
     // lock screen replaces the Registered UI (see the `when` below).
     val locked by app.rcq.android.security.PanicPinService.locked.collectAsState()
     var chatTarget by remember { mutableStateOf<ChatTarget?>(null) }
+    // Thread the user just unlocked via the per-chat PIN gate; reset on leaving
+    // the chat so a locked chat re-prompts every time it's opened.
+    var unlockedChatThread by remember { mutableStateOf<String?>(null) }
     var groupInfoId by remember { mutableStateOf<Int?>(null) }
     var peerInfoUin by remember { mutableStateOf<Int?>(null) }
+    // When the peer-info screen is opened for a CROSS-ISLAND group member, the
+    // group's host — so ContactInfoScreen fetches their card from there instead
+    // of our own island (which 404s). null for same-island / known contacts.
+    var peerInfoHost by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     // Deep-link Settings straight to Network diagnostics (Home overflow menu).
     var settingsToDiagnostics by remember { mutableStateOf(false) }
@@ -427,21 +435,41 @@ private fun RcqApp(session: Session) {
                 onBack = { peerInfoUin = null },
                 onRemoved = { peerInfoUin = null; chatTarget = null },
                 onOpenChat = { peerInfoUin = null; chatTarget = ChatTarget.Peer(it) },
+                groupHost = peerInfoHost,
             )
             s is UiState.Registered && infoId != null -> GroupInfoScreen(
                 session, infoId,
                 onBack = { groupInfoId = null },
                 onLeft = { groupInfoId = null; chatTarget = null },
-                onOpenPeerInfo = { peerInfoUin = it },
+                // Carry the group's host so a cross-island member's profile resolves
+                // from the group's island, not ours.
+                onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = session.groups.value.firstOrNull { g -> g.id == infoId }?.host },
                 onOpenGroup = { groupInfoId = null; chatTarget = ChatTarget.Group(it) },
             )
-            s is UiState.Registered && target != null -> ChatScreen(
-                session, target,
-                onBack = { chatTarget = null },
-                onOpenGroupInfo = { groupInfoId = it },
-                onOpenPeerInfo = { peerInfoUin = it },
-                onOpenGroup = { chatTarget = ChatTarget.Group(it) },
-            )
+            s is UiState.Registered && target != null -> {
+                val chatThread = when (target) {
+                    is ChatTarget.Peer -> app.rcq.android.data.LocalStores.peerThread(target.uin)
+                    is ChatTarget.Group -> app.rcq.android.data.LocalStores.groupThread(target.id)
+                }
+                val lockCtx = androidx.compose.ui.platform.LocalContext.current
+                if (app.rcq.android.data.LocalStores.isLocked(chatThread) &&
+                    app.rcq.android.security.PanicPinService.isConfigured(lockCtx) &&
+                    unlockedChatThread != chatThread
+                ) {
+                    ChatLockGate(
+                        onBack = { chatTarget = null },
+                        onUnlocked = { unlockedChatThread = chatThread },
+                    )
+                } else {
+                    ChatScreen(
+                        session, target,
+                        onBack = { chatTarget = null; unlockedChatThread = null },
+                        onOpenGroupInfo = { groupInfoId = it },
+                        onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
+                        onOpenGroup = { chatTarget = ChatTarget.Group(it); unlockedChatThread = null },
+                    )
+                }
+            }
             s is UiState.Registered && showManageAccounts -> ManageAccountsScreen(
                 session,
                 onBack = { showManageAccounts = false },
@@ -489,7 +517,7 @@ private fun RcqApp(session: Session) {
                 onOpenSettings = { settingsToDiagnostics = false; showSettings = true },
                 onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
                 onOpenProfile = { showProfile = true },
-                onOpenPeerInfo = { peerInfoUin = it },
+                onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
                 onOpenNews = { showNews = true },
                 onOpenOutgoing = { showOutgoing = true },
                 onOpenSaved = { session.uin?.let { chatTarget = ChatTarget.Peer(it) } },

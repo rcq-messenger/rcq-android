@@ -725,7 +725,7 @@
     <string name="random_searching">Ищем собеседника…</string>
     <string name="random_stranger">Анонимный собеседник</string>
     <string name="random_skip">Дальше</string>
-    <string name="random_add_contact">Добавить в контакты</string>
+    <string name="random_add_contact">Добавить</string>
     <string name="random_add_sent">Запрос в контакты отправлен</string>
     <string name="random_ended">Чат завершён</string>
     <string name="random_again">Найти другого</string>
@@ -842,6 +842,10 @@
     <string name="home_mute">Без звука</string>
     <string name="home_unarchive">Из архива</string>
     <string name="home_archive">В архив</string>
+    <string name="home_lock_chat">Запрашивать PIN</string>
+    <string name="home_unlock_chat">Не запрашивать PIN</string>
+    <string name="chat_locked_title">Чат заблокирован</string>
+    <string name="chat_locked_hint">Введите PIN, чтобы открыть чат</string>
     <string name="home_unblock">Разблокировать</string>
     <string name="home_block">Заблокировать</string>
     <string name="home_report">Пожаловаться</string>

@@ -50,6 +50,12 @@ object LocalStores {
     private val _archived = MutableStateFlow<Set<String>>(emptySet())
     val archived: StateFlow<Set<String>> = _archived.asStateFlow()
 
+    /** Threads the user locked behind the app PIN ("peer:<uin>"/"group:<id>").
+     *  Opening a locked chat prompts for the existing PIN first. Only offered
+     *  when a PIN is configured; cleared automatically if the PIN is removed. */
+    private val _locked = MutableStateFlow<Set<String>>(emptySet())
+    val locked: StateFlow<Set<String>> = _locked.asStateFlow()
+
     /** UINs of contacts the user removed — incoming sealed messages from
      *  them are dropped client-side. Mirrors iOS RemovedContactsStore. */
     private val _removed = MutableStateFlow<Set<Int>>(emptySet())
@@ -88,6 +94,14 @@ object LocalStores {
      *  home-row @ indicator. */
     private val _mentionInbox = MutableStateFlow<Set<String>>(emptySet())
     val mentionInbox: StateFlow<Set<String>> = _mentionInbox.asStateFlow()
+
+    /** Per-group "last seen @mention" cut-off (epoch millis). The @-jump FAB only
+     *  shows mentions NEWER than this, so re-entering a chat doesn't resurface
+     *  mentions you already viewed (Android parity with iOS MentionSeenStore).
+     *  Marked (monotonically) on chat exit; a genuinely newer mention brings the
+     *  FAB back. Keyed by group id. */
+    private val _mentionSeenAt = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    val mentionSeenAt: StateFlow<Map<Int, Long>> = _mentionSeenAt.asStateFlow()
 
     /** Presence "stay online for N hours after exit" window: the epoch-millis
      *  moment that window EXPIRES, or null when the feature is off. Local-only
@@ -211,12 +225,14 @@ object LocalStores {
             _muted.value = emptySet()
             _mentionsOnly.value = emptySet()
             _archived.value = emptySet()
+            _locked.value = emptySet()
             _removed.value = emptySet()
             _blocked.value = emptySet()
             _unread.value = emptyMap()
             _reactionInbox.value = emptySet()
             _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
+            _mentionSeenAt.value = emptyMap()
             _presenceWindow.value = null
             _secureThreads.value = emptySet()
             return
@@ -225,12 +241,14 @@ object LocalStores {
         _muted.value = prefs.getStringSet(pk(K_MUTE), emptySet())!!.toSet()
         _mentionsOnly.value = prefs.getStringSet(pk(K_MENTIONS), emptySet())!!.toSet()
         _archived.value = prefs.getStringSet(pk(K_ARCH), emptySet())!!.toSet()
+        _locked.value = prefs.getStringSet(pk(K_LOCKED), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
+        _mentionSeenAt.value = loadMentionSeen(pk(K_MENTION_SEEN))
         _presenceWindow.value = prefs.getLong(pk(K_PRES_WIN), 0L).takeIf { it > 0L }
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
     }
@@ -301,6 +319,9 @@ object LocalStores {
 
     fun isArchived(thread: String) = thread in _archived.value
     fun toggleArchive(thread: String) = toggle(_archived, K_ARCH, thread)
+
+    fun isLocked(thread: String) = thread in _locked.value
+    fun toggleLocked(thread: String) = toggle(_locked, K_LOCKED, thread)
 
     fun isRemoved(uin: Int) = uin in _removed.value
     fun addRemoved(uin: Int) {
@@ -448,6 +469,27 @@ object LocalStores {
             k to v
         }.toMap()
 
+    // ── mention "seen" cut-off (per group) ───────────────────────────
+    fun mentionSeenAt(groupId: Int): Long = _mentionSeenAt.value[groupId] ?: 0L
+
+    /** Advance the per-group mention-seen cut-off (monotonic — never goes back).
+     *  Called on chat exit with the newest @mention timestamp loaded. */
+    fun markMentionSeen(groupId: Int, upToTimestampMs: Long) {
+        if (acct == null) return
+        if (upToTimestampMs <= (_mentionSeenAt.value[groupId] ?: 0L)) return
+        _mentionSeenAt.value = _mentionSeenAt.value + (groupId to upToTimestampMs)
+        prefs.edit().putStringSet(pk(K_MENTION_SEEN), _mentionSeenAt.value.map { "${it.key}=${it.value}" }.toSet()).apply()
+    }
+
+    private fun loadMentionSeen(key: String): Map<Int, Long> =
+        prefs.getStringSet(key, emptySet())!!.mapNotNull { entry ->
+            val i = entry.lastIndexOf('=')
+            if (i <= 0) return@mapNotNull null
+            val g = entry.substring(0, i).toIntOrNull() ?: return@mapNotNull null
+            val v = entry.substring(i + 1).toLongOrNull() ?: return@mapNotNull null
+            g to v
+        }.toMap()
+
     // ── reaction / mention home-row inboxes ──────────────────────────
     fun markReaction(thread: String) = addTo(_reactionInbox, K_REACT_INBOX, thread)
     fun clearReaction(thread: String) = removeFrom(_reactionInbox, K_REACT_INBOX, thread)
@@ -574,7 +616,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_REMOVED, K_BLOCKED, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -582,6 +624,7 @@ object LocalStores {
     private const val K_MUTE = "muted"
     private const val K_MENTIONS = "mentions_only"
     private const val K_ARCH = "archived"
+    private const val K_LOCKED = "locked"
     private const val K_REMOVED = "removed"
     private const val K_BLOCKED = "blocked"
     private const val K_THEME = "theme_mode"
@@ -595,6 +638,7 @@ object LocalStores {
     private const val K_REACT_INBOX = "reaction_inbox"
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_MENTION_INBOX = "mention_inbox"
+    private const val K_MENTION_SEEN = "mention_seen_at"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"

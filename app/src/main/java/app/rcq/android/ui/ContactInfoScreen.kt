@@ -58,6 +58,7 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.data.LocalStores
 import app.rcq.android.model.UserStatus
+import app.rcq.android.net.CrossIslandSender
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
@@ -68,7 +69,7 @@ private val DANGER = Color(0xFFE5484D)
  *  message, and any visibility-gated profile fields the server returns,
  *  plus per-contact actions (favorite, mute, block, remove). */
 @Composable
-internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, onRemoved: () -> Unit, onOpenChat: (Int) -> Unit = {}) {
+internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, onRemoved: () -> Unit, onOpenChat: (Int) -> Unit = {}, groupHost: String? = null) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -88,24 +89,38 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     var safetyNumber by remember { mutableStateOf<String?>(null) }
     var safetyLoading by remember { mutableStateOf(false) }
     var identityChanged by remember { mutableStateOf(false) }
+    // Open card fetched from a cross-island GROUP member's island (name/status),
+    // since they aren't a contact and aren't on our island.
+    var ciCardName by remember { mutableStateOf<String?>(null) }
+    var ciCardStatus by remember { mutableStateOf<String?>(null) }
 
-    // §5c: a cross-island contact's profile lives on ITS island — our own
-    // /users/{uin}/info 404s, so render from the locally-stored card
-    // (nickname/gender/status) and skip the visit ping (it'd mis-route to our
-    // own island's uin).
-    val crossIslandHost = contact?.host
+    // §5c: a cross-island peer's profile lives on ITS island — our own
+    // /users/{uin}/info 404s. crossIslandHost is the existing contact's host, OR
+    // (when opened from a cross-island GROUP member who isn't a contact yet) the
+    // group's host. In both cases we render from the open card, never our island.
+    val crossIslandHost = contact?.host ?: groupHost
     LaunchedEffect(uin) {
         if (crossIslandHost == null) {
             profile = session.loadPeerProfile(uin)
             identityChanged = session.peerIdentityChanged(uin)
             runCatching { session.sendVisit(uin) }
+        } else if (contact == null && groupHost != null) {
+            // Cross-island group member: fetch their open card from the GROUP'S
+            // island instead of our own (which would 404 — the founder's report).
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                CrossIslandSender.fetchCard(groupHost, uin)
+            }?.let { card ->
+                ciCardName = card.nickname
+                ciCardStatus = card.statusMessage
+            }
         }
     }
 
-    val nickname = profile?.nickname ?: contact?.nickname ?: session.contactName(uin)
+    val nickname = profile?.nickname ?: ciCardName ?: contact?.nickname ?: session.contactName(uin)
     val presence = contact?.presence ?: UserStatus.OFFLINE
     val statusMessage = profile?.status_message?.takeIf { it.isNotBlank() }
         ?: contact?.statusMessage?.takeIf { it.isNotBlank() }
+        ?: ciCardStatus?.takeIf { it.isNotBlank() }
     val blocked = contact?.blocked == true
 
     fun copyUin() {
@@ -163,6 +178,25 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 ) {
                     Text(
                         stringResource(if (requestSent) R.string.add_request_sent else R.string.ci_send_request),
+                        color = if (requestSent) c.textSecondary else Color.White,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            } else if (contact == null && crossIslandHost != null) {
+                // Cross-island group member: add them as a cross-island contact
+                // (works even though they're on another server). Immediate add,
+                // not a request — so the button just says "Add".
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(if (requestSent) c.bgSecondary else c.accent)
+                        .clickable(enabled = !requestSent) {
+                            scope.launch { runCatching { session.addCrossIslandContact(uin, crossIslandHost) } }; requestSent = true
+                        }.padding(14.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(if (requestSent) R.string.add_request_sent else R.string.random_add_contact),
                         color = if (requestSent) c.textSecondary else Color.White,
                         fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                     )

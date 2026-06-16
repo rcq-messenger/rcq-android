@@ -1962,7 +1962,11 @@ class Session(context: Context) {
     private val profileGson = com.google.gson.Gson()
 
     /** Last-known-good privacy profile off disk, or null. */
-    private fun cachedProfile(): RcqApi.MeProfile? =
+    /** Last-known-good profile from the local cache (non-suspend) — the Privacy
+     *  screen seeds its pickers from this so they render instantly with the user's
+     *  real choices instead of snapping from the permissive defaults when the
+     *  server load lands (the "ползунки едут на глазах" report). */
+    fun cachedProfile(): RcqApi.MeProfile? =
         LocalStores.cachedProfileJson()?.let {
             runCatching { profileGson.fromJson(it, RcqApi.MeProfile::class.java) }.getOrNull()
         }

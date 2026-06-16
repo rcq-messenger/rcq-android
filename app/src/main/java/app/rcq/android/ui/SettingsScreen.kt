@@ -727,15 +727,19 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
 private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOpenDiagnostics: () -> Unit, onBack: () -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
-    var lastSeen by remember { mutableStateOf("everyone") }
-    var genderVis by remember { mutableStateOf("nobody") }
-    var profileVis by remember { mutableStateOf("everyone") }
-    var invitePolicy by remember { mutableStateOf("everyone") }
-    var receipts by remember { mutableStateOf("everyone") }
-    var presencePersistent by remember { mutableStateOf(false) }
-    var presenceTtl by remember { mutableStateOf(1440) }
-    var hofOptIn by remember { mutableStateOf(false) }
-    var hofAvatar by remember { mutableStateOf<String?>(null) }   // data-URI or null
+    // Seed pickers from the cached profile so they render instantly with the
+    // user's real choices (no "ползунки едут на глазах" snap from defaults); the
+    // LaunchedEffect below reconciles with the server.
+    val cached = remember { session.cachedProfile() }
+    var lastSeen by remember { mutableStateOf(cached?.last_seen_visibility ?: "everyone") }
+    var genderVis by remember { mutableStateOf(cached?.gender_visibility ?: "nobody") }
+    var profileVis by remember { mutableStateOf(cached?.profile_visibility ?: "everyone") }
+    var invitePolicy by remember { mutableStateOf(cached?.group_invite_policy ?: "everyone") }
+    var receipts by remember { mutableStateOf(cached?.read_receipts_visibility ?: "everyone") }
+    var presencePersistent by remember { mutableStateOf(cached?.presence_persistent ?: false) }
+    var presenceTtl by remember { mutableStateOf(cached?.presence_ttl_minutes ?: 1440) }
+    var hofOptIn by remember { mutableStateOf(cached?.hof_opt_in ?: false) }
+    var hofAvatar by remember { mutableStateOf(cached?.hof_avatar) }   // data-URI or null
     var hofBusy by remember { mutableStateOf(false) }
     var hofError by remember { mutableStateOf<String?>(null) }
     val screenSec by app.rcq.android.data.LocalStores.screenSecurity.collectAsState()

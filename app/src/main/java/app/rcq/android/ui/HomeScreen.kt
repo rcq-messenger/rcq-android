@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.GraphicEq
@@ -107,6 +109,7 @@ import androidx.compose.ui.unit.sp
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.CrossIslandRequestsStore
+import app.rcq.android.security.PanicPinService
 import app.rcq.android.data.LocalStores
 import app.rcq.android.model.Contact
 import app.rcq.android.model.RcqGroup
@@ -641,12 +644,17 @@ private fun contactActions(
     val fav = LocalStores.isFavorite(thread)
     val muted = LocalStores.isMuted(thread)
     val archived = LocalStores.isArchived(thread)
+    val locked = LocalStores.isLocked(thread)
     fun s(id: Int) = context.getString(id)
-    return listOf(
+    return listOfNotNull(
         ContextAction(s(R.string.home_send_message), Icons.AutoMirrored.Filled.Chat) { onOpenChat(contact.uin) },
         ContextAction(s(if (fav) R.string.home_remove_fav else R.string.home_add_fav), if (fav) Icons.Filled.Star else Icons.Filled.StarBorder) { LocalStores.toggleFavorite(thread) },
         ContextAction(s(if (muted) R.string.home_unmute else R.string.home_mute), if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff) { LocalStores.toggleMute(thread) },
         ContextAction(s(if (archived) R.string.home_unarchive else R.string.home_archive), if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive) { LocalStores.toggleArchive(thread) },
+        // Per-chat PIN lock — only offered when an app PIN is set.
+        if (PanicPinService.isConfigured(context))
+            ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) { LocalStores.toggleLocked(thread) }
+        else null,
         ContextAction(s(if (contact.blocked) R.string.home_unblock else R.string.home_block), if (contact.blocked) Icons.Outlined.Block else Icons.Filled.Block, destructive = !contact.blocked) { scope.launch { session.toggleBlock(contact.uin) } },
         ContextAction(s(R.string.home_report), Icons.Filled.Flag, destructive = true) { onReport(contact) },
         ContextAction(s(R.string.home_remove), Icons.Filled.PersonRemove, destructive = true) { scope.launch { session.removeContact(contact.uin) } },
@@ -665,13 +673,17 @@ private fun groupActions(
     val fav = LocalStores.isFavorite(thread)
     val muted = LocalStores.isMuted(thread)
     val archived = LocalStores.isArchived(thread)
+    val locked = LocalStores.isLocked(thread)
     val isOwner = group.ownerUin == ownUin
     fun s(id: Int) = context.getString(id)
-    return listOf(
+    return listOfNotNull(
         ContextAction(s(R.string.home_open_chat), Icons.AutoMirrored.Filled.Chat) { onOpenGroup(group.id) },
         ContextAction(s(if (fav) R.string.home_remove_fav else R.string.home_add_fav), if (fav) Icons.Filled.Star else Icons.Filled.StarBorder) { LocalStores.toggleFavorite(thread) },
         ContextAction(s(if (muted) R.string.home_unmute else R.string.home_mute), if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff) { LocalStores.toggleMute(thread) },
         ContextAction(s(if (archived) R.string.home_unarchive else R.string.home_archive), if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive) { LocalStores.toggleArchive(thread) },
+        if (PanicPinService.isConfigured(context))
+            ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) { LocalStores.toggleLocked(thread) }
+        else null,
         if (isOwner)
             ContextAction(s(R.string.home_delete_group), Icons.Filled.Delete, destructive = true) { scope.launch { session.deleteGroup(group.id) } }
         else

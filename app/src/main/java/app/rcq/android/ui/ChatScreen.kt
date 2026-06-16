@@ -465,10 +465,21 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Mark this thread active+read while open; clear again on a new
     // message arriving here is handled in Session.bumpUnreadIfInbound.
     val thisThread = if (isGroup) app.rcq.android.data.LocalStores.groupThread(groupId!!) else app.rcq.android.data.LocalStores.peerThread(peer!!)
+    // Latest snapshot for the mention-seen mark on exit (onDispose otherwise
+    // captures the messages value from when the effect was first set up).
+    val msgsForMentionSeen by androidx.compose.runtime.rememberUpdatedState(messages)
     DisposableEffect(target) {
         session.openThread(thisThread)
         if (!isGroup && !isSelf && peer != null) session.sendReadReceipts(peer)
         onDispose {
+            // Mark the loaded @mentions as seen so re-entering this chat doesn't
+            // resurface the @-jump FAB for mentions already viewed (iOS parity).
+            if (isGroup && groupId != null) {
+                msgsForMentionSeen
+                    .filter { !it.fromMe && session.bodyMentionsMe(it.body) }
+                    .maxOfOrNull { it.sentAt }
+                    ?.let { app.rcq.android.data.LocalStores.markMentionSeen(groupId, it) }
+            }
             session.closeThread()
             if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, false)
         }
@@ -569,7 +580,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // mention inbox). Tapping the @-FAB steps through these in order.
     val mentionIds = remember(messages, isGroup) {
         if (!isGroup) emptyList()
-        else messages.filter { !it.fromMe && session.bodyMentionsMe(it.body) }.map { it.id }
+        else {
+            // Only mentions NEWER than the per-group seen cut-off — reopening a
+            // chat must not resurface the @-FAB for mentions already viewed.
+            val seenAt = app.rcq.android.data.LocalStores.mentionSeenAt(groupId!!)
+            messages.filter { !it.fromMe && it.sentAt > seenAt && session.bodyMentionsMe(it.body) }.map { it.id }
+        }
     }
     var mentionCursor by remember(target) { mutableStateOf(0) }
     // The @-FAB steps through mentions and HIDES once the cursor passes the

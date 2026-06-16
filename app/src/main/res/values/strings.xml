@@ -726,7 +726,7 @@
     <string name="random_searching">Looking for someone…</string>
     <string name="random_stranger">Anonymous stranger</string>
     <string name="random_skip">Skip</string>
-    <string name="random_add_contact">Add to contacts</string>
+    <string name="random_add_contact">Add</string>
     <string name="random_add_sent">Contact request sent</string>
     <string name="random_ended">Chat ended</string>
     <string name="random_again">Find another</string>
@@ -843,6 +843,10 @@
     <string name="home_mute">Mute</string>
     <string name="home_unarchive">Unarchive</string>
     <string name="home_archive">Archive</string>
+    <string name="home_lock_chat">Require PIN</string>
+    <string name="home_unlock_chat">Don\'t require PIN</string>
+    <string name="chat_locked_title">Chat locked</string>
+    <string name="chat_locked_hint">Enter your PIN to open this chat</string>
     <string name="home_unblock">Unblock</string>
     <string name="home_block">Block</string>
     <string name="home_report">Report</string>
