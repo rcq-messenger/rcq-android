@@ -30,6 +30,11 @@ object BrokerRelayStore {
     private const val WANT = 3
     private const val PREFS = "rcq_broker_relays"
     private const val KEY = "relays"
+    // Tags of broker relays the broker marked tier=="trusted" (admin-promoted).
+    // Only these may become an onion ENTRY (an entry sees the client IP, so it
+    // must be vetted); community broker relays stay exits / fallback. The tier
+    // rides the TLS-authenticated /broker/bridges response (broker.py serves it).
+    private const val KEY_TRUSTED = "trusted_tags"
     private val gson = Gson()
     private lateinit var prefs: SharedPreferences
 
@@ -52,6 +57,14 @@ object BrokerRelayStore {
         gson.fromJson<List<SingBoxTransport.Relay>>(raw, object : TypeToken<List<SingBoxTransport.Relay>>() {}.type) ?: emptyList()
     }.getOrDefault(emptyList())
 
+    /** The cached broker relays marked trusted — onion-entry eligible. */
+    fun trustedRelays(): List<SingBoxTransport.Relay> {
+        if (!isReady()) return emptyList()
+        val tags = prefs.getStringSet(KEY_TRUSTED, emptySet()) ?: emptySet()
+        if (tags.isEmpty()) return emptyList()
+        return relays().filter { it.tag in tags }
+    }
+
     fun count(): Int = relays().size
 
     /** Best-effort: pull a few bridges from the broker + cache them. No-op on any
@@ -64,13 +77,20 @@ object BrokerRelayStore {
             ).execute().use { resp -> if (resp.isSuccessful) resp.body?.string() else null } ?: return
             val arr = JsonParser.parseString(body).asJsonObject.getAsJsonArray("relays") ?: return
             val out = ArrayList<SingBoxTransport.Relay>()
+            val trusted = HashSet<String>()
             for (el in arr) {
-                val r = ContactRelayStore.relayFromJson(el.asJsonObject) ?: continue
+                val obj = el.asJsonObject
+                val r = ContactRelayStore.relayFromJson(obj) ?: continue
                 // Collision-proof tag, independent of the descriptor's label.
-                out.add(r.copy(tag = "broker-${r.server.replace(Regex("[^A-Za-z0-9]"), "-")}-${r.port}"))
+                val tag = "broker-${r.server.replace(Regex("[^A-Za-z0-9]"), "-")}-${r.port}"
+                out.add(r.copy(tag = tag))
+                if (runCatching { obj.get("tier")?.asString }.getOrNull() == "trusted") trusted.add(tag)
             }
             // Replace the cache with the freshest set (empty list = broker had none).
-            prefs.edit().putString(KEY, gson.toJson(out)).apply()
+            prefs.edit()
+                .putString(KEY, gson.toJson(out))
+                .putStringSet(KEY_TRUSTED, trusted)
+                .apply()
         }
     }
 }

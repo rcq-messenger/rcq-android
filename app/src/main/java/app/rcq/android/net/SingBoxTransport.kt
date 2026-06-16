@@ -122,15 +122,81 @@ object SingBoxTransport {
      *  to rebuild the chain. */
     fun rotateEntry(): Boolean {
         if (localProxyMode()) return false   // no onion entry to rotate under a user proxy
-        val vless = relays().filter { it.proto == "vless" }
-        if (vless.size < 2) return false
+        // Rotate only among TRUSTED entries — never onto a community/shared relay
+        // that would then see the client IP.
+        val candidates = trustedVlessEntries()
+        if (candidates.size < 2) return false
         val cur = prefs()?.getString(KEY_ENTRY, null)
-        val idx = vless.indexOfFirst { it.tag == cur }
-        val next = vless[(idx + 1).mod(vless.size)]
+        val idx = candidates.indexOfFirst { it.tag == cur }
+        val next = candidates[(idx + 1).mod(candidates.size)]
         if (next.tag == cur) return false
         prefs()?.edit()?.putString(KEY_ENTRY, next.tag)?.apply()
         android.util.Log.i("RCQsingbox", "onion entry rotated -> ${next.tag}")
         return true
+    }
+
+    /** VLESS relays eligible to be the onion ENTRY (hydra step 3). An entry sees
+     *  the client IP (never the destination), so it must be VETTED: the
+     *  signed-config relays ([RelayConfigStore], Ed25519-curated = trusted by
+     *  provenance) plus broker relays the operator promoted to tier=trusted
+     *  ([BrokerRelayStore.trustedRelays]). Social-shared relays ([ContactRelayStore])
+     *  are excluded — they only ever serve as exits / fallback. Dedup by server:port. */
+    private fun trustedVlessEntries(): List<Relay> =
+        (RelayConfigStore.currentRelays() + BrokerRelayStore.trustedRelays())
+            .filter { it.proto == "vless" }
+            .distinctBy { "${it.server}:${it.port}" }
+
+    /** TCP-connect latency to [host]:[port] in ms, or null on failure/timeout.
+     *  Ranks trusted onion-entry candidates. Blocking — call off-main. */
+    private fun probeLatencyMs(host: String, port: Int, timeoutMs: Int = 4000): Long? = runCatching {
+        java.net.Socket().use { sock ->
+            val start = System.nanoTime()
+            sock.connect(InetSocketAddress(host, port), timeoutMs)
+            (System.nanoTime() - start) / 1_000_000
+        }
+    }.getOrNull()
+
+    /** Hydra step 3: pick the onion ENTRY among TRUSTED VLESS relays by
+     *  reachability + NEAREST-with-SPREAD, persisted as the sticky guard. Run
+     *  once before building the onion config (in [start]). A no-op when a valid
+     *  trusted entry is already pinned — preserves the Tor-guard property (pick
+     *  once, keep; don't reshuffle every launch). Only the FIRST pick (or a pick
+     *  after the pinned entry leaves the trusted set) probes; confirmed-block
+     *  rotation is handled separately by [rotateEntry]. With a single trusted
+     *  entry this degrades to today's behaviour; it spreads only once >1 trusted
+     *  entry exists (e.g. гидра promotes more domestic relays to trusted).
+     *  Blocking — called from [start] which already runs off-main. */
+    private fun selectEntryIfNeeded() {
+        if (!onionMode() || localProxyMode()) return
+        val candidates = trustedVlessEntries()
+        if (candidates.isEmpty()) return   // nothing to choose; buildConfig falls back to pool.first()
+        val p = prefs()
+        val cur = p?.getString(KEY_ENTRY, null)
+        if (cur != null && candidates.any { it.tag == cur }) return   // keep the pinned guard
+        // (Re)select: probe reachability + latency in parallel.
+        val exec = java.util.concurrent.Executors.newFixedThreadPool(minOf(candidates.size, 6))
+        val measured: List<Pair<String, Long>> = try {
+            candidates.map { c ->
+                exec.submit(java.util.concurrent.Callable { c.tag to probeLatencyMs(c.server, c.port) })
+            }.mapNotNull { f -> runCatching { f.get(6, TimeUnit.SECONDS) }.getOrNull() }
+                .mapNotNull { (tag, ms) -> if (ms != null) tag to ms else null }
+        } finally {
+            exec.shutdownNow()
+        }
+        val pickTag = if (measured.isEmpty()) {
+            // Every probe failed (the relay port may itself be filtered): still
+            // SPREAD — a random trusted candidate beats always camping pool.first().
+            candidates.random().tag
+        } else {
+            // NEAREST with SPREAD: random among entries within `tolerance` of the
+            // fastest, so near-equals share load while a clearly-closer (e.g.
+            // domestic) entry still wins.
+            val best = measured.minOf { it.second }
+            val tolerance = 50L   // ms — mirrors the urltest tolerance
+            measured.filter { it.second <= best + tolerance }.random().first
+        }
+        p?.edit()?.putString(KEY_ENTRY, pickTag)?.apply()
+        android.util.Log.i("RCQsingbox", "onion entry selected -> $pickTag (trusted=${candidates.size}, reachable=${measured.size})")
     }
 
     private var box: rcqbox.BoxService? = null
@@ -217,6 +283,10 @@ object SingBoxTransport {
     fun start(): Boolean {
         if (isActive) return true
         return runCatching {
+            // Hydra step 3: settle the sticky onion ENTRY (nearest trusted, spread)
+            // before the config is built. A no-op when an entry is already pinned
+            // or onion is off, so it adds latency only on the first onion engage.
+            selectEntryIfNeeded()
             val svc = rcqbox.Rcqbox.newBoxService()
             svc.start(buildConfig())
             box = svc
