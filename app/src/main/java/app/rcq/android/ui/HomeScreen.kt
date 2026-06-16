@@ -183,6 +183,10 @@ internal fun HomeScreen(
     val archived by LocalStores.archived.collectAsState()
     val unread by LocalStores.unread.collectAsState()
     val storyGroups by session.stories.collectAsState()
+    // Operator-toggleable features (admin console → Features); default true.
+    val nearbyEnabled by session.nearbyEnabled.collectAsState()
+    val randomEnabled by session.randomEnabled.collectAsState()
+    val storiesEnabled by session.storiesEnabled.collectAsState()
 
     // Stories: a compressed JPEG awaiting the caption/anonymous dialog before
     // posting, and the group currently open in the full-screen viewer.
@@ -294,6 +298,7 @@ internal fun HomeScreen(
                 onOpenAudioRooms = onOpenAudioRooms,
                 onOpenRadio = onOpenRadio,
                 onPostStory = { storyPicker.launch("image/*") },
+                showPostStory = storiesEnabled,
                 onToggleBypass = { session.setObfuscation(it) },
                 onComingSoon = { comingSoon = it },
                 onSwitchAccount = onSwitchAccount,
@@ -302,7 +307,7 @@ internal fun HomeScreen(
             )
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                if (storyGroups.isNotEmpty()) {
+                if (storyGroups.isNotEmpty() && storiesEnabled) {
                     item(key = "stories") {
                         StoriesStrip(
                             groups = storyGroups,
@@ -428,8 +433,9 @@ internal fun HomeScreen(
                 onRandom = onOpenRandom,
                 onNearby = onOpenNearby,
                 onSettings = onOpenSettings,
-                // Hide Random on org islands / self-host; keep it on the public server.
-                showRandom = session.currentServer == app.rcq.android.net.RcqApi.DEFAULT_HOST,
+                // Operator toggles Random / Nearby via the admin console (Features).
+                showRandom = randomEnabled,
+                showNearby = nearbyEnabled,
             )
         }
 
@@ -700,6 +706,7 @@ private fun HomeHeader(
     onOpenAudioRooms: () -> Unit,
     onOpenRadio: () -> Unit,
     onPostStory: () -> Unit,
+    showPostStory: Boolean = true,
     onToggleBypass: (Boolean) -> Unit,
     onComingSoon: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
@@ -884,11 +891,13 @@ private fun HomeHeader(
                     leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onSearch() },
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.home_menu_post_story), color = c.textPrimary) },
-                    leadingIcon = { Icon(Icons.Filled.AddAPhoto, null, tint = c.accent) },
-                    onClick = { overflowMenu = false; onPostStory() },
-                )
+                if (showPostStory) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.home_menu_post_story), color = c.textPrimary) },
+                        leadingIcon = { Icon(Icons.Filled.AddAPhoto, null, tint = c.accent) },
+                        onClick = { overflowMenu = false; onPostStory() },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_menu_news), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.Newspaper, null, tint = c.accent) },
@@ -1199,7 +1208,7 @@ private fun ConnectingState(stealth: Boolean = false) {
 }
 
 @Composable
-private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onRandom: () -> Unit, onNearby: () -> Unit, onSettings: () -> Unit, showRandom: Boolean = true) {
+private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onRandom: () -> Unit, onNearby: () -> Unit, onSettings: () -> Unit, showRandom: Boolean = true, showNearby: Boolean = true) {
     val c = RcqTheme.colors
     Row(
         Modifier
@@ -1216,7 +1225,7 @@ private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onRandom: () -> Unit,
         // Random/chat-roulette is a public-network feature; hide it on org
         // islands / self-host (founder's call). Nearby stays everywhere (mesh).
         if (showRandom) BarButton(Icons.Filled.Shuffle, stringResource(R.string.home_bar_random), onRandom)
-        BarButton(Icons.Filled.NearMe, stringResource(R.string.home_bar_nearby), onNearby)
+        if (showNearby) BarButton(Icons.Filled.NearMe, stringResource(R.string.home_bar_nearby), onNearby)
         BarButton(Icons.Filled.Settings, stringResource(R.string.home_bar_settings), onSettings)
     }
 }

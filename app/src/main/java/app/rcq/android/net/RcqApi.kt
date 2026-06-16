@@ -728,7 +728,19 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
 
     // ── server capability discovery (GET /server/info, unauthenticated) ──
 
-    data class ServerCapabilities(val uin_shop: Boolean = false, val hall_of_fame: Boolean = false, val registration_policy: String = "open")
+    // nearby/random_chat/hood/stories default TRUE so a server that omits them
+    // (legacy) keeps the tabs visible; the operator hides a feature via the admin
+    // console (Features). max_accounts_per_device caps the account switcher.
+    data class ServerCapabilities(
+        val uin_shop: Boolean = false,
+        val hall_of_fame: Boolean = false,
+        val registration_policy: String = "open",
+        val nearby: Boolean = true,
+        val random_chat: Boolean = true,
+        val hood: Boolean = true,
+        val stories: Boolean = true,
+        val max_accounts_per_device: Int = 5,
+    )
     data class ServerInfoResponse(val name: String = "", val capabilities: ServerCapabilities = ServerCapabilities())
 
     /** Server metadata + optional-surface flags. api.rcq.app advertises

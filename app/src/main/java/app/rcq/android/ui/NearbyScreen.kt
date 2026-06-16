@@ -67,6 +67,8 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
 
     val active = state is NearbyController.State.Active
     val activeBucket = (state as? NearbyController.State.Active)?.bucketId
+    // Operator can hide Hood Chat via the admin console (Features).
+    val hoodEnabled by session.hoodEnabled.collectAsState()
 
     // Nested nav into the bucket-scoped district screens.
     var hoodChatBucket by remember { mutableStateOf<String?>(null) }
@@ -120,7 +122,7 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
                     CountdownLabel(exp)
                     // Full-width stacked (was a 2-up Row where "Announcements"
                     // overflowed the half-width capsule) so both labels fit.
-                    CapsuleButton(stringResource(R.string.hood_title), modifier = Modifier.fillMaxWidth()) { hoodChatBucket = activeBucket }
+                    if (hoodEnabled) CapsuleButton(stringResource(R.string.hood_title), modifier = Modifier.fillMaxWidth()) { hoodChatBucket = activeBucket }
                     CapsuleButton(stringResource(R.string.banners_title), modifier = Modifier.fillMaxWidth()) { bannersBucket = activeBucket }
                     CapsuleButton(stringResource(R.string.nearby_stop), modifier = Modifier.fillMaxWidth()) { controller.stop() }
                 }

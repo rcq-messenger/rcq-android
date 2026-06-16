@@ -286,6 +286,18 @@ class Session(context: Context) {
     private val _hallOfFameEnabled = MutableStateFlow(true)
     val hallOfFameEnabled: StateFlow<Boolean> = _hallOfFameEnabled.asStateFlow()
 
+    /** Operator-toggleable optional features (admin console → Features). Each
+     *  defaults true so a legacy server keeps the tab; turned off → the UI hides
+     *  the entry and the route is also 404-gated server-side. */
+    private val _nearbyEnabled = MutableStateFlow(true)
+    val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
+    private val _randomEnabled = MutableStateFlow(true)
+    val randomEnabled: StateFlow<Boolean> = _randomEnabled.asStateFlow()
+    private val _hoodEnabled = MutableStateFlow(true)
+    val hoodEnabled: StateFlow<Boolean> = _hoodEnabled.asStateFlow()
+    private val _storiesEnabled = MutableStateFlow(true)
+    val storiesEnabled: StateFlow<Boolean> = _storiesEnabled.asStateFlow()
+
     /** Load the server push-preference toggles (Notifications settings). */
     suspend fun loadPushPrefs(): RcqApi.PushPrefs? = runCatching { api.getPushPreferences() }.getOrNull()
 
@@ -870,6 +882,11 @@ class Session(context: Context) {
                 val caps = api.serverInfo().capabilities
                 _uinShopEnabled.value = caps.uin_shop
                 _hallOfFameEnabled.value = caps.hall_of_fame
+                _nearbyEnabled.value = caps.nearby
+                _randomEnabled.value = caps.random_chat
+                _hoodEnabled.value = caps.hood
+                _storiesEnabled.value = caps.stories
+                app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
             }
         }
         // Advertise sender-keys support so others broadcast to us (encrypt-once)

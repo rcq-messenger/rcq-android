@@ -34,7 +34,16 @@ object AccountManager {
      *  handful covers the realistic multi-identity uses (main + work +
      *  persona). Beyond that we suspect abuse or test setups. Local-only;
      *  the server can't tell two UINs share a device anyway. */
-    const val MAX_ACCOUNTS = 5
+    /** Hard ceiling the app supports regardless of server. */
+    const val HARD_CAP = 5
+
+    /** Operator-advertised cap from the active server's /server/info
+     *  (max_accounts_per_device). Session writes it on caps refresh; @Volatile
+     *  so the limit checks (UI thread) see writes from the refresh coroutine. */
+    @Volatile var serverMaxAccounts: Int = HARD_CAP
+
+    /** Effective per-device cap: the operator can LOWER it, never above HARD_CAP. */
+    val MAX_ACCOUNTS: Int get() = maxOf(1, minOf(HARD_CAP, serverMaxAccounts))
 
     private lateinit var appCtx: Context
     private lateinit var prefs: SharedPreferences
