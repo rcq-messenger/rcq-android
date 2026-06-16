@@ -741,6 +741,14 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     val screenSec by app.rcq.android.data.LocalStores.screenSecurity.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
+    // Local-proxy transport (route through the user's own Tor/i2p). Exclusive of
+    // relays/onion — while it's on, those switches grey out.
+    var localProxy by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyMode()) }
+    var lpHost by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyHost()) }
+    var lpPort by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyPort().toString()) }
+    var lpType by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyType()) }
+    var lpTesting by remember { mutableStateOf(false) }
+    var lpTestOk by remember { mutableStateOf<Boolean?>(null) }
     val hofPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -911,6 +919,7 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 }
                 Switch(
                     checked = obfuscated,
+                    enabled = !localProxy,
                     onCheckedChange = { obfuscated = it; app.rcq.android.net.SingBoxTransport.setEnabled(context, it) },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
@@ -928,6 +937,7 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 }
                 Switch(
                     checked = onion,
+                    enabled = !localProxy,
                     onCheckedChange = {
                         onion = it
                         app.rcq.android.net.SingBoxTransport.setOnionOptIn(context, it)
@@ -940,6 +950,89 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
+            }
+
+            // Local proxy: route everything through the user's OWN local Tor /
+            // i2p SOCKS5/HTTP. Mutually exclusive with relays/onion above (they
+            // grey out while this is on). No auto-fallback to relays if the proxy
+            // is down — that would leak around Tor.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_localproxy), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_localproxy_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = localProxy,
+                    onCheckedChange = { on ->
+                        val port = lpPort.toIntOrNull()
+                        if (on && (lpHost.isBlank() || port == null || port !in 1..65535)) {
+                            lpTestOk = false
+                        } else {
+                            localProxy = on
+                            if (on) { obfuscated = false; onion = false }
+                            session.setLocalProxy(on, lpHost.trim(), port ?: 9050, lpType)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
+            if (localProxy) {
+                Column(Modifier.padding(top = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = lpHost,
+                            onValueChange = { lpHost = it },
+                            label = { Text(stringResource(R.string.pv_localproxy_host)) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        OutlinedTextField(
+                            value = lpPort,
+                            onValueChange = { v -> lpPort = v.filter { it.isDigit() }.take(5) },
+                            label = { Text(stringResource(R.string.pv_localproxy_port)) },
+                            singleLine = true,
+                            modifier = Modifier.weight(0.5f),
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                        TextButton(onClick = { lpType = "socks" }) {
+                            Text("SOCKS5", color = if (lpType == "socks") c.accent else c.textSecondary)
+                        }
+                        TextButton(onClick = { lpType = "http" }) {
+                            Text("HTTP", color = if (lpType == "http") c.accent else c.textSecondary)
+                        }
+                        Spacer(Modifier.weight(1f))
+                        TextButton(
+                            enabled = !lpTesting,
+                            onClick = {
+                                val port = lpPort.toIntOrNull()
+                                if (port != null) {
+                                    lpTesting = true; lpTestOk = null
+                                    scope.launch {
+                                        val ok = withContext(Dispatchers.IO) {
+                                            app.rcq.android.net.SingBoxTransport.testLocalProxy(lpHost.trim(), port, lpType)
+                                        }
+                                        lpTestOk = ok; lpTesting = false
+                                    }
+                                }
+                            },
+                        ) { Text(stringResource(R.string.pv_localproxy_test), color = c.accent) }
+                    }
+                    lpTestOk?.let { ok ->
+                        Text(
+                            stringResource(if (ok) R.string.pv_localproxy_test_ok else R.string.pv_localproxy_test_fail),
+                            color = if (ok) c.accent else c.statusBusy,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.pv_localproxy_hint),
+                        color = c.textSecondary, fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
 
             // In-chat bridge sharing: relays a contact shared / you imported,

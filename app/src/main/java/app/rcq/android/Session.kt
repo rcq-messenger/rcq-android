@@ -824,6 +824,37 @@ class Session(context: Context) {
         }
     }
 
+    /** Switch to / from local-proxy transport (route everything through the
+     *  user's OWN local Tor/i2p SOCKS5/HTTP proxy). Like [setObfuscation] but
+     *  selects LOCAL_PROXY mode (exclusive of relays/onion) and rebuilds the API
+     *  + socket so they capture the proxy, then reconnects. There is NO automatic
+     *  fallback to relays if the proxy is down — that would leak traffic around
+     *  the user's Tor; instead the connect fails and the user switches back. */
+    fun setLocalProxy(on: Boolean, host: String, port: Int, type: String) {
+        val transport = app.rcq.android.net.SingBoxTransport
+        if (on) {
+            transport.setLocalProxy(appCtx, host, port, type)
+            transport.setMode(appCtx, app.rcq.android.net.SingBoxTransport.Mode.LOCAL_PROXY)
+            transport.setEnabled(appCtx, true)
+        } else {
+            transport.setMode(appCtx, app.rcq.android.net.SingBoxTransport.Mode.RELAYS)
+            transport.setEnabled(appCtx, false)
+        }
+        val uin = store.uin ?: return
+        val token = store.token ?: return
+        scope.launch {
+            // Force a config rebuild (start() is a no-op if already active, so
+            // stop first when switching mode while engaged).
+            if (transport.isActive) transport.stop()
+            if (on) transport.start()
+            socket.disconnect()
+            api = newApi()
+            socket = newSocket()
+            _stealthActive.value = transport.isActive
+            connectAndSync(uin, token)
+        }
+    }
+
     /** Open the WebSocket + pull the contact graph. Split out of [start] so the
      *  transport engage can run first on a background coroutine. */
     private fun connectAndSync(uin: Int, token: String) {

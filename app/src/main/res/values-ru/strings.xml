@@ -548,6 +548,14 @@
     <string name="pv_obfuscated_desc">Проводит соединение через релей, когда сеть блокирует RCQ напрямую. Повышает стабильность на ограничивающих сетях. Применяется при следующем запуске.</string>
     <string name="pv_onion">Луковая маршрутизация (эксперимент)</string>
     <string name="pv_onion_desc">Проводит соединение через два релея, чтобы ни один релей не видел одновременно вас и сервер. Маскировку соединения включает автоматически. Немного медленнее. Применяется при следующем запуске.</string>
+    <string name="pv_localproxy">Локальный прокси (Tor / I2P)</string>
+    <string name="pv_localproxy_desc">Пускать приложение через ваш локальный Tor или I2P. Заменяет релеи и onion.</string>
+    <string name="pv_localproxy_host">Хост</string>
+    <string name="pv_localproxy_port">Порт</string>
+    <string name="pv_localproxy_test">Проверить</string>
+    <string name="pv_localproxy_test_ok">Сервер доступен через прокси ✓</string>
+    <string name="pv_localproxy_test_fail">Через прокси сервер недоступен</string>
+    <string name="pv_localproxy_hint">Orbot (Tor): 127.0.0.1:9050 · i2pd: 127.0.0.1:4447. Сначала запустите прокси.</string>
     <!-- Polls -->
     <string name="poll_create">Создать опрос</string>
     <string name="poll_question">Вопрос</string>

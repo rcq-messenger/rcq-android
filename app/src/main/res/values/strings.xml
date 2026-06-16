@@ -549,6 +549,14 @@
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>
     <string name="pv_onion">Onion routing (experimental)</string>
     <string name="pv_onion_desc">Routes through two relays so no single relay sees both you and the server. Turns on the protected connection automatically. A little slower. Takes effect on next launch.</string>
+    <string name="pv_localproxy">Local proxy (Tor / I2P)</string>
+    <string name="pv_localproxy_desc">Route the app through your own local Tor or I2P proxy. Replaces relays and onion.</string>
+    <string name="pv_localproxy_host">Host</string>
+    <string name="pv_localproxy_port">Port</string>
+    <string name="pv_localproxy_test">Test</string>
+    <string name="pv_localproxy_test_ok">Reached the server through the proxy ✓</string>
+    <string name="pv_localproxy_test_fail">Couldn\'t reach the server through the proxy</string>
+    <string name="pv_localproxy_hint">Orbot (Tor): 127.0.0.1:9050 · i2pd: 127.0.0.1:4447. Start your proxy first.</string>
     <!-- Polls -->
     <string name="poll_create">Create poll</string>
     <string name="poll_question">Question</string>

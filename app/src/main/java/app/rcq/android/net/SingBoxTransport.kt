@@ -28,7 +28,14 @@ object SingBoxTransport {
     private const val PREFS = "rcq_singbox"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_ENTRY = "onion_entry"   // sticky onion guard (O4)
-    private const val KEY_ONION_OPTIN = "onion_optin"   // per-device opt-in (O5)
+    private const val KEY_ONION_OPTIN = "onion_optin"   // legacy per-device onion opt-in (O5); migrated into KEY_MODE
+    // Unified transport topology (once KEY_ENABLED): which outbound shape buildConfig emits.
+    private const val KEY_MODE = "transport_mode"   // RELAYS | ONION | LOCAL_PROXY
+    private const val KEY_LP_HOST = "lp_host"
+    private const val KEY_LP_PORT = "lp_port"
+    private const val KEY_LP_TYPE = "lp_type"       // socks | http
+
+    enum class Mode { RELAYS, ONION, LOCAL_PROXY }
 
     @Volatile
     var isActive = false
@@ -44,18 +51,56 @@ object SingBoxTransport {
     private fun prefs(): android.content.SharedPreferences? =
         appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** Onion routing is ON when the signed config enables it (cohort flip) OR
-     *  this device opted in (the experimental Settings toggle, O5). Per-device
-     *  opt-in lets volunteers self-select for real-world testing WITHOUT the
-     *  all-or-nothing signed-config flip. Default OFF. */
-    fun onionMode(): Boolean =
-        RelayConfigStore.onionEnabled || (prefs()?.getBoolean(KEY_ONION_OPTIN, false) ?: false)
+    /** The selected transport topology. KEY_MODE is the single source of truth;
+     *  the first read after upgrade migrates the legacy onion opt-in bool. */
+    private fun modeFrom(p: android.content.SharedPreferences): Mode {
+        p.getString(KEY_MODE, null)?.let { return runCatching { Mode.valueOf(it) }.getOrDefault(Mode.RELAYS) }
+        return if (p.getBoolean(KEY_ONION_OPTIN, false)) Mode.ONION else Mode.RELAYS
+    }
+    fun mode(): Mode = prefs()?.let { modeFrom(it) } ?: Mode.RELAYS
+    fun setMode(ctx: Context, m: Mode) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_MODE, m.name).apply()
+    }
 
+    /** Onion routing is ON when this device selected it OR the signed config
+     *  enables it (cohort flip) — EXCEPT an explicit local-proxy choice always
+     *  wins (never silently route a Tor-only user through relays). Default OFF. */
+    fun onionMode(): Boolean =
+        mode() == Mode.ONION || (RelayConfigStore.onionEnabled && mode() != Mode.LOCAL_PROXY)
+
+    /** Route everything through the user's own local SOCKS5/HTTP proxy (Tor/i2p);
+     *  exclusive of relays/onion. */
+    fun localProxyMode(): Boolean = mode() == Mode.LOCAL_PROXY
+    fun localProxyHost(): String = prefs()?.getString(KEY_LP_HOST, "127.0.0.1") ?: "127.0.0.1"
+    fun localProxyPort(): Int = prefs()?.getInt(KEY_LP_PORT, 9050) ?: 9050
+    fun localProxyType(): String = prefs()?.getString(KEY_LP_TYPE, "socks") ?: "socks"
+    fun setLocalProxy(ctx: Context, host: String, port: Int, type: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LP_HOST, host.trim())
+            .putInt(KEY_LP_PORT, port)
+            .putString(KEY_LP_TYPE, if (type == "http") "http" else "socks")
+            .apply()
+    }
+
+    /** One-shot reachability check of a user proxy WITHOUT touching the live
+     *  transport: dial the proxy directly and GET /health (judging on a 2xx,
+     *  not a bare socket-open — a SOCKS port can accept yet the Tor circuit be
+     *  down). Hard timeout; a dead/DPI'd proxy hangs. Blocking — call off-main. */
+    fun testLocalProxy(host: String, port: Int, type: String): Boolean = runCatching {
+        val pType = if (type == "http") Proxy.Type.HTTP else Proxy.Type.SOCKS
+        OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS)
+            .proxy(Proxy(pType, InetSocketAddress(host.trim(), port))).build()
+            .newCall(Request.Builder().url("https://api.rcq.app/health").get().build())
+            .execute().use { it.isSuccessful }
+    }.getOrElse { false }
+
+    // Legacy onion opt-in shims (the existing Settings onion row + any caller):
+    // route through the unified mode so they can never disagree.
     fun isOnionOptIn(ctx: Context): Boolean =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ONION_OPTIN, false)
+        modeFrom(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)) == Mode.ONION
 
     fun setOnionOptIn(ctx: Context, on: Boolean) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ONION_OPTIN, on).apply()
+        setMode(ctx, if (on) Mode.ONION else Mode.RELAYS)
     }
 
     /** Sticky onion ENTRY guard (Tor lesson: pin the entry, don't reshuffle it
@@ -76,6 +121,7 @@ object SingBoxTransport {
      *  true when a different entry was selected. Caller restarts the transport
      *  to rebuild the chain. */
     fun rotateEntry(): Boolean {
+        if (localProxyMode()) return false   // no onion entry to rotate under a user proxy
         val vless = relays().filter { it.proto == "vless" }
         if (vless.size < 2) return false
         val cur = prefs()?.getString(KEY_ENTRY, null)
@@ -212,7 +258,21 @@ object SingBoxTransport {
         // to the single-hop path below when onion is off or we lack 2 VLESS
         // relays, so connectivity is never worse than today. Proven via a local
         // sing-box prototype (RCQ/docs/onion-design.md).
-        if (onionMode() && vless.size >= 2) {
+        if (localProxyMode()) {
+            // LOCAL PROXY: a single socks/http outbound to the user's own
+            // Tor/i2p; no relays, no urltest, no onion. The user's proxy IS the
+            // circumvention + metadata layer. sing-box just forwards the local
+            // mixed inbound (1089) → user proxy, so proxy()/call sites are
+            // untouched. NO automatic fallback to relays (that would leak around
+            // Tor) — if the proxy is down, requests fail until the user fixes it.
+            outbounds.put(JSONObject().apply {
+                put("type", if (localProxyType() == "http") "http" else "socks")
+                put("tag", "out")
+                put("server", localProxyHost())
+                put("server_port", localProxyPort())
+                if (localProxyType() != "http") put("version", "5")
+            })
+        } else if (onionMode() && vless.size >= 2) {
             val entry = stickyEntry(vless)          // O4: persisted guard, not just vless.first()
             val exits = vless.filter { it.tag != entry.tag }
             outbounds.put(JSONObject().apply {
