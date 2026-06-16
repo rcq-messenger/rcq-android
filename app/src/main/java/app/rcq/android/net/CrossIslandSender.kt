@@ -194,13 +194,19 @@ object CrossIslandSender {
         val homes = Multihome.resolveAndMirrorHomes(ownHost, contact.host, contact.uin, contact.signingKey)
             .ifEmpty { listOf(RcqFederation.Home(contact.host, contact.uin)) }
         for (h in homes) {
+            val client = http()
             val body = JsonObject().apply {
                 addProperty("to_uin", h.uin)
                 addProperty("envelope_type", "message")
                 addProperty("payload", payload)
+                // F3 deposit-auth: attach an anonymous blinded token when the
+                // recipient island offers it, so our cross-island deposit isn't
+                // throttled by the blunt per-IP cap (and survives a future
+                // require-token flip). Best-effort — null = the legacy path.
+                DepositAuthStore.tokenFor(h.host, client)?.let { add("deposit_token", it) }
             }.toString().toRequestBody(JSON)
             val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()
-            runCatching { http().newCall(req).execute().use { if (it.isSuccessful) delivered = true } }
+            runCatching { client.newCall(req).execute().use { if (it.isSuccessful) delivered = true } }
         }
         return delivered
     }
