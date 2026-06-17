@@ -196,6 +196,36 @@ object Push {
         }
     }
 
+    /** Whether the app can present a full-screen incoming-call UI. On Android 14+
+     *  (UPSIDE_DOWN_CAKE) USE_FULL_SCREEN_INTENT is special-access and is NOT
+     *  auto-granted to a non-dialer app, so an incoming call silently degrades to
+     *  a heads-up notification that's easy to miss. True (always) below 14. */
+    fun fullScreenIntentGranted(ctx: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+            (ctx.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true)
+
+    /** Open the system screen where the user grants full-screen-intent access, so
+     *  incoming calls pop the full call UI instead of a heads-up. Falls back to
+     *  the app's notification settings if the dedicated screen is unavailable. */
+    fun openFullScreenIntentSettings(ctx: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        val pkgUri = android.net.Uri.parse("package:${ctx.packageName}")
+        runCatching {
+            ctx.startActivity(
+                Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkgUri)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            runCatching {
+                ctx.startActivity(
+                    Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
+
     /** POST [endpoint] to every local account's island so each can wake this
      *  device. Idempotent server-side (upsert on uin+token). Fire-and-forget;
      *  callable headless (reads per-account creds straight from SecureStore). */

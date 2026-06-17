@@ -917,6 +917,9 @@
     <string name="notif_push_change">Change or reset provider</string>
     <string name="notif_push_choose_title">Push provider</string>
     <string name="notif_push_disable">Disable push</string>
+    <string name="notif_fsi_title">Incoming-call screen</string>
+    <string name="notif_fsi_hint">Android 14 blocks the full-screen incoming-call view by default, so calls only show a small banner you can miss. Allow it for reliable incoming calls.</string>
+    <string name="notif_fsi_grant">Allow call screen</string>
     <string name="notif_contact_requests">New contact requests</string>
     <string name="notif_contact_requests_desc">Wake the phone when someone asks to add you</string>
     <string name="notif_perchat_note">To silence a specific chat, long-press it on the home screen.</string>

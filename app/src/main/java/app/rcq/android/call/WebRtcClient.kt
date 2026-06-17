@@ -70,6 +70,17 @@ class WebRtcClient(private val appContext: Context) {
 
     private var turnServers: List<PeerConnection.IceServer> = emptyList()
 
+    // ICE candidate-type tally for the current peer connection (call-failure
+    // diagnostics). On a real censored device a failed/timed-out call with
+    // relay=0 means NO reachable TURN relay candidate was gathered → STUN-only →
+    // the "UI connects, no media" symptom on symmetric NAT/CGNAT. Reset per pc.
+    @Volatile private var candHost = 0
+    @Volatile private var candSrflx = 0
+    @Volatile private var candRelay = 0
+
+    /** Human-readable local ICE candidate tally, e.g. "host=4 srflx=2 relay=0". */
+    fun iceDiag(): String = "host=$candHost srflx=$candSrflx relay=$candRelay"
+
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     // ── TURN ───────────────────────────────────────────────────────────
@@ -238,6 +249,8 @@ class WebRtcClient(private val appContext: Context) {
     private fun makePeerConnection(): PeerConnection {
         val servers = ArrayList(STUN)
         servers.addAll(turnServers)
+        candHost = 0; candSrflx = 0; candRelay = 0
+        android.util.Log.i("RCQcall", "peerConnection: ${turnServers.size} TURN server(s) configured")
         val cfg = PeerConnection.RTCConfiguration(servers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
@@ -343,6 +356,11 @@ class WebRtcClient(private val appContext: Context) {
     private val pcObserver = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate?) {
             candidate ?: return
+            when {
+                candidate.sdp.contains(" typ relay") -> candRelay++
+                candidate.sdp.contains(" typ srflx") -> candSrflx++
+                candidate.sdp.contains(" typ host") -> candHost++
+            }
             val payload = JsonObject().apply {
                 addProperty("sdp", candidate.sdp)
                 addProperty("sdpMLineIndex", candidate.sdpMLineIndex)
@@ -352,6 +370,7 @@ class WebRtcClient(private val appContext: Context) {
         }
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+            android.util.Log.i("RCQcall", "ICE $state (local cand ${iceDiag()})")
             when (state) {
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> onConnected?.invoke()

@@ -71,6 +71,9 @@ fun CallScreen(controller: CallController) {
     val remoteVideo by controller.remoteVideo.collectAsState()
     val incomingUpgrade by controller.incomingVideoUpgrade.collectAsState()
     val connectedAt by controller.connectedAtMs.collectAsState()
+    // When the offer arrived while backgrounded, the full-screen IncomingCallActivity
+    // owns accept/decline; don't also show in-app accept/decline for the same call.
+    val incomingViaFsi by controller.incomingViaFsi.collectAsState()
 
     val isVideo = info.media == CallController.Media.VIDEO
     val connected = state is CallController.State.Connected
@@ -143,9 +146,14 @@ fun CallScreen(controller: CallController) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (incoming) {
-                Row(horizontalArrangement = Arrangement.spacedBy(64.dp)) {
-                    RoundCallButton(Icons.Filled.CallEnd, stringResource(R.string.call_decline), Color(0xFFE5484D)) { controller.decline() }
-                    RoundCallButton(Icons.Filled.Call, stringResource(R.string.call_accept), Color(0xFF30A46C)) { controller.accept() }
+                // FSI-owned (offer arrived while backgrounded): the lock-screen
+                // IncomingCallActivity is the accept/decline surface — show no
+                // in-app buttons so the two can't both drive the same call.
+                if (!incomingViaFsi) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(64.dp)) {
+                        RoundCallButton(Icons.Filled.CallEnd, stringResource(R.string.call_decline), Color(0xFFE5484D)) { controller.decline() }
+                        RoundCallButton(Icons.Filled.Call, stringResource(R.string.call_accept), Color(0xFF30A46C)) { controller.accept() }
+                    }
                 }
             } else if (!ended) {
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {

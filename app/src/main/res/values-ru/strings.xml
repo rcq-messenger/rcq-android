@@ -914,6 +914,9 @@
     <string name="notif_push_change">Сменить или сбросить провайдер</string>
     <string name="notif_push_choose_title">Провайдер пушей</string>
     <string name="notif_push_disable">Отключить пуши</string>
+    <string name="notif_fsi_title">Экран входящего звонка</string>
+    <string name="notif_fsi_hint">Android 14 по умолчанию блокирует полноэкранный показ входящего звонка, поэтому звонок виден только маленьким баннером, который легко пропустить. Разрешите, чтобы входящие звонки приходили надёжно.</string>
+    <string name="notif_fsi_grant">Разрешить экран звонка</string>
     <string name="notif_contact_requests">Новые заявки в контакты</string>
     <string name="notif_contact_requests_desc">Будить телефон, когда вас хотят добавить</string>
     <string name="notif_perchat_note">Чтобы заглушить отдельный чат, удерживайте его на главном экране.</string>

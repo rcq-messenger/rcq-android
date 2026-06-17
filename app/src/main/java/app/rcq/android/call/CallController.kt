@@ -76,11 +76,25 @@ class CallController(
     private val _connectedAtMs = MutableStateFlow(0L)
     val connectedAtMs: StateFlow<Long> = _connectedAtMs.asStateFlow()
 
+    /** True while the current Incoming call's accept/decline surface is the
+     *  full-screen IncomingCallActivity (raised because the offer arrived over the
+     *  WS while the app was backgrounded). The in-app CallScreen suppresses its own
+     *  accept/decline buttons in that case so the two surfaces can't both drive the
+     *  same call (double-accept / decline-then-resurrect). Cleared when the call
+     *  ends or tears down. */
+    private val _incomingViaFsi = MutableStateFlow(false)
+    val incomingViaFsi: StateFlow<Boolean> = _incomingViaFsi.asStateFlow()
+
     private var pendingRemoteOffer: String? = null
     private val pendingRemoteIce = mutableListOf<String>()
     private var pendingRenegotiationOffer: String? = null
     private var outgoingVideoUpgradePending = false
     private var connectedSince = 0L
+    /** Reentrancy guard: an accept() is mid-flight (TURN fetch + handleOffer).
+     *  Blocks a second accept() — a fast double-tap, or the FSI-accept drain
+     *  racing an in-app tap — from running handleOffer twice on one connection
+     *  (which throws and kills the just-answered call). */
+    private var accepting = false
 
     // ICE-recovery state. Touched from IO-pool timers + the rtc callbacks, so
     // the decision points are guarded by recoveryLock.
@@ -118,7 +132,8 @@ class CallController(
         _state.value = State.Outgoing(call)
         scope.launch {
             try {
-                refreshTurn()
+                val turnOk = refreshTurn()
+                android.util.Log.i("RCQcall", "call ${call.id.take(8)} outgoing media=${media.wire} turn=$turnOk")
                 val sdp = rtc.createOffer(media.toRtc())
                 send(signal("call_offer", peerUin, call.id, mapOf("media" to media.wire, "sdp" to sdp)))
                 ringer.startRingback()
@@ -133,12 +148,15 @@ class CallController(
     fun accept() {
         val s = _state.value as? State.Incoming ?: return
         val offer = pendingRemoteOffer ?: return
+        if (accepting) return
+        accepting = true
         val call = s.info
         WebRtcClient.ensureInitialised(appContext)
         ringer.stop()
         scope.launch {
             try {
-                refreshTurn()
+                val turnOk = refreshTurn()
+                android.util.Log.i("RCQcall", "call ${call.id.take(8)} answering media=${call.media.wire} turn=$turnOk")
                 val answerSdp = rtc.handleOffer(offer, call.media.toRtc())
                 _state.value = State.Connected(call)
                 send(signal("call_answer", call.peerUin, call.id, mapOf("sdp" to answerSdp)))
@@ -286,8 +304,30 @@ class CallController(
         // The push-accept path already rang on the lock screen and accepts
         // immediately, so skip the in-app ringer + ring watchdog there.
         if (ring) {
-            ringer.startIncoming()
-            armRingTimeout(call)
+            if (app.rcq.android.RcqApp.foreground) {
+                ringer.startIncoming()
+                armRingTimeout(call)
+            } else {
+                // App backgrounded: a WS-delivered offer can't present the in-app
+                // CallScreen (no Activity launches from the background), so the user
+                // would get a ring with no UI — or nothing with the screen off.
+                // Raise the SAME full-screen-intent surface the push path uses; it
+                // shows IncomingCallActivity over the lockscreen and rings there.
+                // Accept hands back to MainActivity, which re-enters this controller
+                // via onPushOffer (already State.Incoming → accept()). Adds no new
+                // wake transport (no FCM, no foreground service) — this is an offer
+                // we already hold over the live WS.
+                val fsi = JsonObject().apply {
+                    addProperty("call_id", callId)
+                    addProperty("from_uin", from)
+                    addProperty("sdp", sdp)
+                    addProperty("media", mediaWire)
+                    addProperty("nickname", call.peerNickname)
+                }
+                _incomingViaFsi.value = true
+                app.rcq.android.push.Push.showIncomingCall(appContext, fsi)
+                armRingTimeout(call)
+            }
         }
     }
 
@@ -297,6 +337,18 @@ class CallController(
     fun onPushOffer(obj: JsonObject) {
         val from = obj.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
         val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
+        // This offer was accepted on the full-screen surface (lock-screen
+        // IncomingCallActivity), so the in-app CallScreen must not also show
+        // accept/decline during the brief Incoming window before accept() flips to
+        // Connected — true for both the killed-app push and backgrounded-WS cases.
+        _incomingViaFsi.value = true
+        // The offer may already be set up by the live WS (backgrounded-but-alive
+        // case: handleIncomingOffer raised the full-screen UI and we're already
+        // ringing this exact call). Re-running handleIncomingOffer would trip the
+        // `active` busy-guard and send the caller "busy" — so just accept the
+        // call we already hold.
+        val cur = _state.value
+        if (cur is State.Incoming && cur.info.id == callId) { accept(); return }
         handleIncomingOffer(from, callId, obj, ring = false)
         accept()
     }
@@ -379,10 +431,16 @@ class CallController(
         _state.value = State.Ended(call, reason)
         rtc.close()
         ringer.stop()
+        // Tear down any full-screen incoming-call UI we raised for a backgrounded
+        // offer (idempotent: harmless if none was showing). Covers every end path
+        // — remote hangup, local decline, and the unanswered/connect timeouts.
+        app.rcq.android.push.Push.dismissIncomingCall(appContext, call.id)
         pendingRemoteOffer = null
         pendingRemoteIce.clear()
         pendingRenegotiationOffer = null
         _incomingVideoUpgrade.value = false
+        _incomingViaFsi.value = false
+        accepting = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
@@ -548,6 +606,10 @@ class CallController(
             if (_state.value.info?.id == call.id &&
                 _state.value is State.Connected && connectedSince == 0L
             ) {
+                // Diagnostics: relay=0 here means ICE never gathered a TURN relay
+                // candidate → STUN-only → cross-NAT media never formed (the root
+                // cause of "UI connects, no media" on CGNAT/symmetric NAT).
+                android.util.Log.w("RCQcall", "connect timeout call=${call.id.take(8)} ${rtc.iceDiag()}")
                 endLocally(call, "setup_failed")
             }
         }
@@ -557,10 +619,14 @@ class CallController(
     fun teardown() {
         rtc.close()
         ringer.stop()
+        // Also drop any full-screen incoming UI raised for a backgrounded offer.
+        _state.value.info?.let { app.rcq.android.push.Push.dismissIncomingCall(appContext, it.id) }
         pendingRemoteOffer = null
         pendingRemoteIce.clear()
         pendingRenegotiationOffer = null
         _incomingVideoUpgrade.value = false
+        _incomingViaFsi.value = false
+        accepting = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L

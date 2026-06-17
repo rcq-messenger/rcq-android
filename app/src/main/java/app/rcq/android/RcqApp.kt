@@ -50,6 +50,7 @@ class RcqApp : Application() {
         var backgroundedAt = 0L
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {
+                foreground = false
                 val grace = LocalStores.lockGraceSeconds()
                 if (grace <= 0) PanicPinService.lock(applicationContext)
                 else backgroundedAt = SystemClock.elapsedRealtime()
@@ -60,6 +61,7 @@ class RcqApp : Application() {
             }
 
             override fun onStart(owner: LifecycleOwner) {
+                foreground = true
                 val grace = LocalStores.lockGraceSeconds()
                 if (grace > 0 && backgroundedAt > 0L &&
                     SystemClock.elapsedRealtime() - backgroundedAt >= grace * 1000L
@@ -69,5 +71,17 @@ class RcqApp : Application() {
                 backgroundedAt = 0L
             }
         })
+    }
+
+    companion object {
+        /** Whole-app foreground state (ProcessLifecycleOwner). Used by the call
+         *  path: a WS-delivered incoming offer that arrives while the app is
+         *  backgrounded can't present the in-app call screen (no Activity can be
+         *  launched from the background), so it raises the full-screen-intent
+         *  surface instead — the same one the push path uses. Defaults false:
+         *  the process can start headless (push/work warmups) with no UI. */
+        @Volatile
+        var foreground: Boolean = false
+            private set
     }
 }

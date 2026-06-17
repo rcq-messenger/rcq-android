@@ -1414,6 +1414,21 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
+            // Full-screen incoming-call access (Android 14+). Without it an
+            // incoming call degrades to a heads-up banner that's easy to miss —
+            // surface a one-tap grant only while it's actually ungranted.
+            if (!app.rcq.android.push.Push.fullScreenIntentGranted(ctx)) {
+                SettingsGroup {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(stringResource(R.string.notif_fsi_title), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.notif_fsi_hint), color = c.textSecondary, fontSize = 12.sp)
+                        Text(
+                            stringResource(R.string.notif_fsi_grant), color = c.accent, fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 4.dp).clickable { app.rcq.android.push.Push.openFullScreenIntentSettings(ctx) },
+                        )
+                    }
+                }
+            }
             if (showDistChooser) {
                 val dists = app.rcq.android.push.Push.availableDistributors(ctx)
                 val saved = app.rcq.android.push.Push.savedDistributor(ctx)
