@@ -72,7 +72,15 @@ object BrokerRelayStore {
     fun refresh() {
         if (!isReady()) return
         runCatching {
-            val body = client.newCall(
+            // Through the tunnel when it's up: a BLOCKED user can't reach
+            // api.rcq.app directly, so without this they NEVER receive broker
+            // bridges (incl. the community relays operators raise). Once a bundled
+            // relay carries the tunnel, the fetch rides it. Tradeoff: the broker
+            // then buckets by the relay IP, not the user IP (weaker anti-enum) —
+            // acceptable, since some bridges beats none. Unblocked: direct, per
+            // the NO_PROXY base client.
+            val fetchClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
+            val body = fetchClient.newCall(
                 Request.Builder().url("https://$BROKER_HOST/broker/bridges?n=$WANT").get().build(),
             ).execute().use { resp -> if (resp.isSuccessful) resp.body?.string() else null } ?: return
             val arr = JsonParser.parseString(body).asJsonObject.getAsJsonArray("relays") ?: return

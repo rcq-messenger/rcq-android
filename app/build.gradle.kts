@@ -22,8 +22,8 @@ android {
         applicationId = "app.rcq.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 65
-        versionName = "0.65"
+        versionCode = 66
+        versionName = "0.66"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // libsignal ships native .so for 4 ABIs; keep the real-device ones
         // (arm64-v8a, armeabi-v7a) + x86_64 for the emulator, drop 32-bit x86.
@@ -132,6 +132,12 @@ dependencies {
     // QR generation for the "my code" sheet (rcq://add/<uin>). Pure-Java
     // BitMatrix → Bitmap; no UI dependency.
     implementation(libs.zxing.core)
+
+    // In-app QR SCANNER (CaptureActivity via ScanContract) — lets a user link
+    // the web client by scanning chat.rcq.app's QR from inside the app, instead
+    // of depending on the stock camera to deep-link the rcq:// scheme (which
+    // Samsung/MIUI/etc. often refuse). CAMERA permission already declared.
+    implementation(libs.zxing.embedded)
 
     // Pure-Java GIF frame decoder (Glide's gifdecoder; no Glide UI, no native
     // .so). GIF avatars / emoticons / photos decode in MANAGED code instead of

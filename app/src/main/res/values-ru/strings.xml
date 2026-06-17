@@ -171,12 +171,16 @@
     <string name="backup_island_promote_confirm">Сделать основным</string>
     <string name="backup_island_promoted">Основной остров теперь %1$s</string>
     <string name="backup_island_err_unreachable">Остров недоступен. Ничего не изменено.</string>
-    <string name="linked_devices_hint">Браузеры, подключённые к вашему аккаунту. Чтобы подключить, откройте chat.rcq.app, выберите «Connect phone» и отсканируйте код камерой.</string>
+    <string name="linked_devices_hint">Браузеры, подключённые к вашему аккаунту. Чтобы подключить, откройте chat.rcq.app, выберите «Connect phone», нажмите «Сканировать QR» ниже и наведите на код.</string>
     <string name="linked_devices_empty">Нет подключённых браузеров.</string>
     <string name="linked_devices_error">Не удалось загрузить список устройств.</string>
+    <string name="linked_devices_scan">Сканировать QR</string>
+    <string name="linked_devices_scan_prompt">Наведите на QR с chat.rcq.app</string>
+    <string name="linked_devices_scan_invalid">Это не код подключения к вебу</string>
+    <string name="linked_devices_how">Как это работает?</string>
     <string name="linked_devices_disconnect">Отключить</string>
     <string name="linked_devices_connect">Подключить браузер</string>
-    <string name="linked_devices_connect_steps">1. На компьютере откройте chat.rcq.app\n2. Выберите «Connect phone»\n3. Наведите камеру телефона на показанный QR-код\n\nТелефон попросит подтвердить.</string>
+    <string name="linked_devices_connect_steps">1. На компьютере откройте chat.rcq.app\n2. Выберите «Connect phone»\n3. Нажмите «Сканировать QR» и наведите на показанный код\n\nТелефон попросит подтвердить.</string>
     <string name="linked_devices_connected">Подключено %1$s</string>
     <string name="common_close">Закрыть</string>
     <string name="common_done">Готово</string>
@@ -389,7 +393,8 @@
     <string name="settings_sec_history">История</string>
     <string name="settings_sec_about">О приложении</string>
     <string name="settings_sec_account">Аккаунт</string>
-    <string name="settings_row_privacy">Приватность и сеть</string>
+    <string name="settings_row_privacy">Приватность</string>
+    <string name="settings_row_network">Сеть</string>
     <string name="settings_row_notifications">Уведомления</string>
     <string name="settings_row_sounds">Звуки</string>
     <string name="settings_row_blocked">Заблокированные</string>
@@ -444,7 +449,7 @@
     <string name="chat_bg_custom">Из галереи</string>
     <string name="app_icon_default">По умолчанию</string>
     <string name="app_icon_footer">Выберите другую иконку на рабочем столе. При смене иконка может на миг мигнуть, пока система обновляет её.</string>
-    <string name="settings_foot_privacy">Кто вас видит, кто может с вами связаться и на каком вы сервере.</string>
+    <string name="settings_foot_privacy">Кто вас видит и кто может с вами связаться. Сервер, прокси, маскировка и релеи — в разделе «Сеть».</string>
     <string name="settings_foot_history">Удаляет сообщения только с этого устройства. Аккаунт и контакты остаются.</string>
     <string name="theme_auto">Авто</string>
     <string name="theme_light">Светлая</string>
@@ -548,14 +553,15 @@
     <string name="pv_obfuscated_desc">Проводит соединение через релей, когда сеть блокирует RCQ напрямую. Повышает стабильность на ограничивающих сетях. Применяется при следующем запуске.</string>
     <string name="pv_onion">Луковая маршрутизация (эксперимент)</string>
     <string name="pv_onion_desc">Проводит соединение через два релея, чтобы ни один релей не видел одновременно вас и сервер. Маскировку соединения включает автоматически. Немного медленнее. Применяется при следующем запуске.</string>
-    <string name="pv_localproxy">Локальный прокси (Tor / I2P)</string>
-    <string name="pv_localproxy_desc">Пускать приложение через ваш локальный Tor или I2P. Заменяет релеи и onion.</string>
+    <string name="pv_localproxy">Прокси</string>
+    <string name="pv_localproxy_desc">Пускать приложение через любой локальный прокси: Tor, I2P, AWG/wiresocks и другие. Заменяет релеи и onion.</string>
     <string name="pv_localproxy_host">Хост</string>
     <string name="pv_localproxy_port">Порт</string>
     <string name="pv_localproxy_test">Проверить</string>
     <string name="pv_localproxy_test_ok">Сервер доступен через прокси ✓</string>
     <string name="pv_localproxy_test_fail">Через прокси сервер недоступен</string>
-    <string name="pv_localproxy_hint">Orbot (Tor): 127.0.0.1:9050 · i2pd: 127.0.0.1:4447. Сначала запустите прокси.</string>
+    <string name="pv_localproxy_hint">Orbot (Tor): 127.0.0.1:9050 · i2pd: 127.0.0.1:4447 · AWG/wiresocks: 127.0.0.1:25344. Сначала запустите прокси.</string>
+    <string name="common_paste">Вставить</string>
     <!-- Polls -->
     <string name="poll_create">Создать опрос</string>
     <string name="poll_question">Вопрос</string>
@@ -784,6 +790,7 @@
     <string name="relay_share_sent_note">Вы поделились способом подключения</string>
     <string name="relay_share_pick_title">Поделиться подключением</string>
     <string name="relay_share_pick_body">Передайте контакту relay, чтобы он смог пробиться, когда его собственные подключения заблокированы. Он нажмёт Добавить, чтобы использовать его.</string>
+    <string name="relay_share_group_warn">Relay увидят все участники группы. Делитесь дефицитными домашними relay только в проверенных группах.</string>
     <string name="relay_share_none">Пока нет relay, которыми можно поделиться.</string>
     <string name="relay_import_title">Добавить relay</string>
     <string name="relay_import_body">Вставьте ссылку rcq-relay://, которую вы получили вне приложения.</string>
@@ -889,6 +896,10 @@
     <string name="push_channel_messages_desc">Уведомления о новых сообщениях</string>
     <string name="push_new_message">Новое сообщение</string>
     <string name="push_new_group_message">Новое сообщение в группе</string>
+    <string name="push_nudge_title">Сообщения при закрытом приложении</string>
+    <string name="push_nudge_body">Чтобы получать сообщения, когда приложение закрыто или выгружено из памяти, установите ntfy (бесплатный сервис пуш-уведомлений). Аккаунт при закрытии не теряется, он просто уходит в оффлайн.</string>
+    <string name="push_nudge_setup">Настроить</string>
+    <string name="push_nudge_dismiss">Скрыть</string>
     <string name="push_channel_calls">Звонки</string>
     <string name="push_channel_calls_desc">Уведомления о входящих звонках</string>
     <string name="notif_delivery">Доставка push</string>

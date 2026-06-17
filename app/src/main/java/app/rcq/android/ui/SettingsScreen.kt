@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
@@ -94,6 +95,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
@@ -118,7 +120,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
+private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
 
 @Composable
 internal fun SettingsScreen(
@@ -140,7 +142,7 @@ internal fun SettingsScreen(
         // Diagnostics opened directly from Home → back closes Settings.
         if (openDiagnostics && route == SettingsRoute.DIAGNOSTICS) { onBack(); return@BackHandler }
         route = when (route) {
-            SettingsRoute.DIAGNOSTICS, SettingsRoute.CUSTOM_SERVER -> SettingsRoute.PRIVACY
+            SettingsRoute.DIAGNOSTICS, SettingsRoute.CUSTOM_SERVER -> SettingsRoute.NETWORK
             else -> SettingsRoute.ROOT
         }
     }
@@ -153,16 +155,17 @@ internal fun SettingsScreen(
             onOpen = { route = it },
         )
         SettingsRoute.PROFILE -> ProfileEditScreen(session) { route = SettingsRoute.ROOT }
-        SettingsRoute.PRIVACY -> PrivacyScreen(
+        SettingsRoute.PRIVACY -> PrivacyScreen(session) { route = SettingsRoute.ROOT }
+        SettingsRoute.NETWORK -> NetworkScreen(
             session,
             onOpenCustomServer = { route = SettingsRoute.CUSTOM_SERVER },
             onOpenDiagnostics = { route = SettingsRoute.DIAGNOSTICS },
         ) { route = SettingsRoute.ROOT }
-        // Back from Diagnostics returns to Privacy (where it was opened from),
+        // Back from Diagnostics returns to Network (where it was opened from),
         // not the Settings root (tester #1) — unless we deep-linked here from
         // Home, in which case back closes Settings entirely.
         SettingsRoute.DIAGNOSTICS -> DiagnosticsScreen(session) {
-            if (openDiagnostics) onBack() else route = SettingsRoute.PRIVACY
+            if (openDiagnostics) onBack() else route = SettingsRoute.NETWORK
         }
         SettingsRoute.NOTIFICATIONS -> NotificationsScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.SOUNDS -> SoundsScreen { route = SettingsRoute.ROOT }
@@ -179,8 +182,8 @@ internal fun SettingsScreen(
         SettingsRoute.BACKUP_ISLAND -> BackupIslandScreen(session, onPromoted = onMigrated) { route = SettingsRoute.ROOT }
         SettingsRoute.CUSTOM_SERVER -> CustomServerScreen(
             session,
-            // Back returns to Privacy (its parent), not the Settings root (tester #1).
-            onBack = { route = SettingsRoute.PRIVACY },
+            // Back returns to Network (its parent), not the Settings root (tester #1).
+            onBack = { route = SettingsRoute.NETWORK },
             onSwitched = { newUin -> onMigrated(newUin); onBack() },
         )
         SettingsRoute.UIN_SHOP -> UinShopScreen(
@@ -289,6 +292,8 @@ private fun SettingsRoot(
             SectionLabel(stringResource(R.string.settings_sec_privacy))
             SettingsGroup {
                 SettingsRow(Icons.Filled.Lock, stringResource(R.string.settings_row_privacy)) { onOpen(SettingsRoute.PRIVACY) }
+                Divider()
+                SettingsRow(Icons.Filled.NetworkCheck, stringResource(R.string.settings_row_network)) { onOpen(SettingsRoute.NETWORK) }
                 Divider()
                 SettingsRow(Icons.Filled.Notifications, stringResource(R.string.settings_row_notifications)) { onOpen(SettingsRoute.NOTIFICATIONS) }
                 Divider()
@@ -724,7 +729,7 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
 // ── Privacy & Network ────────────────────────────────────────────────
 
 @Composable
-private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOpenDiagnostics: () -> Unit, onBack: () -> Unit) {
+private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     // Seed pickers from the cached profile so they render instantly with the
@@ -744,15 +749,6 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     var hofError by remember { mutableStateOf<String?>(null) }
     val screenSec by app.rcq.android.data.LocalStores.screenSecurity.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
-    // Local-proxy transport (route through the user's own Tor/i2p). Exclusive of
-    // relays/onion — while it's on, those switches grey out.
-    var localProxy by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyMode()) }
-    var lpHost by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyHost()) }
-    var lpPort by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyPort().toString()) }
-    var lpType by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyType()) }
-    var lpTesting by remember { mutableStateOf(false) }
-    var lpTestOk by remember { mutableStateOf<Boolean?>(null) }
     val hofPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -897,8 +893,25 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 }
             }
 
-            Spacer(Modifier.height(4.dp))
-            SectionLabel(stringResource(R.string.pv_network))
+        }
+    }
+}
+
+@Composable
+private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOpenDiagnostics: () -> Unit, onBack: () -> Unit) {
+    val c = RcqTheme.colors
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
+    var localProxy by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyMode()) }
+    var lpHost by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyHost()) }
+    var lpPort by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyPort().toString()) }
+    var lpType by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyType()) }
+    var lpTesting by remember { mutableStateOf(false) }
+    var lpTestOk by remember { mutableStateOf<Boolean?>(null) }
+    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        SettingsTopBar(stringResource(R.string.settings_row_network), onBack)
+        Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             SettingsGroup {
                 val host = session.currentServer
                 SettingsRow(
@@ -981,29 +994,60 @@ private fun PrivacyScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 )
             }
             if (localProxy) {
+                val clipboard = LocalClipboardManager.current
+                // Persist host/port/type to prefs on EVERY edit (not only on the
+                // enable toggle), so a custom port/host survives leaving Settings.
+                // SingBoxTransport.setLocalProxy is a bare prefs write (no transport
+                // restart), so this is cheap per-keystroke. An invalid/blank port
+                // keeps the last persisted value instead of snapping to the default.
+                fun persistProxy() {
+                    val p = lpPort.toIntOrNull()?.takeIf { it in 1..65535 }
+                        ?: app.rcq.android.net.SingBoxTransport.localProxyPort()
+                    app.rcq.android.net.SingBoxTransport.setLocalProxy(context, lpHost.trim(), p, lpType)
+                }
                 Column(Modifier.padding(top = 8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = lpHost,
-                            onValueChange = { lpHost = it },
+                            onValueChange = { lpHost = it; persistProxy() },
                             label = { Text(stringResource(R.string.pv_localproxy_host)) },
                             singleLine = true,
+                            trailingIcon = {
+                                Icon(
+                                    Icons.Filled.ContentPaste,
+                                    contentDescription = stringResource(R.string.common_paste),
+                                    tint = c.accent,
+                                    modifier = Modifier.clickable {
+                                        clipboard.getText()?.text?.trim()?.takeIf { it.isNotEmpty() }?.let { lpHost = it; persistProxy() }
+                                    },
+                                )
+                            },
                             modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.size(8.dp))
                         OutlinedTextField(
                             value = lpPort,
-                            onValueChange = { v -> lpPort = v.filter { it.isDigit() }.take(5) },
+                            onValueChange = { v -> lpPort = v.filter { it.isDigit() }.take(5); persistProxy() },
                             label = { Text(stringResource(R.string.pv_localproxy_port)) },
                             singleLine = true,
+                            trailingIcon = {
+                                Icon(
+                                    Icons.Filled.ContentPaste,
+                                    contentDescription = stringResource(R.string.common_paste),
+                                    tint = c.accent,
+                                    modifier = Modifier.clickable {
+                                        clipboard.getText()?.text?.filter { it.isDigit() }?.take(5)?.takeIf { it.isNotEmpty() }?.let { lpPort = it; persistProxy() }
+                                    },
+                                )
+                            },
                             modifier = Modifier.weight(0.5f),
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                        TextButton(onClick = { lpType = "socks" }) {
+                        TextButton(onClick = { lpType = "socks"; persistProxy() }) {
                             Text("SOCKS5", color = if (lpType == "socks") c.accent else c.textSecondary)
                         }
-                        TextButton(onClick = { lpType = "http" }) {
+                        TextButton(onClick = { lpType = "http"; persistProxy() }) {
                             Text("HTTP", color = if (lpType == "http") c.accent else c.textSecondary)
                         }
                         Spacer(Modifier.weight(1f))
@@ -1489,10 +1533,31 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
 @Composable
 private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf<List<app.rcq.android.net.RcqApi.DeviceInfo>?>(null) } // null = loading
     var failed by remember { mutableStateOf(false) }
     var showHow by remember { mutableStateOf(false) }
+
+    // In-app QR scanner: decode chat.rcq.app's connect-phone QR and feed it into
+    // the same WebLinkRequest confirm flow a deep link uses. Removes the reliance
+    // on the stock camera understanding the rcq:// scheme.
+    val scanLauncher = rememberLauncherForActivityResult(com.journeyapps.barcodescanner.ScanContract()) { result ->
+        result.contents?.trim()?.let { raw ->
+            val req = app.rcq.android.WebLinkRequest.fromUri(android.net.Uri.parse(raw))
+            if (req != null) app.rcq.android.WebLinkRequest.pending.value = req
+            else Toast.makeText(context, context.getString(R.string.linked_devices_scan_invalid), Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun launchScan() {
+        val opts = com.journeyapps.barcodescanner.ScanOptions().apply {
+            setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+            setPrompt(context.getString(R.string.linked_devices_scan_prompt))
+            setBeepEnabled(false)
+            setOrientationLocked(false)
+        }
+        scanLauncher.launch(opts)
+    }
 
     suspend fun reload() {
         failed = false
@@ -1521,10 +1586,15 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
         )
         Box(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(percent = 50))
-                .background(c.accent).clickable { showHow = true }.padding(vertical = 13.dp),
+                .background(c.accent).clickable { launchScan() }.padding(vertical = 13.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(stringResource(R.string.linked_devices_connect), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.linked_devices_scan), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            TextButton(onClick = { showHow = true }) {
+                Text(stringResource(R.string.linked_devices_how), color = c.accent, fontSize = 13.sp)
+            }
         }
         Spacer(Modifier.height(8.dp))
         when (val list = devices) {

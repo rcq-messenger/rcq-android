@@ -109,7 +109,13 @@ object WebLinkRequest {
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromUri(uri: android.net.Uri?): Req? {
-        if (uri == null || uri.scheme != "rcq" || uri.host != "link") return null
+        if (uri == null) return null
+        val isRcq = uri.scheme == "rcq" && uri.host == "link"
+        // https://rcq.app/link?t=…&k=… — the camera-friendly form (stock cameras
+        // often won't deep-link the rcq:// scheme but do open https).
+        val isWeb = (uri.scheme == "https" || uri.scheme == "http") &&
+            uri.host == "rcq.app" && uri.pathSegments.firstOrNull() == "link"
+        if (!isRcq && !isWeb) return null
         val token = uri.getQueryParameter("t")?.takeIf { it.isNotBlank() } ?: return null
         val webPub = uri.getQueryParameter("k")?.takeIf { it.isNotBlank() } ?: return null
         return Req(token, webPub)

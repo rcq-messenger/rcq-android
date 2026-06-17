@@ -234,8 +234,28 @@ object Push {
         fun str(k: String): String? =
             json.get(k)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
 
+        // Only REAL messages raise a banner. The server pushes for "message"/"gmsg"
+        // (a real message) but also "secscreen" (secure-screen state sync) and
+        // "system" envelopes, which carry NO new message — showing "New message"
+        // for those is the "ложные уведомления, новых сообщений нет" report.
+        // Mirror the iOS NSE, which suppresses these after decrypt. envType is set
+        // server-side in the UnifiedPush payload; absent => assume a real message
+        // (older server) so nothing legitimate is ever swallowed.
+        val envType = str("envType") ?: "message"
+        if (envType != "message" && envType != "gmsg") return
+
         val groupName = str("group_name")
-        val isGroup = groupName != null || str("group_id") != null
+        val groupId = json.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
+        val isGroup = groupName != null || groupId != null
+        // Defense in depth: never wake for a group the active account muted, even
+        // if the server's muted_group_ids sync was stale (the v0.63 class of bug).
+        // The 1:1 sealed wake hides the sender, so peer mute stays a server gate.
+        if (groupId != null) {
+            val activeId = app.rcq.android.data.AccountManager.activeId.value
+            if (activeId != null &&
+                app.rcq.android.data.LocalStores.isMutedFor(activeId, app.rcq.android.data.LocalStores.groupThread(groupId))
+            ) return
+        }
         val title = groupName ?: str("title") ?: ctx.getString(R.string.app_name)
         val body = str("body") ?: ctx.getString(
             if (isGroup) R.string.push_new_group_message else R.string.push_new_message,

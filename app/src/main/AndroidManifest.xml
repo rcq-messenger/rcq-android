@@ -49,6 +49,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.RCQ"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout|uiMode|density"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -69,6 +70,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="rcq" android:host="link" />
+            </intent-filter>
+            <!-- Same connect-to-web link in https form (https://rcq.app/link?t=…&k=…).
+                 Stock cameras (Samsung/MIUI/…) often refuse to deep-link a custom
+                 rcq:// scheme but DO open https, so the web QR also offers this form;
+                 Android shows RCQ in the app chooser (no assetlinks.json yet). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/link" />
             </intent-filter>
             <!-- Contact deep link (spec §5): rcq://add/<uin>?h=<island>&k=<key> —
                  scanning a contact QR with any camera opens the add-contact

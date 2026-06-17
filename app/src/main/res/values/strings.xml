@@ -172,12 +172,16 @@
     <string name="backup_island_promote_confirm">Make primary</string>
     <string name="backup_island_promoted">Primary island is now %1$s</string>
     <string name="backup_island_err_unreachable">Island unreachable. Nothing was changed.</string>
-    <string name="linked_devices_hint">Browsers connected to your account. To connect one, open chat.rcq.app, choose Connect phone, and scan the code with your camera.</string>
+    <string name="linked_devices_hint">Browsers connected to your account. To connect one, open chat.rcq.app, choose Connect phone, tap Scan QR below, and point at the code.</string>
     <string name="linked_devices_empty">No browsers are connected.</string>
     <string name="linked_devices_error">Couldn\'t load linked devices.</string>
+    <string name="linked_devices_scan">Scan QR</string>
+    <string name="linked_devices_scan_prompt">Point at the QR on chat.rcq.app</string>
+    <string name="linked_devices_scan_invalid">That isn\'t a web-connect code</string>
+    <string name="linked_devices_how">How does it work?</string>
     <string name="linked_devices_disconnect">Disconnect</string>
     <string name="linked_devices_connect">Connect a browser</string>
-    <string name="linked_devices_connect_steps">1. On your computer, open chat.rcq.app\n2. Choose \"Connect phone\"\n3. Point your phone\'s camera at the QR code shown there\n\nYour phone will ask you to confirm.</string>
+    <string name="linked_devices_connect_steps">1. On your computer, open chat.rcq.app\n2. Choose \"Connect phone\"\n3. Tap \"Scan QR\" and point at the code shown there\n\nYour phone will ask you to confirm.</string>
     <string name="linked_devices_connected">Connected %1$s</string>
     <string name="common_close">Close</string>
     <string name="common_done">Done</string>
@@ -390,7 +394,8 @@
     <string name="settings_sec_history">History</string>
     <string name="settings_sec_about">About</string>
     <string name="settings_sec_account">Account</string>
-    <string name="settings_row_privacy">Privacy &amp; Network</string>
+    <string name="settings_row_privacy">Privacy</string>
+    <string name="settings_row_network">Network</string>
     <string name="settings_row_notifications">Notifications</string>
     <string name="settings_row_sounds">Sounds</string>
     <string name="settings_row_blocked">Blocked users</string>
@@ -445,7 +450,7 @@
     <string name="chat_bg_custom">Gallery</string>
     <string name="app_icon_default">Default</string>
     <string name="app_icon_footer">Pick a different launcher icon. The home screen may flicker for a moment while it updates.</string>
-    <string name="settings_foot_privacy">Control who can see you, who can reach you, and which server you\'re on.</string>
+    <string name="settings_foot_privacy">Control who can see you and who can reach you. Server, proxy, obfuscation and relays are under Network.</string>
     <string name="settings_foot_history">Removes messages from this device only. Your account and contacts stay.</string>
     <string name="theme_auto">Auto</string>
     <string name="theme_light">Light</string>
@@ -549,14 +554,15 @@
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>
     <string name="pv_onion">Onion routing (experimental)</string>
     <string name="pv_onion_desc">Routes through two relays so no single relay sees both you and the server. Turns on the protected connection automatically. A little slower. Takes effect on next launch.</string>
-    <string name="pv_localproxy">Local proxy (Tor / I2P)</string>
-    <string name="pv_localproxy_desc">Route the app through your own local Tor or I2P proxy. Replaces relays and onion.</string>
+    <string name="pv_localproxy">Proxy</string>
+    <string name="pv_localproxy_desc">Route the app through any local proxy: Tor, I2P, AWG/wiresocks, etc. Replaces relays and onion.</string>
     <string name="pv_localproxy_host">Host</string>
     <string name="pv_localproxy_port">Port</string>
     <string name="pv_localproxy_test">Test</string>
     <string name="pv_localproxy_test_ok">Reached the server through the proxy ✓</string>
     <string name="pv_localproxy_test_fail">Couldn\'t reach the server through the proxy</string>
-    <string name="pv_localproxy_hint">Orbot (Tor): 127.0.0.1:9050 · i2pd: 127.0.0.1:4447. Start your proxy first.</string>
+    <string name="pv_localproxy_hint">Orbot (Tor): 127.0.0.1:9050 · i2pd: 127.0.0.1:4447 · AWG/wiresocks: 127.0.0.1:25344. Start your proxy first.</string>
+    <string name="common_paste">Paste</string>
     <!-- Polls -->
     <string name="poll_create">Create poll</string>
     <string name="poll_question">Question</string>
@@ -785,6 +791,7 @@
     <string name="relay_share_sent_note">You shared a way to connect</string>
     <string name="relay_share_pick_title">Share a connection</string>
     <string name="relay_share_pick_body">Hand this contact a relay so they can get through when their own connections are blocked. They tap Add to use it.</string>
+    <string name="relay_share_group_warn">Every group member will see this relay. Only share scarce domestic relays in groups you trust.</string>
     <string name="relay_share_none">No relays available to share yet.</string>
     <string name="relay_import_title">Add a relay</string>
     <string name="relay_import_body">Paste an rcq-relay:// link you received out of band.</string>
@@ -892,6 +899,10 @@
     <string name="push_channel_messages_desc">New message notifications</string>
     <string name="push_new_message">New message</string>
     <string name="push_new_group_message">New group message</string>
+    <string name="push_nudge_title">Messages while the app is closed</string>
+    <string name="push_nudge_body">To receive messages while the app is closed or evicted from memory, install ntfy (a free push service). Your account is never lost when you close the app, it just goes offline.</string>
+    <string name="push_nudge_setup">Set up</string>
+    <string name="push_nudge_dismiss">Dismiss</string>
     <string name="push_channel_calls">Calls</string>
     <string name="push_channel_calls_desc">Incoming call notifications</string>
     <string name="notif_delivery">Push delivery</string>

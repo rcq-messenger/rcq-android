@@ -998,7 +998,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                     scope.launch { runCatching { session.sendReaction(m, asset) } }
                                     actionMsg = null
                                 }.padding(4.dp),
-                            ) { EmoticonGif(asset, Modifier.size(32.dp), animate = false) }
+                            ) { AnimatedEmoticon(asset, Modifier.size(32.dp)) }
                         }
                     }
                     MessageAction(stringResource(R.string.chat_reply)) { replyTarget = m; actionMsg = null }
@@ -1088,7 +1088,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     MessageAction(stringResource(R.string.chat_attach_location)) { attachMenu = false; shareLocation() }
                     MessageAction(stringResource(R.string.chat_attach_group)) { attachMenu = false; showGroupPicker = true }
                     if (isGroup) MessageAction(stringResource(R.string.poll_create)) { attachMenu = false; showPollComposer = true }
-                    if (!isGroup) MessageAction(stringResource(R.string.relay_share_attach)) { attachMenu = false; showRelayPicker = true }
+                    MessageAction(stringResource(R.string.relay_share_attach)) { attachMenu = false; showRelayPicker = true }
                 }
             },
             confirmButton = {},
@@ -1169,11 +1169,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             text = {
                 Column {
                     Text(stringResource(R.string.relay_share_pick_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    if (groupId != null) Text(stringResource(R.string.relay_share_group_warn), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         pool.forEach { r ->
                             MessageAction("${r.proto.uppercase()} · ${r.server}:${r.port}") {
                                 showRelayPicker = false
-                                peer?.let { p -> scope.launch { runCatching { session.shareRelay(p, r) } } }
+                                val gid = groupId
+                                val p = peer
+                                scope.launch { runCatching {
+                                    if (gid != null) session.shareRelayToGroup(gid, r) else p?.let { session.shareRelay(it, r) }
+                                } }
                             }
                         }
                     }

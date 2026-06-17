@@ -780,6 +780,31 @@ class Session(context: Context) {
                     socket = newSocket()
                 }
             }
+            // Post-engage health check + DIRECT fallback (iOS parity, AppState
+            // re-probe). The trap behind "Резерв включён, но работает только с
+            // VPN": the tunnel engaged (toggle on, or a transient probe miss) but
+            // can't actually carry traffic to the backend, while a DIRECT
+            // connection CAN — e.g. an UNcensored user whose relay/onion path is
+            // broken. Without this they're stuck on a dead tunnel forever (the
+            // watchdog only self-heals onion). So: if the tunnel is up but the
+            // live route is dead AND direct works, drop to direct.
+            // STRICT GATING so a genuinely-blocked user is NEVER silently
+            // de-tunnelled: only fall back when direct actually succeeds (a
+            // censored user's direct probe fails → stays on the tunnel), NEVER
+            // under the user's own local proxy (Tor/i2p — that hard no-fallback
+            // rule is the Tor-leak invariant), and NEVER under an explicit
+            // per-device onion opt-in (preserve the metadata-resistance the user
+            // deliberately chose). Cohort-flipped onion (signed config) on an
+            // open network does fall back — it's a censorship aid, moot when
+            // direct works.
+            if (transport.isActive && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx)) {
+                if (!transport.probeCurrentRoute(serverHost()) && transport.probeDirect(serverHost())) {
+                    android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
+                    transport.stop()
+                    api = newApi()
+                    socket = newSocket()
+                }
+            }
             _stealthActive.value = transport.isActive
             connectAndSync(uin, token)
             // (Crash reports are NOT auto-sent. A captured crash is offered to
@@ -2277,7 +2302,14 @@ class Session(context: Context) {
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
                 is Envelope.Skdm -> Unit         // intercepted in ingestGroup before routing
                 is Envelope.Sknack -> Unit       // intercepted in ingestGroup before routing
-                is Envelope.RelayShare -> Unit   // in-chat bridge sharing is 1:1 only
+                is Envelope.RelayShare ->
+                    // A member shared a relay into the group to augment everyone's
+                    // transport pool. Render as a kind="relay" card; never auto-apply
+                    // (each member taps Add). Drop malformed. Group-shared relays stay
+                    // exit/fallback + onion-entry-INELIGIBLE (excluded from
+                    // trustedVlessEntries), so a poisoned share can't become an entry.
+                    if (ContactRelayStore.relayFromJson(env.relay) != null)
+                        storeGroup(ChatMessage(env.id, 0, false, env.relay.toString(), now, kind = "relay", groupId = groupId, senderUin = dec.senderUin))
                 is Envelope.Unknown -> Unit
             }
     }
@@ -2486,6 +2518,19 @@ class Session(context: Context) {
         val env = Envelope.relayShare(relayJson)
         store(ChatMessage(env.id, toUin, fromMe = true, body = relayJson.toString(), sentAt = System.currentTimeMillis(), state = DeliveryState.SENDING, kind = "relay"))
         sendEnvelope(env, env.id, toUin)
+    }
+
+    /** Share a relay into a GROUP — the highest-reach censorship-resistant
+     *  distribution: one drop in a community group hands the relay to every member
+     *  over the E2E group fan-out (sender keys), invisible to a censor. Renders as
+     *  a kind="relay" card; each member taps Add (never auto-applied). A
+     *  group-shared relay stays exit/fallback only and onion-entry-INELIGIBLE
+     *  (ContactRelayStore is excluded from trustedVlessEntries), so a poisoned
+     *  share can't become anyone's entry guard. See RCQ/docs/relay-distribution-v2.md. */
+    suspend fun shareRelayToGroup(groupId: Int, relay: SingBoxTransport.Relay) {
+        val relayJson = ContactRelayStore.relayToJson(relay)
+        val env = Envelope.relayShare(relayJson)
+        sendGroupEnvelope(groupId, env, env.id, relayJson.toString(), kind = "relay")
     }
 
     /** Relays the user can hand to a contact: the signed-config pool + already

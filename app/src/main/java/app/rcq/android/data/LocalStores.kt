@@ -317,6 +317,13 @@ object LocalStores {
     fun mutedPeerUins(): List<Int> =
         _muted.value.mapNotNull { if (it.startsWith("peer:")) it.substringAfter("peer:").toIntOrNull() else null }
 
+    /** Headless mute check: read [thread]'s NONE-mute flag straight from prefs for
+     *  [accountId], WITHOUT binding the global per-account state. Safe to call from
+     *  the UnifiedPush service (no Activity, no active account bound). Returns false
+     *  if prefs aren't initialised yet (degrade to showing the notification). */
+    fun isMutedFor(accountId: String, thread: String): Boolean =
+        ::prefs.isInitialized && prefs.getStringSet("$accountId.$K_MUTE", emptySet())!!.contains(thread)
+
     fun isArchived(thread: String) = thread in _archived.value
     fun toggleArchive(thread: String) = toggle(_archived, K_ARCH, thread)
 

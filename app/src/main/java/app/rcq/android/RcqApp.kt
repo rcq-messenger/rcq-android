@@ -34,6 +34,11 @@ class RcqApp : Application() {
         // including on headless starts — the UnifiedPush push service reads the
         // roster to register/resolve accounts and posts message notifications.
         app.rcq.android.data.AccountManager.init(this)
+        // Local prefs available process-wide, incl. headless push starts: the
+        // UnifiedPush service reads the per-account mute set to suppress banners
+        // for muted groups (defense in depth over the server's muted_group_ids).
+        // Idempotent — MainActivity.onCreate calls it again and it no-ops.
+        LocalStores.init(this)
         // Per-host access-token store for closed (masquerade) islands — seed the
         // in-memory map so the OkHttp interceptor can stamp X-RCQ-Auth.
         app.rcq.android.net.AccessTokenStore.init(this)

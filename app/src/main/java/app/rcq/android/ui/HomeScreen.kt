@@ -182,6 +182,13 @@ internal fun HomeScreen(
     val ownStatus by session.status.collectAsState()
     val connected by session.connected.collectAsState()
     val stealthActive by session.stealthActive.collectAsState()
+    // Push reachability nudge: a killed/swiped app only receives messages via a
+    // UnifiedPush distributor (ntfy). With none installed the user silently gets
+    // nothing while closed ("приложение перестало работать после закрытия").
+    // Show a dismissible banner pointing at setup; the account is never lost.
+    var pushNudgeDismissed by remember { mutableStateOf(false) }
+    val showPushNudge = !pushNudgeDismissed &&
+        app.rcq.android.push.Push.pushState(context) == app.rcq.android.push.Push.PushState.NO_DISTRIBUTOR
     val favorites by LocalStores.favorites.collectAsState()
     val archived by LocalStores.archived.collectAsState()
     val unread by LocalStores.unread.collectAsState()
@@ -310,6 +317,14 @@ internal fun HomeScreen(
             )
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                if (showPushNudge) {
+                    item(key = "push-nudge") {
+                        PushNudgeBanner(
+                            onSetup = { app.rcq.android.push.Push.openNtfyInstall(context) },
+                            onDismiss = { pushNudgeDismissed = true },
+                        )
+                    }
+                }
                 if (storyGroups.isNotEmpty() && storiesEnabled) {
                     item(key = "stories") {
                         StoriesStrip(
@@ -1176,6 +1191,34 @@ private fun CiPendingRow(tag: String, preview: String, onAccept: () -> Unit, onB
         Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(R.string.ci_block), color = c.textSecondary, modifier = Modifier.clickable(onClick = onBlock).padding(8.dp))
+    }
+}
+
+@Composable
+private fun PushNudgeBanner(onSetup: () -> Unit, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Notifications, null, tint = c.accent, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.push_nudge_title),
+                color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(stringResource(R.string.push_nudge_body), color = c.textSecondary, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.push_nudge_dismiss), color = c.textSecondary)
+            }
+            TextButton(onClick = onSetup) {
+                Text(stringResource(R.string.push_nudge_setup), color = c.accent)
+            }
+        }
     }
 }
 

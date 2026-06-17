@@ -46,6 +46,16 @@ object SingBoxTransport {
     @Volatile
     private var appCtx: Context? = null
 
+    // Onion single-hop-first: whether the chosen sticky ENTRY was reachable at the
+    // last [selectEntryIfNeeded] probe. When false (entry blocked/down, or no trusted
+    // entry at all), the 2-hop onion chain can't carry traffic, so [buildConfig]
+    // degrades to a single-hop race over the TRUSTED signed-config relays instead of
+    // building a dead chain. Connectivity-first, but it NEVER single-hops through the
+    // untrusted shared/community pool (that would expose an onion user's IP+island to
+    // a relay they never vouched for).
+    @Volatile
+    private var onionEntryReachable = false
+
     fun init(ctx: Context) { appCtx = ctx.applicationContext }
 
     private fun prefs(): android.content.SharedPreferences? =
@@ -167,12 +177,18 @@ object SingBoxTransport {
      *  entry exists (e.g. гидра promotes more domestic relays to trusted).
      *  Blocking — called from [start] which already runs off-main. */
     private fun selectEntryIfNeeded() {
+        onionEntryReachable = false
         if (!onionMode() || localProxyMode()) return
         val candidates = trustedVlessEntries()
-        if (candidates.isEmpty()) return   // nothing to choose; buildConfig falls back to pool.first()
+        if (candidates.isEmpty()) return   // no trusted entry -> onion can't form -> single-hop fallback
         val p = prefs()
         val cur = p?.getString(KEY_ENTRY, null)
-        if (cur != null && candidates.any { it.tag == cur }) return   // keep the pinned guard
+        candidates.firstOrNull { it.tag == cur }?.let { pinned ->
+            // Keep the pinned guard (Tor-guard property), but confirm it's reachable —
+            // the verdict gates onion-vs-single-hop. A blocked guard => single-hop.
+            onionEntryReachable = probeLatencyMs(pinned.server, pinned.port) != null
+            return
+        }
         // (Re)select: probe reachability + latency in parallel.
         val exec = java.util.concurrent.Executors.newFixedThreadPool(minOf(candidates.size, 6))
         val measured: List<Pair<String, Long>> = try {
@@ -196,6 +212,9 @@ object SingBoxTransport {
             measured.filter { it.second <= best + tolerance }.random().first
         }
         p?.edit()?.putString(KEY_ENTRY, pickTag)?.apply()
+        // The chosen entry carries traffic only if it was among the reachable probes;
+        // an all-probes-failed random pick is NOT reachable -> single-hop fallback.
+        onionEntryReachable = measured.any { it.first == pickTag }
         android.util.Log.i("RCQsingbox", "onion entry selected -> $pickTag (trusted=${candidates.size}, reachable=${measured.size})")
     }
 
@@ -342,7 +361,7 @@ object SingBoxTransport {
                 put("server_port", localProxyPort())
                 if (localProxyType() != "http") put("version", "5")
             })
-        } else if (onionMode() && vless.size >= 2) {
+        } else if (onionMode() && vless.size >= 2 && onionEntryReachable) {
             val entry = stickyEntry(vless)          // O4: persisted guard, not just vless.first()
             val exits = vless.filter { it.tag != entry.tag }
             outbounds.put(JSONObject().apply {
@@ -360,6 +379,24 @@ object SingBoxTransport {
                     put("detour", "onion-entry")
                 })
             }
+        } else if (onionMode()) {
+            // Onion DESIRED but the 2-hop chain can't form (sticky entry unreachable,
+            // or <2 VLESS): single-hop race over the TRUSTED signed-config/bundled relays
+            // ONLY. Connectivity-first (a trusted single hop beats a dead chain), but it
+            // NEVER races the untrusted shared/community pool here — single-hopping an
+            // onion user through a relay they didn't vouch for would expose their IP +
+            // destination island. The domestic bundled entry keeps this reachable for a
+            // blocked user even when the foreign trusted relays are down.
+            val trusted = RelayConfigStore.currentRelays()
+            outbounds.put(JSONObject().apply {
+                put("type", "urltest")
+                put("tag", "out")
+                put("outbounds", JSONArray(trusted.map { it.tag }))
+                put("url", "https://api.rcq.app/health")
+                put("interval", "5m")
+                put("tolerance", 50)
+            })
+            trusted.forEach { outbounds.put(if (it.proto == "hysteria2") hysteria2Outbound(it) else vlessOutbound(it)) }
         } else {
             outbounds.put(JSONObject().apply {
                 put("type", "urltest")
