@@ -23,10 +23,14 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
     private val client = OkHttpClient.Builder()
         // Detect a dead/stale connection fast (cellular CGNAT + radio sleep
         // silently kill idle keep-alives). callTimeout stays generous so
-        // large media uploads on slow links still complete.
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)
+        // large media uploads on slow links still complete. BUT a user-chosen
+        // local proxy (Tor/i2p/AWG) is inherently slow — i2p/Tor build circuits
+        // over many seconds — so give those a far longer leash, or the connect
+        // gives up before the tunnel is ready (the "works in Telegram but not
+        // RCQ" report: TG is patient, we weren't). Only local-proxy users pay it.
+        .connectTimeout(if (SingBoxTransport.localProxyMode()) 30 else 10, TimeUnit.SECONDS)
+        .readTimeout(if (SingBoxTransport.localProxyMode()) 30 else 15, TimeUnit.SECONDS)
+        .callTimeout(if (SingBoxTransport.localProxyMode()) 90 else 30, TimeUnit.SECONDS)
         // Don't let pooled connections sit idle long enough to die unnoticed;
         // a fresh one is cheap next to a 10s+ dead-socket hang.
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))

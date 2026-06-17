@@ -98,7 +98,10 @@ object SingBoxTransport {
      *  down). Hard timeout; a dead/DPI'd proxy hangs. Blocking — call off-main. */
     fun testLocalProxy(host: String, port: Int, type: String): Boolean = runCatching {
         val pType = if (type == "http") Proxy.Type.HTTP else Proxy.Type.SOCKS
-        OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS)
+        // 25s, not 6s: i2p/Tor can take many seconds to build the first circuit,
+        // so a too-short Test wrongly reports a WORKING proxy as unreachable (the
+        // i2p "works in Telegram but the RCQ Test fails" report).
+        OkHttpClient.Builder().callTimeout(25, TimeUnit.SECONDS)
             .proxy(Proxy(pType, InetSocketAddress(host.trim(), port))).build()
             .newCall(Request.Builder().url("https://api.rcq.app/health").get().build())
             .execute().use { it.isSuccessful }

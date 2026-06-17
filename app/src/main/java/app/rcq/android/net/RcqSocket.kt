@@ -21,6 +21,10 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
 
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
+        // A user-chosen local proxy (Tor/i2p/AWG) is slow to build its first
+        // circuit; the default 10s connect can give up before the WS handshake
+        // completes. Give local-proxy users a longer connect leash.
+        .connectTimeout(if (SingBoxTransport.localProxyMode()) 30 else 10, TimeUnit.SECONDS)
         // Ride the embedded sing-box SOCKS proxy when the transport is engaged
         // (null = direct). Captured at build; Session rebuilds the socket after
         // engaging so it picks the proxy up.
