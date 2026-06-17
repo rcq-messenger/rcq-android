@@ -3,11 +3,18 @@ package app.rcq.android.net
 import android.content.Context
 import android.content.SharedPreferences
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.InetSocketAddress
 import java.net.Proxy
+import java.net.Socket
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,7 +42,14 @@ object BrokerRelayStore {
     // must be vetted); community broker relays stay exits / fallback. The tier
     // rides the TLS-authenticated /broker/bridges response (broker.py serves it).
     private const val KEY_TRUSTED = "trusted_tags"
+    // Region-scoped liveness: report which relays are reachable FROM THIS network
+    // so the broker serves them where they actually work (POST /broker/reachability).
+    private const val KEY_REPORT_TS = "reach_report_ts"
+    private const val REPORT_INTERVAL_MS = 60 * 60 * 1000L  // at most hourly
+    private const val PROBE_TIMEOUT_MS = 2500
+    private const val MAX_PROBE = 20
     private val gson = Gson()
+    private val jsonMedia = "application/json".toMediaType()
     private lateinit var prefs: SharedPreferences
 
     fun init(ctx: Context) {
@@ -99,6 +113,60 @@ object BrokerRelayStore {
                 .putString(KEY, gson.toJson(out))
                 .putStringSet(KEY_TRUSTED, trusted)
                 .apply()
+        }
+    }
+
+    /** Report which known relays are reachable FROM THIS NETWORK so the broker can
+     *  serve them region-by-region (POST /broker/reachability). Probes the relays
+     *  the client knows (signed-config + shared + broker) with a DIRECT TCP connect
+     *  — that IS the reachability measurement — then posts the ok/fail verdicts
+     *  THROUGH the tunnel when it's up (a blocked user can't reach the flagship
+     *  direct). Best-effort, throttled hourly, off the main thread.
+     *
+     *  SKIPPED under a user local proxy (Tor/I2P): a direct probe to relay IPs
+     *  would bypass the proxy and leak the real IP — the Tor-leak rule. */
+    fun reportReachability() {
+        if (!isReady() || SingBoxTransport.localProxyMode()) return
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - prefs.getLong(KEY_REPORT_TS, 0L) < REPORT_INTERVAL_MS) return
+        runCatching {
+            val seen = HashSet<String>()
+            val targets = (RelayConfigStore.currentRelays() + ContactRelayStore.relays() + relays())
+                .filter { it.server.isNotBlank() && it.port in 1..65535 && seen.add("${it.server}:${it.port}") }
+                .take(MAX_PROBE)
+            if (targets.isEmpty()) return
+            // Direct TCP reachability probes, in parallel + time-bounded.
+            val pool = Executors.newFixedThreadPool(minOf(6, targets.size))
+            val verdicts = try {
+                pool.invokeAll(
+                    targets.map { r ->
+                        java.util.concurrent.Callable {
+                            val ok = runCatching {
+                                Socket().use { it.connect(InetSocketAddress(r.server, r.port), PROBE_TIMEOUT_MS); true }
+                            }.getOrDefault(false)
+                            Triple(r.server, r.port, ok)
+                        }
+                    },
+                    (PROBE_TIMEOUT_MS * 2).toLong(), TimeUnit.MILLISECONDS,
+                )
+            } finally {
+                pool.shutdownNow()
+            }
+            val reports = JsonArray()
+            for (f in verdicts) {
+                val v = runCatching { f.get() }.getOrNull() ?: continue
+                reports.add(JsonObject().apply {
+                    addProperty("server", v.first); addProperty("port", v.second); addProperty("ok", v.third)
+                })
+            }
+            if (reports.size() == 0) return
+            val payload = JsonObject().apply { add("reports", reports) }
+            val postClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
+            postClient.newCall(
+                Request.Builder().url("https://$BROKER_HOST/broker/reachability")
+                    .post(payload.toString().toRequestBody(jsonMedia)).build(),
+            ).execute().use { /* best-effort: success just stamps the throttle below */ }
+            prefs.edit().putLong(KEY_REPORT_TS, nowMs).apply()
         }
     }
 }

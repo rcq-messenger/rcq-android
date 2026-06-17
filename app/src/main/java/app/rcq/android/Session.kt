@@ -817,7 +817,12 @@ class Session(context: Context) {
             launch { runCatching { app.rcq.android.net.RelayConfigStore.refresh(appCtx) } }
             // Pull a few broker bridges (anti-enumeration channel) alongside —
             // best-effort, merged into the transport pool as off-config fallback.
-            launch(Dispatchers.IO) { runCatching { app.rcq.android.net.BrokerRelayStore.refresh() } }
+            // Then report which known relays are reachable from this network, so
+            // the broker serves them region-by-region (throttled hourly inside).
+            launch(Dispatchers.IO) {
+                runCatching { app.rcq.android.net.BrokerRelayStore.refresh() }
+                runCatching { app.rcq.android.net.BrokerRelayStore.reportReachability() }
+            }
         }
     }
 
