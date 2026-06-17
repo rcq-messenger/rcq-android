@@ -186,7 +186,9 @@ internal fun HomeScreen(
     // UnifiedPush distributor (ntfy). With none installed the user silently gets
     // nothing while closed ("приложение перестало работать после закрытия").
     // Show a dismissible banner pointing at setup; the account is never lost.
-    var pushNudgeDismissed by remember { mutableStateOf(false) }
+    // Persisted (not remember{}): navigating into a chat and back recreated
+    // HomeScreen and resurrected the dismissed banner (v0.66 regression).
+    val pushNudgeDismissed by LocalStores.pushNudgeDismissed.collectAsState()
     val showPushNudge = !pushNudgeDismissed &&
         app.rcq.android.push.Push.pushState(context) == app.rcq.android.push.Push.PushState.NO_DISTRIBUTOR
     val favorites by LocalStores.favorites.collectAsState()
@@ -321,7 +323,7 @@ internal fun HomeScreen(
                     item(key = "push-nudge") {
                         PushNudgeBanner(
                             onSetup = { app.rcq.android.push.Push.openNtfyInstall(context) },
-                            onDismiss = { pushNudgeDismissed = true },
+                            onDismiss = { LocalStores.dismissPushNudge() },
                         )
                     }
                 }

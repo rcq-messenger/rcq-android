@@ -149,6 +149,15 @@ object LocalStores {
     private val _screenSecurity = MutableStateFlow(false)
     val screenSecurity: StateFlow<Boolean> = _screenSecurity.asStateFlow()
 
+    /** Whether the user permanently dismissed the home-screen "install a push
+     *  distributor" nudge (shown when no UnifiedPush distributor is present).
+     *  Device-global and persisted: once dismissed it stays dismissed across
+     *  navigation and cold starts (a plain remember{} reset on every return to
+     *  the home list — v0.66 regression). When a distributor later appears the
+     *  banner is gated off anyway, so this never hides a real need. */
+    private val _pushNudgeDismissed = MutableStateFlow(false)
+    val pushNudgeDismissed: StateFlow<Boolean> = _pushNudgeDismissed.asStateFlow()
+
     /** PIN re-lock grace in SECONDS (#10): 0 = lock the moment the app
      *  backgrounds (current behaviour); >0 = only re-lock if away longer than
      *  this, so quick app switches don't demand the PIN every time. */
@@ -206,6 +215,7 @@ object LocalStores {
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
+        _pushNudgeDismissed.value = prefs.getBoolean(K_PUSH_NUDGE_DISMISSED, false)
         _sectionFlags.value = prefs.getStringSet(K_SECTION_FLAGS, emptySet())!!.toSet()
         // Stored as comma-joined asset names (asset names never contain commas).
         // Panel: absent/"" → empty (the CTA shows). Reactions: absent → the
@@ -417,6 +427,13 @@ object LocalStores {
 
     fun screenSecurityOn() = _screenSecurity.value
     fun setScreenSecurity(on: Boolean) { _screenSecurity.value = on; prefs.edit().putBoolean(K_SCREEN_SEC, on).apply() }
+
+    /** Permanently dismiss the push-distributor nudge (see [pushNudgeDismissed]). */
+    fun dismissPushNudge() {
+        if (_pushNudgeDismissed.value) return
+        _pushNudgeDismissed.value = true
+        if (::prefs.isInitialized) prefs.edit().putBoolean(K_PUSH_NUDGE_DISMISSED, true).apply()
+    }
 
     // ── home section fold flags (global UI preference) ────────────────
     fun isSectionFlag(id: String) = id in _sectionFlags.value
@@ -650,6 +667,7 @@ object LocalStores {
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"
     private const val K_SCREEN_SEC = "screen_security"
+    private const val K_PUSH_NUDGE_DISMISSED = "push_nudge_dismissed"
     private const val K_PRES_WIN = "presence_window"
     private const val K_SECURE = "secure_threads"
     private const val K_SECTION_FLAGS = "section_flags"
