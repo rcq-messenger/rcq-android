@@ -27,6 +27,11 @@ object SingBoxTransport {
     const val LOCAL_PORT = 1089
     private const val PREFS = "rcq_singbox"
     private const val KEY_ENABLED = "enabled"
+    // User opted out of boot-time auto-engage: don't turn the tunnel on just
+    // because a direct probe failed (they route through their own VPN/proxy and
+    // don't want our sing-box stacked on top). The explicit KEY_ENABLED toggle
+    // still engages it. iOS parity ("rcq.singbox.autoDisabled").
+    private const val KEY_AUTO_DISABLED = "auto_disabled"
     private const val KEY_ENTRY = "onion_entry"   // sticky onion guard (O4)
     private const val KEY_ONION_OPTIN = "onion_optin"   // legacy per-device onion opt-in (O5); migrated into KEY_MODE
     // Unified transport topology (once KEY_ENABLED): which outbound shape buildConfig emits.
@@ -297,6 +302,16 @@ object SingBoxTransport {
 
     fun setEnabled(ctx: Context, on: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
+    }
+
+    /** When true, the boot path must NOT auto-engage the tunnel on a failed direct
+     *  probe (the explicit [isEnabled] toggle still does). For users on their own
+     *  VPN/proxy who don't want our sing-box stacked on top. */
+    fun autoEngageDisabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_DISABLED, false)
+
+    fun setAutoEngageDisabled(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_AUTO_DISABLED, on).apply()
     }
 
     /** Start the in-process sing-box. Blocking (call off the main thread).

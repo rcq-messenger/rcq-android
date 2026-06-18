@@ -779,7 +779,12 @@ class Session(context: Context) {
             // no overhead). The blocking sing-box start runs here off the main
             // thread; api/socket are rebuilt so they capture the SOCKS proxy.
             val transport = app.rcq.android.net.SingBoxTransport
-            val engage = transport.isEnabled(appCtx) || !transport.probeDirect(serverHost())
+            // Engage when the user forced it on, OR (auto-fallback) when direct is
+            // unreachable — UNLESS the user opted out of auto-engage (they run their
+            // own VPN/proxy and don't want our sing-box on top). The explicit toggle
+            // always wins; the opt-out gates only the probe-driven auto-engage.
+            val engage = transport.isEnabled(appCtx) ||
+                (!transport.autoEngageDisabled(appCtx) && !transport.probeDirect(serverHost()))
             if (engage && !transport.isActive) {
                 // Use the freshest known relay list (last verified payload off
                 // disk) before building the transport; bundled if none yet.
