@@ -182,6 +182,7 @@ internal fun HomeScreen(
     val ownStatus by session.status.collectAsState()
     val connected by session.connected.collectAsState()
     val stealthActive by session.stealthActive.collectAsState()
+    val routeVerified by session.routeVerified.collectAsState()
     // Push reachability nudge: a killed/swiped app only receives messages via a
     // UnifiedPush distributor (ntfy). With none installed the user silently gets
     // nothing while closed ("приложение перестало работать после закрытия").
@@ -296,6 +297,7 @@ internal fun HomeScreen(
                 ownStatus = ownStatus,
                 connected = connected,
                 stealthActive = stealthActive,
+                routeVerified = routeVerified,
                 accounts = accountRows,
                 canAddAccount = accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
                 onPickStatus = { scope.launch { session.setStatus(it) } },
@@ -721,6 +723,7 @@ private fun HomeHeader(
     ownStatus: UserStatus,
     connected: Boolean,
     stealthActive: Boolean,
+    routeVerified: Boolean,
     accounts: List<AccountRow>,
     canAddAccount: Boolean,
     onPickStatus: (UserStatus) -> Unit,
@@ -878,10 +881,14 @@ private fun HomeHeader(
             // nick/UIN stays dead-centred.
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 if (stealthActive) {
+                    // Honest shield: solid accent only when the route is VERIFIED to
+                    // reach the backend; amber when the bypass is engaged but not yet
+                    // (or no longer) carrying traffic — so it can't claim a working
+                    // bypass when the chain is dead ("щит есть, связи нет").
                     Icon(
                         Icons.Filled.Shield,
                         stringResource(R.string.stealth_info_title),
-                        tint = c.accent,
+                        tint = if (routeVerified) c.accent else c.statusAway,
                         modifier = Modifier.size(22.dp).clip(CircleShape).clickable { showStealthInfo = true },
                     )
                 }
