@@ -231,10 +231,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val onMentionClick: (Int) -> Unit = { uin -> if (uin != ownUin) onOpenPeerInfo(uin) }
     // Resolve an `@nickname` to a group member's uin (case-insensitive), for
     // clickable @-mentions in the bubble + the composer autocomplete. Groups only.
-    val mentionUin = remember(group, isGroup) {
-        { nick: String ->
-            if (isGroup) group?.members?.firstOrNull { it.nickname.equals(nick, ignoreCase = true) }?.uin else null
+    // Roster longest-match @mention resolver: given the body + the index of an
+    // '@', return (uin, matched-nick-length) for the LONGEST member nick that
+    // follows (case-insensitive), so nicks with spaces/colons (e.g. "JO f3 JO",
+    // ".:example") render as clickable links — the old exact-nick + word-char
+    // regex couldn't match them. Groups only.
+    val mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = remember(group, isGroup) {
+        val members = group?.members?.takeIf { isGroup } ?: return@remember null
+        fun match(text: String, at: Int): Pair<Int, Int>? {
+            val after = text.substring(at + 1)
+            val lower = after.lowercase()
+            val mem = members
+                .filter { it.nickname.isNotEmpty() && lower.startsWith(it.nickname.lowercase()) }
+                .maxByOrNull { it.nickname.length } ?: return null
+            val len = mem.nickname.length
+            val tail = after.getOrNull(len)
+            // Boundary so "@bob" doesn't match inside "@bobsled".
+            return if (tail == null || !tail.isLetterOrDigit()) mem.uin to len else null
         }
+        ::match
     }
     val isTyping = !isGroup && typingFrom == peer
 
@@ -736,7 +751,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 onViewImage = { fullscreenImage = it },
                                 mentionNick = mentionNick,
                                 onMentionClick = onMentionClick,
-                                mentionUin = mentionUin,
+                                mentionMatch = mentionMatch,
                                 highlighted = m.id == highlightId,
                                 onTapReply = onTapReply,
                                 onSenderClick = if (isGroup && !m.fromMe) ({ m.senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
@@ -2244,7 +2259,7 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionUin: ((String) -> Int?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -2356,7 +2371,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 val manyLines = m.body.count { it == '\n' } >= 14
                 EmoticonText(
                     m.body, color = c.textPrimary, fontSize = 15.sp, lineHeight = 19.sp,
-                    mentionNick = mentionNick, onMentionClick = onMentionClick, mentionUin = mentionUin,
+                    mentionNick = mentionNick, onMentionClick = onMentionClick, mentionMatch = mentionMatch,
                     maxLines = if (collapsed) 14 else Int.MAX_VALUE,
                     onTextLayout = { if (collapsed) bodyOverflow = it.hasVisualOverflow },
                 )

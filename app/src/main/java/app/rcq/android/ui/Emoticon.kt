@@ -281,9 +281,12 @@ internal fun EmoticonText(
     // digits. Null = no mention handling (the default for non-message text).
     mentionNick: ((Int) -> String?)? = null,
     onMentionClick: ((Int) -> Unit)? = null,
-    // When supplied, an `@nickname` whose nick resolves to a group member's uin
-    // renders as the clickable accent nick (tap → [onMentionClick]); else plain.
-    mentionUin: ((String) -> Int?)? = null,
+    // When supplied, an `@mention` is resolved by ROSTER longest-match, not a
+    // fixed char-class regex: given the body + the index of an `@`, it returns
+    // (uin, matched-nick-length) for the longest member nick that follows, or
+    // null. This makes nicks with spaces/colons (e.g. "JO f3 JO", ".:example")
+    // clickable, which the old `@([\p{L}\p{N}_.-]+)` regex couldn't match.
+    mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null,
     // #2: cap visible lines (collapsed long message); Int.MAX_VALUE = no cap.
     maxLines: Int = Int.MAX_VALUE,
     // #2: reports the layout so the caller can tell if the text was actually
@@ -296,7 +299,7 @@ internal fun EmoticonText(
     val layoutCb: (androidx.compose.ui.text.TextLayoutResult) -> Unit = { onTextLayout?.invoke(it) }
     val hasMention =
         (mentionNick != null && body.contains('#') && Emoticons.MENTION_RE.containsMatchIn(body)) ||
-        (mentionUin != null && body.contains('@') && Emoticons.MENTION_AT_RE.containsMatchIn(body))
+        (mentionMatch != null && body.contains('@'))
     // http(s) links are made tappable in the body too (report: links in chats
     // weren't clickable). Cheap "://" gate before the regex.
     val hasUrl = body.contains("://") && Emoticons.URL_RE.containsMatchIn(body)
@@ -325,11 +328,11 @@ internal fun EmoticonText(
     // even type). The resolvers are remember()'d by the caller, so this only
     // rebuilds when the body or a resolver actually changes. animate=false also
     // renders a static first frame (no AnimatedImageDrawable churn).
-    val (annotated, inline) = remember(body, mentionNick, mentionUin, onMentionClick, accent) {
+    val (annotated, inline) = remember(body, mentionNick, mentionMatch, onMentionClick, accent) {
         val inlineMap = HashMap<String, InlineTextContent>()
         val ann = buildAnnotatedString {
             for (t in tokens) when (t) {
-                is Emoticons.Token.Text -> appendWithMentions(t.text, mentionNick, mentionUin, onMentionClick, accent)
+                is Emoticons.Token.Text -> appendWithMentions(t.text, mentionNick, mentionMatch, onMentionClick, accent)
                 is Emoticons.Token.Emo -> {
                     appendInlineContent(t.asset, t.code)
                     if (t.asset !in inlineMap) {
@@ -355,12 +358,12 @@ internal fun EmoticonText(
 
 /** Append [text], turning each resolvable mention into a clickable accent nick
  *  (tap → [onMentionClick]): `#<uin>` via [mentionNick] (renders the nick), and
- *  `@nickname` via [mentionUin] (renders the typed `@nick`). Unresolved or
- *  no-resolver tokens stay plain. Both kinds are merged in source order. */
+ *  `@mention` via [mentionMatch] (roster longest-match; renders the typed `@nick`).
+ *  Unresolved or no-resolver tokens stay plain. Both kinds merged in source order. */
 private fun AnnotatedString.Builder.appendWithMentions(
     text: String,
     mentionNick: ((Int) -> String?)?,
-    mentionUin: ((String) -> Int?)?,
+    mentionMatch: ((String, Int) -> Pair<Int, Int>?)?,
     onMentionClick: ((Int) -> Unit)?,
     accent: Color,
 ) {
@@ -375,10 +378,21 @@ private fun AnnotatedString.Builder.appendWithMentions(
             hits.add(Hit(m.range, false, uin, nick))
         }
     }
-    if (mentionUin != null) {
-        for (m in Emoticons.MENTION_AT_RE.findAll(text)) {
-            val uin = mentionUin(m.groupValues[1]) ?: continue
-            hits.add(Hit(m.range, false, uin, m.value)) // keep the typed "@nick"
+    if (mentionMatch != null) {
+        // Scan each '@' and ask the roster for the longest member nick that
+        // follows (spaces/colons included), instead of a fixed char-class regex.
+        var i = 0
+        while (i < text.length) {
+            val at = text.indexOf('@', i)
+            if (at < 0) break
+            val m = mentionMatch(text, at)
+            if (m != null) {
+                val (uin, len) = m            // len = matched nick length (no '@')
+                hits.add(Hit(at..(at + len), false, uin, text.substring(at, at + len + 1)))
+                i = at + len + 1
+            } else {
+                i = at + 1
+            }
         }
     }
     for (m in Emoticons.URL_RE.findAll(text)) {
