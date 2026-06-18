@@ -247,6 +247,14 @@ class Session(context: Context) {
     private val _stealthActive = MutableStateFlow(false)
     val stealthActive: StateFlow<Boolean> = _stealthActive.asStateFlow()
 
+    /** Whether the engaged tunnel VERIFIABLY reaches the backend through the
+     *  current route (the same /health-through-route probe the watchdog +
+     *  diagnostics use). The home shield reflects this so it can't claim a working
+     *  bypass when the chain (esp. onion) carries no traffic — the "лук: щит есть,
+     *  связи нет" report. Meaningless (false) when no tunnel is engaged. */
+    private val _routeVerified = MutableStateFlow(false)
+    val routeVerified: StateFlow<Boolean> = _routeVerified.asStateFlow()
+
     private val _typingFrom = MutableStateFlow<Int?>(null)
     val typingFrom: StateFlow<Int?> = _typingFrom.asStateFlow()
     private var typingSeq = 0
@@ -737,6 +745,7 @@ class Session(context: Context) {
                 delay(60_000)
                 if (!transport.isActive || !transport.onionMode()) { deadStreak = 0; continue }
                 val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) }
+                _routeVerified.value = ok   // keep the home shield honest for onion (never dropped)
                 if (ok) { deadStreak = 0; continue }
                 deadStreak++
                 if (deadStreak >= 2 && transport.rotateEntry()) {
@@ -797,8 +806,18 @@ class Session(context: Context) {
             // deliberately chose). Cohort-flipped onion (signed config) on an
             // open network does fall back — it's a censorship aid, moot when
             // direct works.
-            if (transport.isActive && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx)) {
-                if (!transport.probeCurrentRoute(serverHost()) && transport.probeDirect(serverHost())) {
+            var routeOk = false
+            if (transport.isActive) {
+                // Probe the live route once: it tells the shield whether the tunnel
+                // actually carries traffic (read-only /health through the proxy; safe
+                // for onion too — it does NOT tear the chain down).
+                routeOk = transport.probeCurrentRoute(serverHost())
+                // DIRECT fallback only when droppable: tunnel up but dead AND direct
+                // works -> drop. NEVER under a local proxy (Tor-leak rule) nor an
+                // explicit onion opt-in (preserve chosen metadata-resistance).
+                if (!routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx) &&
+                    transport.probeDirect(serverHost())
+                ) {
                     android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
                     transport.stop()
                     api = newApi()
@@ -806,6 +825,7 @@ class Session(context: Context) {
                 }
             }
             _stealthActive.value = transport.isActive
+            _routeVerified.value = transport.isActive && routeOk
             connectAndSync(uin, token)
             // (Crash reports are NOT auto-sent. A captured crash is offered to
             // the user on next launch via a consent dialog in MainActivity —
@@ -850,6 +870,7 @@ class Session(context: Context) {
             api = newApi()
             socket = newSocket()
             _stealthActive.value = transport.isActive
+            _routeVerified.value = transport.isActive && transport.probeCurrentRoute(serverHost())
             connectAndSync(uin, token)
         }
     }
@@ -881,6 +902,7 @@ class Session(context: Context) {
             api = newApi()
             socket = newSocket()
             _stealthActive.value = transport.isActive
+            _routeVerified.value = transport.isActive && transport.probeCurrentRoute(serverHost())
             connectAndSync(uin, token)
         }
     }
