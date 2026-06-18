@@ -552,6 +552,8 @@
     <string name="pv_network">Network</string>
     <string name="pv_obfuscated">Obfuscated connection</string>
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>
+    <string name="pv_obf_auto_disable">Don\'t engage automatically</string>
+    <string name="pv_obf_auto_disable_desc">By default the app turns obfuscation on automatically if it can\'t reach the server directly. If you route your traffic through your own VPN/proxy, enable this so our transport doesn\'t stack on top of yours.</string>
     <string name="pv_onion">Onion routing (experimental)</string>
     <string name="pv_onion_desc">Routes through two relays so no single relay sees both you and the server. Turns on the protected connection automatically. A little slower. Takes effect on next launch.</string>
     <string name="pv_localproxy">Proxy</string>

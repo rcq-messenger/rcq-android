@@ -903,6 +903,7 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
+    var autoDisabled by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.autoEngageDisabled(context)) }
     var localProxy by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyMode()) }
     var lpHost by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyHost()) }
     var lpPort by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyPort().toString()) }
@@ -938,6 +939,22 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     checked = obfuscated,
                     enabled = !localProxy,
                     onCheckedChange = { obfuscated = it; app.rcq.android.net.SingBoxTransport.setEnabled(context, it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
+
+            // "Don't engage automatically" (iOS parity): by default the app turns
+            // the tunnel on when it can't reach the server directly; a user on their
+            // own VPN/proxy can opt out so our sing-box doesn't stack on theirs.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_obf_auto_disable), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_obf_auto_disable_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = autoDisabled,
+                    enabled = !localProxy,
+                    onCheckedChange = { autoDisabled = it; app.rcq.android.net.SingBoxTransport.setAutoEngageDisabled(context, it) },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }
