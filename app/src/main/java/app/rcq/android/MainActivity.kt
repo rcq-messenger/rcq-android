@@ -31,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -419,6 +420,14 @@ private fun RcqApp(session: Session) {
                 showRestore -> showRestore = false
             }
         }
+        // Preserve each screen's scroll (and other rememberSaveable state) across
+        // the when-branch swaps. Leaving a branch tore the screen down and
+        // discarded its LazyListState, so Back reset the chat list / Settings to
+        // the TOP and a chat to the bottom. Keying home/chat(per-thread)/settings
+        // lets re-entry restore where the user was. (NB: the composition still
+        // rebuilds on return, so the slow re-sort #9 is a separate keep-composed
+        // change; this fixes the scroll-position #2.)
+        val stateHolder = rememberSaveableStateHolder()
         when {
             s is UiState.Registered && locked -> app.rcq.android.ui.PinLockScreen(
                 session,
@@ -467,13 +476,15 @@ private fun RcqApp(session: Session) {
                         onUnlocked = { unlockedChatThread = chatThread },
                     )
                 } else {
-                    ChatScreen(
-                        session, target,
-                        onBack = { chatTarget = null; unlockedChatThread = null },
-                        onOpenGroupInfo = { groupInfoId = it },
-                        onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
-                        onOpenGroup = { chatTarget = ChatTarget.Group(it); unlockedChatThread = null },
-                    )
+                    stateHolder.SaveableStateProvider("chat:$chatThread") {
+                        ChatScreen(
+                            session, target,
+                            onBack = { chatTarget = null; unlockedChatThread = null },
+                            onOpenGroupInfo = { groupInfoId = it },
+                            onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
+                            onOpenGroup = { chatTarget = ChatTarget.Group(it); unlockedChatThread = null },
+                        )
+                    }
                 }
             }
             s is UiState.Registered && showManageAccounts -> ManageAccountsScreen(
@@ -509,32 +520,36 @@ private fun RcqApp(session: Session) {
                 session,
                 onBack = { showProfile = false },
             )
-            s is UiState.Registered && showSettings -> SettingsScreen(
-                session, s.uin,
-                onBack = { showSettings = false; settingsToDiagnostics = false },
-                onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
-                onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
-                openDiagnostics = settingsToDiagnostics,
-            )
-            s is UiState.Registered -> HomeScreen(
-                session, s.uin,
-                onOpenChat = { chatTarget = ChatTarget.Peer(it) },
-                onOpenGroup = { chatTarget = ChatTarget.Group(it) },
-                onOpenSettings = { settingsToDiagnostics = false; showSettings = true },
-                onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
-                onOpenProfile = { showProfile = true },
-                onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
-                onOpenNews = { showNews = true },
-                onOpenOutgoing = { showOutgoing = true },
-                onOpenSaved = { session.uin?.let { chatTarget = ChatTarget.Peer(it) } },
-                onOpenAudioRooms = { showAudioRooms = true },
-                onOpenNearby = { showNearby = true },
-                onOpenRadio = { showRadio = true },
-                onOpenRandom = { showRandom = true },
-                onSwitchAccount = ::switchAccount,
-                onAddAccount = ::addAccount,
-                onManageAccounts = { showManageAccounts = true },
-            )
+            s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider("settings") {
+                SettingsScreen(
+                    session, s.uin,
+                    onBack = { showSettings = false; settingsToDiagnostics = false },
+                    onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
+                    onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
+                    openDiagnostics = settingsToDiagnostics,
+                )
+            }
+            s is UiState.Registered -> stateHolder.SaveableStateProvider("home") {
+                HomeScreen(
+                    session, s.uin,
+                    onOpenChat = { chatTarget = ChatTarget.Peer(it) },
+                    onOpenGroup = { chatTarget = ChatTarget.Group(it) },
+                    onOpenSettings = { settingsToDiagnostics = false; showSettings = true },
+                    onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
+                    onOpenProfile = { showProfile = true },
+                    onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
+                    onOpenNews = { showNews = true },
+                    onOpenOutgoing = { showOutgoing = true },
+                    onOpenSaved = { session.uin?.let { chatTarget = ChatTarget.Peer(it) } },
+                    onOpenAudioRooms = { showAudioRooms = true },
+                    onOpenNearby = { showNearby = true },
+                    onOpenRadio = { showRadio = true },
+                    onOpenRandom = { showRandom = true },
+                    onSwitchAccount = ::switchAccount,
+                    onAddAccount = ::addAccount,
+                    onManageAccounts = { showManageAccounts = true },
+                )
+            }
             s is UiState.Onboarding -> OnboardingScreen(onStart = ::register, onRestore = { showRestore = true })
             s is UiState.Registering -> Registering()
             s is UiState.Failed -> Failed(s.message, onRetry = { retryRegister() })
