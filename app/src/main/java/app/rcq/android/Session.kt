@@ -88,10 +88,18 @@ class Session(context: Context) {
     // or the default public server. Both clients are rebuilt from it after
     // a registration that picks a custom server.
     private fun serverHost(): String = store.serverHost ?: RcqApi.DEFAULT_HOST
+    // Cloudflare front for the flagship: when set (boot found direct api.rcq.app
+    // blocked but the CF front reachable), the API + WS connect to this host
+    // instead. It rides Cloudflare's collateral-resistant IPs and proxies to
+    // api.rcq.app, so a blocked user reaches the island WITHOUT a relay. serverHost()
+    // stays the island identity (api.rcq.app) — this only changes the transport URL.
+    private var frontHost: String? = null
+    private val FRONT_HOST = "cdn.rcq.app"   // Cloudflare front for api.rcq.app
+    private fun apiHost(): String = frontHost ?: serverHost()
     private var api = newApi()
     private var socket = newSocket()
-    private fun newApi(): RcqApi = RcqApi("https://${serverHost()}").apply { if (store.isRegistered) setToken(store.token) }
-    private fun newSocket(): RcqSocket = RcqSocket("wss://${serverHost()}")
+    private fun newApi(): RcqApi = RcqApi("https://${apiHost()}").apply { if (store.isRegistered) setToken(store.token) }
+    private fun newSocket(): RcqSocket = RcqSocket("wss://${apiHost()}")
     // Opened lazily by [bindDb] (in [start]) so the message DB is never opened
     // before the panic-PIN dataKey is available — opening a PIN-encrypted DB
     // with the wrong key would fail. While locked it stays closed.
@@ -779,12 +787,30 @@ class Session(context: Context) {
             // no overhead). The blocking sing-box start runs here off the main
             // thread; api/socket are rebuilt so they capture the SOCKS proxy.
             val transport = app.rcq.android.net.SingBoxTransport
-            // Engage when the user forced it on, OR (auto-fallback) when direct is
-            // unreachable — UNLESS the user opted out of auto-engage (they run their
-            // own VPN/proxy and don't want our sing-box on top). The explicit toggle
-            // always wins; the opt-out gates only the probe-driven auto-engage.
-            val engage = transport.isEnabled(appCtx) ||
-                (!transport.autoEngageDisabled(appCtx) && !transport.probeDirect(serverHost()))
+            val directOk = transport.probeDirect(serverHost())
+            val flagship = store.serverHost.isNullOrBlank() || store.serverHost == RcqApi.DEFAULT_HOST
+            // CF FRONT FALLBACK (tried BEFORE the relay): the flagship is blocked
+            // directly, the user isn't forcing the relay/local-proxy, and the
+            // Cloudflare front reaches the island -> route the API + WS through
+            // cdn.rcq.app (CF's collateral-resistant IPs proxy to api.rcq.app) with
+            // NO relay. Simpler + harder to IP-block than a relay; relays remain the
+            // fallback (and the privacy path) if the front is also blocked. Skipped
+            // under a forced relay/local-proxy and for custom islands (the front only
+            // proxies the flagship).
+            if (!directOk && flagship && !transport.isEnabled(appCtx) && !transport.localProxyMode() &&
+                transport.probeDirect(FRONT_HOST)
+            ) {
+                frontHost = FRONT_HOST
+                api = newApi()
+                socket = newSocket()
+                android.util.Log.i("RCQfront", "direct api blocked, CF front reachable — routing via $FRONT_HOST")
+            }
+            // Engage the relay when the user forced it on, OR (auto-fallback) when
+            // direct is unreachable AND the front didn't take over — UNLESS the user
+            // opted out of auto-engage. The explicit toggle always wins; the opt-out
+            // gates only the probe-driven auto-engage.
+            val engage = frontHost == null && (transport.isEnabled(appCtx) ||
+                (!transport.autoEngageDisabled(appCtx) && !directOk))
             if (engage && !transport.isActive) {
                 // Use the freshest known relay list (last verified payload off
                 // disk) before building the transport; bundled if none yet.
