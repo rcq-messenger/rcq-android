@@ -282,9 +282,18 @@ object Push {
         // The 1:1 sealed wake hides the sender, so peer mute stays a server gate.
         if (groupId != null) {
             val activeId = app.rcq.android.data.AccountManager.activeId.value
-            if (activeId != null &&
-                app.rcq.android.data.LocalStores.isMutedFor(activeId, app.rcq.android.data.LocalStores.groupThread(groupId))
-            ) return
+            val thread = app.rcq.android.data.LocalStores.groupThread(groupId)
+            if (activeId != null) {
+                // Fully muted (NONE): never wake, even if the server's muted_group_ids
+                // sync was stale (the v0.63 class of bug).
+                if (app.rcq.android.data.LocalStores.isMutedFor(activeId, thread)) return
+                // Mentions-only: the user wants a banner ONLY when @mentioned. Android
+                // does no in-push decrypt (unlike the iOS NSE), so it can't confirm a
+                // mention from a sealed/gmsg wake — stay quiet rather than spam every
+                // message (the "muted RCQ Beta still pushes" report). Real mentions are
+                // still seen in-app; precise server-side mention gating is a follow-up.
+                if (app.rcq.android.data.LocalStores.isMentionsOnlyFor(activeId, thread)) return
+            }
         }
         val title = groupName ?: str("title") ?: ctx.getString(R.string.app_name)
         val body = str("body") ?: ctx.getString(

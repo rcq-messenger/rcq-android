@@ -827,7 +827,12 @@ private fun HomeHeader(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box {
-                StatusIcon(ownStatus, size = 30.dp, modifier = Modifier.clip(CircleShape).clickable { statusMenu = true })
+                // The flower must not claim ONLINE while the socket is down (report:
+                // all network toggles off -> flower green but no connectivity). Show
+                // OFFLINE when not connected; the status-picker menu below stays bound
+                // to the real ownStatus so the user's choice isn't lost.
+                val effectiveStatus = if (connected) ownStatus else UserStatus.OFFLINE
+                StatusIcon(effectiveStatus, size = 30.dp, modifier = Modifier.clip(CircleShape).clickable { statusMenu = true })
                 // Always-visible connection indicator (#16): a small dot on the
                 // identity flower. Green = socket up, amber = connecting /
                 // offline (the app auto-reconnects). Non-interactive overlay.

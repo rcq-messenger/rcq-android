@@ -334,6 +334,14 @@ object LocalStores {
     fun isMutedFor(accountId: String, thread: String): Boolean =
         ::prefs.isInitialized && prefs.getStringSet("$accountId.$K_MUTE", emptySet())!!.contains(thread)
 
+    /** Headless "mentions only" check (companion to [isMutedFor]): read [thread]'s
+     *  mentions-only notify flag straight from prefs for [accountId], no account
+     *  binding. The UnifiedPush service uses it to stay quiet for a mentions-only
+     *  group's ordinary messages — Android can't decrypt the push to confirm an
+     *  @mention (unlike the iOS NSE), so mentions-only behaves as quiet here. */
+    fun isMentionsOnlyFor(accountId: String, thread: String): Boolean =
+        ::prefs.isInitialized && prefs.getStringSet("$accountId.$K_MENTIONS", emptySet())!!.contains(thread)
+
     fun isArchived(thread: String) = thread in _archived.value
     fun toggleArchive(thread: String) = toggle(_archived, K_ARCH, thread)
 
