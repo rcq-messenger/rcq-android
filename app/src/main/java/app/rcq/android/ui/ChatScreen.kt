@@ -1044,18 +1044,24 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         var editText by remember(m.id) { mutableStateOf(m.body) }
         AlertDialog(
             onDismissRequest = { editMsg = null },
+            // The dialog window is its OWN sub-window and does NOT inherit the
+            // activity's adjustResize, so for a long message the keyboard covered
+            // the field and the user typed blind. decorFitsSystemWindows=false +
+            // imePadding on the content makes the dialog ride above the IME, and the
+            // bounded+scrolling field keeps the caret visible instead of growing tall.
+            properties = DialogProperties(decorFitsSystemWindows = false),
             containerColor = c.bgSecondary,
             title = { Text(stringResource(R.string.chat_edit_title), color = c.textPrimary) },
             text = {
                 Box(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 12.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().imePadding().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     BasicTextField(
                         value = editText,
                         onValueChange = { editText = it },
                         textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
                         cursorBrush = SolidColor(c.accent),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
                     )
                 }
             },

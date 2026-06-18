@@ -1006,7 +1006,10 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     app.rcq.android.net.SingBoxTransport.setLocalProxy(context, lpHost.trim(), p, lpType)
                 }
                 Column(Modifier.padding(top = 8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Host + port stacked vertically: with a label + paste icon each,
+                    // two side-by-side fields don't fit in portrait (report: had to
+                    // rotate the phone). Full-width, one per line.
+                    Column {
                         OutlinedTextField(
                             value = lpHost,
                             onValueChange = { lpHost = it; persistProxy() },
@@ -1022,9 +1025,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                                     },
                                 )
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                        Spacer(Modifier.size(8.dp))
+                        Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = lpPort,
                             onValueChange = { v -> lpPort = v.filter { it.isDigit() }.take(5); persistProxy() },
@@ -1040,7 +1043,7 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                                     },
                                 )
                             },
-                            modifier = Modifier.weight(0.5f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
