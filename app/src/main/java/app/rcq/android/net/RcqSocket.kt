@@ -39,6 +39,16 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private var attempt = 0
     private var pingTimer: java.util.Timer? = null
 
+    // Silent-death watchdog. The server answers every app-level ping with a
+    // pong frame, so a healthy socket hears SOMETHING inbound at least every
+    // ~25s. A socket can die without any TCP error (NAT timeout, DPI kill,
+    // route black-holed) and OkHttp keeps buffering writes into it, so the
+    // app believes it's online while nothing arrives. If we still think we're
+    // connected but heard nothing for WATCHDOG_SILENCE_MS (~3 missed pongs),
+    // force a redial. Mirrors the iOS 90s silent-socket watchdog.
+    @Volatile private var lastInboundAt = 0L
+    @Volatile private var believedConnected = false
+
     // Identity guard for listener callbacks: open() rotates sockets, and a
     // cancel()ed socket still fires onFailure asynchronously. Without the
     // generation check that stale callback would flip the connected state
@@ -75,7 +85,19 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
                 // App-level heartbeat matching the iOS client; keeps the
                 // server's per-socket liveness fresh on top of OkHttp's
                 // protocol ping.
-                override fun run() { ws?.send("{\"type\":\"ping\"}") }
+                override fun run() {
+                    ws?.send("{\"type\":\"ping\"}")
+                    if (believedConnected &&
+                        System.currentTimeMillis() - lastInboundAt > WATCHDOG_SILENCE_MS
+                    ) {
+                        android.util.Log.w(
+                            "RCQsocket",
+                            "watchdog: no inbound frame for ${WATCHDOG_SILENCE_MS / 1000}s on a socket believed connected — redialing",
+                        )
+                        believedConnected = false
+                        reconnectNow()
+                    }
+                }
             }, 25_000, 25_000)
         }
     }
@@ -88,12 +110,15 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (gen != generation) return
                 attempt = 0
+                lastInboundAt = System.currentTimeMillis()
+                believedConnected = true
                 startPing()
                 onState(true)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (gen != generation) return
+                lastInboundAt = System.currentTimeMillis()
                 runCatching {
                     val obj = JsonParser.parseString(text).asJsonObject
                     val type = obj.get("type")?.asString ?: return
@@ -103,12 +128,14 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (gen != generation) return
+                believedConnected = false
                 onState(false)
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (gen != generation) return
+                believedConnected = false
                 onState(false)
                 scheduleReconnect()
             }
@@ -123,6 +150,7 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     fun reconnectNow() {
         if (!shouldStayConnected) return
         attempt = 0
+        believedConnected = false
         onState(false)
         open()
     }
@@ -142,6 +170,7 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
 
     fun disconnect() {
         shouldStayConnected = false
+        believedConnected = false
         pingTimer?.cancel()
         pingTimer = null
         ws?.close(1000, null)
@@ -150,5 +179,9 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
 
     companion object {
         const val DEFAULT_WS_URL = "wss://api.rcq.app"
+
+        // 3+ missed heartbeat pongs (25s cadence) before declaring the socket
+        // silently dead; matches the iOS client's watchdog.
+        private const val WATCHDOG_SILENCE_MS = 90_000L
     }
 }
