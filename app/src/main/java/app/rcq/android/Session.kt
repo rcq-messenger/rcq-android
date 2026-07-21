@@ -3068,30 +3068,54 @@ class Session(context: Context) {
         }
     }
 
-    /** Fan a control envelope out to every other group member, best effort. */
+    /** Fan a control envelope (delete / edit / reaction) out to the group.
+     *  Mirrors fanOutGroup's transport split: capable members get ONE
+     *  sender-keys gmsg broadcast, legacy members a per-member sealed copy.
+     *  The old always-per-member path needed every member's identity key, so
+     *  in a members-hidden group or a huge roster the payload list came up
+     *  empty and the delete/edit silently reached NOBODY while the author's
+     *  copy vanished locally (GitHub issue #6, "Delete for everyone makes
+     *  nothing") — and a 1000+ member group cost one X25519 seal per member
+     *  for every reaction. The gmsg receive path has routed control envelopes
+     *  since sender keys landed, on all three clients. Also routes through
+     *  groupCtx so a FOREIGN group's control lands on ITS island with guest
+     *  creds instead of misrouting to ours. */
     private suspend fun fanOutControl(groupId: Int, env: Envelope) = withContext(Dispatchers.IO) {
-        val me = store.uin ?: return@withContext
+        val ctx = groupCtx(groupId)
+        val me = ctx.myUin.takeIf { it != 0 } ?: return@withContext
         val group = group(groupId) ?: return@withContext
         runCatching {
-            // Same per-member isolation as fanOutGroup: one unusable key must not
-            // drop the reaction/edit/delete for the whole group.
-            val payloads = group.members
-                .filter { it.uin != me && it.identityKey.isNotEmpty() }
-                .mapNotNull { m ->
+            val sendable = group.members.filter { it.uin != me && it.identityKey.isNotEmpty() }
+            val capable = if (ctx.host == null) sendable.filter { it.senderKeys } else emptyList()
+            if (capable.isNotEmpty()) {
+                val step = SenderKeyStore.prepareOwnSend(me, ctx.gid, capable.map { it.uin })
+                val gmsg = SenderKeys.sealGmsg(env, ctx.gid, step.kid, step.epoch, step.index, step.mk, signingPriv())
+                // Chain distribution first, so no recipient sees an unknown kid.
+                val skdmTargets = capable.filter { it.uin in step.needDistribution }
+                if (skdmTargets.isNotEmpty()) {
+                    val skdmEnv = Envelope.Skdm(ctx.gid, step.kid, step.epoch, step.index, step.ckAtI)
+                    val skdmPayloads = skdmTargets.mapNotNull { m ->
+                        runCatching {
+                            RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(skdmEnv, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                        }.getOrNull()
+                    }
+                    if (skdmPayloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, skdmPayloads, envelopeType = "skdm") }
+                }
+                withRetry { ctx.api.sendGroupBroadcast(ctx.gid, gmsg) }
+                SenderKeyStore.markDistributed(me, ctx.gid, skdmTargets.map { it.uin })
+                SenderKeyStore.advanceOwn(me, ctx.gid)
+            }
+            // Legacy members (or a foreign group / no capable cohort) keep the
+            // per-member sealed copy. Same one-bad-key isolation as fanOutGroup.
+            val rest = if (capable.isNotEmpty()) sendable.filter { !it.senderKeys } else sendable
+            if (rest.isNotEmpty()) {
+                val payloads = rest.mapNotNull { m ->
                     runCatching {
-                        RcqApi.GroupPayload(
-                            to_uin = m.uin,
-                            payload = SealedSender.encryptV1(
-                                envelope = env,
-                                recipientIdentityPub = Base64.decode(m.identityKey, Base64.NO_WRAP),
-                                ownUin = me,
-                                signingPriv = signingPriv(),
-                                signingPub = signingPub(),
-                            ),
-                        )
+                        RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
                     }.getOrNull()
                 }
-            if (payloads.isNotEmpty()) withRetry { api.sendGroupSealed(groupId, payloads) }
+                if (payloads.isNotEmpty()) withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads) }
+            }
         }
     }
 
