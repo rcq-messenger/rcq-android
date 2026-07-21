@@ -106,7 +106,9 @@ object ContactAddLink {
  *  RcqApp shows a confirm dialog, then seals this account into the relay slot so
  *  the web logs in as the same identity. */
 object WebLinkRequest {
-    data class Req(val token: String, val webPub: String)
+    /** [clientLabel] = the QR's `c` param ("Desktop"/"Web") shown in the phone's
+     *  Linked-devices list; "Web" for old QRs that carry no hint. */
+    data class Req(val token: String, val webPub: String, val clientLabel: String = "Web")
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromUri(uri: android.net.Uri?): Req? {
@@ -119,7 +121,8 @@ object WebLinkRequest {
         if (!isRcq && !isWeb) return null
         val token = uri.getQueryParameter("t")?.takeIf { it.isNotBlank() } ?: return null
         val webPub = uri.getQueryParameter("k")?.takeIf { it.isNotBlank() } ?: return null
-        return Req(token, webPub)
+        val label = uri.getQueryParameter("c")?.trim()?.takeIf { it.isNotBlank() }?.take(24) ?: "Web"
+        return Req(token, webPub, label)
     }
 }
 
@@ -671,7 +674,7 @@ private fun RcqApp(session: Session) {
                     onConfirm = {
                         WebLinkRequest.pending.value = null
                         scope.launch {
-                            val err = runCatching { session.linkWeb(req.token, req.webPub) }.exceptionOrNull()
+                            val err = runCatching { session.linkWeb(req.token, req.webPub, req.clientLabel) }.exceptionOrNull()
                             val msg = when {
                                 err == null -> R.string.weblink_done
                                 // 409 = the one-time slot is already filled: a

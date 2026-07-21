@@ -2788,12 +2788,14 @@ class Session(context: Context) {
      *  with its ephemeral private key and logs in as this same identity. The
      *  blob carries the recovery material (keys + session token), so the caller
      *  MUST confirm with the user first — it hands web access to the account. */
-    suspend fun linkWeb(token: String, webPubB64: String) {
+    suspend fun linkWeb(token: String, webPubB64: String, clientLabel: String = "Web") {
         val uin = store.uin ?: error("not registered")
         // Mint a SEPARATE session token for the web device (revocable on its
         // own, and it flips the account to multi-device → server serves v=1).
-        // The web carries this, not the phone's token.
-        val jwt = api.linkDevice("Web").token.ifEmpty { error("device link failed") }
+        // The web carries this, not the phone's token. [clientLabel] ("Desktop"
+        // /"Web") comes from the scanned QR's `c` param so the Linked-devices
+        // list names it correctly.
+        val jwt = api.linkDevice(clientLabel).token.ifEmpty { error("device link failed") }
         val now = System.currentTimeMillis() / 1000
         val blob = com.google.gson.JsonObject().apply {
             addProperty("uin", uin)
