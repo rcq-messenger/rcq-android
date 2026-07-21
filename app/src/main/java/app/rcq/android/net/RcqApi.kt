@@ -385,8 +385,24 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         val group_id: Int? = null,
     )
 
+    /** Fetch the offline queue with `ack=1`: the server returns rows WITHOUT
+     *  deleting them and holds each until the client POSTs /messages/queue/ack
+     *  with the ids it actually persisted. The old ack-less call deleted rows
+     *  on fetch, so a fetch whose HTTP response was lost in flight (dropped
+     *  connection, NAT reset) advanced the server cursor and the messages were
+     *  gone — the "изредка теряются сообщения" reports. Now a lost response
+     *  means no ack, so the server redelivers; the client dedupes by envelope
+     *  UUID. Matches the iOS drain. */
     suspend fun drainQueue(): List<QueuedEnvelope> = withContext(Dispatchers.IO) {
-        get("/messages/queue", authed = true, Array<QueuedEnvelope>::class.java).toList()
+        get("/messages/queue?ack=1", authed = true, Array<QueuedEnvelope>::class.java).toList()
+    }
+
+    data class QueueAckIn(val direct_ids: List<Int>, val group_ids: List<Int>)
+
+    /** Advance this device's drain cursor past the rows it has persisted. */
+    suspend fun ackQueue(directIds: List<Int>, groupIds: List<Int>) = withContext(Dispatchers.IO) {
+        if (directIds.isEmpty() && groupIds.isEmpty()) return@withContext
+        sendNoResult("POST", "/messages/queue/ack", gson.toJson(QueueAckIn(directIds, groupIds)), authed = true)
     }
 
     // ── contacts (rcq-spec 4) ────────────────────────────────────────

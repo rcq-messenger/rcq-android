@@ -3306,6 +3306,15 @@ class Session(context: Context) {
 
     private suspend fun drainQueue() {
         CrashReporter.crumb(appCtx, "drain_queue")
+        // ack=1 protocol: the server holds each row until we confirm we ingested
+        // it. Collect the ids that made it through ingest, then ack them; a lost
+        // response (this fetch's or the ack's) leaves the rows on the server for
+        // redelivery instead of silently dropping them. Split direct vs group —
+        // the two server tables have independent auto-increment ids that can
+        // collide. Ingest is best-effort + dedups by envelope UUID, so acking a
+        // row that turned out to be a duplicate is harmless.
+        val directIds = ArrayList<Int>()
+        val groupIds = ArrayList<Int>()
         api.drainQueue().forEach { q ->
             val payload = q.payload ?: return@forEach
             when {
@@ -3313,7 +3322,11 @@ class Session(context: Context) {
                 q.group_id != null -> ingestGroup(payload, q.group_id)
                 else -> ingest(payload)
             }
+            if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
         }
+        // Best-effort ack. If it fails the server redelivers next drain and the
+        // UUID dedupe collapses the repeat, so we never lose and never double.
+        runCatching { api.ackQueue(directIds, groupIds) }
         CrashReporter.crumb(appCtx, "drain_done")
     }
 
