@@ -22,11 +22,15 @@ import java.util.UUID
 data class Reply(val id: String, val snippet: String, val authorName: String)
 
 sealed interface Envelope {
-    data class Text(val id: String, val text: String, val replyTo: Reply? = null) : Envelope
+    /** Disappearing-message TTL in seconds carried by the sender inside the
+     *  encrypted envelope (iOS key "ttl"); null = permanent. The receiver
+     *  expires the local copy [ttl] seconds after receipt. Only the content
+     *  kinds below carry it. */
+    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null) : Envelope
     /** Photo. `mediaId`/`mediaKey` point at the out-of-band encrypted
      *  blob (rcq-spec 9). caption may be empty. [spoiler] = sent blurred,
      *  the recipient taps to reveal (Android-only flag; iOS ignores it). */
-    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null) : Envelope
+    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null) : Envelope
     /** A reaction to another message (iOS kind "reaction"). Carries no own
      *  message id; [targetId] is the reacted message's UUID, [asset] the
      *  emoji (null clears, currently treated as a no-op on receipt). */
@@ -52,6 +56,7 @@ sealed interface Envelope {
         val mime: String,
         val sizeBytes: Long,
         val caption: String?,
+        val ttl: Int? = null,
     ) : Envelope
     /** Voice note (iOS kind "voice"). Audio bytes live in an encrypted
      *  blob; [durationSec] drives the bubble timer. */
@@ -60,6 +65,7 @@ sealed interface Envelope {
         val mediaId: String,
         val mediaKey: String,
         val durationSec: Double,
+        val ttl: Int? = null,
     ) : Envelope
     /** Video (iOS kind "video"). Bytes in an encrypted blob; [thumbnailB64]
      *  is a base64 JPEG poster frame shown before download, [durationSec]
@@ -73,9 +79,10 @@ sealed interface Envelope {
         val caption: String?,
         val spoiler: Boolean = false,
         val albumId: String? = null,
+        val ttl: Int? = null,
     ) : Envelope
     /** Shared location (iOS kind "location"). */
-    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?) : Envelope
+    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null) : Envelope
     /** Profile-view ping (iOS kind "visit"). Fire-and-forget, no bubble:
      *  the recipient tallies it locally for the "profile views" stat.
      *  [at] is seconds since the 2001 reference date, matching the iOS
@@ -162,6 +169,7 @@ sealed interface Envelope {
             addProperty("kind", "text")
             addProperty("id", id)
             addProperty("text", text)
+            ttl?.let { addProperty("ttl", it) }
             replyTo?.let {
                 add("reply", JsonObject().apply {
                     addProperty("id", it.id)
@@ -178,6 +186,7 @@ sealed interface Envelope {
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
             if (spoiler) addProperty("spoiler", true)
             albumId?.let { addProperty("album", it) }
+            ttl?.let { addProperty("ttl", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Reaction -> JsonObject().apply {
             addProperty("kind", "reaction")
@@ -206,6 +215,7 @@ sealed interface Envelope {
             addProperty("mime", mime)
             addProperty("size", sizeBytes)
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
+            ttl?.let { addProperty("ttl", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Voice -> JsonObject().apply {
             addProperty("kind", "voice")
@@ -213,6 +223,7 @@ sealed interface Envelope {
             addProperty("mediaID", mediaId)
             addProperty("mediaKey", mediaKey)
             addProperty("durationSec", durationSec)
+            ttl?.let { addProperty("ttl", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Video -> JsonObject().apply {
             addProperty("kind", "video")
@@ -224,6 +235,7 @@ sealed interface Envelope {
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
             if (spoiler) addProperty("spoiler", true)
             albumId?.let { addProperty("album", it) }
+            ttl?.let { addProperty("ttl", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Location -> JsonObject().apply {
             addProperty("kind", "location")
@@ -231,6 +243,7 @@ sealed interface Envelope {
             addProperty("lat", lat)
             addProperty("lng", lng)
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
+            ttl?.let { addProperty("ttl", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Visit -> JsonObject().apply {
             addProperty("kind", "visit")
@@ -354,8 +367,12 @@ sealed interface Envelope {
                     authorName = it.get("authorName")?.asString.orEmpty(),
                 )
             }
+            // Disappearing-message TTL (seconds) the sender packed into the
+            // envelope; absent/JSON-null → permanent. Only the content kinds
+            // read it — control envelopes ignore any stray value.
+            val ttl = obj.get("ttl")?.takeIf { it.isJsonPrimitive }?.asInt
             return when (val kind = obj.get("kind")?.asString) {
-                "text" -> Text(id, obj.get("text")?.asString.orEmpty(), reply)
+                "text" -> Text(id, obj.get("text")?.asString.orEmpty(), reply, ttl)
                 "photo" -> Photo(
                     id = id,
                     mediaId = obj.get("mediaID")?.asString.orEmpty(),
@@ -363,6 +380,7 @@ sealed interface Envelope {
                     caption = obj.get("caption")?.asString,
                     spoiler = obj.get("spoiler")?.asBoolean ?: false,
                     albumId = obj.get("album")?.asString,
+                    ttl = ttl,
                 )
                 "reaction" -> Reaction(
                     targetId = obj.get("targetID")?.asString.orEmpty(),
@@ -384,12 +402,14 @@ sealed interface Envelope {
                     mime = obj.get("mime")?.asString ?: "application/octet-stream",
                     sizeBytes = obj.get("size")?.asLong ?: 0L,
                     caption = obj.get("caption")?.asString,
+                    ttl = ttl,
                 )
                 "voice" -> Voice(
                     id = id,
                     mediaId = obj.get("mediaID")?.asString.orEmpty(),
                     mediaKey = obj.get("mediaKey")?.asString.orEmpty(),
                     durationSec = obj.get("durationSec")?.asDouble ?: 0.0,
+                    ttl = ttl,
                 )
                 "video" -> Video(
                     id = id,
@@ -400,12 +420,14 @@ sealed interface Envelope {
                     caption = obj.get("caption")?.asString,
                     spoiler = obj.get("spoiler")?.asBoolean ?: false,
                     albumId = obj.get("album")?.asString,
+                    ttl = ttl,
                 )
                 "location" -> Location(
                     id = id,
                     lat = obj.get("lat")?.asDouble ?: 0.0,
                     lng = obj.get("lng")?.asDouble ?: 0.0,
                     caption = obj.get("caption")?.asString,
+                    ttl = ttl,
                 )
                 "visit" -> Visit(obj.get("at")?.asDouble ?: 0.0)
                 "poll" -> Poll(

@@ -739,6 +739,15 @@ class Session(context: Context) {
                 runCatching { drainVisitedQueuesOnce() }
             }
         }
+        // Disappearing-message reaper: expire messages whose TTL lapsed while a
+        // chat is open. 10s cadence keeps a 1-minute timer visibly honest
+        // without busy-waiting; the on-load sweep covers longer closed gaps.
+        scope.launch {
+            while (true) {
+                delay(10_000)
+                runCatching { sweepExpiredMessages() }
+            }
+        }
         // O4b onion ENTRY-guard rotation: when onion is active but the backend
         // is unreachable through the current route for two consecutive checks,
         // the sticky ENTRY relay is likely blocked (the whole 2-hop path dies
@@ -2311,22 +2320,22 @@ class Session(context: Context) {
         val now = System.currentTimeMillis()
         when (val env = envelope) {
                 is Envelope.Text -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.text, now, kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id)
+                    ChatMessage(env.id, 0, false, env.text, now, kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, now))
                 )
                 is Envelope.Photo -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId)
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now))
                 )
                 is Envelope.File -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, groupId = groupId, senderUin = dec.senderUin)
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, now))
                 )
                 is Envelope.Voice -> storeGroup(
-                    ChatMessage(env.id, 0, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), groupId = groupId, senderUin = dec.senderUin)
+                    ChatMessage(env.id, 0, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, now))
                 )
                 is Envelope.Video -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId)
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now))
                 )
                 is Envelope.Location -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, groupId = groupId, senderUin = dec.senderUin)
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, now))
                 )
                 is Envelope.Poll -> storeGroup(
                     ChatMessage(env.id, 0, false, app.rcq.android.model.PollContent(env.pollId, env.question, env.options, env.singleChoice, env.anonymous).toJson(), now, kind = "poll", groupId = groupId, senderUin = dec.senderUin)
@@ -3212,17 +3221,17 @@ class Session(context: Context) {
             }
             when (val env = dec.envelope) {
                 is Envelope.Text ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.text, now, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.text, now, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, now)))
                 is Envelope.Photo ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, spoiler = env.spoiler, albumId = env.albumId))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now)))
                 is Envelope.File ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, expiresAt = expiryFor(env.ttl, now)))
                 is Envelope.Voice ->
-                    store(ChatMessage(env.id, dec.senderUin, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt()))
+                    store(ChatMessage(env.id, dec.senderUin, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), expiresAt = expiryFor(env.ttl, now)))
                 is Envelope.Video ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now)))
                 is Envelope.Location ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, expiresAt = expiryFor(env.ttl, now)))
                 is Envelope.Reaction -> applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
                     // Author-only: a peer can only retract their own message.
@@ -3274,22 +3283,22 @@ class Session(context: Context) {
         val me = store.uin ?: return
         if (gid != null) {
             when (inner) {
-                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, now, kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id))
-                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId))
-                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me))
-                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me))
-                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId))
-                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me))
+                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, now, kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
                 else -> Unit
             }
         } else if (to != null) {
             when (inner) {
-                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, now, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id))
-                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId))
-                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes))
-                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt()))
-                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId))
-                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng))
+                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, now, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, expiresAt = expiryFor(inner.ttl, now)))
                 else -> Unit
             }
         }
@@ -3588,9 +3597,30 @@ class Session(context: Context) {
     // ── persistence + flow updates ───────────────────────────────────
 
     private fun loadMessagesFromDb() {
+        // Reap any disappearing messages whose TTL lapsed while the app was
+        // closed BEFORE seeding the flows, so an expired message never flashes
+        // on launch.
+        db.deleteExpired(System.currentTimeMillis())
         val all = db.all()
         _messages.value = all.filter { it.groupId == null }.groupBy { it.peerUin }
         _groupMessages.value = all.filter { it.groupId != null }.groupBy { it.groupId!! }
+    }
+
+    /** Disappearing messages: seconds-since-receipt TTL the sender packed into
+     *  the envelope, turned into an absolute epoch-ms expiry. null ttl (or a
+     *  non-positive value) → permanent. Anchored to receipt time, so a message
+     *  vanishes [ttl] seconds after it lands on this device. */
+    private fun expiryFor(ttl: Int?, nowMs: Long): Long? =
+        ttl?.takeIf { it > 0 }?.let { nowMs + it * 1000L }
+
+    /** Delete every message whose TTL elapsed, from the DB and both in-memory
+     *  message flows, so disappearing messages actually disappear from open
+     *  chats. Runs on a timer and on chat activity. No-op when nothing expired. */
+    private fun sweepExpiredMessages() {
+        val expired = db.deleteExpired(System.currentTimeMillis()).toSet()
+        if (expired.isEmpty()) return
+        _messages.value = _messages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
+        _groupMessages.value = _groupMessages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
     }
 
     /** Seed the contact/group roster from the on-disk cache so the chat list
