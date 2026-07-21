@@ -87,7 +87,8 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
               lng        REAL,
               spoiler    INTEGER NOT NULL DEFAULT 0,
               album_id   TEXT,
-              reply_to_id TEXT
+              reply_to_id TEXT,
+              expires_at INTEGER
             )
             """.trimIndent()
         )
@@ -127,6 +128,20 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         if (oldVersion < 12) db.execSQL("ALTER TABLE messages ADD COLUMN spoiler INTEGER NOT NULL DEFAULT 0")
         if (oldVersion < 13) db.execSQL("ALTER TABLE messages ADD COLUMN album_id TEXT")
         if (oldVersion < 14) db.execSQL("ALTER TABLE messages ADD COLUMN reply_to_id TEXT")
+        if (oldVersion < 15) db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER")
+    }
+
+    /** Delete every message whose disappearing-message TTL has elapsed and
+     *  return their ids so the caller can drop them from the in-memory flows.
+     *  Cheap (indexed by the WHERE on a nullable column is fine at our row
+     *  counts) and idempotent. */
+    fun deleteExpired(nowMs: Long): List<String> {
+        val ids = ArrayList<String>()
+        db.rawQuery("SELECT id FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?", arrayOf(nowMs.toString())).use { c ->
+            while (c.moveToNext()) ids.add(c.getString(0))
+        }
+        if (ids.isNotEmpty()) db.delete("messages", "expires_at IS NOT NULL AND expires_at <= ?", arrayOf(nowMs.toString()))
+        return ids
     }
 
     /** Insert; returns true if it was new (false if the UUID already existed). */
@@ -157,6 +172,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
             put("spoiler", if (msg.spoiler) 1 else 0)
             put("album_id", msg.albumId)
             put("reply_to_id", msg.replyToId)
+            put("expires_at", msg.expiresAt)
         }
         val rowId = db.insertWithOnConflict("messages", null, values, SQLiteDatabase.CONFLICT_IGNORE)
         return rowId != -1L
@@ -186,7 +202,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
     fun all(): List<ChatMessage> {
         val out = ArrayList<ChatMessage>()
         db.rawQuery(
-            "SELECT id, peer_uin, from_me, body, sent_at, state, kind, media_id, media_key, reply_snippet, reply_author, group_id, sender_uin, reactions, edited, file_name, file_mime, file_size, duration_sec, thumb_b64, lat, lng, spoiler, album_id, reply_to_id FROM messages ORDER BY sent_at ASC", null,
+            "SELECT id, peer_uin, from_me, body, sent_at, state, kind, media_id, media_key, reply_snippet, reply_author, group_id, sender_uin, reactions, edited, file_name, file_mime, file_size, duration_sec, thumb_b64, lat, lng, spoiler, album_id, reply_to_id, expires_at FROM messages ORDER BY sent_at ASC", null,
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(
@@ -216,6 +232,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
                         spoiler = c.getInt(22) == 1,
                         albumId = c.getString(23),
                         replyToId = c.getString(24),
+                        expiresAt = if (c.isNull(25)) null else c.getLong(25),
                     )
                 )
             }
@@ -228,7 +245,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 14
+        const val VERSION = 15
         private const val LEGACY_NAME = "rcq-messages.db"
         private val SIDECARS = listOf("", "-wal", "-shm", "-journal")
 

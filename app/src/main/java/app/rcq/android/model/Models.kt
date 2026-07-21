@@ -103,4 +103,5 @@ data class ChatMessage(
     val lng: Double? = null,      // kind == "location"
     val spoiler: Boolean = false, // photo/video sent blurred; tap-to-reveal
     val albumId: String? = null,  // photo/video grouped into a media album
+    val expiresAt: Long? = null,  // disappearing message: epoch ms after which it's swept (null = permanent)
 )
