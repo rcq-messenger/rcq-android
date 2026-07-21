@@ -86,6 +86,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -146,6 +147,15 @@ internal fun SettingsScreen(
             else -> SettingsRoute.ROOT
         }
     }
+    // Preserve each settings sub-screen's scroll across the internal route swaps
+    // (ROOT <-> a sub-page <-> ROOT). On a route change the outgoing screen
+    // LEAVES the composition while the parent "settings" provider stays mounted,
+    // so its rememberSaveable scroll state was disposed WITHOUT a performSave and
+    // reset to the TOP on return — the #2 fix wrapped Settings at the
+    // MainActivity level but missed this inner nav. A nested holder keyed by the
+    // route saves the outgoing page's state and restores the incoming one.
+    val settingsStateHolder = rememberSaveableStateHolder()
+    settingsStateHolder.SaveableStateProvider(route.name) {
     when (route) {
         SettingsRoute.ROOT -> SettingsRoot(
             session, uin,
@@ -193,6 +203,7 @@ internal fun SettingsScreen(
             // Settings (same flow as the free move / a server switch).
             onMigrated = { newUin -> onMigrated(newUin); onBack() },
         )
+    }
     }
 }
 
