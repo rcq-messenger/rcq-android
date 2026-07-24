@@ -405,8 +405,8 @@ private fun AnnotatedString.Builder.appendWithMentions(
         if (h.range.first < cursor) continue // skip overlaps
         if (h.range.first > cursor) append(text.substring(cursor, h.range.first))
         if (h.url) {
-            // LinkAnnotation.Url auto-opens via the platform UriHandler (and a
-            // rcq.app/g/ link is caught by our deep-link filter -> opens in-app).
+            // LinkAnnotation.Url auto-opens via LocalUriHandler = InAppBrowser
+            // (Custom Tab for the web; rcq deep links keep routing in-app).
             withLink(LinkAnnotation.Url(h.display)) {
                 withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(h.display) }
             }

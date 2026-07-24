@@ -224,8 +224,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             // the app scales from this single wrapper.
             val fontScale by LocalStores.fontScale.collectAsState()
             val base = androidx.compose.ui.platform.LocalDensity.current
+            // In-app browser: every LinkAnnotation.Url auto-open and explicit
+            // uriHandler.openUri in the app resolves through InAppBrowser
+            // (Chrome Custom Tab for the web, ACTION_VIEW for deep links).
+            val uriHandler = remember {
+                object : androidx.compose.ui.platform.UriHandler {
+                    override fun openUri(uri: String) =
+                        app.rcq.android.ui.InAppBrowser.open(this@MainActivity, uri)
+                }
+            }
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(base.density, base.fontScale * fontScale),
+                androidx.compose.ui.platform.LocalUriHandler provides uriHandler,
             ) {
                 RcqTheme(mode) { RcqApp(session) }
             }
