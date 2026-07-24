@@ -129,6 +129,10 @@ dependencies {
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.navigation.compose)
 
+    // In-app browser: web links tapped in a chat open in a Chrome Custom Tab
+    // over the app instead of kicking the user out to the system browser.
+    implementation(libs.androidx.browser)
+
     // QR generation for the "my code" sheet (rcq://add/<uin>). Pure-Java
     // BitMatrix → Bitmap; no UI dependency.
     implementation(libs.zxing.core)
