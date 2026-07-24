@@ -255,6 +255,7 @@
     <string name="pin_decoy_needs_two">Сначала добавьте 2-й аккаунт</string>
     <string name="pin_decoy_desc">Если ввести этот PIN вместо настоящего, приложение откроется и покажет только выбранный ниже аккаунт. Остальные аккаунты остаются скрытыми, пока вы не введёте настоящий PIN.</string>
     <string name="pin_decoy_pick">Аккаунт, который показывает ложный PIN</string>
+    <string name="pin_decoy_plausibility">Выберите аккаунт, которым вы реально пользуетесь для обычных, несекретных переписок. Пустой аккаунт без сообщений и контактов выглядит подставным и может выдать ложный PIN.</string>
     <string name="pin_lock_title">Введите PIN</string>
     <string name="pin_lock_subtitle">Сообщения на этом устройстве заблокированы.</string>
     <string name="pin_unlock">Разблокировать</string>

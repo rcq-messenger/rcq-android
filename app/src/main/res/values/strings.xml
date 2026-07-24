@@ -256,6 +256,7 @@
     <string name="pin_decoy_needs_two">Add a 2nd account first</string>
     <string name="pin_decoy_desc">Entering this PIN instead of your real one opens the app showing only the account you pick below. Your other accounts stay hidden until you enter your real PIN.</string>
     <string name="pin_decoy_pick">Account the decoy PIN shows</string>
+    <string name="pin_decoy_plausibility">Pick an account you actually use for everyday, non-sensitive chats. A blank account with no messages or contacts looks staged and can give the decoy away.</string>
     <string name="pin_lock_title">Enter your PIN</string>
     <string name="pin_lock_subtitle">Your messages are locked on this device.</string>
     <string name="pin_unlock">Unlock</string>

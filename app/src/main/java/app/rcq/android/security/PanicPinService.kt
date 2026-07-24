@@ -47,6 +47,16 @@ object PanicPinService {
     @Volatile
     private var realSlotKey: ByteArray? = null
 
+    // Decoy session custody: while unlocked into the decoy (duress) view we
+    // hold the decoy slot's payload + derived key so a "change PIN" from that
+    // view re-seals the DECOY slot (never the real one). Both null in a real
+    // session; cleared on lock. We never keep the real slot key in a decoy
+    // session, so a coercer's UI actions can't reach the hidden accounts' slot.
+    @Volatile
+    private var decoyPayload: PinVault.SlotPayload? = null
+    @Volatile
+    private var decoySlotKey: ByteArray? = null
+
     private val gson = Gson()
 
     fun isConfigured(context: Context): Boolean = PinVault.isConfigured(context)
@@ -57,6 +67,8 @@ object PanicPinService {
         dataKey = null
         realPayload = null
         realSlotKey = null
+        decoyPayload = null
+        decoySlotKey = null
         pendingDecoyAccountId = null
     }
 
@@ -95,6 +107,8 @@ object PanicPinService {
                 // FIRST, then calls completeUnlock, so the real accounts never
                 // flash on screen. Real PIN entry later exits decoy mode.
                 dataKey = PinVault.dataKeyBytes(unlock.payload)
+                decoyPayload = unlock.payload
+                decoySlotKey = unlock.slotKey
                 pendingDecoyAccountId = unlock.payload.decoyAccountId
                 SubmitResult.DECOY
             }
@@ -258,6 +272,23 @@ object PanicPinService {
         return runCatching { PinVault.reSealSlot(context, realSlot, payload, newPin) }.isSuccess
     }
 
+    /** True while unlocked into the decoy (duress) view. */
+    val inDecoySession: Boolean get() = decoySlotKey != null
+
+    /** Change the PIN from within a decoy session: re-seal the DECOY slot under
+     *  [newPin]. The real slot is untouched, so the hidden accounts stay hidden
+     *  and their PIN unchanged — a coercer who was given the decoy PIN can
+     *  change "their" PIN without it ever exposing (or hinting at) the real
+     *  accounts. Rejects a [newPin] that collides with another slot. */
+    fun changeDecoyPin(context: Context, newPin: String): Boolean {
+        if (newPin.length < PinVault.MIN_PIN_LENGTH) return false
+        val payload = decoyPayload ?: return false
+        val oldKey = decoySlotKey ?: return false
+        val newKey = PinVault.reSealUnderNewPin(context, oldKey, payload, newPin) ?: return false
+        decoySlotKey = newKey
+        return true
+    }
+
     /** Remove the PIN entirely. Returns the device key the message DBs revert
      *  to (the caller rekeys them back). Also drops any biometric unlock — its
      *  sealed blob is meaningless once the vault is gone. */
@@ -267,6 +298,8 @@ object PanicPinService {
         dataKey = null
         realPayload = null
         realSlotKey = null
+        decoyPayload = null
+        decoySlotKey = null
         pendingDecoyAccountId = null
         _locked.value = false
         return SecureStore.deviceKey(context)
@@ -278,6 +311,8 @@ object PanicPinService {
         dataKey = null
         realPayload = null
         realSlotKey = null
+        decoyPayload = null
+        decoySlotKey = null
         pendingDecoyAccountId = null
         _locked.value = true
     }

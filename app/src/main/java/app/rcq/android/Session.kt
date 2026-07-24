@@ -1311,18 +1311,47 @@ class Session(context: Context) {
         true
     }
 
-    /** Change the PIN (re-seal the vault slot; the dataKey + DBs are untouched). */
+    /** Change the PIN (re-seal the vault slot; the dataKey + DBs are untouched).
+     *  From a DECOY session this re-seals the DECOY slot only (report #237: a
+     *  coercer with the decoy PIN changes "their" PIN without ever touching or
+     *  revealing the hidden real accounts). */
     suspend fun changePin(newPin: String): Boolean = withContext(Dispatchers.IO) {
-        PanicPinService.changeRealPin(appCtx, newPin)
+        if (AccountManager.decoyMode.value != null) PanicPinService.changeDecoyPin(appCtx, newPin)
+        else PanicPinService.changeRealPin(appCtx, newPin)
     }
 
     /** Remove the PIN: rekey every DB from the vault key back to the device key,
-     *  then destroy the vault. */
+     *  then destroy the vault.
+     *
+     *  Report #237 (reset-PIN bypass): from a DECOY session, plainly removing
+     *  the PIN would revert every DB — including the HIDDEN real accounts — to
+     *  the device key, so a coercer could reset the decoy PIN and then see the
+     *  real accounts on the next launch. Instead, a reset from duress first
+     *  background-wipes the hidden accounts and drops decoy mode, leaving ONLY
+     *  the decoy as a normal no-PIN install. To the coercer it looks like an
+     *  ordinary PIN removal; the real accounts are gone from the device
+     *  (recoverable later from a seed phrase on another device). */
     suspend fun removePin(): Boolean = withContext(Dispatchers.IO) {
+        val decoyId = AccountManager.decoyMode.value
+        if (decoyId != null) {
+            AccountManager.accounts.value.filter { it.id != decoyId }.forEach { acc ->
+                runCatching {
+                    SecureStore.wipeAccount(appCtx, acc.id)
+                    MessageDb.wipeAccount(appCtx, acc.id)
+                    SignalStoreDb.wipeAccount(appCtx, acc.id)
+                    app.rcq.android.data.VisitStore.wipeAccount(acc.id)
+                    CrossIslandStore.wipeAccount(acc.id)
+                    VisitedIslandsStore.wipeAccount(acc.id)
+                    LocalStores.clearAccount(acc.id)
+                }
+                AccountManager.remove(acc.id)
+            }
+        }
         val vaultKey = PanicPinService.dataKey ?: return@withContext false
         val deviceKey = SecureStore.deviceKey(appCtx)
         rekeyAllAccountDbs(from = vaultKey, to = deviceKey)
         PanicPinService.removePin(appCtx)
+        if (decoyId != null) AccountManager.exitDecoyMode()
         true
     }
 
