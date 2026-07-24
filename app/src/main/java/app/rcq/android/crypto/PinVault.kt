@@ -185,6 +185,25 @@ object PinVault {
         writeSlot(context, index, payload, deriveKey(context, pin, vault.salt))
     }
 
+    /** Re-seal whichever slot [oldKey] currently opens under a key derived from
+     *  [newPin], keeping [payload] (dataKey unchanged → DB not re-encrypted).
+     *  Used to change the DECOY PIN from within a duress session WITHOUT the
+     *  real slot key: the caller holds only the decoy slot's key. Rejects a
+     *  [newPin] that would open a DIFFERENT existing slot (a collision could
+     *  make the new decoy PIN accidentally match the real slot). Returns the
+     *  new derived key on success, or null (slot not found / collision). */
+    fun reSealUnderNewPin(context: Context, oldKey: ByteArray, payload: SlotPayload, newPin: String): ByteArray? {
+        val vault = readVault(context) ?: return null
+        val idx = vault.slots.indexOfFirst { openSlot(it, oldKey) != null }
+        if (idx < 0) return null
+        val newKey = deriveKey(context, newPin, vault.salt)
+        vault.slots.forEachIndexed { i, slot -> if (i != idx && openSlot(slot, newKey) != null) return null }
+        val slots = vault.slots.toMutableList()
+        slots[idx] = sealSlot(payload, newKey)
+        writeVault(context, VaultFile(vault.salt, slots))
+        return newKey
+    }
+
     fun freeSlotIndex(layout: Layout): Int? {
         val used = listOfNotNull(layout.realSlot, layout.decoySlot, layout.wipeSlot).toSet()
         return (0 until SLOT_COUNT).firstOrNull { it !in used }

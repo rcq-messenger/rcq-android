@@ -2101,6 +2101,13 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
     var wpin by remember { mutableStateOf("") }
     var wconfirm by remember { mutableStateOf("") }
     var werror by remember { mutableStateOf<String?>(null) }
+    // Report #237 (deniability): while unlocked into a DECOY session, the PIN
+    // screen must not reveal that a decoy/wipe PIN — or any hidden account —
+    // exists. In decoy mode we hide the whole Duress + biometric surface and
+    // show only a plausible Change/Remove PIN (Remove is duress-aware in
+    // Session.removePin: it wipes the hidden accounts instead of exposing them).
+    val decoyModeId by app.rcq.android.data.AccountManager.decoyMode.collectAsState()
+    val inDecoyMode = decoyModeId != null
     // Decoy PIN (panic-PIN phase 2): a PIN that reveals only a chosen account.
     val roster by app.rcq.android.data.AccountManager.accounts.collectAsState()
     var decoyConfigured by remember { mutableStateOf(session.hasDecoyPin) }
@@ -2202,6 +2209,7 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                 }
             } else if (decoyEditing) {
                 Text(stringResource(R.string.pin_decoy_desc), color = c.textSecondary, fontSize = 13.sp)
+                Text(stringResource(R.string.pin_decoy_plausibility), color = c.textSecondary, fontSize = 13.sp)
                 Text(stringResource(R.string.pin_decoy_pick), color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 SettingsGroup {
                     roster.forEachIndexed { i, a ->
@@ -2272,7 +2280,7 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                         }
                     }
                 }
-                if (bioHardware) {
+                if (bioHardware && !inDecoyMode) {
                     Spacer(Modifier.height(8.dp))
                     SectionLabel(stringResource(R.string.pin_biometric_label))
                     SettingsGroup {
@@ -2303,6 +2311,7 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                         }
                     }
                 }
+                if (!inDecoyMode) {
                 Spacer(Modifier.height(8.dp))
                 SectionLabel(stringResource(R.string.pin_duress_label))
                 SettingsGroup {
@@ -2346,6 +2355,7 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                         }
                     }
                 }
+                } // end !inDecoyMode duress section
             }
             // Auto-lock grace (#10): how long the app can sit in the background
             // before it demands the PIN again. Only meaningful with a PIN set.

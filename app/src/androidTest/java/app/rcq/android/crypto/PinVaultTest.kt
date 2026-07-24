@@ -56,6 +56,59 @@ class PinVaultTest {
     }
 
     @Test
+    fun reSealDecoyUnderNewPinKeepsRealSlotIntact() {
+        // Real vault + a decoy slot (same dataKey), mirroring setDecoyPin.
+        val unlock = PinVault.createWithRealPin(ctx, "1111")
+        val dataKey = PinVault.dataKeyBytes(unlock.payload)!!
+        val layout = unlock.payload.layout!!
+        val decoyPayload = PinVault.SlotPayload(
+            mode = PinVault.MODE_DECOY,
+            dataKeyB64 = android.util.Base64.encodeToString(dataKey, android.util.Base64.NO_WRAP),
+            decoyAccountId = "acc-decoy",
+        )
+        val decoySlot = PinVault.addSlot(ctx, "2222", decoyPayload, layout)
+        assertNotNull(decoySlot)
+
+        // Change the DECOY pin from within a duress session: re-seal whichever
+        // slot the old decoy key opens, under a fresh pin.
+        val oldDecoyKey = PinVault.unlock(ctx, "2222")!!.slotKey
+        val newKey = PinVault.reSealUnderNewPin(ctx, oldDecoyKey, decoyPayload, "3333")
+        assertNotNull(newKey)
+
+        // Old decoy pin dead; new decoy pin opens the DECOY slot.
+        assertNull(PinVault.unlock(ctx, "2222"))
+        val d = PinVault.unlock(ctx, "3333")
+        assertNotNull(d)
+        assertEquals(PinVault.MODE_DECOY, d!!.payload.mode)
+        // The REAL slot is untouched: real pin still opens the real slot.
+        val r = PinVault.unlock(ctx, "1111")
+        assertNotNull(r)
+        assertEquals(PinVault.MODE_REAL, r!!.payload.mode)
+    }
+
+    @Test
+    fun reSealDecoyRejectsCollisionWithRealPin() {
+        // A decoy pin change that would collide with the REAL pin must fail,
+        // so it can never accidentally make the decoy slot openable by (or
+        // shadow) the real slot.
+        val unlock = PinVault.createWithRealPin(ctx, "1111")
+        val dataKey = PinVault.dataKeyBytes(unlock.payload)!!
+        val layout = unlock.payload.layout!!
+        val decoyPayload = PinVault.SlotPayload(
+            mode = PinVault.MODE_DECOY,
+            dataKeyB64 = android.util.Base64.encodeToString(dataKey, android.util.Base64.NO_WRAP),
+            decoyAccountId = "acc-decoy",
+        )
+        PinVault.addSlot(ctx, "2222", decoyPayload, layout)
+        val oldDecoyKey = PinVault.unlock(ctx, "2222")!!.slotKey
+        // Re-seal the decoy under the REAL pin → rejected.
+        assertNull(PinVault.reSealUnderNewPin(ctx, oldDecoyKey, decoyPayload, "1111"))
+        // Both pins still work as before (nothing was mutated).
+        assertEquals(PinVault.MODE_REAL, PinVault.unlock(ctx, "1111")!!.payload.mode)
+        assertEquals(PinVault.MODE_DECOY, PinVault.unlock(ctx, "2222")!!.payload.mode)
+    }
+
+    @Test
     fun destroyClearsVault() {
         PinVault.createWithRealPin(ctx, "1234")
         assertTrue(PinVault.isConfigured(ctx))
