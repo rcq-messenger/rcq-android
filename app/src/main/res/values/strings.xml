@@ -913,6 +913,10 @@
     <string name="notif_categories">Categories</string>
     <string name="notif_push_on">Push is on</string>
     <string name="notif_push_via">Delivered via %1$s</string>
+    <string name="notif_push_broken_title">Notifications are not arriving</string>
+    <string name="notif_push_broken_507">Your push service says this device is not connected to it, so it refuses to accept wakes. Open the ntfy app, turn on instant delivery (a permanent connection), and exclude it from battery optimisation.</string>
+    <string name="notif_push_broken_429">Your push service is rate-limiting your network, so some wakes are being dropped. A different distributor, or your own ntfy server, fixes this.</string>
+    <string name="notif_push_broken_other">Your push service answered with an error (%1$s), so wakes are not getting through.</string>
     <string name="notif_push_off">Push is off</string>
     <string name="notif_push_enable_hint">A push distributor is installed. Enable it to get messages and calls while RCQ is in the background.</string>
     <string name="notif_push_enable">Enable push</string>

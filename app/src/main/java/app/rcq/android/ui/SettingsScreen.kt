@@ -1395,7 +1395,22 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
     var pushState by remember { mutableStateOf(app.rcq.android.push.Push.pushState(ctx)) }
     var showDistChooser by remember { mutableStateOf(false) }
     var contactReq by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(Unit) { contactReq = session.loadPushPrefs()?.contact_requests }
+    // What the server's last wake attempt to THIS device's endpoint did. A
+    // UnifiedPush distributor that stops accepting wakes (ntfy.sh answers 507
+    // once the topic has no connected subscriber, 429 once the rate bucket
+    // behind the subscriber's NAT is drained) is otherwise completely silent:
+    // the user just stops getting notifications with nothing to look at.
+    var pushError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        contactReq = session.loadPushPrefs()?.contact_requests
+        val myHost = app.rcq.android.push.Push.savedEndpoint(ctx)
+            ?.substringAfter("://", "")?.substringBefore('/')?.takeIf { it.isNotBlank() }
+        val mine = session.loadPushHealth()?.devices.orEmpty()
+            .filter { it.platform == "android-up" && myHost != null && it.host == myHost }
+        // Only complain when every registration on this host is failing — one
+        // healthy row means wakes are landing somewhere.
+        pushError = if (mine.isNotEmpty() && mine.all { it.last_error != null }) mine.first().last_error else null
+    }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_notifications), onBack)
@@ -1410,6 +1425,23 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                             val dist = app.rcq.android.push.Push.savedDistributor(ctx)
                                 ?.let { app.rcq.android.push.Push.distributorLabel(ctx, it) } ?: ""
                             Text(stringResource(R.string.notif_push_via, dist), color = c.textSecondary, fontSize = 12.sp)
+                            // Registered, but the distributor is rejecting our
+                            // wakes: say which failure it is and what fixes it.
+                            pushError?.let { err ->
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    stringResource(R.string.notif_push_broken_title),
+                                    color = c.statusBusy, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    when (err) {
+                                        "507" -> stringResource(R.string.notif_push_broken_507)
+                                        "429" -> stringResource(R.string.notif_push_broken_429)
+                                        else -> stringResource(R.string.notif_push_broken_other, err)
+                                    },
+                                    color = c.textSecondary, fontSize = 12.sp,
+                                )
+                            }
                             // Change / reset the provider — the missing "switch
                             // distributor" affordance. Opens a chooser when more
                             // than one is installed, else lets you disable.

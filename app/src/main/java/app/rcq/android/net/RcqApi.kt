@@ -695,6 +695,24 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         sendNoResult("PUT", "/users/me/push-preferences", gson.toJson(body), authed = true)
     }
 
+    /** What the server's last wake attempt to each registered device did.
+     *  `last_error` is an HTTP status the distributor answered with ("507" =
+     *  no connected subscriber, "429" = its rate bucket is drained) or an
+     *  exception name; null means the last attempt got through. */
+    data class PushHealthRow(
+        val platform: String,
+        val host: String? = null,
+        val last_error: String? = null,
+        val last_ok: String? = null,
+        val registered_at: String? = null,
+    )
+
+    data class PushHealth(val devices: List<PushHealthRow> = emptyList())
+
+    suspend fun pushHealth(): PushHealth = withContext(Dispatchers.IO) {
+        get("/users/me/push-health", authed = true, PushHealth::class.java)
+    }
+
     // ── presence + account (rcq-spec 3.3 / 2.4) ──────────────────────
 
     data class StatusBody(val status: String, val status_message: String? = null)

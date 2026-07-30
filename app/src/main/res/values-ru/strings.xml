@@ -910,6 +910,10 @@
     <string name="notif_categories">Категории</string>
     <string name="notif_push_on">Push включён</string>
     <string name="notif_push_via">Через %1$s</string>
+    <string name="notif_push_broken_title">Уведомления не доходят</string>
+    <string name="notif_push_broken_507">Сервис push сообщает, что это устройство с ним не на связи, и отказывается принимать сигналы. Откройте приложение ntfy, включите постоянное соединение (instant delivery) и снимите ограничения энергосбережения.</string>
+    <string name="notif_push_broken_429">Сервис push ограничивает запросы с вашей сети, часть сигналов теряется. Помогает другой дистрибьютор или собственный сервер ntfy.</string>
+    <string name="notif_push_broken_other">Сервис push ответил ошибкой (%1$s), сигналы не проходят.</string>
     <string name="notif_push_off">Push выключен</string>
     <string name="notif_push_enable_hint">Дистрибьютор push установлен. Включите, чтобы получать сообщения и звонки, когда RCQ свёрнут.</string>
     <string name="notif_push_enable">Включить push</string>

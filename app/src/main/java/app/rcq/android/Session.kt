@@ -317,6 +317,12 @@ class Session(context: Context) {
     /** Load the server push-preference toggles (Notifications settings). */
     suspend fun loadPushPrefs(): RcqApi.PushPrefs? = runCatching { api.getPushPreferences() }.getOrNull()
 
+    /** Last push-delivery verdict per registered device, or null if the island
+     *  is too old to answer (pre-push-health servers 404 here). Drives the
+     *  "notifications are not arriving, and here is why" line in Settings —
+     *  a failing UnifiedPush distributor is otherwise completely silent. */
+    suspend fun loadPushHealth(): RcqApi.PushHealth? = runCatching { api.pushHealth() }.getOrNull()
+
     /** Flip the "push for new contact requests" preference (optimistic; caller
      *  reverts the UI on failure). */
     suspend fun setContactRequestsPush(on: Boolean): Boolean =
