@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -55,8 +56,10 @@ import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.RcqApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -81,7 +84,10 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
 
     val isOwn = group.owner_uin != null && group.owner_uin == session.uin
     var index by remember { mutableStateOf(0) }
-    var bytes by remember { mutableStateOf<ByteArray?>(null) }
+    // Decoded frame of the current story (null while it downloads/decodes) and
+    // whether that failed — both gate the progress clock below.
+    var frame by remember { mutableStateOf<ImageBitmap?>(null) }
+    var loadFailed by remember { mutableStateOf(false) }
     var showViewers by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     // Ignore the left/right navigation taps for a beat after the viewer appears.
@@ -96,17 +102,35 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     val story = stories.getOrNull(index) ?: run { onClose(); return }
     val progress = remember(index) { Animatable(0f) }
 
-    // Decode the current story's media (download + decrypt, cached by id).
+    // Download + decrypt the current story's media, then decode it OFF the main
+    // thread. Decoding a full-size JPEG inside composition (which is what this
+    // used to do) blocks the frame clock — and the progress tween below is
+    // driven by that same clock, so it jumped forward by however long the
+    // decode blocked. The photo appeared already ~90% through its slot and
+    // vanished a moment later: the "история промелькивает за долю секунды"
+    // report. Same for a slow download, which the timer used to run straight
+    // through while the spinner was still up.
     LaunchedEffect(story.id) {
-        bytes = null
-        bytes = session.fetchImage(story.media_id, story.media_key_b64)
+        frame = null
+        loadFailed = false
+        val b = session.fetchImage(story.media_id, story.media_key_b64)
+        if (b == null) { loadFailed = true; return@LaunchedEffect }
+        // GIF stories via the pure-Java first frame (native GIF decoder
+        // SIGSEGVs on some OEM ROMs); JPEG/PNG via the native decoder.
+        val bmp = withContext(Dispatchers.Default) {
+            if (b.isGif()) gifFirstFrame(b) else BitmapFactory.decodeByteArray(b, 0, b.size)
+        }
+        if (bmp == null) loadFailed = true else frame = bmp.asImageBitmap()
     }
 
     // Mark viewed (skip own — implicitly seen, doesn't count server-side) and
     // run the progress bar; on natural completion, advance or close. Paused
-    // while a sheet/dialog is open so the user can read the viewers list.
-    LaunchedEffect(index, showViewers, confirmDelete) {
+    // while a sheet/dialog is open so the user can read the viewers list, and
+    // held entirely until the photo is on screen (or known unloadable) so the
+    // story always gets its full time in front of the viewer.
+    LaunchedEffect(index, showViewers, confirmDelete, frame != null, loadFailed) {
         if (showViewers || confirmDelete) return@LaunchedEffect
+        if (frame == null && !loadFailed) return@LaunchedEffect
         if (!isOwn) session.markStoryViewed(story.id)
         progress.snapTo(progress.value)
         val durMs = ((story.duration_sec ?: 0) * 1000).coerceAtLeast(PHOTO_STORY_MS)
@@ -119,16 +143,18 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     fun next() { if (index < stories.lastIndex) index++ else onClose() }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        // Media.
-        bytes?.let { b ->
-            // GIF stories via the pure-Java first frame (native GIF decoder
-            // SIGSEGVs on some OEM ROMs); JPEG/PNG via the native decoder.
-            val bmp = remember(story.id, b) { if (b.isGif()) gifFirstFrame(b) else BitmapFactory.decodeByteArray(b, 0, b.size) }
-            if (bmp != null) {
-                Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        // Media: the decoded frame, a spinner while it loads, or a short
+        // message when it can't be loaded at all (which still advances, rather
+        // than parking the viewer on a spinner forever).
+        val shown = frame
+        when {
+            shown != null -> Image(shown, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            loadFailed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.story_load_failed), color = Color.White, fontSize = 15.sp)
             }
-        } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Color.White)
+            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color.White)
+            }
         }
 
         // Tap zones: left third = back, right two-thirds = forward.
