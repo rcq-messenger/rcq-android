@@ -723,6 +723,7 @@
     <string name="story_posted">Story posted</string>
     <string name="story_post_failed">Couldn\'t post story</string>
     <string name="story_pick_failed">Couldn\'t read that image</string>
+    <string name="story_load_failed">Couldn\'t load this story</string>
     <string name="story_viewers">Viewers</string>
     <string name="story_no_viewers">No views yet</string>
     <string name="story_delete">Delete</string>
