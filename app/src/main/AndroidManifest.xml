@@ -6,6 +6,13 @@
          installer (the user still confirms the install). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Embedded UnifiedPush distributor: one long-lived socket to push.rcq.app,
+         held open by a foreground service. This is the price of background push
+         without Google's services, and is what every distributor (ntfy included)
+         does. REMOTE_MESSAGING is the Android 14+ service type for exactly this. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Full-screen incoming-call UI over the lock screen (UnifiedPush call wake). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Detect when the user screenshots a notify-mode secure chat (Android 14+). -->
@@ -137,6 +144,35 @@
                 <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- ── Embedded UnifiedPush distributor ────────────────────────────
+             Declaring REGISTER here is also what makes RCQ appear in its own
+             distributor chooser: the connector finds distributors by querying
+             receivers of that action, and an app may be its own. exported=true
+             is required by that query; the receiver refuses any package but
+             ours. -->
+        <receiver
+            android:name=".push.embedded.DistributorReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+                <action android:name="org.unifiedpush.android.distributor.UNREGISTER" />
+                <action android:name="org.unifiedpush.android.distributor.MESSAGE_ACK" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".push.embedded.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".push.embedded.PushSocketService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

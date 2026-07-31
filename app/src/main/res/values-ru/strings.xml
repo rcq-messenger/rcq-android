@@ -897,6 +897,10 @@
     <string name="home_reaction_indicator">Новая реакция на ваше сообщение</string>
     <string name="home_mention_indicator">Вас упомянули</string>
     <string name="push_channel_messages">Сообщения</string>
+    <string name="push_service_title">RCQ на связи</string>
+    <string name="push_service_body">Держит соединение, чтобы приходили сообщения и звонки</string>
+    <string name="push_service_channel">Фоновое соединение</string>
+    <string name="push_service_channel_desc">Постоянное уведомление, пока RCQ держит соединение для доставки сообщений в фоне</string>
     <string name="push_channel_messages_desc">Уведомления о новых сообщениях</string>
     <string name="push_new_message">Новое сообщение</string>
     <string name="push_new_group_message">Новое сообщение в группе</string>
@@ -910,6 +914,8 @@
     <string name="notif_categories">Категории</string>
     <string name="notif_push_on">Push включён</string>
     <string name="notif_push_via">Через %1$s</string>
+    <string name="notif_push_builtin">RCQ (встроенный)</string>
+    <string name="notif_push_switch_builtin">Перейти на свой push RCQ</string>
     <string name="notif_push_broken_title">Уведомления не доходят</string>
     <string name="notif_push_broken_507">Сервис push сообщает, что это устройство с ним не на связи, и отказывается принимать сигналы. Откройте приложение ntfy, включите постоянное соединение (instant delivery) и снимите ограничения энергосбережения.</string>
     <string name="notif_push_broken_429">Сервис push ограничивает запросы с вашей сети, часть сигналов теряется. Помогает другой дистрибьютор или собственный сервер ntfy.</string>

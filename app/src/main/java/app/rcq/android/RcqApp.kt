@@ -43,6 +43,10 @@ class RcqApp : Application() {
         // in-memory map so the OkHttp interceptor can stamp X-RCQ-Auth.
         app.rcq.android.net.AccessTokenStore.init(this)
         app.rcq.android.push.Push.ensureChannels(this)
+        // If this device distributes its own pushes, make sure the socket is up.
+        // The service is START_STICKY, but a force-stop (or a background start
+        // the system refused) leaves it down until something asks again.
+        app.rcq.android.push.Push.resumeEmbedded(this)
         // Optional PIN-lock grace (#10): users asked not to re-enter the PIN on
         // every quick app switch. With a grace > 0 we DON'T lock on background;
         // instead we lock on RETURN if the app was away longer than the grace
