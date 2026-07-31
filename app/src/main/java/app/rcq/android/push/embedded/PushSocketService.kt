@@ -58,6 +58,8 @@ class PushSocketService : Service() {
     }
 
     private var client: OkHttpClient? = null
+    /** Transport the current client is pinned to, so a change can be spotted. */
+    private var usingProxy: java.net.Proxy? = null
     private var socket: WebSocket? = null
     /** Topic the live socket is subscribed to. A re-registration mints a new
      *  topic, and without this the service happily kept listening on the old
@@ -78,22 +80,29 @@ class PushSocketService : Service() {
     override fun onCreate() {
         super.onCreate()
         startInForeground()
-        client = OkHttpClient.Builder()
+        connect()
+    }
+
+    /** A client bound to the transport in force right now. Rebuilt whenever
+     *  that changes, because a socket opened directly cannot start using the
+     *  tunnel (and vice versa) — OkHttp fixes the route at construction. */
+    private fun buildClient(proxy: java.net.Proxy?): OkHttpClient =
+        OkHttpClient.Builder()
             // No read timeout: this socket is idle by design between wakes. The
             // server sends a keepalive every 45s, and pingInterval gives us our
             // own liveness check on top.
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .pingInterval(50, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            .proxy(proxy)
             .build()
-        connect()
-    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInForeground()
         val wanted = EmbeddedDistributor.topic(this)
-        if (socket != null && connectedTopic != wanted) {
-            Log.i(TAG, "topic changed — resubscribing")
+        val forced = intent?.getBooleanExtra(EmbeddedDistributor.EXTRA_RECONNECT, false) == true
+        if (socket != null && (forced || connectedTopic != wanted)) {
+            Log.i(TAG, if (forced) "transport changed — redialling" else "topic changed — resubscribing")
             dropSocket()
         }
         if (socket == null && !stopping) connect()
@@ -152,6 +161,18 @@ class PushSocketService : Service() {
         val topic = EmbeddedDistributor.topic(this) ?: run {
             Log.w(TAG, "no topic registered — stopping")
             stopSelf(); return
+        }
+        // Ride the censorship-circumvention tunnel whenever it is engaged. A
+        // push socket pinned to a direct route would be the one part of the app
+        // that dies the moment the push host is blocked, while everything else
+        // kept working through relays — which is precisely when a user needs to
+        // be told they have a message.
+        val proxy = runCatching { app.rcq.android.net.SingBoxTransport.proxy() }.getOrNull()
+        if (client == null || proxy != usingProxy) {
+            client?.dispatcher?.executorService?.shutdown()
+            client = buildClient(proxy)
+            usingProxy = proxy
+            Log.i(TAG, "transport: ${if (proxy != null) "relay" else "direct"}")
         }
         val since = EmbeddedDistributor.since(this)
         val url = buildString {

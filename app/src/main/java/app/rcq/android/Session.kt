@@ -833,6 +833,11 @@ class Session(context: Context) {
                 if (transport.start()) {
                     api = newApi()
                     socket = newSocket()
+                    // The push socket dials at app start, a beat before this
+                    // engages; leaving it pinned to the direct route means the
+                    // one connection that still has to work on a censored
+                    // network is the one not using the tunnel.
+                    app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
                 }
             }
             // Post-engage health check + DIRECT fallback (iOS parity, AppState
@@ -944,6 +949,7 @@ class Session(context: Context) {
             // stop first when switching mode while engaged).
             if (transport.isActive) transport.stop()
             if (on) transport.start()
+            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
             socket.disconnect()
             api = newApi()
             socket = newSocket()
