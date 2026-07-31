@@ -1441,6 +1441,22 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                                     },
                                     color = c.textSecondary, fontSize = 12.sp,
                                 )
+                                // Both of those failures are the public ntfy's
+                                // rate gates, and neither exists on our own
+                                // server — so offer the one-tap way out rather
+                                // than explaining it and leaving the user to
+                                // find the chooser.
+                                if (app.rcq.android.push.Push.savedDistributor(ctx) != ctx.packageName) {
+                                    Text(
+                                        stringResource(R.string.notif_push_switch_builtin),
+                                        color = c.accent, fontSize = 14.sp,
+                                        modifier = Modifier.padding(top = 4.dp).clickable {
+                                            app.rcq.android.push.Push.chooseDistributor(ctx, ctx.packageName)
+                                            pushState = app.rcq.android.push.Push.pushState(ctx)
+                                            pushError = null
+                                        },
+                                    )
+                                }
                             }
                             // Change / reset the provider — the missing "switch
                             // distributor" affordance. Opens a chooser when more

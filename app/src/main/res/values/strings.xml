@@ -900,6 +900,10 @@
     <string name="home_reaction_indicator">New reaction to your message</string>
     <string name="home_mention_indicator">You were mentioned</string>
     <string name="push_channel_messages">Messages</string>
+    <string name="push_service_title">RCQ is connected</string>
+    <string name="push_service_body">Keeping the connection open for messages and calls</string>
+    <string name="push_service_channel">Background connection</string>
+    <string name="push_service_channel_desc">The ongoing notice shown while RCQ holds the connection that delivers messages in the background</string>
     <string name="push_channel_messages_desc">New message notifications</string>
     <string name="push_new_message">New message</string>
     <string name="push_new_group_message">New group message</string>
@@ -913,6 +917,8 @@
     <string name="notif_categories">Categories</string>
     <string name="notif_push_on">Push is on</string>
     <string name="notif_push_via">Delivered via %1$s</string>
+    <string name="notif_push_builtin">RCQ (built-in)</string>
+    <string name="notif_push_switch_builtin">Switch to RCQ\'s own push</string>
     <string name="notif_push_broken_title">Notifications are not arriving</string>
     <string name="notif_push_broken_507">Your push service says this device is not connected to it, so it refuses to accept wakes. Open the ntfy app, turn on instant delivery (a permanent connection), and exclude it from battery optimisation.</string>
     <string name="notif_push_broken_429">Your push service is rate-limiting your network, so some wakes are being dropped. A different distributor, or your own ntfy server, fixes this.</string>

@@ -135,29 +135,51 @@ object Push {
 
     fun savedDistributor(ctx: Context): String? = UnifiedPush.getSavedDistributor(ctx)
 
-    /** Pick the first installed distributor (if none chosen yet) and register —
-     *  the Settings "Enable" action. Returns false if none is installed. */
+    /** Pick a distributor (if none chosen yet) and register — the Settings
+     *  "Enable" action. Returns false if none is available at all.
+     *
+     *  Our own embedded distributor wins the default pick: it talks to
+     *  push.rcq.app, where we control the rate limits, instead of the public
+     *  ntfy.sh that was refusing 81% of this server's wakes. The user can still
+     *  switch to any installed distributor from the chooser. */
     fun enablePush(ctx: Context): Boolean {
         if (UnifiedPush.getSavedDistributor(ctx) != null) {
             UnifiedPush.register(ctx)
             return true
         }
-        val pick = UnifiedPush.getDistributors(ctx).firstOrNull() ?: return false
+        val available = UnifiedPush.getDistributors(ctx)
+        val pick = available.firstOrNull { it == ctx.packageName }
+            ?: available.firstOrNull()
+            ?: return false
         UnifiedPush.saveDistributor(ctx, pick)
         UnifiedPush.register(ctx)
         return true
+    }
+
+    /** Re-open the embedded distributor's socket if this device uses it. Called
+     *  on app start: the service is START_STICKY, but a force-stop (or a system
+     *  that could not honour a background start) leaves it down until something
+     *  asks again. No-op for a device on ntfy or with push off. */
+    fun resumeEmbedded(ctx: Context) {
+        if (UnifiedPush.getSavedDistributor(ctx) == ctx.packageName) {
+            app.rcq.android.push.embedded.EmbeddedDistributor.ensureRunning(ctx)
+        }
     }
 
     /** Installed UnifiedPush distributors (package names). */
     fun availableDistributors(ctx: Context): List<String> = UnifiedPush.getDistributors(ctx)
 
     /** Human-readable label for a distributor package — its app name, falling
-     *  back to the last path segment (e.g. "ntfy"). */
-    fun distributorLabel(ctx: Context, pkg: String): String =
-        runCatching {
+     *  back to the last path segment (e.g. "ntfy"). Our own package is named
+     *  explicitly: in a chooser listing "RCQ" next to "ntfy", the bare app name
+     *  reads like a mistake rather than a choice. */
+    fun distributorLabel(ctx: Context, pkg: String): String {
+        if (pkg == ctx.packageName) return ctx.getString(R.string.notif_push_builtin)
+        return runCatching {
             val pm = ctx.packageManager
             pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: pkg.substringAfterLast('.')
+    }
 
     /** Switch to a SPECIFIC distributor the user picked. Drops the old
      *  registration + endpoint first (so the server stops waking a stale
