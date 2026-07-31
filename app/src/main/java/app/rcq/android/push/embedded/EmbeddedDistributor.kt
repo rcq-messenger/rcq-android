@@ -131,6 +131,24 @@ object EmbeddedDistributor {
         }
     }
 
+    /** Extra that tells a running socket service to drop and redial. */
+    const val EXTRA_RECONNECT = "reconnect"
+
+    /** Redial now instead of waiting out the backoff. Used when the transport
+     *  changes underneath us (the user engaged or dropped the circumvention
+     *  tunnel): the live socket is pinned to the old route and, if that route
+     *  just became the blocked one, would sit there looking healthy. */
+    fun reconnectNow(ctx: Context) {
+        if (!isActive(ctx)) return
+        runCatching {
+            ContextCompat.startForegroundService(
+                ctx.applicationContext,
+                Intent(ctx.applicationContext, PushSocketService::class.java)
+                    .putExtra(EXTRA_RECONNECT, true),
+            )
+        }
+    }
+
     fun stop(ctx: Context) {
         runCatching {
             ctx.applicationContext.stopService(

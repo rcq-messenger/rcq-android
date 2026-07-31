@@ -949,7 +949,13 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 Switch(
                     checked = obfuscated,
                     enabled = !localProxy,
-                    onCheckedChange = { obfuscated = it; app.rcq.android.net.SingBoxTransport.setEnabled(context, it) },
+                    onCheckedChange = {
+                        obfuscated = it
+                        app.rcq.android.net.SingBoxTransport.setEnabled(context, it)
+                        // The push socket is pinned to whichever route it dialled
+                        // on; redial it so it follows the tunnel in or out.
+                        app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(context)
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }
@@ -991,6 +997,7 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                         if (it && !obfuscated) {
                             obfuscated = true
                             app.rcq.android.net.SingBoxTransport.setEnabled(context, true)
+                            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(context)
                         }
                     },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
