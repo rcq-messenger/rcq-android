@@ -67,6 +67,25 @@ sealed interface RandomState {
     data class Error(val code: String) : RandomState
 }
 
+/** WS event names that carry a SEALED envelope in `payload`, i.e. everything a
+ *  client may declare as the outer `envelope_type` on a send (the server echoes
+ *  that string back as the live event name, and files the same row in the
+ *  offline queue). The outer label only drives server-side routing and push
+ *  gating; what the envelope IS gets decided by the INNER kind after decrypt,
+ *  which is why they all funnel into the same ingest.
+ *
+ *  Kept in sync with the server's accepted types (rcq-server-ref
+ *  routers/messages.py) and iOS MessageService.envelopeType(for:). Anything
+ *  missing here is dropped on the live socket and only surfaces on the next
+ *  offline-queue drain — that was the bug where a reaction, read receipt or
+ *  edit from iOS (which has always typed its control envelopes) reached an
+ *  online Android peer minutes late, on reconnect. */
+private val SEALED_WS_TYPES = setOf(
+    "message", "system", "secscreen", "nudge", "bounce",
+    "read", "reaction", "edit", "delete", "visit",
+    "carbon", "skdm", "sknack", "homerec", "relay_share",
+)
+
 /**
  * The app's single coordinator: identity, REST, WebSocket, encrypted
  * storage, local message DB, and crypto. Exposes observable state
@@ -2256,6 +2275,9 @@ class Session(context: Context) {
         val sendable = group.members.filter { it.uin != me && it.identityKey.isNotEmpty() }
         val capable = if (ctx.host == null) sendable.filter { it.senderKeys } else emptyList()
         var skipped = 0
+        // Stamped BEFORE the POST: the wake for a sibling account on this same
+        // device can land while the request is still in flight.
+        app.rcq.android.push.Push.noteOwnGroupPost(groupId)
         try {
             val resp: RcqApi.SendResponse
             if (capable.isNotEmpty()) {
@@ -3078,12 +3100,27 @@ class Session(context: Context) {
         if (changed) { cur[peer] = updated; _messages.value = cur }
     }
 
+    /** Declared OUTER envelope_type for a control envelope — mirrors iOS
+     *  MessageService.envelopeType(for:). The server routes the opaque payload
+     *  regardless, but gates push on this label (_PUSHABLE_TYPES), so sending
+     *  reactions/reads/edits/deletes as the default "message" raised false
+     *  "New message" banners on every offline receiver. */
+    private fun envelopeTypeFor(env: Envelope): String = when (env) {
+        is Envelope.Delete -> "delete"
+        is Envelope.ReadReceipt -> "read"
+        is Envelope.Reaction -> "reaction"
+        is Envelope.Edit -> "edit"
+        is Envelope.Visit -> "visit"
+        is Envelope.SecureScreen, is Envelope.ScreenshotTaken -> "secscreen"
+        else -> "message"
+    }
+
     /** Encrypt + send a control envelope (e.g. a reaction) to one peer.
      *  Reuses the send-retry but tracks no delivery state. */
     private suspend fun sendControl(toUin: Int, env: Envelope) {
         runCatching {
             val payload = encryptFor(toUin, env)
-            withRetry { api.sendSealed(toUin, payload) }
+            withRetry { api.sendSealed(toUin, payload, envelopeType = envelopeTypeFor(env)) }
         }
     }
 
@@ -3144,7 +3181,7 @@ class Session(context: Context) {
                     }
                     if (skdmPayloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, skdmPayloads, envelopeType = "skdm") }
                 }
-                withRetry { ctx.api.sendGroupBroadcast(ctx.gid, gmsg) }
+                withRetry { ctx.api.sendGroupBroadcast(ctx.gid, gmsg, envelopeType = envelopeTypeFor(env)) }
                 SenderKeyStore.markDistributed(me, ctx.gid, skdmTargets.map { it.uin })
                 SenderKeyStore.advanceOwn(me, ctx.gid)
             }
@@ -3157,7 +3194,7 @@ class Session(context: Context) {
                         RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
                     }.getOrNull()
                 }
-                if (payloads.isNotEmpty()) withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads) }
+                if (payloads.isNotEmpty()) withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, envelopeType = envelopeTypeFor(env)) }
             }
         }
     }
@@ -3601,7 +3638,7 @@ class Session(context: Context) {
 
     private fun handleEvent(type: String, obj: JsonObject) {
         when (type) {
-            "message", "system" -> {
+            in SEALED_WS_TYPES -> {
                 val payload = obj.get("payload")?.asString
                 val gid = obj.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
                 if (payload != null) {

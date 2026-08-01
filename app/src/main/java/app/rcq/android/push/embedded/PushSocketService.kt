@@ -136,6 +136,19 @@ class PushSocketService : Service() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // "Hide" opens THIS channel's system settings: blocking the channel
+        // there removes the row for good while the service keeps running
+        // (Android 13+ shows only the Task Manager "active apps" pill). That
+        // is the honest way to get rid of the notice — the OS will not allow
+        // a background socket without a foreground service.
+        val hide = PendingIntent.getActivity(
+            this, 1,
+            Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.push_service_title))
@@ -144,6 +157,9 @@ class PushSocketService : Service() {
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(tap)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .addAction(0, getString(R.string.push_service_hide), hide)
             .build()
         // Android 14+ requires the service type at startForeground time; older
         // releases reject the 3-arg overload, so the branch is on the platform
@@ -260,7 +276,10 @@ class PushSocketService : Service() {
 internal fun ensureChannel(ctx: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-    if (nm.getNotificationChannel(PushSocketService.CHANNEL_ID) != null) return
+    // Deliberately UNCONDITIONAL: re-creating an existing channel refreshes its
+    // user-visible name/description (the self-explaining copy), while the
+    // importance keeps whatever the user set — the platform never lets code
+    // raise it back, which is exactly right here.
     nm.createNotificationChannel(
         NotificationChannel(
             PushSocketService.CHANNEL_ID,
