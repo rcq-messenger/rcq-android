@@ -314,6 +314,22 @@ object SingBoxTransport {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_AUTO_DISABLED, on).apply()
     }
 
+    /** Bring the tunnel up for a destination that is unreachable directly, for
+     *  callers that hold no Context (CrossIslandSender). Same guards as the
+     *  boot-time auto-engage: never against the user's opt-out, and never in
+     *  local-proxy mode, where the user's own proxy is the only allowed route
+     *  and stacking sing-box under it would be a leak. Blocking — call off-main.
+     *  Returns true when a proxy is available afterwards. */
+    fun engageForBlockedDestination(reason: String): Boolean {
+        if (isActive) return true
+        val ctx = appCtx ?: return false
+        if (localProxyMode() || autoEngageDisabled(ctx)) return false
+        RelayConfigStore.prime(ctx)
+        val ok = start()
+        if (ok) android.util.Log.i("RCQfront", "engaged the tunnel for $reason (direct route blocked)")
+        return ok
+    }
+
     /** Start the in-process sing-box. Blocking (call off the main thread).
      *  Returns true once the local proxy is listening (idempotent). */
     @Synchronized
