@@ -47,6 +47,9 @@ object Push {
      *  so it can open the right thread (and switch to the right account). */
     const val EXTRA_OPEN_GROUP_ID = "open_group_id"
     const val EXTRA_OPEN_TO_UIN = "open_to_uin"
+    /** Set when the wake is "we answered your report": the tap should land on
+     *  the reports screen, since that answer is the only reason to open. */
+    const val EXTRA_OPEN_REPORTS = "open_reports"
 
     /** Groups this device posted to a moment ago, keyed by group id →
      *  SystemClock.elapsedRealtime() of the send.
@@ -403,6 +406,7 @@ object Push {
             data = android.net.Uri.parse("rcq://notif/${groupId ?: "dm"}/${toUin ?: 0}")
             if (groupId != null) putExtra(EXTRA_OPEN_GROUP_ID, groupId)
             if (toUin != null) putExtra(EXTRA_OPEN_TO_UIN, toUin)
+            if (str("notif_kind") == "report_reply") putExtra(EXTRA_OPEN_REPORTS, true)
         }
         val pi = PendingIntent.getActivity(
             ctx, id, tap,

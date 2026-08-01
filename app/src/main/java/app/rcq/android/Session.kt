@@ -1600,6 +1600,11 @@ class Session(context: Context) {
     /** Fetch the admin-posted news feed (GET /news); null on failure. */
     suspend fun loadNews(): RcqApi.NewsFeed? = runCatching { api.news() }.getOrNull()
 
+    /** My own reports plus any answer written to them. Soft-fails to null so a
+     *  dead network shows the empty state rather than a crash. */
+    suspend fun loadMyReports(): List<RcqApi.MyReport>? =
+        runCatching { api.myReports() }.getOrNull()
+
     // ── stories (24h ephemeral) ──────────────────────────────────────
 
     /** Pull the active stories feed into [stories]. Soft-fails (keeps the

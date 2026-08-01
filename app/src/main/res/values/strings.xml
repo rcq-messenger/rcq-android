@@ -956,4 +956,11 @@
     <string name="emoji_tab_reactions">Reactions</string>
     <string name="emoji_pick_panel_hint">Tap to add emoticons to your composer panel (up to 40).</string>
     <string name="emoji_pick_reactions_hint">Tap to choose your quick reactions (up to 6).</string>
+    <string name="myreports_title">My reports</string>
+    <string name="myreports_empty">You have not sent any reports. If you do, the answer appears here.</string>
+    <string name="myreports_answer">Answer</string>
+    <string name="myreports_status_open">Waiting</string>
+    <string name="myreports_status_resolved">Resolved</string>
+    <string name="myreports_status_dismissed">Declined</string>
+    <string name="myreports_status_duplicate">Duplicate</string>
 </resources>

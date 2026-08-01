@@ -146,20 +146,22 @@ object GroupJoinLink {
  *  RcqApp consumes this once registered + unlocked, switching to the target
  *  account first when the wake was for a non-active local account. */
 object NotificationOpen {
-    data class Req(val groupId: Int?, val toUin: Int?)
+    data class Req(val groupId: Int?, val toUin: Int?, val reports: Boolean = false)
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromIntent(i: android.content.Intent?): Req? {
         i ?: return null
         val g = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_GROUP_ID, -1).takeIf { it > 0 }
         val u = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN, -1).takeIf { it > 0 }
+        val rep = i.getBooleanExtra(app.rcq.android.push.Push.EXTRA_OPEN_REPORTS, false)
         // Consume: setIntent keeps this intent sticky, so without removing the
         // extras any later activity re-create (language switch calls
         // recreate()) would re-fire the navigation and yank the user back
         // into the thread they had already left.
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_GROUP_ID)
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN)
-        return if (g != null || u != null) Req(g, u) else null
+        i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_REPORTS)
+        return if (g != null || u != null || rep) Req(g, u, rep) else null
     }
 }
 
@@ -326,6 +328,8 @@ private fun RcqApp(session: Session) {
     var showSettings by remember { mutableStateOf(false) }
     // Deep-link Settings straight to Network diagnostics (Home overflow menu).
     var settingsToDiagnostics by remember { mutableStateOf(false) }
+    // Deep-link Settings straight to "My reports" (a tapped report-reply push).
+    var settingsToReports by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
     var showManageAccounts by remember { mutableStateOf(false) }
     var showNews by remember { mutableStateOf(false) }
@@ -375,7 +379,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; settingsToDiagnostics = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
     }
 
     // Kept for "Try again": retrying after a transient failure must re-use the
@@ -451,6 +455,11 @@ private fun RcqApp(session: Session) {
             }
         }
         NotificationOpen.pending.value = null
+        if (req.reports) {
+            settingsToReports = true
+            showSettings = true
+            return@LaunchedEffect
+        }
         req.groupId?.let { chatTarget = ChatTarget.Group(it) }
     }
 
@@ -592,10 +601,11 @@ private fun RcqApp(session: Session) {
             s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider("settings") {
                 SettingsScreen(
                     session, s.uin,
-                    onBack = { showSettings = false; settingsToDiagnostics = false },
+                    onBack = { showSettings = false; settingsToDiagnostics = false; settingsToReports = false },
                     onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
                     onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
                     openDiagnostics = settingsToDiagnostics,
+                    openMyReports = settingsToReports,
                 )
             }
             s is UiState.Registered -> stateHolder.SaveableStateProvider("home") {
@@ -603,7 +613,7 @@ private fun RcqApp(session: Session) {
                     session, s.uin,
                     onOpenChat = { chatTarget = ChatTarget.Peer(it) },
                     onOpenGroup = { chatTarget = ChatTarget.Group(it) },
-                    onOpenSettings = { settingsToDiagnostics = false; showSettings = true },
+                    onOpenSettings = { settingsToDiagnostics = false; settingsToReports = false; showSettings = true },
                     onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
                     onOpenProfile = { showProfile = true },
                     onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
