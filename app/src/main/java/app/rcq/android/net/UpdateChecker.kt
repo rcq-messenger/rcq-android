@@ -58,6 +58,12 @@ object UpdateChecker {
     // the sing-box proxy via client() when bypass is on.) GitHub
     // releases/latest/download/ always tracks the newest published release.
     private val MANIFEST_URLS = listOf(
+        // dl.rcq.app first: same files, but behind Cloudflare, which is what
+        // makes an update downloadable from a network that throttles transit to
+        // our Frankfurt droplet (a tester had to turn on a VPN to get the APK
+        // at any usable speed). The direct origin stays as the next candidate
+        // for anyone the CDN cannot serve.
+        "https://dl.rcq.app/android/latest.json",
         "https://rcq.app/android/latest.json",
         "https://github.com/rcq-messenger/rcq-android/releases/latest/download/latest.json",
     )
