@@ -17,7 +17,7 @@
 
     <string name="onboard_mesh_kicker">ОФЛАЙН-СЕТЬ</string>
     <string name="onboard_mesh_title">Общение без интернета</string>
-    <string name="onboard_mesh_body">Радиочат находит людей рядом по Bluetooth и Wi-Fi Direct. Сообщения идут от устройства к устройству, без серверов и без сигнала сети.</string>
+    <string name="onboard_mesh_body">Обычная переписка идёт через интернет, как везде. А если сети нет совсем, включается Радиочат: находит людей рядом по Bluetooth и Wi-Fi Direct, сообщения идут от устройства к устройству, без серверов.</string>
 
     <string name="onboard_chat_kicker">ЧАТ</string>
     <string name="onboard_chat_title">Чат с sealed-sender</string>
