@@ -196,6 +196,24 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         get("/news", authed = true, NewsFeed::class.java)
     }
 
+    // ── my reports (the answer to a report I filed) ──────────────────
+    // Reports used to be a one-way box: you could file one and never learn
+    // whether anyone read it. The reply cannot arrive as a chat message (the
+    // server holds no keys and never composes envelopes), so it is fetched
+    // here on our own session instead.
+    data class MyReport(
+        val id: Int,
+        val reason: String?,
+        val status: String?,
+        val created_at: String?,
+        val reply: String?,
+        val replied_at: String?,
+    )
+
+    suspend fun myReports(): List<MyReport> = withContext(Dispatchers.IO) {
+        get("/reports/mine", authed = true, Array<MyReport>::class.java).toList()
+    }
+
     // ── stories (24h ephemeral, rcq-spec) ────────────────────────────
     // Media reuses the sealed-blob path: encrypt → /media/upload → the
     // resulting media_id + key go up with the story. Datetimes arrive as

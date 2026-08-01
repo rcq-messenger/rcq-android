@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -121,7 +122,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND }
+private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
 
 @Composable
 internal fun SettingsScreen(
@@ -133,8 +134,19 @@ internal fun SettingsScreen(
     // Deep-link: open straight on Network diagnostics (the Home overflow menu
     // entry). Back from it then closes Settings rather than landing in Privacy.
     openDiagnostics: Boolean = false,
+    // Deep-link: a tapped "we answered your report" notification lands here
+    // directly, because the answer is the only reason the user opened the app.
+    openMyReports: Boolean = false,
 ) {
-    var route by remember { mutableStateOf(if (openDiagnostics) SettingsRoute.DIAGNOSTICS else SettingsRoute.ROOT) }
+    var route by remember {
+        mutableStateOf(
+            when {
+                openMyReports -> SettingsRoute.MY_REPORTS
+                openDiagnostics -> SettingsRoute.DIAGNOSTICS
+                else -> SettingsRoute.ROOT
+            },
+        )
+    }
     // System-back parity with the in-screen ← arrow: pop ONE settings level
     // instead of letting back fall through to the activity (which dumped the
     // user straight out to the chat list). At ROOT the handler is disabled so
@@ -178,6 +190,7 @@ internal fun SettingsScreen(
             if (openDiagnostics) onBack() else route = SettingsRoute.NETWORK
         }
         SettingsRoute.NOTIFICATIONS -> NotificationsScreen(session) { route = SettingsRoute.ROOT }
+        SettingsRoute.MY_REPORTS -> MyReportsScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.SOUNDS -> SoundsScreen { route = SettingsRoute.ROOT }
         SettingsRoute.LANGUAGE -> LanguageScreen { route = SettingsRoute.ROOT }
         SettingsRoute.APP_ICON -> AppIconScreen { route = SettingsRoute.ROOT }
@@ -307,6 +320,8 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.NetworkCheck, stringResource(R.string.settings_row_network)) { onOpen(SettingsRoute.NETWORK) }
                 Divider()
                 SettingsRow(Icons.Filled.Notifications, stringResource(R.string.settings_row_notifications)) { onOpen(SettingsRoute.NOTIFICATIONS) }
+                Divider()
+                SettingsRow(Icons.Outlined.Flag, stringResource(R.string.myreports_title)) { onOpen(SettingsRoute.MY_REPORTS) }
                 Divider()
                 SettingsRow(Icons.AutoMirrored.Filled.VolumeUp, stringResource(R.string.settings_row_sounds)) { onOpen(SettingsRoute.SOUNDS) }
                 Divider()
