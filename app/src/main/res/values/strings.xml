@@ -18,7 +18,7 @@
 
     <string name="onboard_mesh_kicker">OFFLINE MESH</string>
     <string name="onboard_mesh_title">Chat with no internet</string>
-    <string name="onboard_mesh_body">Radio Chat finds people near you over Bluetooth and Wi-Fi Direct. Messages hop device to device, with no servers and no cell signal needed.</string>
+    <string name="onboard_mesh_body">Normal messaging goes over the internet, like anywhere else. When there is no network at all, Radio Chat takes over: it finds people near you over Bluetooth and Wi-Fi Direct, and messages hop device to device with no servers involved.</string>
 
     <string name="onboard_chat_kicker">CHAT</string>
     <string name="onboard_chat_title">Sealed-sender chat</string>
