@@ -80,6 +80,13 @@ sealed interface RandomState {
  *  offline-queue drain — that was the bug where a reaction, read receipt or
  *  edit from iOS (which has always typed its control envelopes) reached an
  *  online Android peer minutes late, on reconnect. */
+/** Flip to true once v0.76+ (the first build that ingests every sealed type on
+ *  the live socket, see [SEALED_WS_TYPES]) is the common case in the field.
+ *  Until then control envelopes keep going out labelled "message": older
+ *  Android peers would otherwise not apply a reaction, edit or
+ *  delete-for-everyone until their next reconnect. */
+private const val TYPED_CONTROL_SENDS = false
+
 private val SEALED_WS_TYPES = setOf(
     "message", "system", "secscreen", "nudge", "bounce",
     "read", "reaction", "edit", "delete", "visit",
@@ -3103,8 +3110,17 @@ class Session(context: Context) {
     /** Declared OUTER envelope_type for a control envelope — mirrors iOS
      *  MessageService.envelopeType(for:). The server routes the opaque payload
      *  regardless, but gates push on this label (_PUSHABLE_TYPES), so sending
-     *  reactions/reads/edits/deletes as the default "message" raised false
-     *  "New message" banners on every offline receiver. */
+     *  reactions/reads/edits/deletes as the default "message" raises false
+     *  "New message" banners on every offline receiver.
+     *
+     *  ⚠ STAGED, and [TYPED_CONTROL_SENDS] is the switch. The server echoes this
+     *  label as the LIVE WS event name, and Android only started accepting the
+     *  full set in this version: a v0.75-or-older peer drops anything outside
+     *  message/system/gmsg and picks it up on its next queue drain, which runs
+     *  on connect. Flipping the senders before receivers have spread would make
+     *  a delete-for-everyone sit visible on an un-updated phone until it
+     *  reconnects, which is a worse bug than the banner it fixes. Turn this on
+     *  once v0.76+ is the norm; iOS already accepts every type it receives. */
     private fun envelopeTypeFor(env: Envelope): String = when (env) {
         is Envelope.Delete -> "delete"
         is Envelope.ReadReceipt -> "read"
@@ -3113,7 +3129,7 @@ class Session(context: Context) {
         is Envelope.Visit -> "visit"
         is Envelope.SecureScreen, is Envelope.ScreenshotTaken -> "secscreen"
         else -> "message"
-    }
+    }.takeIf { TYPED_CONTROL_SENDS } ?: "message"
 
     /** Encrypt + send a control envelope (e.g. a reaction) to one peer.
      *  Reuses the send-retry but tracks no delivery state. */
