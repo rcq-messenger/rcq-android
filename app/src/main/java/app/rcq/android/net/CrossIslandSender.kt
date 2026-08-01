@@ -49,6 +49,40 @@ object CrossIslandSender {
         return proxiedClient ?: baseClient.newBuilder().proxy(p).build().also { proxiedClient = it }
     }
 
+    /** Foreign hosts whose direct route we already found to be blocked, so the
+     *  retry below happens once per host and not once per call. */
+    private val needsTunnel = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * Run a call to [host], falling back to the circumvention tunnel when the
+     * DIRECT route to that specific island is blocked.
+     *
+     * The app auto-engages the tunnel when its OWN island fails to answer, and
+     * the Cloudflare front only ever proxies the flagship — so a user whose
+     * carrier blocks the subnet of ANOTHER island (a tester saw exactly this:
+     * "the main server started working, is2 did not", while is2 was healthy and
+     * answering from other networks) had no fallback at all for that island: it
+     * simply stayed unreachable while everything else looked fine.
+     *
+     * Only connection-level failures trigger it. An HTTP error means we reached
+     * the island and it answered, which the tunnel would not change.
+     */
+    private fun <T> viaBestRoute(host: String, call: (OkHttpClient) -> T): T {
+        if (host in needsTunnel && SingBoxTransport.engageForBlockedDestination(host)) {
+            return call(http())
+        }
+        return try {
+            call(http())
+        } catch (e: java.io.IOException) {
+            // Already tunnelled: a failure here is the island or the relay path,
+            // and re-running the same call would only double the wait.
+            if (SingBoxTransport.proxy() != null) throw e
+            if (!SingBoxTransport.engageForBlockedDestination(host)) throw e
+            needsTunnel.add(host)
+            call(http())
+        }
+    }
+
     data class Card(
         val identityKey: String,
         val signingKey: String,
@@ -66,7 +100,7 @@ object CrossIslandSender {
     /** Fetch a peer's open public-key card from their island (no auth). */
     fun fetchCard(host: String, uin: Int): Card? {
         val req = Request.Builder().url("https://$host/federation/keys/$uin").get().build()
-        http().newCall(req).execute().use { resp ->
+        viaBestRoute(host) { it.newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) return null
             val o = JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject
             return Card(
@@ -88,7 +122,7 @@ object CrossIslandSender {
         val url = "https://$host/federation/uin-for-key?signing_key=" +
             java.net.URLEncoder.encode(signingKeyB64, "UTF-8")
         val req = Request.Builder().url(url).get().build()
-        http().newCall(req).execute().use { resp ->
+        viaBestRoute(host) { it.newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) return null
             return runCatching {
                 JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject.get("uin").asInt
@@ -108,7 +142,7 @@ object CrossIslandSender {
         }
         val req = Request.Builder().url("https://$host/auth/register")
             .post(body.toString().toRequestBody(JSON)).build()
-        http().newCall(req).execute().use { resp ->
+        viaBestRoute(host) { it.newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) return null
             return runCatching {
                 JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject.get("uin").asInt
@@ -122,7 +156,7 @@ object CrossIslandSender {
         val fallback = listOf(RcqFederation.Home(host, uin))
         val card = fetchCard(host, uin) ?: return fallback
         val req = Request.Builder().url("https://$host/federation/island-record/$uin").get().build()
-        http().newCall(req).execute().use { resp ->
+        viaBestRoute(host) { it.newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) return fallback
             val doc = runCatching {
                 JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
@@ -148,7 +182,7 @@ object CrossIslandSender {
             .addFormDataPart("blob", "photo.bin", blob.toRequestBody(OCTET))
             .build()
         val req = Request.Builder().url("https://$host/media/$mediaId").put(body).build()
-        return runCatching { http().newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
+        return runCatching { viaBestRoute(host) { c -> c.newCall(req).execute() }.use { it.isSuccessful } }.getOrDefault(false)
     }
 
     /** §5d cross-island call signaling: v=1-seal a call envelope and deposit it
@@ -171,7 +205,7 @@ object CrossIslandSender {
             addProperty("payload", payload)
         }.toString().toRequestBody(JSON)
         val req = Request.Builder().url("https://${contact.host}/messages/sealed").post(body).build()
-        return runCatching { http().newCall(req).execute().use { it.isSuccessful } }.getOrDefault(false)
+        return runCatching { viaBestRoute(contact.host) { c -> c.newCall(req).execute() }.use { it.isSuccessful } }.getOrDefault(false)
     }
 
     /** Deliver [env] to a cross-island [contact]: v=1-seal to their identity key
@@ -194,19 +228,25 @@ object CrossIslandSender {
         val homes = Multihome.resolveAndMirrorHomes(ownHost, contact.host, contact.uin, contact.signingKey)
             .ifEmpty { listOf(RcqFederation.Home(contact.host, contact.uin)) }
         for (h in homes) {
-            val client = http()
-            val body = JsonObject().apply {
-                addProperty("to_uin", h.uin)
-                addProperty("envelope_type", "message")
-                addProperty("payload", payload)
-                // F3 deposit-auth: attach an anonymous blinded token when the
-                // recipient island offers it, so our cross-island deposit isn't
-                // throttled by the blunt per-IP cap (and survives a future
-                // require-token flip). Best-effort — null = the legacy path.
-                DepositAuthStore.tokenFor(h.host, client)?.let { add("deposit_token", it) }
-            }.toString().toRequestBody(JSON)
-            val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()
-            runCatching { client.newCall(req).execute().use { if (it.isSuccessful) delivered = true } }
+            // Per-home best route: a home whose island is blocked for this
+            // network gets a second attempt through the tunnel instead of
+            // silently failing while the other homes succeed.
+            runCatching {
+                viaBestRoute(h.host) { client ->
+                    val body = JsonObject().apply {
+                        addProperty("to_uin", h.uin)
+                        addProperty("envelope_type", "message")
+                        addProperty("payload", payload)
+                        // F3 deposit-auth: attach an anonymous blinded token when the
+                        // recipient island offers it, so our cross-island deposit isn't
+                        // throttled by the blunt per-IP cap (and survives a future
+                        // require-token flip). Best-effort — null = the legacy path.
+                        DepositAuthStore.tokenFor(h.host, client)?.let { add("deposit_token", it) }
+                    }.toString().toRequestBody(JSON)
+                    val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()
+                    client.newCall(req).execute().use { if (it.isSuccessful) delivered = true }
+                }
+            }
         }
         return delivered
     }
