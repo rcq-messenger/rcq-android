@@ -141,6 +141,28 @@ object GroupJoinLink {
     }
 }
 
+/** A pending open-this-thread request from a tapped message notification.
+ *  [Push.showMessage] stamps the wake's group_id/to_uin as intent extras;
+ *  RcqApp consumes this once registered + unlocked, switching to the target
+ *  account first when the wake was for a non-active local account. */
+object NotificationOpen {
+    data class Req(val groupId: Int?, val toUin: Int?)
+    val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+
+    fun fromIntent(i: android.content.Intent?): Req? {
+        i ?: return null
+        val g = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_GROUP_ID, -1).takeIf { it > 0 }
+        val u = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN, -1).takeIf { it > 0 }
+        // Consume: setIntent keeps this intent sticky, so without removing the
+        // extras any later activity re-create (language switch calls
+        // recreate()) would re-fire the navigation and yank the user back
+        // into the thread they had already left.
+        i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_GROUP_ID)
+        i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN)
+        return if (g != null || u != null) Req(g, u) else null
+    }
+}
+
 // FragmentActivity (not the bare ComponentActivity) so BiometricPrompt can host
 // its dialog for the panic-PIN biometric unlock. FragmentActivity is itself a
 // ComponentActivity, so setContent / enableEdgeToEdge still apply.
@@ -162,6 +184,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         WebLinkRequest.fromUri(intent.data)?.let { WebLinkRequest.pending.value = it }
         ContactAddLink.fromUri(intent.data)?.let { ContactAddLink.pending.value = it }
         GroupJoinLink.fromUri(intent.data)?.let { GroupJoinLink.pending.value = it }
+        NotificationOpen.fromIntent(intent)?.let { NotificationOpen.pending.value = it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -179,6 +202,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         WebLinkRequest.fromUri(intent?.data)?.let { WebLinkRequest.pending.value = it }
         ContactAddLink.fromUri(intent?.data)?.let { ContactAddLink.pending.value = it }
         GroupJoinLink.fromUri(intent?.data)?.let { GroupJoinLink.pending.value = it }
+        NotificationOpen.fromIntent(intent)?.let { NotificationOpen.pending.value = it }
         enableEdgeToEdge()
         app.rcq.android.data.LanguageManager.init(applicationContext)
         LocalStores.init(applicationContext)
@@ -396,6 +420,38 @@ private fun RcqApp(session: Session) {
         resetNav()
         state = UiState.Registering
         scope.launch { state = UiState.Registered(session.switchToAccount(id)) }
+    }
+
+    // A tapped message notification: open the thread it points at, switching to
+    // the target account first when the wake was for a non-active local account.
+    // The request STAYS pending across switchAccount (resetNav clears chatTarget)
+    // and is consumed only once the right account is registered + unlocked — the
+    // effect re-fires when state/locked flip, so a tap while PIN-locked routes
+    // correctly after the unlock.
+    val notifOpen by NotificationOpen.pending.collectAsState()
+    LaunchedEffect(state, locked, notifOpen) {
+        val req = notifOpen ?: return@LaunchedEffect
+        if (state !is UiState.Registered || locked) return@LaunchedEffect
+        if (req.toUin != null && req.toUin != session.uin) {
+            // Find the local account owning the wake's to_uin. The active
+            // account was already handled by the != check above, so a
+            // cross-island numeric collision resolves active-first, then to
+            // the first roster match.
+            val acct = app.rcq.android.data.AccountManager.accounts.value.firstOrNull {
+                app.rcq.android.data.SecureStore(context, it.id).uin == req.toUin
+            }
+            if (acct == null) {
+                // Unknown account (stale notification after a burn) — land on Home.
+                NotificationOpen.pending.value = null
+                return@LaunchedEffect
+            }
+            if (acct.id != app.rcq.android.data.AccountManager.activeId.value) {
+                switchAccount(acct.id)
+                return@LaunchedEffect
+            }
+        }
+        NotificationOpen.pending.value = null
+        req.groupId?.let { chatTarget = ChatTarget.Group(it) }
     }
 
     Box(

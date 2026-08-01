@@ -1500,6 +1500,26 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
+            // The built-in distributor's permanent notice: explain WHY it
+            // exists and hand the user the honest way to hide it (blocking the
+            // rcq_push_service channel; the socket keeps running). Only shown
+            // while the built-in delivery is actually the active distributor.
+            if (pushState == app.rcq.android.push.Push.PushState.CONNECTED &&
+                app.rcq.android.push.Push.savedDistributor(ctx) == ctx.packageName
+            ) {
+                SettingsGroup {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(stringResource(R.string.notif_push_notice_title), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.notif_push_notice_body), color = c.textSecondary, fontSize = 12.sp)
+                        Text(
+                            stringResource(R.string.notif_push_notice_hide), color = c.accent, fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 4.dp).clickable {
+                                app.rcq.android.push.Push.openPushServiceChannelSettings(ctx)
+                            },
+                        )
+                    }
+                }
+            }
             // Full-screen incoming-call access (Android 14+). Without it an
             // incoming call degrades to a heads-up banner that's easy to miss —
             // surface a one-tap grant only while it's actually ungranted.
@@ -1534,25 +1554,37 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                             }
                             dists.forEach { pkg ->
                                 val current = pkg == saved
-                                Text(
-                                    app.rcq.android.push.Push.distributorLabel(ctx, pkg) + if (current) "  ✓" else "",
-                                    color = if (current) c.accent else c.textPrimary, fontSize = 15.sp,
-                                    modifier = Modifier.fillMaxWidth().clickable {
+                                Column(
+                                    Modifier.fillMaxWidth().clickable {
                                         app.rcq.android.push.Push.chooseDistributor(ctx, pkg)
                                         showDistChooser = false
                                         pushState = app.rcq.android.push.Push.pushState(ctx)
                                     }.padding(vertical = 10.dp),
-                                )
+                                ) {
+                                    Text(
+                                        app.rcq.android.push.Push.distributorLabel(ctx, pkg) + if (current) "  ✓" else "",
+                                        color = if (current) c.accent else c.textPrimary, fontSize = 15.sp,
+                                    )
+                                    // Name each option's trade-off so "экономный
+                                    // режим" is a visible choice, not a hidden one.
+                                    Text(
+                                        if (pkg == ctx.packageName) stringResource(R.string.notif_push_dist_hint_builtin)
+                                        else stringResource(R.string.notif_push_dist_hint_other),
+                                        color = c.textSecondary, fontSize = 11.sp,
+                                    )
+                                }
                             }
                             Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp).background(c.divider))
-                            Text(
-                                stringResource(R.string.notif_push_disable), color = c.statusBusy, fontSize = 15.sp,
-                                modifier = Modifier.fillMaxWidth().clickable {
+                            Column(
+                                Modifier.fillMaxWidth().clickable {
                                     app.rcq.android.push.Push.resetDistributor(ctx)
                                     showDistChooser = false
                                     pushState = app.rcq.android.push.Push.pushState(ctx)
                                 }.padding(vertical = 10.dp),
-                            )
+                            ) {
+                                Text(stringResource(R.string.notif_push_disable), color = c.statusBusy, fontSize = 15.sp)
+                                Text(stringResource(R.string.notif_push_disable_hint), color = c.textSecondary, fontSize = 11.sp)
+                            }
                         }
                     },
                 )
@@ -1565,16 +1597,29 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                         Text(stringResource(R.string.notif_contact_requests), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Text(stringResource(R.string.notif_contact_requests_desc), color = c.textSecondary, fontSize = 11.sp)
                     }
-                    Switch(
-                        checked = contactReq ?: true,
-                        enabled = contactReq != null,
-                        onCheckedChange = { v ->
-                            val prev = contactReq
-                            contactReq = v
-                            scope.launch { if (!session.setContactRequestsPush(v)) contactReq = prev }
-                        },
-                        colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
-                    )
+                    // No placeholder value into a live Switch: rendering
+                    // `?: true` before the async loadPushPrefs answer made the
+                    // thumb visibly animate to the real value on screen entry
+                    // (the "toggle flips by itself" report). A Switch that
+                    // ENTERS composition at its real value doesn't animate; the
+                    // fixed-size Spacer keeps the row height stable meanwhile.
+                    val cr = contactReq
+                    if (cr == null) {
+                        // 52x48, not the 52x32 track: M3's Switch applies
+                        // minimumInteractiveComponentSize, so the track sits
+                        // centred in a 48dp touch target. Sizing to the track
+                        // would swap the thumb animation for a 16dp row jump.
+                        Spacer(Modifier.size(52.dp, 48.dp))
+                    } else {
+                        Switch(
+                            checked = cr,
+                            onCheckedChange = { v ->
+                                contactReq = v
+                                scope.launch { if (!session.setContactRequestsPush(v)) contactReq = cr }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                        )
+                    }
                 }
             }
             Text(

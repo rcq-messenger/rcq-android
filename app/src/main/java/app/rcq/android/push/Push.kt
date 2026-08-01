@@ -43,6 +43,47 @@ object Push {
     const val CHANNEL_CALLS_RING = "rcq_calls_ring"
     private const val CALL_NOTIF_ID = 0x2C01
 
+    /** Intent extras a message notification tap carries into [MainActivity]
+     *  so it can open the right thread (and switch to the right account). */
+    const val EXTRA_OPEN_GROUP_ID = "open_group_id"
+    const val EXTRA_OPEN_TO_UIN = "open_to_uin"
+
+    /** Groups this device posted to a moment ago, keyed by group id →
+     *  SystemClock.elapsedRealtime() of the send.
+     *
+     *  The server already refuses to wake the sending device (it skips every
+     *  push token the authenticated sender registered), which covers the
+     *  sender-keys broadcast path. The LEGACY per-member group path is
+     *  deliberately anonymous though — sealed sender means no `caller` — so
+     *  there the server cannot tell that a recipient account lives on the same
+     *  phone as the author, and a multi-account user got a banner about their
+     *  own post. Telling the server which local accounts share a device would
+     *  fix it by de-anonymizing exactly what sealed sender protects, so the
+     *  knowledge stays here: a wake for a group we posted to a breath ago is
+     *  our own echo. Process-global on purpose — the wake is delivered into
+     *  this same process, and a killed process has no recent post to suppress. */
+    private val recentOwnGroupPosts = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /** Window in which a group wake is treated as the echo of our own post.
+     *  Short on purpose: suppressing someone ELSE's message notification is
+     *  worse than the spurious self-banner this removes, and the echo comes
+     *  back within a second or two of the POST. */
+    private const val OWN_POST_ECHO_MS = 5_000L
+
+    /** Called from the group send paths right after the fan-out POST. */
+    fun noteOwnGroupPost(groupId: Int) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        recentOwnGroupPosts[groupId] = now
+        // Bounded without a sweeper task: drop anything already past the window
+        // on each write (a user posts to a handful of groups, not thousands).
+        recentOwnGroupPosts.entries.removeAll { now - it.value > OWN_POST_ECHO_MS }
+    }
+
+    private fun isOwnEcho(groupId: Int): Boolean {
+        val at = recentOwnGroupPosts[groupId] ?: return false
+        return android.os.SystemClock.elapsedRealtime() - at <= OWN_POST_ECHO_MS
+    }
+
     private const val PREFS = "rcq_push"
     private const val K_ENDPOINT = "endpoint"
 
@@ -248,6 +289,24 @@ object Push {
         }
     }
 
+    /** Open the system settings page for the push-service channel, where the
+     *  user can block the channel and hide the persistent connection notice
+     *  for good — the foreground service keeps running without it (Android
+     *  then shows only the Task Manager "active apps" entry). */
+    fun openPushServiceChannelSettings(ctx: Context) {
+        runCatching {
+            ctx.startActivity(
+                Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(
+                        android.provider.Settings.EXTRA_CHANNEL_ID,
+                        app.rcq.android.push.embedded.PushSocketService.CHANNEL_ID,
+                    )
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
     /** POST [endpoint] to every local account's island so each can wake this
      *  device. Idempotent server-side (upsert on uin+token). Fire-and-forget;
      *  callable headless (reads per-account creds straight from SecureStore). */
@@ -298,23 +357,31 @@ object Push {
 
         val groupName = str("group_name")
         val groupId = json.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
+        val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val isGroup = groupName != null || groupId != null
-        // Defense in depth: never wake for a group the active account muted, even
+        // Defense in depth: never wake for a group the TARGET account muted, even
         // if the server's muted_group_ids sync was stale (the v0.63 class of bug).
+        // The wake carries to_uin, so on a multi-account device we consult the
+        // account it is FOR — checking only the active account let a sibling
+        // account's muted group keep buzzing the phone.
         // The 1:1 sealed wake hides the sender, so peer mute stays a server gate.
         if (groupId != null) {
-            val activeId = app.rcq.android.data.AccountManager.activeId.value
+            // Our own post echoing back through a sibling account on this same
+            // device (the anonymous legacy group path the server can't filter).
+            if (isOwnEcho(groupId)) return
+            val acctId = toUin?.let { u ->
+                AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
+            } ?: app.rcq.android.data.AccountManager.activeId.value
             val thread = app.rcq.android.data.LocalStores.groupThread(groupId)
-            if (activeId != null) {
-                // Fully muted (NONE): never wake, even if the server's muted_group_ids
-                // sync was stale (the v0.63 class of bug).
-                if (app.rcq.android.data.LocalStores.isMutedFor(activeId, thread)) return
+            if (acctId != null) {
+                // Fully muted (NONE): never wake.
+                if (app.rcq.android.data.LocalStores.isMutedFor(acctId, thread)) return
                 // Mentions-only: the user wants a banner ONLY when @mentioned. Android
                 // does no in-push decrypt (unlike the iOS NSE), so it can't confirm a
                 // mention from a sealed/gmsg wake — stay quiet rather than spam every
                 // message (the "muted RCQ Beta still pushes" report). Real mentions are
                 // still seen in-app; precise server-side mention gating is a follow-up.
-                if (app.rcq.android.data.LocalStores.isMentionsOnlyFor(activeId, thread)) return
+                if (app.rcq.android.data.LocalStores.isMentionsOnlyFor(acctId, thread)) return
             }
         }
         val title = groupName ?: str("title") ?: ctx.getString(R.string.app_name)
@@ -322,11 +389,23 @@ object Push {
             if (isGroup) R.string.push_new_group_message else R.string.push_new_message,
         )
 
+        // Distinct groups get their own notification; all 1:1 pushes collapse
+        // into one "New message" (the sealed wake doesn't reveal the sender).
+        val id = (str("group_id") ?: "dm").hashCode()
         val tap = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            // Extras don't participate in Intent.filterEquals, so without a
+            // per-thread data URI every notification would share one
+            // PendingIntent and FLAG_UPDATE_CURRENT would clobber older
+            // notifications' extras with the newest thread. The rcq://notif
+            // authority matches no VIEW filter and the intent is explicit,
+            // so this never collides with real deep links.
+            data = android.net.Uri.parse("rcq://notif/${groupId ?: "dm"}/${toUin ?: 0}")
+            if (groupId != null) putExtra(EXTRA_OPEN_GROUP_ID, groupId)
+            if (toUin != null) putExtra(EXTRA_OPEN_TO_UIN, toUin)
         }
         val pi = PendingIntent.getActivity(
-            ctx, 0, tap,
+            ctx, id, tap,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notif = NotificationCompat.Builder(ctx, CHANNEL_MESSAGES)
@@ -338,9 +417,6 @@ object Push {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
-        // Distinct groups get their own notification; all 1:1 pushes collapse
-        // into one "New message" (the sealed wake doesn't reveal the sender).
-        val id = (str("group_id") ?: "dm").hashCode()
         runCatching { NotificationManagerCompat.from(ctx).notify(id, notif) }
     }
 
