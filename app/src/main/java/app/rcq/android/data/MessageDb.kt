@@ -199,6 +199,18 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.delete("messages", "id = ?", arrayOf(id))
     }
 
+    /** Erase one 1:1 conversation. `group_id IS NULL` matters: a peer's uin
+     *  also appears as `peer_uin` on their messages inside a group, and
+     *  clearing a private chat must not take group history with it. */
+    fun deletePeerThread(uin: Int) {
+        db.delete("messages", "peer_uin = ? AND group_id IS NULL", arrayOf(uin.toString()))
+    }
+
+    /** Erase one group conversation. */
+    fun deleteGroupThread(groupId: Int) {
+        db.delete("messages", "group_id = ?", arrayOf(groupId.toString()))
+    }
+
     fun all(): List<ChatMessage> {
         val out = ArrayList<ChatMessage>()
         db.rawQuery(

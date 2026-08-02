@@ -107,6 +107,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -2233,8 +2234,22 @@ internal fun SettingsTopBar(title: String, onBack: () -> Unit, trailing: @Compos
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent, modifier = Modifier.size(26.dp).clickable(onClick = onBack))
         Spacer(Modifier.width(12.dp))
-        Text(title, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.weight(1f))
+        // The WEIGHT belongs on the title, not on a spacer after it. Row
+        // measures unweighted children first, so an unweighted title claimed
+        // the whole width and whatever came after it was squeezed into what
+        // was left — on "Редактировать профиль" that broke "Сохранить" into a
+        // column of single letters (reported by vss). Weighted, the title
+        // takes the leftovers instead of the trailing action, and truncates
+        // rather than wrapping when even that is not enough.
+        Text(
+            title,
+            color = c.textPrimary,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
         trailing?.invoke()
     }
 }

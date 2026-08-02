@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -271,6 +272,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var showSearch by remember { mutableStateOf(false) }
     var showAllMedia by remember { mutableStateOf(false) }
     var chatMenu by remember { mutableStateOf(false) }
+    var confirmClearThread by remember { mutableStateOf(false) }
     // A picked photo/video waiting in the pre-send preview (tap to blur).
     var pendingSend by remember { mutableStateOf<PendingSend?>(null) }
     var showGroupPicker by remember { mutableStateOf(false) }
@@ -731,6 +733,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             onClick = { chatMenu = false; session.setChatSecure(peer, !chatSecure) },
                         )
                     }
+                    // Erase this conversation without hunting for the contact on
+                    // the home screen and long-pressing it (vss: "нет функции
+                    // удалить переписку в текущем диалоге").
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.home_clear_chat), color = Color(0xFFE5484D)) },
+                        leadingIcon = { Icon(Icons.Filled.DeleteSweep, null, tint = Color(0xFFE5484D)) },
+                        onClick = { chatMenu = false; confirmClearThread = true },
+                    )
                 }
             }
         }
@@ -1299,6 +1309,43 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onClose = { showAllMedia = false },
             onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = it } },
             onOpenVideo = { m -> mediaBytes(m) { openFile(context, it, "video-${m.id}.mp4", "video/mp4") } },
+        )
+    }
+    if (confirmClearThread) {
+        val threadName = when {
+            isGroup -> group?.name ?: stringResource(R.string.chat_group)
+            isSelf -> stringResource(R.string.chat_saved_title)
+            else -> session.contactName(peer ?: 0)
+        }
+        AlertDialog(
+            onDismissRequest = { confirmClearThread = false },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.home_clear_chat), color = c.textPrimary) },
+            text = {
+                Text(
+                    stringResource(
+                        if (isGroup) R.string.home_clear_chat_body_group else R.string.home_clear_chat_body,
+                        threadName,
+                    ),
+                    color = c.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearThread = false
+                    when (target) {
+                        is ChatTarget.Peer -> session.clearPeerThread(target.uin)
+                        is ChatTarget.Group -> session.clearGroupThread(target.id)
+                    }
+                    // Nothing left to show here.
+                    onBack()
+                }) { Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearThread = false }) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            },
         )
     }
 }

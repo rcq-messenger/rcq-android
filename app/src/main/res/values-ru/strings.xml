@@ -868,7 +868,15 @@
     <string name="home_unblock">Разблокировать</string>
     <string name="home_block">Заблокировать</string>
     <string name="home_report">Пожаловаться</string>
-    <string name="home_remove">Удалить</string>
+    <string name="home_remove">Удалить из контактов</string>
+    <string name="home_clear_chat">Удалить переписку</string>
+    <string name="home_clear_chat_body">Все сообщения с %1$s будут стёрты с этого устройства. У собеседника они останутся, вернуть их отсюда нельзя.</string>
+    <string name="home_clear_chat_body_group">Все сообщения в %1$s будут стёрты с этого устройства. Группа продолжит работать, у остальных участников переписка останется, вернуть её отсюда нельзя.</string>
+    <string name="home_clear_chat_confirm">Удалить</string>
+    <string name="home_remove_title">Удалить %1$s?</string>
+    <string name="home_remove_body">Вы пропадёте из контактов друг у друга. Что сделать с перепиской на этом устройстве?</string>
+    <string name="home_remove_with_chat">Удалить вместе с перепиской</string>
+    <string name="home_remove_keep_chat">Оставить переписку</string>
     <string name="home_delete_group">Удалить группу</string>
     <string name="home_leave_group">Покинуть группу</string>
     <string name="home_new_group">Новая группа</string>
@@ -932,7 +940,7 @@
     <string name="notif_push_broken_429">Сервис доставки ограничивает запросы с вашей сети, часть сигналов теряется. Помогает другой сервис доставки или собственный сервер ntfy.</string>
     <string name="notif_push_broken_other">Сервис доставки ответил ошибкой (%1$s), сигналы не проходят.</string>
     <string name="notif_push_off">Push выключен</string>
-    <string name="notif_push_enable_hint">Сервис доставки установлен. Включите пуши, чтобы получать сообщения и звонки, когда RCQ свёрнут.</string>
+    <string name="notif_push_enable_hint">Сервис доставки готов, но пуши сейчас выключены. Включите их, чтобы получать сообщения и звонки, когда RCQ свёрнут.</string>
     <string name="notif_push_enable">Включить push</string>
     <string name="notif_push_ntfy_hint">Google-push здесь недоступен. Поставьте ntfy один раз (маленькое бесплатное приложение), чтобы получать сообщения и входящие звонки в фоне.</string>
     <string name="notif_push_install_ntfy">Установить ntfy</string>
