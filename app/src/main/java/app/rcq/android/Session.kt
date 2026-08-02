@@ -1531,10 +1531,34 @@ class Session(context: Context) {
      *  (iOS parity; target is self, which the backend allows for bug_bounty).
      *  The platform + app version are tagged into the text so the admin queue
      *  shows which client a report came from. */
-    suspend fun submitBugReport(text: String, attachments: List<RcqApi.ReportAttachment> = emptyList()): Boolean {
-        val me = store.uin ?: return false
+    suspend fun submitBugReport(text: String, attachments: List<RcqApi.ReportAttachment> = emptyList()): Boolean =
+        submitBugReportResult(text, attachments) == BugReportResult.SENT
+
+    /** Why a bug report did not go through, so the screen can say something
+     *  instead of quietly resetting the button.
+     *
+     *  Reported by user-9547, who hit "Отправить", watched it return to
+     *  "Отправить", and retried for a quarter of an hour: the server was
+     *  answering 429 the whole time and nothing on screen said so. */
+    enum class BugReportResult { SENT, RATE_LIMITED, CLOSED, FAILED }
+
+    suspend fun submitBugReportResult(
+        text: String,
+        attachments: List<RcqApi.ReportAttachment> = emptyList(),
+    ): BugReportResult {
+        val me = store.uin ?: return BugReportResult.FAILED
         val tag = "[Android ${app.rcq.android.BuildConfig.VERSION_NAME}]"
-        return runCatching { api.report(me, "$tag $text", "bug_bounty", attachments) }.isSuccess
+        return runCatching { api.report(me, "$tag $text", "bug_bounty", attachments) }.fold(
+            onSuccess = { BugReportResult.SENT },
+            onFailure = { e ->
+                when {
+                    e.message?.contains("429") == true -> BugReportResult.RATE_LIMITED
+                    // The operator switched reports off on this island.
+                    e.message?.contains("403") == true -> BugReportResult.CLOSED
+                    else -> BugReportResult.FAILED
+                }
+            },
+        )
     }
 
     /** Encrypt [bytes] with a fresh per-blob key, upload it, and return the
