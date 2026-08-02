@@ -155,8 +155,9 @@
     <string name="settings_row_linked_devices">Linked devices</string>
     <string name="settings_row_backup_island">Backup on another island</string>
     <string name="backup_island_body">Automatic backup, not a second login — you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
-    <string name="backup_island_row_uin">your number there: #%1$d</string>
-    <string name="backup_island_row_uin_diff">your number there: #%1$d (your #%2$d was already taken on that island)</string>
+    <string name="backup_island_row_uin">mailbox on this island: #%1$d</string>
+    <string name="home_via_backup">Your island is not answering. Mail is arriving through your backup island; to send from there, make it the main one in Settings.</string>
+    <string name="backup_island_row_uin_diff">mailbox on this island: #%1$d (islands number independently and your #%2$d was taken here)</string>
     <string name="backup_island_auto_title">Keep a backup on another island</string>
     <string name="backup_island_auto_sub">The island is picked automatically from the public catalogue</string>
     <string name="backup_island_auto_busy">Picking an island…</string>
@@ -226,7 +227,7 @@
     <string name="restore_button">Restore</string>
     <string name="restore_restoring">Restoring…</string>
     <string name="restore_err_invalid">That doesn\'t look like a valid 24-word recovery phrase.</string>
-    <string name="restore_err_notfound">No account on this server matches that phrase.</string>
+    <string name="restore_err_notfound">No account on this island matches that phrase. A phrase restores the identity it belongs to: a backup mailbox is not a separate account and comes back together with the main one.</string>
     <string name="restore_err_generic">Couldn\'t restore. Check your connection and the phrase.</string>
     <string name="onboard_cta_restore">Restore from phrase</string>
     <string name="pin_on">On</string>
