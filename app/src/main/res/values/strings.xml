@@ -880,6 +880,8 @@
     <string name="add_ci_self">This is you — your account on this island</string>
     <string name="add_searching">Searching…</string>
     <string name="add_no_results">Nothing found.</string>
+    <string name="add_scan">Scan a QR code</string>
+    <string name="add_scan_prompt">Point the camera at a contact QR</string>
     <string name="add_already_contact">already in contacts</string>
     <string name="add_request_sent">request sent</string>
     <string name="home_report_title">Report %1$s</string>

@@ -879,6 +879,8 @@
     <string name="add_ci_self">Это вы, ваш аккаунт на этом острове</string>
     <string name="add_searching">Поиск…</string>
     <string name="add_no_results">Ничего не найдено.</string>
+    <string name="add_scan">Сканировать QR-код</string>
+    <string name="add_scan_prompt">Наведите камеру на QR-код контакта</string>
     <string name="add_already_contact">уже в контактах</string>
     <string name="add_request_sent">запрос отправлен</string>
     <string name="home_report_title">Пожаловаться на %1$s</string>

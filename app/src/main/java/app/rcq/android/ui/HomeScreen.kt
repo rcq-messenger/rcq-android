@@ -106,6 +106,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.QrCodeScanner
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.CrossIslandRequestsStore
@@ -1428,12 +1429,60 @@ private fun AddContactDialog(
     // island — shown only when a uin@host on another island is detected.
     var ciToken by remember { mutableStateOf("") }
 
+    // Scan a contact QR right here. The https form of the link is an App Link
+    // now, so a stock camera usually works too — but "usually" depends on the
+    // vendor's camera app (Samsung and MIUI regularly refuse), and this is the
+    // whole friend-to-friend path, so it should not rest on that. Routing goes
+    // through the same pending-link objects a deep link uses, so a scanned code
+    // gets the identical confirm + cross-island handling.
+    val scanLauncher = rememberLauncherForActivityResult(
+        com.journeyapps.barcodescanner.ScanContract(),
+    ) { result ->
+        val text = result.contents?.trim().orEmpty()
+        if (text.isEmpty()) return@rememberLauncherForActivityResult
+        val uri = runCatching { android.net.Uri.parse(text) }.getOrNull()
+        val contact = app.rcq.android.ContactAddLink.fromUri(uri)
+        val group = GroupLinkParser.parse(text)
+        when {
+            contact != null -> { app.rcq.android.ContactAddLink.pending.value = contact; onDismiss() }
+            group != null -> { query = text }          // the dialog already previews a group link
+            text.toIntOrNull()?.let { it > 0 } == true -> query = text
+            // Anything else (a web-link QR, a random code): put it in the field
+            // rather than swallowing it, so the user sees what was scanned.
+            else -> query = text
+        }
+    }
+    fun launchContactScan() {
+        scanLauncher.launch(
+            com.journeyapps.barcodescanner.ScanOptions().apply {
+                setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                setBeepEnabled(false)
+                setOrientationLocked(false)
+                setPrompt(context.getString(R.string.add_scan_prompt))
+            },
+        )
+    }
+
     // Debounced server-side search of people AND joinable groups (iOS Add
     // overlay parity — the old dialog only accepted a raw UIN). A pasted group
     // link is handled separately (below), so don't waste a search on it.
     LaunchedEffect(query) {
         val q = query.trim()
         if (q.length < 2 || GroupLinkParser.parse(q) != null) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
+        // `#911` means THAT number and nothing else. Plain `911` still runs the
+        // fuzzy search, which is what you want when you half-remember a number
+        // or are looking for a name — the two intents needed separate syntax
+        // (user report: searching a known UIN buried it under everything that
+        // merely contained those digits).
+        val exact = if (q.startsWith("#")) q.drop(1).trim().toIntOrNull()?.takeIf { it > 0 } else null
+        if (exact != null) {
+            searching = true
+            delay(250)
+            users = listOfNotNull(session.lookupUin(exact))
+            groups = emptyList()
+            searching = false
+            return@LaunchedEffect
+        }
         searching = true
         delay(300)
         users = session.searchUsers(q)
@@ -1454,6 +1503,14 @@ private fun AddContactDialog(
                     onValueChange = { query = it },
                     label = { Text(stringResource(R.string.add_search_hint), color = c.textSecondary) },
                     singleLine = true,
+                    trailingIcon = {
+                        Icon(
+                            Icons.Filled.QrCodeScanner,
+                            stringResource(R.string.add_scan),
+                            tint = c.accent,
+                            modifier = Modifier.size(24.dp).clickable { launchContactScan() },
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 val digits = query.trim().toIntOrNull()
@@ -1575,7 +1632,11 @@ private fun AddContactDialog(
                         }
                         if (searching) {
                             Text(stringResource(R.string.add_searching), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
-                        } else if (query.trim().length >= 2 && users.isEmpty() && groups.isEmpty() && digits == null && groupRef == null) {
+                            // `ci != null` matters: a `uin@host` query renders its own
+                            // card above, and printing "nothing found" under it read
+                            // as a contradiction (user report with a screenshot of
+                            // both on screen at once).
+                        } else if (query.trim().length >= 2 && users.isEmpty() && groups.isEmpty() && digits == null && groupRef == null && ci == null) {
                             Text(stringResource(R.string.add_no_results), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
                         } else if (query.isEmpty()) {
                             Text(stringResource(R.string.add_search_prompt), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
