@@ -124,7 +124,7 @@ class Session(context: Context) {
     private fun apiHost(): String = frontHost ?: serverHost()
     private var api = newApi()
     private var socket = newSocket()
-    private fun newApi(): RcqApi = RcqApi("https://${apiHost()}").apply { if (store.isRegistered) setToken(store.token) }
+    private fun newApi(): RcqApi = RcqApi("https://${apiHost()}", isPrimary = true).apply { if (store.isRegistered) setToken(store.token) }
     private fun newSocket(): RcqSocket = RcqSocket("wss://${apiHost()}")
     // Opened lazily by [bindDb] (in [start]) so the message DB is never opened
     // before the panic-PIN dataKey is available — opening a PIN-encrypted DB
