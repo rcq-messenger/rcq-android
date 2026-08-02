@@ -633,6 +633,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // the list past the cursor and brings the FAB back for that one.
     val mentionsLeft = (mentionIds.size - mentionCursor).coerceAtLeast(0)
 
+    // "This number no longer exists": set the first time a send to this peer
+    // failed AND their island answered a clean 404 (Session.notePeerLivenessAfterFailure).
+    // Cleared the moment anything arrives from them again, so a wrong guess
+    // cannot stick.
+    val gonePeers by LocalStores.gonePeers.collectAsState()
+    val peerGone = !isGroup && peer != null && peer in gonePeers
+    LaunchedEffect(messages.size) {
+        if (peerGone && messages.lastOrNull()?.fromMe == false) LocalStores.setGone(peer!!, false)
+    }
+
     Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
         // Header.
         Row(
@@ -738,6 +748,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 12.dp, vertical = 6.dp),
                 textColor = c.textSecondary,
                 iconTint = c.textSecondary,
+            )
+        }
+
+        if (peerGone) {
+            Text(
+                stringResource(R.string.chat_peer_gone),
+                color = c.statusBusy,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
             )
         }
 

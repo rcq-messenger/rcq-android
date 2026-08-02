@@ -68,6 +68,16 @@ object LocalStores {
     private val _blocked = MutableStateFlow<Set<Int>>(emptySet())
     val blocked: StateFlow<Set<Int>> = _blocked.asStateFlow()
 
+    /** Peers whose island answered "no such number" after a send failed — i.e.
+     *  they burned the account. Discovered lazily, never polled: asking the
+     *  server periodically whether each of your contacts still exists is
+     *  exactly the metadata traffic this project avoids, so the question is
+     *  only asked when a send has already failed (user report: "I burned my
+     *  other account, writing to it from the main one just says it could not
+     *  send — mark them instead"). Cleared if they ever come back. */
+    private val _gonePeers = MutableStateFlow<Set<Int>>(emptySet())
+    val gonePeers: StateFlow<Set<Int>> = _gonePeers.asStateFlow()
+
     /** Persistent per-thread unread counters, keyed "peer:<uin>"/"group:<id>".
      *  Mirrors the iOS UnreadStore: survives cold starts, bumped on inbound
      *  message, cleared when the chat opens. */
@@ -238,6 +248,7 @@ object LocalStores {
             _locked.value = emptySet()
             _removed.value = emptySet()
             _blocked.value = emptySet()
+            _gonePeers.value = emptySet()
             _unread.value = emptyMap()
             _reactionInbox.value = emptySet()
             _reactedMsgIds.value = emptyMap()
@@ -254,6 +265,7 @@ object LocalStores {
         _locked.value = prefs.getStringSet(pk(K_LOCKED), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
+        _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
@@ -353,6 +365,13 @@ object LocalStores {
         if (acct == null || uin in _removed.value) return
         _removed.value = _removed.value + uin
         prefs.edit().putStringSet(pk(K_REMOVED), _removed.value.map(Int::toString).toSet()).apply()
+    }
+
+    fun isGone(uin: Int) = uin in _gonePeers.value
+    fun setGone(uin: Int, on: Boolean) {
+        if (acct == null || on == (uin in _gonePeers.value)) return
+        _gonePeers.value = if (on) _gonePeers.value + uin else _gonePeers.value - uin
+        prefs.edit().putStringSet(pk(K_GONE), _gonePeers.value.map(Int::toString).toSet()).apply()
     }
 
     fun isBlocked(uin: Int) = uin in _blocked.value
@@ -648,7 +667,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -659,6 +678,7 @@ object LocalStores {
     private const val K_LOCKED = "locked"
     private const val K_REMOVED = "removed"
     private const val K_BLOCKED = "blocked"
+    private const val K_GONE = "gone_peers"
     private const val K_THEME = "theme_mode"
     private const val K_CHAT_BG = "chat_background"
     private const val K_HOME_BG = "home_background"

@@ -2978,6 +2978,7 @@ class Session(context: Context) {
                 withContext(Dispatchers.IO) { CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost()) }
             }.getOrDefault(false)
             updateMessageState(id, toUin, if (ok) DeliveryState.SENT else DeliveryState.FAILED)
+            if (!ok) notePeerLivenessAfterFailure(toUin)
             return
         }
         try {
@@ -2996,6 +2997,7 @@ class Session(context: Context) {
                 withContext(Dispatchers.IO) { depositToPeerExtraHomes(toUin, env) }
             }.getOrDefault(0)
             updateMessageState(id, toUin, if (rescued > 0) DeliveryState.SENT else DeliveryState.FAILED)
+            if (rescued == 0) notePeerLivenessAfterFailure(toUin)
         }
     }
 
@@ -3572,6 +3574,26 @@ class Session(context: Context) {
     }
 
     /** Server-side search for the Add window (users + joinable groups). */
+    /** After a send FAILED, ask once whether the peer still exists. A clean
+     *  "no such number" from their island means they burned the account, and
+     *  the chat can say so instead of leaving a red retry arrow the user will
+     *  keep tapping. Only ever called on failure: polling every contact for
+     *  liveness would be exactly the metadata traffic we avoid. Any other
+     *  outcome (network error, blocked island, anything but a definite 404)
+     *  changes nothing — silence is not evidence of death. */
+    private fun notePeerLivenessAfterFailure(uin: Int) {
+        scope.launch(Dispatchers.IO) {
+            val ci = CrossIslandStore.findByUin(uin)
+            val gone = if (ci != null) {
+                CrossIslandSender.peerMissing(ci.host, uin)
+            } else {
+                runCatching { api.userInfo(uin) }.exceptionOrNull()
+                    ?.message?.startsWith("HTTP 404") == true
+            }
+            if (gone) LocalStores.setGone(uin, true)
+        }
+    }
+
     /** Resolve ONE exact UIN (the `#911` search form). Null when nobody holds
      *  that number, which is a different answer from "no name matched". */
     suspend fun lookupUin(uin: Int): RcqApi.UserInfo? =
