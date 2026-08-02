@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -52,6 +54,11 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
     var phrase by remember { mutableStateOf("") }
     var server by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    // Set when the phrase resolves to an identity this device already holds;
+    // drives the confirm dialog. `forceAdd` survives the retry so the second
+    // attempt goes through.
+    var duplicateUin by remember { mutableStateOf<Int?>(null) }
+    var forceAdd by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val wordCount = remember(phrase) { RecoveryPhrase.parse(phrase).size }
@@ -103,11 +110,14 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
                     scope.launch {
                         val words = RecoveryPhrase.parse(phrase)
                         val res = runCatching {
-                            session.recoverAccount(words, server.trim().ifBlank { null })
+                            session.recoverAccount(words, server.trim().ifBlank { null }, force = forceAdd)
                         }
                         busy = false
                         res.onSuccess { onRestored(it) }
                             .onFailure { e ->
+                                // Already on this device: ask instead of silently
+                                // making a second, empty copy of the same number.
+                                if (e is Session.AccountAlreadyHere) { duplicateUin = e.uin; return@launch }
                                 error = when {
                                     e is IllegalArgumentException -> R.string.restore_err_invalid
                                     (e.message ?: "").contains("404") || (e.message ?: "").contains("identity_not_found") -> R.string.restore_err_notfound
@@ -118,5 +128,33 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
                 }
             }
         }
+    }
+
+    duplicateUin?.let { dupUin ->
+        AlertDialog(
+            onDismissRequest = { duplicateUin = null },
+            containerColor = RcqTheme.colors.bgSecondary,
+            title = { Text(stringResource(R.string.restore_title), color = RcqTheme.colors.textPrimary) },
+            text = { Text(stringResource(R.string.restore_already_here, dupUin), color = RcqTheme.colors.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    duplicateUin = null
+                    forceAdd = true
+                    busy = true
+                    scope.launch {
+                        val words = RecoveryPhrase.parse(phrase)
+                        val res = runCatching { session.recoverAccount(words, server.trim().ifBlank { null }, force = true) }
+                        busy = false
+                        res.onSuccess { onRestored(it) }
+                            .onFailure { error = context.getString(R.string.restore_err_generic) }
+                    }
+                }) { Text(stringResource(R.string.restore_add_anyway), color = RcqTheme.colors.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { duplicateUin = null }) {
+                    Text(stringResource(R.string.common_cancel), color = RcqTheme.colors.textSecondary)
+                }
+            },
+        )
     }
 }

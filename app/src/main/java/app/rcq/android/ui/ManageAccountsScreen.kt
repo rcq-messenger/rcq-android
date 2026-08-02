@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.data.Account
@@ -67,7 +69,10 @@ internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit, onAddByS
     val activeId by AccountManager.activeId.collectAsState()
     var pendingDelete by remember { mutableStateOf<Account?>(null) }
 
-    val sorted = accounts.sortedBy { it.createdAt }
+    // Roster order, not creation order: the list is now reorderable (the
+    // switcher renders the same order), and sorting by createdAt here would
+    // have quietly undone every move.
+    val sorted = accounts
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -127,6 +132,24 @@ internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit, onAddByS
                         Text(host, color = c.textSecondary, fontSize = 12.sp)
                         uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                     }
+                    // Reorder: with several identities, creation order is rarely
+                    // the order you want to see them in (user request).
+                    val index = sorted.indexOfFirst { it.id == account.id }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowUp, stringResource(R.string.manage_accounts_move_up),
+                            tint = if (index > 0) c.textSecondary else c.divider,
+                            modifier = Modifier.size(22.dp)
+                                .clickable(enabled = index > 0) { AccountManager.move(account.id, up = true) },
+                        )
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown, stringResource(R.string.manage_accounts_move_down),
+                            tint = if (index < sorted.lastIndex) c.textSecondary else c.divider,
+                            modifier = Modifier.size(22.dp)
+                                .clickable(enabled = index < sorted.lastIndex) { AccountManager.move(account.id, up = false) },
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
                     if (isActive) {
                         Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(20.dp))
                     } else {

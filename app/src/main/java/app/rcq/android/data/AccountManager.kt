@@ -114,6 +114,19 @@ object AccountManager {
             .apply()
     }
 
+    /** Move an account one slot up or down. The switcher and the manage screen
+     *  render the roster in order, and with several identities creation order
+     *  is rarely the order you want (user request). Persisted like the rest. */
+    fun move(id: String, up: Boolean) {
+        val list = _accounts.value.toMutableList()
+        val i = list.indexOfFirst { it.id == id }
+        val j = if (up) i - 1 else i + 1
+        if (i < 0 || j !in list.indices) return
+        val tmp = list[i]; list[i] = list[j]; list[j] = tmp
+        _accounts.value = list
+        save()
+    }
+
     /** Add a new (still-empty) account and make it active. The caller then
      *  registers an identity into its per-account stores. Returns null at
      *  the cap (defence in depth — UI gates this too). */
