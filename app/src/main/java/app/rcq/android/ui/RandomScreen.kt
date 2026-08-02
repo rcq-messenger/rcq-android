@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.SkipNext
@@ -246,13 +247,18 @@ private fun MatchedChat(session: Session, matched: RandomState.Matched) {
             Modifier.fillMaxWidth().background(c.bgSecondary.copy(alpha = 0.6f)).padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // No name, no initial, no number. Random chat says "anonymous
+            // stranger" on the tin, and this header used to print the nickname
+            // the person uses everywhere else in RCQ, which is the one thing
+            // that makes them findable. The server stopped sending it too, so
+            // this is belt and braces rather than the only guard.
             Box(Modifier.size(30.dp).clip(CircleShape).background(c.accent.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
-                Text(matched.peerNickname.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Icon(Icons.Filled.Person, null, tint = Color.White, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(matched.peerNickname, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(stringResource(R.string.random_stranger), color = c.textSecondary, fontSize = 12.sp)
+                Text(stringResource(R.string.random_stranger), color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.random_anon_note), color = c.textSecondary, fontSize = 12.sp)
             }
             // Add the stranger as a contact (a random peer is NOT a contact by default).
             Icon(

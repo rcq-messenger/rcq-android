@@ -743,6 +743,7 @@
     <string name="random_start">Найти собеседника</string>
     <string name="random_searching">Ищем собеседника…</string>
     <string name="random_stranger">Анонимный собеседник</string>
+    <string name="random_anon_note">Ни вы, ни он не видите имя и номер друг друга</string>
     <string name="random_skip">Дальше</string>
     <string name="random_add_contact">Добавить</string>
     <string name="random_add_sent">Запрос в контакты отправлен</string>
