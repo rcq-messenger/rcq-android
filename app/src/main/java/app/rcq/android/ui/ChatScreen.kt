@@ -506,8 +506,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Snapshot the unread count at open (before openThread clears it) so we can
     // mark where reading left off — an "Unread messages" divider, Telegram-style.
     val initialUnread = remember(target) { app.rcq.android.data.LocalStores.unread.value[thisThread] ?: 0 }
-    val firstUnreadIndex = remember(messages.size, initialUnread) {
-        if (initialUnread in 1..messages.size) messages.size - initialUnread else -1
+    // Pin the divider to the message reading stopped at, by id. Deriving it as
+    // `size - unread` on every size change slid the marker DOWN as new messages
+    // arrived, so it always sat N-from-the-end instead of staying where the
+    // user left off.
+    val unreadAnchorId = remember(target, messages.isNotEmpty()) {
+        if (initialUnread in 1..messages.size) messages[messages.size - initialUnread].id else null
+    }
+    val firstUnreadIndex = remember(messages, unreadAnchorId) {
+        unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
     }
     val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
     var didInitialScroll by remember(target) { mutableStateOf(false) }
@@ -563,11 +570,28 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
     // New message: stick to the bottom ONLY if the user is already near it
     // (don't yank them up while reading, #5); an own send always follows.
+    //
+    // The tail that was ALREADY there when the chat opened must not move the
+    // view. This effect also runs on first composition, and back then it did
+    // two things wrong at once: an empty `visibleItemsInfo` (layout has not run
+    // yet on the frame the chat opens) made `?: 0` compare against
+    // `totalItemsCount - 3` = -3, so "near the bottom" was true on a list that
+    // had not been measured; and once measured, landing on the unread divider
+    // with only a few unread messages ALSO reads as near-the-bottom. Either way
+    // it immediately animated past the divider to the last message, which is
+    // the "opens and scrolls straight to the end" report. So: adopt the tail
+    // silently the first time, and only react to a genuinely newer message.
+    var stickyAnchorId by remember(target) { mutableStateOf<String?>(null) }
     LaunchedEffect(messages.lastOrNull()?.id) {
         if (!didInitialScroll) return@LaunchedEffect
         val last = messages.lastOrNull() ?: return@LaunchedEffect
+        val previous = stickyAnchorId
+        stickyAnchorId = last.id
+        if (previous == null || previous == last.id) return@LaunchedEffect
         val info = listState.layoutInfo
-        val nearBottom = (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 3
+        // No measured items = no basis to claim the user is at the bottom.
+        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
+        val nearBottom = lastVisible >= info.totalItemsCount - 3
         if (last.fromMe || nearBottom) listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
     }
     // Keep the latest message visible when the keyboard opens (report #29).
