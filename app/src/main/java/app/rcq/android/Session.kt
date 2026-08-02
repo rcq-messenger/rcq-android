@@ -3572,6 +3572,12 @@ class Session(context: Context) {
     fun blockCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
         CrossIslandRequestsStore.block(me, uin, host)
+        // ...and in the list the user can actually SEE. The quarantine store
+        // keeps its own per-(uin,host) denylist, so blocking a cross-island
+        // stranger silenced them but left Settings → Blocked users empty, which
+        // reads as "the block did not take" (user report). Same set, one
+        // surface: this is also what makes Unblock possible at all.
+        LocalStores.setBlocked(uin, true)
         refreshCiRequests()
     }
 
