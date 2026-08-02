@@ -114,6 +114,15 @@ object CrossIslandSender {
         }
     }
 
+    /** Does [host] answer a definite "no such number" for [uin]? Used once,
+     *  after a send to that peer has already failed, to tell "they burned the
+     *  account" apart from "the island is unreachable right now". Anything but
+     *  a clean 404 returns false: we never mark someone gone on a maybe. */
+    fun peerMissing(host: String, uin: Int): Boolean = runCatching {
+        val req = Request.Builder().url("https://$host/federation/keys/$uin").get().build()
+        viaBestRoute(host) { it.newCall(req).execute() }.use { it.code == 404 }
+    }.getOrDefault(false)
+
     /** §5c cross-island group add: resolve the local uin bound to [signingKeyB64]
      *  on [host], or null when no account there has that key yet. Open inverse
      *  map of the key card; lets an owner-initiated add reuse an existing
