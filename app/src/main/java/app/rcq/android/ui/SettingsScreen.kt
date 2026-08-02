@@ -2119,8 +2119,14 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(h.host, color = c.textPrimary)
+                                    // Islands number independently: we ASK for the
+                                    // same UIN and take what we get. A short number
+                                    // is usually taken elsewhere, and saying so
+                                    // beats leaving the user to wonder why their
+                                    // backup has a different number (user report).
                                     Text(
-                                        stringResource(R.string.backup_island_row_uin, h.uin),
+                                        if (h.uin == session.uin) stringResource(R.string.backup_island_row_uin, h.uin)
+                                        else stringResource(R.string.backup_island_row_uin_diff, h.uin, session.uin ?: 0),
                                         color = c.textSecondary, fontSize = 12.sp,
                                     )
                                 }

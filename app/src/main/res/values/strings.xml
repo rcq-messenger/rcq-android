@@ -152,6 +152,7 @@
     <string name="settings_row_backup_island">Backup on another island</string>
     <string name="backup_island_body">Automatic backup, not a second login — you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
     <string name="backup_island_row_uin">your number there: #%1$d</string>
+    <string name="backup_island_row_uin_diff">your number there: #%1$d (your #%2$d was already taken on that island)</string>
     <string name="backup_island_auto_title">Keep a backup on another island</string>
     <string name="backup_island_auto_sub">The island is picked automatically from the public catalogue</string>
     <string name="backup_island_auto_busy">Picking an island…</string>
