@@ -1478,14 +1478,14 @@ private fun AddContactDialog(
         if (exact != null) {
             searching = true
             delay(250)
-            users = listOfNotNull(session.lookupUin(exact))
+            users = listOfNotNull(session.lookupUin(exact)).filter { it.uin != session.uin }
             groups = emptyList()
             searching = false
             return@LaunchedEffect
         }
         searching = true
         delay(300)
-        users = session.searchUsers(q)
+        users = session.searchUsers(q).filter { it.uin != session.uin }
         // Don't surface CLOSED groups in open search — they're not joinable this
         // way (join only via invite link); iOS already hides them (#11).
         groups = session.searchGroups(q).filter { !it.is_closed }
@@ -1552,7 +1552,11 @@ private fun AddContactDialog(
                         }
                         // Exact-UIN add stays possible even for users whose
                         // profile isn't searchable (privacy-gated).
-                        if (digits != null && users.none { it.uin == digits }) {
+                        // ...but never offer to add YOURSELF: searching "134" from
+                        // account #134 listed "#134 · send a request" (user report
+                        // with a screenshot). Own number = the Favourites chat,
+                        // which lives on the home screen already.
+                        if (digits != null && digits != session.uin && users.none { it.uin == digits }) {
                             // Say WHICH island a bare number reaches — a user on
                             // is2 typing an api number must see the mismatch
                             // (beta report: the request "never arrived").

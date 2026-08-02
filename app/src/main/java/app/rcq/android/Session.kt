@@ -3365,6 +3365,8 @@ class Session(context: Context) {
                 refreshCiRequests()
                 return@runCatching
             }
+            // A thread the user deleted comes back when its peer writes again.
+            if (dec.senderUin != meUin) LocalStores.clearRemoved(dec.senderUin)
             val now = System.currentTimeMillis()
             // Random-chat peer: keep the conversation ephemeral (in-memory,
             // never persisted, never on Home). Text only for v=1.

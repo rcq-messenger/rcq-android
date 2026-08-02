@@ -123,9 +123,15 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         ?: ciCardStatus?.takeIf { it.isNotBlank() }
     val blocked = contact?.blocked == true
 
+    // A bare number is ambiguous across islands: "#134" reaches a different
+    // person depending on where you type it. Copy the full `uin@host` for a
+    // contact who does not live on our island, which is exactly when someone
+    // needs to pass the address on (user report).
+    val fullAddress = crossIslandHost?.let { "$uin@$it" }
+
     fun copyUin() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("UIN", "$uin"))
+        cm.setPrimaryClip(ClipData.newPlainText("UIN", fullAddress ?: "$uin"))
         Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
     }
 
@@ -211,7 +217,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("UIN", color = c.textSecondary, fontSize = 12.sp)
-                    Text("#$uin", color = c.textMono, fontSize = 15.sp)
+                    Text(fullAddress ?: "#$uin", color = c.textMono, fontSize = 15.sp)
                 }
                 Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary, modifier = Modifier.size(18.dp))
             }
