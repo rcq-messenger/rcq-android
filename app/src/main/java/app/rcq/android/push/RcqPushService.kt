@@ -16,6 +16,14 @@ class RcqPushService : PushService() {
     /** A new endpoint URL — persist it and register it with every account's
      *  island so the server can wake this device. */
     override fun onNewEndpoint(endpoint: PushEndpoint, instance: String) {
+        // The connector re-registers on its own when the process starts, and
+        // this device always has a distributor available because RCQ ships one.
+        // If the user turned push off, an endpoint arriving here is that
+        // machinery talking, not the user — drop it and re-assert the choice.
+        if (Push.isUserDisabled(applicationContext)) {
+            Push.enforceUserDisabled(applicationContext)
+            return
+        }
         Push.setEndpoint(applicationContext, endpoint.url)
         Push.registerWithBackend(applicationContext, endpoint.url)
     }

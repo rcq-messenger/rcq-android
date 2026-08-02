@@ -90,11 +90,51 @@ object Push {
     private const val PREFS = "rcq_push"
     private const val K_ENDPOINT = "endpoint"
 
+    /** The user turned push OFF and means it. Without this flag the choice did
+     *  not survive a restart: the connector re-binds our own PushService on
+     *  app start, a distributor is always present (we ARE one), so it
+     *  re-registered, minted a fresh topic and came back on — the "I disabled
+     *  push, relaunched, it is on again" report. */
+    private const val K_USER_DISABLED = "user_disabled"
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** Endpoint as a flow so a screen sees the async arrival. `register()` only
+     *  ASKS the distributor; the endpoint lands later in
+     *  RcqPushService.onNewEndpoint, which is why the Settings block used to
+     *  need a second tap to notice it had worked. */
+    val endpointFlow: kotlinx.coroutines.flow.MutableStateFlow<String?> =
+        kotlinx.coroutines.flow.MutableStateFlow(null)
+
     fun savedEndpoint(ctx: Context): String? = prefs(ctx).getString(K_ENDPOINT, null)
-    fun setEndpoint(ctx: Context, url: String) { prefs(ctx).edit().putString(K_ENDPOINT, url).apply() }
-    fun clearEndpoint(ctx: Context) { prefs(ctx).edit().remove(K_ENDPOINT).apply() }
+    fun setEndpoint(ctx: Context, url: String) {
+        prefs(ctx).edit().putString(K_ENDPOINT, url).apply()
+        endpointFlow.value = url
+    }
+    fun clearEndpoint(ctx: Context) {
+        prefs(ctx).edit().remove(K_ENDPOINT).apply()
+        endpointFlow.value = null
+    }
+
+    fun isUserDisabled(ctx: Context): Boolean = prefs(ctx).getBoolean(K_USER_DISABLED, false)
+    private fun setUserDisabled(ctx: Context, on: Boolean) {
+        prefs(ctx).edit().putBoolean(K_USER_DISABLED, on).apply()
+    }
+
+    /** Re-assert "push is off" against anything that re-registered behind the
+     *  user's back (the connector's own start-up binding, a stale distributor
+     *  registration). Cheap and idempotent; called on app start and whenever an
+     *  endpoint shows up while the user has push disabled. */
+    fun enforceUserDisabled(ctx: Context) {
+        if (!isUserDisabled(ctx)) return
+        val stale = savedEndpoint(ctx)
+        runCatching { UnifiedPush.unregister(ctx) }
+        runCatching { UnifiedPush.removeDistributor(ctx) }
+        clearEndpoint(ctx)
+        app.rcq.android.push.embedded.EmbeddedDistributor.stop(ctx)
+        app.rcq.android.push.embedded.EmbeddedDistributor.clear(ctx)
+        if (stale != null) deregisterWithBackend(ctx, stale)
+    }
 
     /** Create the message notification channel. Idempotent; safe from
      *  Application.onCreate (also runs on headless starts). */
@@ -187,6 +227,7 @@ object Push {
      *  ntfy.sh that was refusing 81% of this server's wakes. The user can still
      *  switch to any installed distributor from the chooser. */
     fun enablePush(ctx: Context): Boolean {
+        setUserDisabled(ctx, false)
         if (UnifiedPush.getSavedDistributor(ctx) != null) {
             UnifiedPush.register(ctx)
             return true
@@ -229,6 +270,7 @@ object Push {
      *  registration + endpoint first (so the server stops waking a stale
      *  provider); the new endpoint arrives async in [RcqPushService.onNewEndpoint]. */
     fun chooseDistributor(ctx: Context, pkg: String) {
+        setUserDisabled(ctx, false)
         val old = savedEndpoint(ctx)
         runCatching { UnifiedPush.unregister(ctx) }
         if (old != null) deregisterWithBackend(ctx, old)
@@ -241,6 +283,7 @@ object Push {
      *  (or none). Unregisters, clears the saved choice + our endpoint, and
      *  best-effort removes the token from every island. */
     fun resetDistributor(ctx: Context) {
+        setUserDisabled(ctx, true)
         val old = savedEndpoint(ctx)
         runCatching { UnifiedPush.unregister(ctx) }
         runCatching { UnifiedPush.removeDistributor(ctx) }

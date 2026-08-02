@@ -46,6 +46,8 @@ class RcqApp : Application() {
         // If this device distributes its own pushes, make sure the socket is up.
         // The service is START_STICKY, but a force-stop (or a background start
         // the system refused) leaves it down until something asks again.
+        // Honour a user who turned push off BEFORE anything can re-register.
+        app.rcq.android.push.Push.enforceUserDisabled(this)
         app.rcq.android.push.Push.resumeEmbedded(this)
         // Optional PIN-lock grace (#10): users asked not to re-enter the PIN on
         // every quick app switch. With a grace > 0 we DON'T lock on background;

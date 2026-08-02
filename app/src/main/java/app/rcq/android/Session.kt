@@ -1605,6 +1605,11 @@ class Session(context: Context) {
     suspend fun loadMyReports(): List<RcqApi.MyReport>? =
         runCatching { api.myReports() }.getOrNull()
 
+    /** Delete one of my own reports. False when the server refused: an open
+     *  report about ANOTHER user waits for a verdict, so it can't be erased. */
+    suspend fun deleteMyReport(id: Int): Boolean =
+        runCatching { api.deleteMyReport(id) }.isSuccess
+
     // ── stories (24h ephemeral) ──────────────────────────────────────
 
     /** Pull the active stories feed into [stories]. Soft-fails (keeps the
