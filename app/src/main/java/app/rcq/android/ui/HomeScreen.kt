@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreVert
@@ -142,6 +143,31 @@ internal data class AccountRow(
     val active: Boolean,
 )
 
+/** Open-state and typed query of the "Add" search sheet, kept OUTSIDE
+ *  HomeScreen's composition.
+ *
+ *  Opening someone's profile from a search result takes HomeScreen out of
+ *  composition entirely (MainActivity swaps the whole screen), so a
+ *  `remember` here died and the user came back from the profile to a bare
+ *  home screen with their search gone. Reported by vss: "я зашёл в профиль,
+ *  нажал назад, а окна Добавить уже нет, я его не закрывал".
+ *
+ *  Held here rather than in LocalStores because it is transient navigation
+ *  state, not a preference: it should not outlive the process.
+ */
+internal object AddSheet {
+    val open = mutableStateOf(false)
+    val query = mutableStateOf("")
+
+    /** Leave the search for good: the user got where they were going (opened a
+     *  chat, sent a request) or dismissed it. Backing out of a profile
+     *  deliberately does NOT call this. */
+    fun close() {
+        open.value = false
+        query.value = ""
+    }
+}
+
 @Composable
 internal fun HomeScreen(
     session: Session,
@@ -196,8 +222,17 @@ internal fun HomeScreen(
     // Persisted (not remember{}): navigating into a chat and back recreated
     // HomeScreen and resurrected the dismissed banner (v0.66 regression).
     val pushNudgeDismissed by LocalStores.pushNudgeDismissed.collectAsState()
-    val showPushNudge = !pushNudgeDismissed &&
-        app.rcq.android.push.Push.pushState(context) == app.rcq.android.push.Push.PushState.NO_DISTRIBUTOR
+    // remember, NOT a bare call: pushState() asks the PackageManager which apps
+    // can act as a UnifiedPush distributor, and this line sits in the body of a
+    // screen that recomposes on every presence tick, message and unread change.
+    // A package query per frame is exactly the kind of cost that makes going
+    // back to the home screen feel heavy (vss: "планируется ускорить переход в
+    // главное окно"). Distributors are installed and uninstalled by hand, so
+    // once per visit to this screen is often enough.
+    val hasDistributor = remember {
+        app.rcq.android.push.Push.pushState(context) != app.rcq.android.push.Push.PushState.NO_DISTRIBUTOR
+    }
+    val showPushNudge = !pushNudgeDismissed && !hasDistributor
     val favorites by LocalStores.favorites.collectAsState()
     val archived by LocalStores.archived.collectAsState()
     val unread by LocalStores.unread.collectAsState()
@@ -219,7 +254,7 @@ internal fun HomeScreen(
         }
     }
 
-    var showAdd by remember { mutableStateOf(false) }
+    var showAdd by AddSheet.open
     var showQr by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
@@ -230,6 +265,10 @@ internal fun HomeScreen(
     var previewContact by remember { mutableStateOf<Contact?>(null) }
     var previewGroup by remember { mutableStateOf<RcqGroup?>(null) }
     var reportTarget by remember { mutableStateOf<Contact?>(null) }
+    // Irreversible-on-this-device actions, each behind a confirmation.
+    var clearPeerTarget by remember { mutableStateOf<Contact?>(null) }
+    var clearGroupTarget by remember { mutableStateOf<RcqGroup?>(null) }
+    var removeTarget by remember { mutableStateOf<Contact?>(null) }
 
     // Section fold state is persisted (LocalStores.sectionFlags) so a collapsed
     // section stays collapsed across leaving/re-entering home (report: the
@@ -490,7 +529,10 @@ internal fun HomeScreen(
                 title = ct.nickname,
                 subtitle = "#${ct.uin}",
                 avatar = { StatusIcon(ct.presence, size = 36.dp) },
-                actions = contactActions(ct, session, scope, context, onOpenChat, onReport = { reportTarget = it }),
+                actions = contactActions(ct, session, scope, context, onOpenChat,
+                    onReport = { reportTarget = it },
+                    onClearThread = { clearPeerTarget = it },
+                    onRemove = { removeTarget = it }),
                 onDismiss = { previewContact = null },
             )
         }
@@ -499,7 +541,8 @@ internal fun HomeScreen(
                 title = g.name,
                 subtitle = pluralStringResource(R.plurals.members, g.members.size, g.members.size),
                 avatar = { GroupAvatar(g, session, 36.dp) },
-                actions = groupActions(g, uin, session, scope, context, onOpenGroup),
+                actions = groupActions(g, uin, session, scope, context, onOpenGroup,
+                    onClearThread = { clearGroupTarget = it }),
                 onDismiss = { previewGroup = null },
             )
         }
@@ -514,10 +557,17 @@ internal fun HomeScreen(
             session = session,
             contacts = contacts,
             onAddUin = { target -> scope.launch { runCatching { session.addContact(target) } } },
-            onOpenChat = { u -> showAdd = false; onOpenChat(u) },
-            onOpenProfile = { u -> showAdd = false; onOpenPeerInfo(u) },
-            onOpenGroup = { g -> showAdd = false; onOpenGroup(g) },
-            onDismiss = { showAdd = false },
+            onOpenChat = { u -> AddSheet.close(); onOpenChat(u) },
+            // NOT closed: looking at a profile is part of deciding whether to
+            // add someone, and the search should still be there on the way
+            // back. Opening the profile takes this whole screen (sheet
+            // included) out of composition, so leaving the flag set is enough
+            // — the sheet comes back with the query when the user does. It
+            // closes when they actually leave for somewhere (a chat, a group)
+            // or send the request from the profile.
+            onOpenProfile = { u -> onOpenPeerInfo(u) },
+            onOpenGroup = { g -> AddSheet.close(); onOpenGroup(g) },
+            onDismiss = { AddSheet.close() },
         )
     }
     if (showQr) {
@@ -563,6 +613,65 @@ internal fun HomeScreen(
             name = ct.nickname,
             onSubmit = { reason -> scope.launch { runCatching { session.report(ct.uin, reason) } }; reportTarget = null },
             onDismiss = { reportTarget = null },
+        )
+    }
+    // "Clear conversation": local, irreversible, says so.
+    clearPeerTarget?.let { ct ->
+        AlertDialog(
+            onDismissRequest = { clearPeerTarget = null },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.home_clear_chat), color = c.textPrimary) },
+            text = { Text(stringResource(R.string.home_clear_chat_body, ct.nickname), color = c.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = { session.clearPeerThread(ct.uin); clearPeerTarget = null }) {
+                    Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearPeerTarget = null }) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            },
+        )
+    }
+    clearGroupTarget?.let { g ->
+        AlertDialog(
+            onDismissRequest = { clearGroupTarget = null },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.home_clear_chat), color = c.textPrimary) },
+            text = { Text(stringResource(R.string.home_clear_chat_body_group, g.name), color = c.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = { session.clearGroupThread(g.id); clearGroupTarget = null }) {
+                    Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearGroupTarget = null }) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            },
+        )
+    }
+    // Removing a contact asks what to do with the messages instead of guessing.
+    // Both answers are offered as buttons, so neither is the accidental one.
+    removeTarget?.let { ct ->
+        AlertDialog(
+            onDismissRequest = { removeTarget = null },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.home_remove_title, ct.nickname), color = c.textPrimary) },
+            text = { Text(stringResource(R.string.home_remove_body), color = c.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch { session.removeContact(ct.uin, alsoDeleteMessages = true) }
+                    removeTarget = null
+                }) { Text(stringResource(R.string.home_remove_with_chat), color = Color(0xFFE5484D)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    scope.launch { session.removeContact(ct.uin, alsoDeleteMessages = false) }
+                    removeTarget = null
+                }) { Text(stringResource(R.string.home_remove_keep_chat), color = c.accent) }
+            },
         )
     }
     comingSoon?.let { feature ->
@@ -673,6 +782,8 @@ private fun contactActions(
     context: android.content.Context,
     onOpenChat: (Int) -> Unit,
     onReport: (Contact) -> Unit,
+    onClearThread: (Contact) -> Unit,
+    onRemove: (Contact) -> Unit,
 ): List<ContextAction> {
     val thread = LocalStores.peerThread(contact.uin)
     val fav = LocalStores.isFavorite(thread)
@@ -691,7 +802,12 @@ private fun contactActions(
         else null,
         ContextAction(s(if (contact.blocked) R.string.home_unblock else R.string.home_block), if (contact.blocked) Icons.Outlined.Block else Icons.Filled.Block, destructive = !contact.blocked) { scope.launch { session.toggleBlock(contact.uin) } },
         ContextAction(s(R.string.home_report), Icons.Filled.Flag, destructive = true) { onReport(contact) },
-        ContextAction(s(R.string.home_remove), Icons.Filled.PersonRemove, destructive = true) { scope.launch { session.removeContact(contact.uin) } },
+        // Clearing the conversation and removing the person are separate on
+        // purpose: vss found that "remove" looked like it deleted the chat and
+        // did not, so re-adding brought every message back. Now one action does
+        // each, and remove ASKS before it also erases.
+        ContextAction(s(R.string.home_clear_chat), Icons.Filled.DeleteSweep, destructive = true) { onClearThread(contact) },
+        ContextAction(s(R.string.home_remove), Icons.Filled.PersonRemove, destructive = true) { onRemove(contact) },
     )
 }
 
@@ -702,6 +818,7 @@ private fun groupActions(
     scope: CoroutineScope,
     context: android.content.Context,
     onOpenGroup: (Int) -> Unit,
+    onClearThread: (RcqGroup) -> Unit,
 ): List<ContextAction> {
     val thread = LocalStores.groupThread(group.id)
     val fav = LocalStores.isFavorite(thread)
@@ -718,6 +835,8 @@ private fun groupActions(
         if (PanicPinService.isConfigured(context))
             ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) { LocalStores.toggleLocked(thread) }
         else null,
+        // Wipe the local copy of a group conversation without leaving it.
+        ContextAction(s(R.string.home_clear_chat), Icons.Filled.DeleteSweep, destructive = true) { onClearThread(group) },
         if (isOwner)
             ContextAction(s(R.string.home_delete_group), Icons.Filled.Delete, destructive = true) { scope.launch { session.deleteGroup(group.id) } }
         else
@@ -1435,7 +1554,9 @@ private fun AddContactDialog(
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var query by remember { mutableStateOf("") }
+    // Hoisted out of composition so a trip to a search result's profile and
+    // back does not wipe what was typed (see AddSheet).
+    var query by AddSheet.query
     var users by remember { mutableStateOf<List<RcqApi.UserInfo>>(emptyList()) }
     var groups by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }

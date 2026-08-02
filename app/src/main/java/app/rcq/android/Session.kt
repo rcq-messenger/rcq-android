@@ -1080,6 +1080,13 @@ class Session(context: Context) {
         // Multihoming v1: also drain the backup-island mailboxes (dedup by
         // envelope uuid collapses anything the primary already delivered).
         scope.launch { runCatching { drainBackupQueuesOnce() } }
+        // §5c guest mailboxes on visited islands. This used to run ONLY in the
+        // 30-second loop, so a cold start — which is exactly what tapping a
+        // push does — showed the chat empty for up to half a minute while the
+        // message sat on the other island. From the outside that is "пуш есть,
+        // а текст не доходит" (vss). The backup drain above was already here;
+        // this is the same call for the cross-island half.
+        scope.launch { runCatching { drainVisitedQueuesOnce() } }
         scope.launch { runCatching { withRetry { refreshContacts() } } }
         scope.launch { runCatching { withRetry { refreshPending() } } }
         scope.launch { runCatching { withRetry { refreshOutgoing() } } }
@@ -1612,6 +1619,29 @@ class Session(context: Context) {
         _groupMessages.value = emptyMap()
     }
 
+    /** Erase ONE conversation from this device: the stored rows, the in-memory
+     *  copy the chat renders from, and its unread badge.
+     *
+     *  Local only, and deliberately so. "Delete for everyone" already exists
+     *  per message and needs the other side to be reachable; this is the "get
+     *  it off my phone" action, which must work with no network and cannot
+     *  promise anything about the other device.
+     *
+     *  Reported by vss: removing a chat from the main screen dropped the
+     *  roster entry and kept every message, so re-adding the person brought
+     *  the whole conversation back and "delete" had quietly meant "hide". */
+    fun clearPeerThread(uin: Int) {
+        db.deletePeerThread(uin)
+        _messages.value = _messages.value - uin
+        LocalStores.clearUnread(LocalStores.peerThread(uin))
+    }
+
+    fun clearGroupThread(groupId: Int) {
+        db.deleteGroupThread(groupId)
+        _groupMessages.value = _groupMessages.value - groupId
+        LocalStores.clearUnread(LocalStores.groupThread(groupId))
+    }
+
     /** Publish own presence status. Optimistic local update, soft-fail
      *  on the network call. */
     suspend fun setStatus(status: UserStatus) {
@@ -1636,11 +1666,15 @@ class Session(context: Context) {
      *  cross-island contact lives only in CrossIslandStore (the own island has
      *  no roster row to DELETE) — drop it there, or refreshContacts would
      *  merge it right back (beta report #207). */
-    suspend fun removeContact(uin: Int) {
+    suspend fun removeContact(uin: Int, alsoDeleteMessages: Boolean = false) {
         LocalStores.addRemoved(uin)
         val ci = CrossIslandStore.findByUin(uin)
         if (ci != null) CrossIslandStore.remove(ci.uin, ci.host)
         else runCatching { api.removeContact(uin) }
+        // Opt-in, because removing a contact and erasing what they wrote you
+        // are different intentions and only the user knows which one this is.
+        // The caller asks; nothing here decides on their behalf.
+        if (alsoDeleteMessages) clearPeerThread(uin)
         runCatching { refreshContacts() }
     }
 

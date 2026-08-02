@@ -179,6 +179,10 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                         .background(if (requestSent) c.bgSecondary else c.accent)
                         .clickable(enabled = !requestSent) {
                             scope.launch { runCatching { session.addContact(uin) } }; requestSent = true
+                            // The request is sent, so the search that led here
+                            // has done its job — don't reopen it behind us on
+                            // the way back to the home screen.
+                            AddSheet.close()
                         }.padding(14.dp),
                     horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
                 ) {

@@ -869,7 +869,15 @@
     <string name="home_unblock">Unblock</string>
     <string name="home_block">Block</string>
     <string name="home_report">Report</string>
-    <string name="home_remove">Remove</string>
+    <string name="home_remove">Remove contact</string>
+    <string name="home_clear_chat">Delete conversation</string>
+    <string name="home_clear_chat_body">Deletes every message with %1$s from this device. It stays on theirs, and this cannot be undone here.</string>
+    <string name="home_clear_chat_body_group">Deletes every message in %1$s from this device. The group carries on and other members keep their copies; this cannot be undone here.</string>
+    <string name="home_clear_chat_confirm">Delete</string>
+    <string name="home_remove_title">Remove %1$s?</string>
+    <string name="home_remove_body">You will disappear from each other\'s contacts. What should happen to the messages on this device?</string>
+    <string name="home_remove_with_chat">Remove and delete messages</string>
+    <string name="home_remove_keep_chat">Keep messages</string>
     <string name="home_delete_group">Delete group</string>
     <string name="home_leave_group">Leave group</string>
     <string name="home_new_group">New group</string>
@@ -935,7 +943,7 @@
     <string name="notif_push_broken_429">Your push delivery service is rate-limiting your network, so some wakes are being dropped. A different delivery service, or your own ntfy server, fixes this.</string>
     <string name="notif_push_broken_other">Your push delivery service answered with an error (%1$s), so wakes are not getting through.</string>
     <string name="notif_push_off">Push is off</string>
-    <string name="notif_push_enable_hint">A push delivery service is installed. Enable it to get messages and calls while RCQ is in the background.</string>
+    <string name="notif_push_enable_hint">A delivery service is ready, but pushes are switched off. Turn them on to get messages and calls while RCQ is in the background.</string>
     <string name="notif_push_enable">Enable push</string>
     <string name="notif_push_ntfy_hint">Android can\'t use Google push here. Install ntfy once (a small free app) to get background messages and incoming calls.</string>
     <string name="notif_push_install_ntfy">Install ntfy</string>
