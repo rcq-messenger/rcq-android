@@ -2510,7 +2510,28 @@ class Session(context: Context) {
      *  otherwise returns null (back to a fresh-install / onboarding state). */
     suspend fun burnAccount(): Int? {
         val burnedId = AccountManager.activeId.value
-        runCatching { api.deleteAccount() }
+        // The server call decides whether anything is actually erased, so a
+        // failure must not be swallowed: wiping local storage regardless left
+        // the app telling someone their data was deleted while the account row
+        // was still on the island. Retry once (a burn is usually attempted on a
+        // bad network, and the endpoint is idempotent), and only then give up
+        // and keep the account so the user can try again instead of being told
+        // a comforting lie.
+        val serverDeleted = runCatching { api.deleteAccount() }
+            .recoverCatching { api.deleteAccount() }
+            .isSuccess
+        if (!serverDeleted) {
+            // Returning the CURRENT uin keeps the caller on this account, which
+            // is the truth: nothing was erased. Say so out loud, otherwise the
+            // screen just closes and the user assumes it worked.
+            android.util.Log.w("RCQburn", "server delete failed; keeping the account rather than faking erasure")
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    appCtx, appCtx.getString(R.string.burn_failed), android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+            return store.uin
+        }
         socket.disconnect()
         if (burnedId != null) {
             SecureStore.wipeAccount(appCtx, burnedId)
