@@ -361,6 +361,20 @@ object LocalStores {
     fun toggleLocked(thread: String) = toggle(_locked, K_LOCKED, thread)
 
     fun isRemoved(uin: Int) = uin in _removed.value
+
+    /** Un-hide a thread the user had deleted. Nothing used to do this, so a
+     *  deleted conversation stayed invisible forever: the peer could write
+     *  again, the push would fire, the message would file correctly, and the
+     *  chat simply never came back on the home screen (user report: "I deleted
+     *  the request, wrote again from the other account, the push arrives but
+     *  nothing appears"). Somebody writing to you is the definition of a live
+     *  conversation, so incoming mail resurrects the thread. */
+    fun clearRemoved(uin: Int) {
+        if (acct == null || uin !in _removed.value) return
+        _removed.value = _removed.value - uin
+        prefs.edit().putStringSet(pk(K_REMOVED), _removed.value.map(Int::toString).toSet()).apply()
+    }
+
     fun addRemoved(uin: Int) {
         if (acct == null || uin in _removed.value) return
         _removed.value = _removed.value + uin
