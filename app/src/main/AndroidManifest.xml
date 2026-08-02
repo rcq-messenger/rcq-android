@@ -83,7 +83,7 @@
                  Stock cameras (Samsung/MIUI/…) often refuse to deep-link a custom
                  rcq:// scheme but DO open https, so the web QR also offers this form;
                  Android shows RCQ in the app chooser (no assetlinks.json yet). -->
-            <intent-filter>
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -98,10 +98,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="rcq" android:host="add" />
             </intent-filter>
-            <!-- Same link in https form (https://rcq.app/u/<uin>?h=…) — tapped
-                 in a chat/browser Android offers RCQ in the app chooser (no
-                 assetlinks.json yet, so not auto-verified). -->
-            <intent-filter>
+            <!-- Same link in https form (https://rcq.app/u/<uin>?h=…). With
+                 assetlinks.json served from rcq.app this is an App Link:
+                 Android opens RCQ directly instead of offering a chooser (or,
+                 worse, silently handing the invite to the browser). That is the
+                 whole "a friend scans my QR" path on Android — the in-app
+                 scanner we ship is for linking the web client, not contacts. -->
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -116,7 +119,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="rcq" android:host="group" />
             </intent-filter>
-            <intent-filter>
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
