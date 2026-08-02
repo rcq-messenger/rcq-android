@@ -3572,6 +3572,11 @@ class Session(context: Context) {
     }
 
     /** Server-side search for the Add window (users + joinable groups). */
+    /** Resolve ONE exact UIN (the `#911` search form). Null when nobody holds
+     *  that number, which is a different answer from "no name matched". */
+    suspend fun lookupUin(uin: Int): RcqApi.UserInfo? =
+        runCatching { api.userInfo(uin) }.getOrNull()
+
     suspend fun searchUsers(q: String): List<RcqApi.UserInfo> =
         runCatching { api.searchUsers(q) }.getOrNull() ?: emptyList()
 
