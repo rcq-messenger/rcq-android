@@ -936,7 +936,7 @@
     <string name="notif_push_dist_hint_other">Delivery runs through this app; it shows its own status notice.</string>
     <string name="notif_push_disable_hint">Messages arrive only while RCQ is open.</string>
     <string name="notif_push_notice_title">About the permanent notice</string>
-    <string name="notif_push_notice_body">Android requires a visible notice while an app holds a background connection. RCQ keeps it silent, with no status-bar icon. You can hide it completely; delivery keeps working.</string>
+    <string name="notif_push_notice_body">Android requires a visible notice while an app holds a background connection, and it also insists on a small icon next to the clock. We keep the notice silent, off the lock screen and out of your way, but the icon is not ours to remove. You can hide both by turning this channel off; delivery keeps working.</string>
     <string name="notif_push_notice_hide">Hide the notice</string>
     <string name="notif_fsi_title">Incoming-call screen</string>
     <string name="notif_fsi_hint">Android 14 blocks the full-screen incoming-call view by default, so calls only show a small banner you can miss. Allow it for reliable incoming calls.</string>
@@ -963,4 +963,5 @@
     <string name="myreports_status_resolved">Resolved</string>
     <string name="myreports_status_dismissed">Declined</string>
     <string name="myreports_status_duplicate">Duplicate</string>
+    <string name="burn_failed">Could not reach the server, so nothing was deleted. Your account is untouched. Try again when you have a connection.</string>
 </resources>

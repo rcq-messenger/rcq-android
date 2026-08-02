@@ -933,7 +933,7 @@
     <string name="notif_push_dist_hint_other">Доставка идёт через это приложение, у него своё служебное уведомление.</string>
     <string name="notif_push_disable_hint">Сообщения будут приходить только при открытом RCQ.</string>
     <string name="notif_push_notice_title">Про постоянное уведомление</string>
-    <string name="notif_push_notice_body">Android требует показывать уведомление, пока приложение держит фоновое соединение. RCQ делает его тихим, без значка в статус-баре. Его можно полностью скрыть, доставка продолжит работать.</string>
+    <string name="notif_push_notice_body">Пока приложение держит фоновое соединение, Android требует показывать уведомление и вдобавок ставит маленький значок рядом с часами. Уведомление мы делаем тихим и убираем с экрана блокировки, а вот значок убрать не в нашей власти. И то и другое исчезнет, если выключить этот канал, доставка при этом сохранится.</string>
     <string name="notif_push_notice_hide">Скрыть уведомление</string>
     <string name="notif_fsi_title">Экран входящего звонка</string>
     <string name="notif_fsi_hint">Android 14 по умолчанию блокирует полноэкранный показ входящего звонка, поэтому звонок виден только маленьким баннером, который легко пропустить. Разрешите, чтобы входящие звонки приходили надёжно.</string>
@@ -960,4 +960,5 @@
     <string name="myreports_status_resolved">Решено</string>
     <string name="myreports_status_dismissed">Отклонено</string>
     <string name="myreports_status_duplicate">Дубликат</string>
+    <string name="burn_failed">Сервер недоступен, поэтому ничего не удалено. Аккаунт на месте. Попробуйте снова, когда появится связь.</string>
 </resources>

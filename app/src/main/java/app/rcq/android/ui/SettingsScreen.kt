@@ -1436,7 +1436,14 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_notifications), onBack)
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Scrollable, like every other settings sub-screen. This one was a
+        // plain Column, so anything past the fold was simply unreachable: a
+        // tester reported it, and the explanatory card added later made the
+        // screen taller and the cut-off worse.
+        Column(
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             // ── Push delivery (UnifiedPush / ntfy) ──
             SectionLabel(stringResource(R.string.notif_delivery))
             SettingsGroup {
