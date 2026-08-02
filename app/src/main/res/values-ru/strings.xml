@@ -752,6 +752,7 @@
     <string name="random_cant_start">Не удалось начать случайный чат</string>
     <string name="random_err_age_required">Сначала укажите возраст в профиле (только 18+).</string>
     <string name="random_err_under_18">Случайный чат доступен только пользователям 18+.</string>
+    <string name="random_set_age">Указать возраст</string>
     <string name="random_err_limit">Достигнут дневной лимит случайных чатов.</string>
     <string name="random_err_other">Что-то пошло не так. Попробуйте снова.</string>
     <!-- In-chat message search -->
