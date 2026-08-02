@@ -274,6 +274,12 @@ class RcqApi(
         get("/reports/mine", authed = true, Array<MyReport>::class.java).toList()
     }
 
+    /** Drop one of my own reports. 409 = still open against another user, so
+     *  moderation keeps it until there is a verdict. */
+    suspend fun deleteMyReport(id: Int) = withContext(Dispatchers.IO) {
+        deleteNoContent("/reports/mine/$id", authed = true)
+    }
+
     // ── stories (24h ephemeral, rcq-spec) ────────────────────────────
     // Media reuses the sealed-blob path: encrypt → /media/upload → the
     // resulting media_id + key go up with the story. Datetimes arrive as

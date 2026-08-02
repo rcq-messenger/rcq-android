@@ -960,5 +960,7 @@
     <string name="myreports_status_resolved">Решено</string>
     <string name="myreports_status_dismissed">Отклонено</string>
     <string name="myreports_status_duplicate">Дубликат</string>
+    <string name="myreports_delete">Удалить</string>
+    <string name="myreports_delete_refused">Это обращение ещё рассматривается, поэтому удалить его пока нельзя.</string>
     <string name="burn_failed">Сервер недоступен, поэтому ничего не удалено. Аккаунт на месте. Попробуйте снова, когда появится связь.</string>
 </resources>

@@ -31,6 +31,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.RcqApi
@@ -51,6 +54,10 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
     var items by remember { mutableStateOf<List<RcqApi.MyReport>?>(null) }
     var loading by remember { mutableStateOf(true) }
+    // The server keeps an OPEN report about another user until a verdict, so a
+    // delete can legitimately be refused; say so instead of failing silently.
+    var refused by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         items = session.loadMyReports()
@@ -74,6 +81,14 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
             )
         }
 
+        if (refused) {
+            Text(
+                stringResource(R.string.myreports_delete_refused),
+                color = c.statusBusy,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         val list = items.orEmpty()
         when {
             loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = c.accent) }
@@ -89,7 +104,17 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { Box(Modifier.size(4.dp)) }
-                items(list) { r -> ReportCard(r) }
+                items(list, key = { it.id }) { r ->
+                    ReportCard(r, onDelete = {
+                        scope.launch {
+                            if (session.deleteMyReport(r.id)) {
+                                items = items?.filterNot { it.id == r.id }
+                            } else {
+                                refused = true
+                            }
+                        }
+                    })
+                }
                 item { Box(Modifier.size(8.dp)) }
             }
         }
@@ -97,7 +122,7 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ReportCard(report: RcqApi.MyReport) {
+private fun ReportCard(report: RcqApi.MyReport, onDelete: () -> Unit) {
     val c = RcqTheme.colors
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).padding(16.dp),
@@ -110,8 +135,16 @@ private fun ReportCard(report: RcqApi.MyReport) {
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            formatReportDate(report.created_at)?.let {
-                Text(it, color = c.textSecondary, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                formatReportDate(report.created_at)?.let {
+                    Text(it, color = c.textSecondary, fontSize = 12.sp)
+                }
+                Icon(
+                    Icons.Outlined.Delete,
+                    stringResource(R.string.myreports_delete),
+                    tint = c.textSecondary,
+                    modifier = Modifier.size(18.dp).clickable(onClick = onDelete),
+                )
             }
         }
 

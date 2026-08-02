@@ -321,8 +321,6 @@ private fun SettingsRoot(
                 Divider()
                 SettingsRow(Icons.Filled.Notifications, stringResource(R.string.settings_row_notifications)) { onOpen(SettingsRoute.NOTIFICATIONS) }
                 Divider()
-                SettingsRow(Icons.Outlined.Flag, stringResource(R.string.myreports_title)) { onOpen(SettingsRoute.MY_REPORTS) }
-                Divider()
                 SettingsRow(Icons.AutoMirrored.Filled.VolumeUp, stringResource(R.string.settings_row_sounds)) { onOpen(SettingsRoute.SOUNDS) }
                 Divider()
                 SettingsRow(Icons.Outlined.Block, stringResource(R.string.settings_row_blocked), value = if (blockedCount > 0) "$blockedCount" else null) { onOpen(SettingsRoute.BLOCKED) }
@@ -361,6 +359,12 @@ private fun SettingsRoot(
                 }
                 Divider()
                 SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) { bugText = ""; bugSent = false; showBugReport = true }
+                Divider()
+                // Directly under "Report a bug": this is where someone who just
+                // filed one looks for the answer. It sat in the privacy block
+                // next to Notifications, which is where the answer NOTIFICATION
+                // is configured, not where the answer is read (tester report).
+                SettingsRow(Icons.Outlined.Flag, stringResource(R.string.myreports_title)) { onOpen(SettingsRoute.MY_REPORTS) }
             }
 
             Spacer(Modifier.height(22.dp))
@@ -1415,6 +1419,12 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var pushState by remember { mutableStateOf(app.rcq.android.push.Push.pushState(ctx)) }
+    // Enabling only ASKS the distributor; the endpoint lands asynchronously in
+    // RcqPushService.onNewEndpoint. Reading pushState once at tap time is why
+    // the first tap looked like nothing happened and the block only caught up
+    // on the second one. Follow the endpoint instead.
+    val liveEndpoint by app.rcq.android.push.Push.endpointFlow.collectAsState()
+    LaunchedEffect(liveEndpoint) { pushState = app.rcq.android.push.Push.pushState(ctx) }
     var showDistChooser by remember { mutableStateOf(false) }
     var contactReq by remember { mutableStateOf<Boolean?>(null) }
     // What the server's last wake attempt to THIS device's endpoint did. A
