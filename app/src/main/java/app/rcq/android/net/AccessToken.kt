@@ -103,6 +103,16 @@ object AccessRedeemer {
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .build()
+    @Volatile private var proxiedClient: OkHttpClient? = null
+
+    /** Redeeming is a call to a CLOSED island, i.e. exactly the kind of host a
+     *  censored network is likely to block, so it has to ride the tunnel when
+     *  one is up. Built lazily rather than captured at object init: the object
+     *  is touched before the transport engages. */
+    private fun http(): OkHttpClient {
+        val p = SingBoxTransport.proxy() ?: return client
+        return proxiedClient ?: client.newBuilder().proxy(p).build().also { proxiedClient = it }
+    }
 
     /**
      * Exchange a pasted access token for a durable per-device token and store it
@@ -120,7 +130,7 @@ object AccessRedeemer {
             .post(gson.toJson(body).toRequestBody(JSON))
             .build()
         return try {
-            client.newCall(req).execute().use { resp ->
+            http().newCall(req).execute().use { resp ->
                 when {
                     resp.code == 404 -> RedeemResult.NoGate // no /gate router → not gated
                     !resp.isSuccessful -> RedeemResult.BadToken

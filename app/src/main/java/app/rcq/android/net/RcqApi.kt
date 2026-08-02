@@ -18,7 +18,17 @@ import java.util.concurrent.TimeUnit
  * peer lookup, and 1:1 sealed send are wired; contacts roster + media come
  * later.
  */
-class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
+class RcqApi(
+    private val baseUrl: String = DEFAULT_BASE_URL,
+    /** True only for the session's OWN island client (built by Session). The
+     *  primary host already has a full boot-time route ladder (direct probe →
+     *  CF front → relay → post-engage direct fallback), so it must NOT also
+     *  auto-engage the tunnel on a one-off network error: a transient blip on
+     *  a healthy network would silently move every user onto a relay. Every
+     *  OTHER host (backup island, visited island, guest session, cross-island
+     *  media) has no such ladder — see [viaBestRoute]. */
+    private val isPrimary: Boolean = false,
+) {
 
     private val client = OkHttpClient.Builder()
         // Detect a dead/stale connection fast (cellular CGNAT + radio sleep
@@ -44,6 +54,56 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
         .addInterceptor(AccessTokenInterceptor)
         .build()
     private val gson = Gson()
+
+    /** Bare host of [baseUrl] (`is2.example.org`), for the blocked-route memo. */
+    private val host: String =
+        runCatching { java.net.URI(baseUrl).host }.getOrNull() ?: DEFAULT_HOST
+
+    @Volatile private var proxiedClient: OkHttpClient? = null
+
+    /** The client to use RIGHT NOW. [client] captured the proxy at build time,
+     *  which is correct for the primary (Session rebuilds it after engaging)
+     *  but wrong for the ad-hoc instances created per foreign-island call: one
+     *  built before the transport came up would keep going direct, both failing
+     *  on a censored network and leaking the foreign host outside the tunnel. */
+    private fun http(): OkHttpClient {
+        val p = SingBoxTransport.proxy() ?: return client
+        if (client.proxy != null) return client
+        return proxiedClient ?: client.newBuilder().proxy(p).build().also { proxiedClient = it }
+    }
+
+    /**
+     * Execute against the best route for THIS host: direct while that works,
+     * through the circumvention tunnel once the direct route to this specific
+     * island turns out to be blocked.
+     *
+     * The gap this closes: the boot ladder probes only the user's OWN island,
+     * and the Cloudflare front only ever proxies the flagship. So a user whose
+     * network blocks a DIFFERENT island (a tester saw exactly this: "the main
+     * server started working, is2 did not", while is2 was healthy from other
+     * networks) had no fallback for it at all. [CrossIslandSender] already got
+     * this treatment for sealed deposits; every other foreign-island call —
+     * backup homes, visited islands, guest sessions, cross-island media, push
+     * token registration — went through here and still had none.
+     *
+     * Only connection-level failures (IOException from the call itself) count.
+     * An HTTP error means the island answered, and a tunnel would not change it.
+     */
+    private fun viaBestRoute(call: (OkHttpClient) -> okhttp3.Response): okhttp3.Response {
+        if (isPrimary) return call(http())
+        if (host in blockedHosts && SingBoxTransport.engageForBlockedDestination("api:$host")) {
+            return call(http())
+        }
+        return try {
+            call(http())
+        } catch (e: IOException) {
+            // Already tunnelled: another attempt would only double the wait.
+            if (SingBoxTransport.proxy() != null) throw e
+            if (!SingBoxTransport.engageForBlockedDestination("api:$host")) throw e
+            blockedHosts.add(host)
+            call(http())
+        }
+    }
 
     /** Drop all pooled connections so the next request opens a fresh
      *  TCP+TLS one. Called between send retries: on mobile data a pooled
@@ -1040,7 +1100,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
             else -> b.get()
         }
         if (authed) token?.let { b.header("Authorization", "Bearer $it") }
-        client.newCall(b.build()).execute().use { resp ->
+        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
         }
     }
@@ -1057,7 +1117,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
             .build()
         val b = Request.Builder().url("$baseUrl/media/upload").post(body)
         token?.let { b.header("Authorization", "Bearer $it") }
-        client.newCall(b.build()).execute().use { resp ->
+        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw IOException("upload HTTP ${resp.code}: ${text.take(200)}")
             gson.fromJson(text, UploadResponse::class.java)
@@ -1073,7 +1133,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
             .build()
         val b = Request.Builder().url("$baseUrl/media/$mediaId").put(body)
         token?.let { b.header("Authorization", "Bearer $it") }
-        client.newCall(b.build()).execute().use { resp ->
+        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw IOException("deposit HTTP ${resp.code}: ${text.take(200)}")
             gson.fromJson(text, UploadResponse::class.java)
@@ -1082,7 +1142,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
 
     suspend fun getBlob(mediaId: String): ByteArray = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl/media/$mediaId").get().build()
-        client.newCall(req).execute().use { resp ->
+        viaBestRoute { it.newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("download HTTP ${resp.code}")
             resp.body?.bytes() ?: throw IOException("empty blob")
         }
@@ -1102,7 +1162,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
     private fun postNoContent(path: String, json: String, authed: Boolean) {
         val builder = Request.Builder().url("$baseUrl$path").post(json.toRequestBody(JSON))
         if (authed) token?.let { builder.header("Authorization", "Bearer $it") }
-        client.newCall(builder.build()).execute().use { resp ->
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}: ${resp.body?.string()?.take(200)}")
         }
     }
@@ -1117,7 +1177,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
     private fun deleteNoContent(path: String, authed: Boolean) {
         val builder = Request.Builder().url("$baseUrl$path").delete()
         if (authed) token?.let { builder.header("Authorization", "Bearer $it") }
-        client.newCall(builder.build()).execute().use { resp ->
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}: ${resp.body?.string()?.take(200)}")
         }
     }
@@ -1130,7 +1190,7 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
     }
 
     private fun <T> execute(request: Request, type: Class<T>): T {
-        client.newCall(request).execute().use { resp ->
+        viaBestRoute { it.newCall(request).execute() }.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
                 throw IOException("HTTP ${resp.code}: ${text.take(200)}")
@@ -1142,6 +1202,13 @@ class RcqApi(private val baseUrl: String = DEFAULT_BASE_URL) {
     companion object {
         const val DEFAULT_HOST = "api.rcq.app"
         const val DEFAULT_BASE_URL = "https://$DEFAULT_HOST"
+
+        /** Foreign hosts whose DIRECT route was already found to be blocked.
+         *  Process-wide on purpose: the instances that talk to those hosts are
+         *  created per call, so a per-instance memo would re-pay the failed
+         *  direct attempt every time. Mirrors CrossIslandSender.needsTunnel. */
+        private val blockedHosts =
+            java.util.Collections.synchronizedSet(HashSet<String>())
         private val JSON = "application/json".toMediaType()
         private val OCTET = "application/octet-stream".toMediaType()
     }
