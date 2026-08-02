@@ -281,6 +281,14 @@ class Session(context: Context) {
     private val _stealthActive = MutableStateFlow(false)
     val stealthActive: StateFlow<Boolean> = _stealthActive.asStateFlow()
 
+    /** True while the PRIMARY island is unreachable but a backup mailbox is
+     *  still handing us mail. Without this the failover is completely silent:
+     *  the user keeps receiving and has no way to tell their island is down
+     *  ("I would not even know api stopped working" — tester). Set by the
+     *  backup drain, cleared as soon as the primary answers again. */
+    private val _receivingViaBackup = MutableStateFlow(false)
+    val receivingViaBackup: StateFlow<Boolean> = _receivingViaBackup.asStateFlow()
+
     /** Whether the engaged tunnel VERIFIABLY reaches the backend through the
      *  current route (the same /health-through-route probe the watchdog +
      *  diagnostics use). The home shield reflects this so it can't claim a working
@@ -1011,6 +1019,9 @@ class Session(context: Context) {
             onEvent = ::handleEvent,
             onState = { up ->
                 _connected.value = up
+                // The primary answered: whatever the backup drain thought, we
+                // are not in failover any more.
+                if (up) _receivingViaBackup.value = false
                 if (up) {
                     // The server replays messages missed while we were offline as
                     // a burst right after connect. Those must NOT play the receive
@@ -1283,6 +1294,13 @@ class Session(context: Context) {
         if (MultihomeStore.list(uin).isEmpty()) return
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
+        // Is the primary actually down right now? Cheap /health through the
+        // live route; a backup drain on a healthy primary is just the normal
+        // belt-and-braces copy and must NOT raise the failover flag.
+        withContext(Dispatchers.IO) {
+            _receivingViaBackup.value =
+                !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())
+        }
         withContext(Dispatchers.IO) {
             Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
                 // A group row in a BACKUP mailbox = that island also hosts a

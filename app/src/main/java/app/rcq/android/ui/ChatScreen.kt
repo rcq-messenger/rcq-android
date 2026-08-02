@@ -104,6 +104,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -187,7 +189,7 @@ private object ChatDrafts {
     val byThread = mutableMapOf<String, String>()
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit, onOpenGroupInfo: (Int) -> Unit = {}, onOpenPeerInfo: (Int) -> Unit = {}, onOpenGroup: (Int) -> Unit = {}) {
     val c = RcqTheme.colors
@@ -1040,11 +1042,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // cap. Recipients re-check the same rule on receipt.
         val canDeleteAll = m.fromMe ||
             (group != null && group.members.firstOrNull { it.uin == ownUin }?.canDelete(group.ownerUin) == true)
-        AlertDialog(
+        // A sheet, not a centre dialog: this is the most-used menu in the app and
+        // it belongs under the thumb, next to the message it acts on (iOS has
+        // had it as a sheet from the start; on Android everything was a centred
+        // AlertDialog, which reads as a system warning rather than a menu).
+        ModalBottomSheet(
             onDismissRequest = { actionMsg = null },
             containerColor = c.bgSecondary,
-            title = { Text(stringResource(if (m.kind == "photo") R.string.chat_a_photo else R.string.chat_a_message), color = c.textPrimary) },
-            text = {
+        ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+                Text(
+                    stringResource(if (m.kind == "photo") R.string.chat_a_photo else R.string.chat_a_message),
+                    color = c.textSecondary, fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
                 Column {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1092,10 +1103,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                     MessageAction(stringResource(R.string.chat_delete_me), danger = true) { session.deleteLocal(m); actionMsg = null }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { actionMsg = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+            }
+        }
     }
 
     editMsg?.let { m ->
@@ -1136,11 +1145,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     if (attachMenu) {
-        AlertDialog(
+        ModalBottomSheet(
             onDismissRequest = { attachMenu = false },
             containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.chat_attach), color = c.textPrimary) },
-            text = {
+        ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+                Text(
+                    stringResource(R.string.chat_attach),
+                    color = c.textSecondary, fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
                 Column {
                     MessageAction(stringResource(R.string.chat_attach_photo)) { attachMenu = false; picker.launch("image/*") }
                     MessageAction(stringResource(R.string.chat_attach_video)) { attachMenu = false; videoPicker.launch("video/*") }
@@ -1154,10 +1168,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (isGroup) MessageAction(stringResource(R.string.poll_create)) { attachMenu = false; showPollComposer = true }
                     MessageAction(stringResource(R.string.relay_share_attach)) { attachMenu = false; showRelayPicker = true }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { attachMenu = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+            }
+        }
     }
 
     // Pre-send preview: tap the media to mark it a spoiler, then Send.

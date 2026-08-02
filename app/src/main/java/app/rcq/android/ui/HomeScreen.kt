@@ -76,6 +76,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -183,6 +185,9 @@ internal fun HomeScreen(
     val ownStatus by session.status.collectAsState()
     val connected by session.connected.collectAsState()
     val stealthActive by session.stealthActive.collectAsState()
+    // Failover is otherwise invisible: mail keeps arriving through a backup
+    // island while the primary is down and nothing on screen says so.
+    val viaBackup by session.receivingViaBackup.collectAsState()
     val routeVerified by session.routeVerified.collectAsState()
     // Push reachability nudge: a killed/swiped app only receives messages via a
     // UnifiedPush distributor (ntfy). With none installed the user silently gets
@@ -320,6 +325,15 @@ internal fun HomeScreen(
                 onAddAccount = { showAddAccount = true },
                 onManageAccounts = onManageAccounts,
             )
+
+            if (viaBackup) {
+                Text(
+                    stringResource(R.string.home_via_backup),
+                    color = c.statusBusy,
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 if (showPushNudge) {
@@ -1407,6 +1421,7 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddContactDialog(
     session: Session,
@@ -1492,11 +1507,19 @@ private fun AddContactDialog(
         searching = false
     }
 
-    AlertDialog(
+    // A sheet, not a centred dialog: Add is a search surface with a keyboard,
+    // and a box floating in the middle of the screen fights the IME for space
+    // (iOS has always had this as a sheet).
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.add_title), color = c.textPrimary) },
-        text = {
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp)) {
+            Text(
+                stringResource(R.string.add_title),
+                color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
             Column(Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = query,
@@ -1648,10 +1671,8 @@ private fun AddContactDialog(
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-    )
+        }
+    }
 }
 
 /** One tappable search result (user or group) in the Add window. */
