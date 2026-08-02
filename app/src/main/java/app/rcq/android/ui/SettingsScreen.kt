@@ -246,6 +246,9 @@ private fun SettingsRoot(
     var bugText by remember { mutableStateOf("") }
     var bugSending by remember { mutableStateOf(false) }
     var bugSent by remember { mutableStateOf(false) }
+    // Why the last send failed, shown in the dialog; null when there is nothing
+    // to report.
+    var bugError by remember { mutableStateOf<String?>(null) }
     // Bug-report attachments (#28): picked photo/video URIs (max 3), shown as
     // thumbnails; sealed + uploaded only on send.
     var bugAttachments by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
@@ -472,9 +475,21 @@ private fun SettingsRoot(
                                         session.uploadReportAttachment(bytes, outMime)
                                     }
                                 }
-                                val ok = session.submitBugReport(bugText.trim(), atts)
+                                val result = session.submitBugReportResult(bugText.trim(), atts)
                                 bugSending = false
-                                if (ok) bugSent = true
+                                bugError = null
+                                when (result) {
+                                    Session.BugReportResult.SENT -> bugSent = true
+                                    // Say WHY. Silently returning the button to
+                                    // its idle state read as "the app is broken"
+                                    // and produced a quarter of an hour of retries.
+                                    Session.BugReportResult.RATE_LIMITED ->
+                                        bugError = context.getString(R.string.bug_report_too_many)
+                                    Session.BugReportResult.CLOSED ->
+                                        bugError = context.getString(R.string.bug_report_closed)
+                                    Session.BugReportResult.FAILED ->
+                                        bugError = context.getString(R.string.bug_report_failed)
+                                }
                             }
                         },
                     ) { Text(stringResource(if (bugSending) R.string.bug_report_sending else R.string.bug_report_send), color = c.accent) }
@@ -489,6 +504,7 @@ private fun SettingsRoot(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.bug_report_hint), color = c.textSecondary, fontSize = 12.sp)
+                        bugError?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
                         OutlinedTextField(
                             value = bugText,
                             onValueChange = { if (it.length <= 1000) bugText = it },

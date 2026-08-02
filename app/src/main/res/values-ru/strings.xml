@@ -415,6 +415,9 @@
     <string name="bug_report_attach">Прикрепить фото или видео</string>
     <string name="bug_report_send">Отправить</string>
     <string name="bug_report_sending">Отправка…</string>
+    <string name="bug_report_too_many">За последний час вы отправили много обращений. Подождите немного, и это уйдёт.</string>
+    <string name="bug_report_closed">Этот остров сейчас не принимает обращения.</string>
+    <string name="bug_report_failed">Не удалось отправить. Проверьте связь и попробуйте ещё раз.</string>
     <string name="bug_report_sent">Спасибо. Репорт отправлен.</string>
     <string name="settings_row_move_uin">Сменить UIN</string>
     <string name="settings_row_burn">Сжечь аккаунт</string>

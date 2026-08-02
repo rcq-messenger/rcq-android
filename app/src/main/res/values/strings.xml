@@ -416,6 +416,9 @@
     <string name="bug_report_attach">Attach photo or video</string>
     <string name="bug_report_send">Send</string>
     <string name="bug_report_sending">Sending…</string>
+    <string name="bug_report_too_many">You have sent a lot of reports in the last hour. Give it a little while and this will go through.</string>
+    <string name="bug_report_closed">This island is not accepting reports right now.</string>
+    <string name="bug_report_failed">Could not send. Check the connection and try again.</string>
     <string name="bug_report_sent">Thanks. Your report was sent.</string>
     <string name="settings_row_move_uin">Move to a new UIN</string>
     <string name="settings_row_burn">Burn account</string>
