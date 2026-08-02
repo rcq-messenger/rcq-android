@@ -932,6 +932,11 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Reality, not just the stored preference: the app engages the tunnel by
+    // itself when the island is unreachable, and the switch used to keep saying
+    // OFF while the shield in the header said ON. Same state, two answers, and
+    // the user is right to call that broken.
+    val stealthActive by session.stealthActive.collectAsState()
     var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
     var autoDisabled by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.autoEngageDisabled(context)) }
     var localProxy by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyMode()) }
@@ -966,11 +971,15 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     Text(stringResource(R.string.pv_obfuscated_desc), color = c.textSecondary, fontSize = 11.sp)
                 }
                 Switch(
-                    checked = obfuscated,
+                    checked = obfuscated || stealthActive,
                     enabled = !localProxy,
                     onCheckedChange = {
                         obfuscated = it
-                        app.rcq.android.net.SingBoxTransport.setEnabled(context, it)
+                        // setObfuscation, not setEnabled: the preference alone left
+                        // a running tunnel running, so switching OFF changed nothing
+                        // until the next launch while the shield stayed lit. This
+                        // starts or stops it now and rebuilds the API + socket.
+                        session.setObfuscation(it)
                         // The push socket is pinned to whichever route it dialled
                         // on; redial it so it follows the tunnel in or out.
                         app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(context)
@@ -990,7 +999,17 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 Switch(
                     checked = autoDisabled,
                     enabled = !localProxy,
-                    onCheckedChange = { autoDisabled = it; app.rcq.android.net.SingBoxTransport.setAutoEngageDisabled(context, it) },
+                    onCheckedChange = {
+                        autoDisabled = it
+                        app.rcq.android.net.SingBoxTransport.setAutoEngageDisabled(context, it)
+                        // "Don't engage automatically" while an AUTO-engaged tunnel
+                        // is running means stop that one too: the user is telling us
+                        // to stay out of the way now, not from the next launch.
+                        if (it && !obfuscated && stealthActive) {
+                            session.setObfuscation(false)
+                            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(context)
+                        }
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }

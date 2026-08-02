@@ -753,6 +753,7 @@
     <string name="random_cant_start">Can\'t start random chat</string>
     <string name="random_err_age_required">Set your age in your profile first (18+ only).</string>
     <string name="random_err_under_18">Random chat is for users 18 and older.</string>
+    <string name="random_set_age">Set your age</string>
     <string name="random_err_limit">You\'ve reached today\'s random-chat limit.</string>
     <string name="random_err_other">Something went wrong. Try again.</string>
     <!-- In-chat message search -->

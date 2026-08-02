@@ -334,6 +334,9 @@ private fun RcqApp(session: Session) {
     var showManageAccounts by remember { mutableStateOf(false) }
     var showNews by remember { mutableStateOf(false) }
     var showRandom by remember { mutableStateOf(false) }
+    // Random chat sends the user to the profile editor to set an age; this
+    // brings them back where they were instead of dumping them on the roster.
+    var profileReturnsToRandom by remember { mutableStateOf(false) }
     var showAudioRooms by remember { mutableStateOf(false) }
     var showNearby by remember { mutableStateOf(false) }
     var showRadio by remember { mutableStateOf(false) }
@@ -581,6 +584,9 @@ private fun RcqApp(session: Session) {
             s is UiState.Registered && showRandom -> app.rcq.android.ui.RandomScreen(
                 session,
                 onBack = { showRandom = false },
+                // Set-your-age leads straight into the profile editor and comes
+                // back here when it closes (iOS parity).
+                onEditProfile = { showRandom = false; profileReturnsToRandom = true; showProfile = true },
             )
             s is UiState.Registered && showAudioRooms -> app.rcq.android.ui.AudioRoomsScreen(
                 session,
@@ -596,7 +602,10 @@ private fun RcqApp(session: Session) {
             )
             s is UiState.Registered && showProfile -> ProfileEditScreen(
                 session,
-                onBack = { showProfile = false },
+                onBack = {
+                    showProfile = false
+                    if (profileReturnsToRandom) { profileReturnsToRandom = false; showRandom = true }
+                },
             )
             s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider("settings") {
                 SettingsScreen(

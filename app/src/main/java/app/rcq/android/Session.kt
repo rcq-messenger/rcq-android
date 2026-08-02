@@ -817,6 +817,28 @@ class Session(context: Context) {
             var deadStreak = 0
             while (true) {
                 delay(60_000)
+                // Auto-engaged tunnel on a network that has since recovered: drop
+                // it. Until now it stayed up for the whole session ("the shield
+                // never went away until I killed the service"), which is both
+                // slower and confusing, since the user never asked for it. Only
+                // the AUTO case is dropped: an explicit toggle, onion and a local
+                // proxy all stay exactly where the user put them.
+                if (transport.isActive && !transport.isEnabled(appCtx) &&
+                    !transport.onionMode() && !transport.localProxyMode()
+                ) {
+                    val directBack = withContext(Dispatchers.IO) { transport.probeDirect(serverHost()) }
+                    if (directBack) {
+                        withContext(Dispatchers.IO) { transport.stop() }
+                        socket.disconnect()
+                        api = newApi()
+                        socket = newSocket()
+                        _stealthActive.value = false
+                        _routeVerified.value = false
+                        app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                        store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+                        continue
+                    }
+                }
                 if (!transport.isActive || !transport.onionMode()) { deadStreak = 0; continue }
                 val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) }
                 _routeVerified.value = ok   // keep the home shield honest for onion (never dropped)

@@ -63,7 +63,7 @@ import kotlinx.coroutines.launch
  *  an ended card. Chat traffic rides the normal sealed path; the conversation
  *  is held in [Session.randomMessages] (ephemeral, never persisted). */
 @Composable
-internal fun RandomScreen(session: Session, onBack: () -> Unit) {
+internal fun RandomScreen(session: Session, onBack: () -> Unit, onEditProfile: () -> Unit = {}) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val state by session.random.collectAsState()
@@ -107,6 +107,7 @@ internal fun RandomScreen(session: Session, onBack: () -> Unit) {
                         age = ownAge,
                         ageKnown = ageLoaded,
                         onStart = { scope.launch { session.startRandom() } },
+                        onEditProfile = onEditProfile,
                     )
                 }
             }
@@ -115,7 +116,7 @@ internal fun RandomScreen(session: Session, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Idle(age: Int?, ageKnown: Boolean, onStart: () -> Unit) {
+private fun Idle(age: Int?, ageKnown: Boolean, onStart: () -> Unit, onEditProfile: () -> Unit) {
     val c = RcqTheme.colors
     // Same two refusals the server would give, decided before the tap.
     val blocked = when {
@@ -134,6 +135,18 @@ private fun Idle(age: Int?, ageKnown: Boolean, onStart: () -> Unit) {
         Text(stringResource(R.string.random_intro_body), color = c.textSecondary, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         blocked?.let {
             Text(stringResource(it), color = c.statusBusy, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            // Telling someone to go set their age and leaving them to find the
+            // screen is half a message. iOS opens the editor from here and comes
+            // back; do the same.
+            if (age == null) {
+                Text(
+                    stringResource(R.string.random_set_age),
+                    color = c.accent,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable(onClick = onEditProfile),
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         CapsuleButton(
