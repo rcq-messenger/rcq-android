@@ -69,6 +69,16 @@ internal fun RandomScreen(session: Session, onBack: () -> Unit) {
     val state by session.random.collectAsState()
 
     // Leaving the screen ends queueing / the pair so the peer isn't stranded.
+    // The 18+ gate used to live only on the server: you pressed Start, waited,
+    // and got an error card back. The age is in your own profile, so the
+    // check belongs here, before the button (tester report).
+    var ownAge by remember { mutableStateOf<Int?>(null) }
+    var ageLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        ownAge = (session.cachedProfile() ?: session.loadProfile())?.age
+        ageLoaded = true
+    }
+
     fun exit() {
         scope.launch { session.leaveRandom() }
         onBack()
@@ -93,7 +103,11 @@ internal fun RandomScreen(session: Session, onBack: () -> Unit) {
                     is RandomState.Searching -> Searching(onCancel = { scope.launch { session.leaveRandom() } })
                     is RandomState.Ended -> Ended(reason = s.reason, onAgain = { scope.launch { session.startRandom() } }, onClose = { session.dismissRandom() })
                     is RandomState.Error -> ErrorCard(code = s.code, onClose = { session.dismissRandom() })
-                    else -> Idle(onStart = { scope.launch { session.startRandom() } })  // Idle
+                    else -> Idle(
+                        age = ownAge,
+                        ageKnown = ageLoaded,
+                        onStart = { scope.launch { session.startRandom() } },
+                    )
                 }
             }
         }
@@ -101,8 +115,15 @@ internal fun RandomScreen(session: Session, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Idle(onStart: () -> Unit) {
+private fun Idle(age: Int?, ageKnown: Boolean, onStart: () -> Unit) {
     val c = RcqTheme.colors
+    // Same two refusals the server would give, decided before the tap.
+    val blocked = when {
+        !ageKnown -> null                       // still loading: don't accuse anyone yet
+        age == null -> R.string.random_err_age_required
+        age < 18 -> R.string.random_err_under_18
+        else -> null
+    }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -111,8 +132,15 @@ private fun Idle(onStart: () -> Unit) {
         Icon(Icons.Filled.Casino, null, tint = c.accent, modifier = Modifier.size(64.dp))
         Text(stringResource(R.string.random_intro_title), color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Text(stringResource(R.string.random_intro_body), color = c.textSecondary, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        blocked?.let {
+            Text(stringResource(it), color = c.statusBusy, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
         Spacer(Modifier.height(8.dp))
-        CapsuleButton(stringResource(R.string.random_start), onClick = onStart)
+        CapsuleButton(
+            stringResource(R.string.random_start),
+            enabled = ageKnown && blocked == null,
+            onClick = onStart,
+        )
     }
 }
 

@@ -2292,7 +2292,10 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
     val onWallpaper = LocalStores.chatBackground.collectAsState().value.isNotEmpty()
     // Cap a bubble so a long message leaves a gap to the far edge — keeps the
     // L/R alignment (mine vs theirs) readable, not just the colour (tester #7).
-    val maxW = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
+    // 0.86, not 0.78: the gap only has to be wide enough to read the alignment
+    // (and to hold the per-message buttons that will live there), and a tester
+    // pointed out we were spending a fifth of the screen on empty margin.
+    val maxW = (LocalConfiguration.current.screenWidthDp * 0.86f).dp
     // A text body that is just a group-invite URL renders as a join card.
     val groupLinkId = if (m.kind == "text") GroupLinkParser.parse(m.body) else null
     // Telegram-style: a plain text bubble carries the time/ticks INSIDE itself
