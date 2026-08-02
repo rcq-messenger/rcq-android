@@ -601,7 +601,15 @@ class Session(context: Context) {
      *  and rebind onto the recovered UIN. Throws IllegalArgumentException on a
      *  bad phrase, or IllegalStateException("identity_not_found") if the server
      *  has no account for these keys. */
-    suspend fun recoverAccount(words: List<String>, serverInput: String? = null): Int {
+    /** Thrown when the phrase resolves to an identity this device ALREADY has.
+     *  Restoring anyway is legal (that is how you rebuild a broken local copy)
+     *  but it produces a second, EMPTY slot for the same number, and a user who
+     *  expected their history back reads that as data loss (report: "I thought
+     *  it deleted my history, turns out it made a copy"). Ask first, let them
+     *  force it. */
+    class AccountAlreadyHere(val uin: Int) : IllegalStateException("account_already_here")
+
+    suspend fun recoverAccount(words: List<String>, serverInput: String? = null, force: Boolean = false): Int {
         if (AccountManager.isAtLimit) throw IllegalStateException("Account limit reached")
         val decoded = app.rcq.android.crypto.RecoveryPhrase.decode(words, appCtx)
             ?: throw IllegalArgumentException("invalid_phrase")
@@ -626,6 +634,15 @@ class Session(context: Context) {
         regApi.setToken(resp.token)
         val nick = runCatching { regApi.userInfo(resp.uin).nickname }
             .getOrNull()?.takeIf { it.isNotBlank() } ?: "user-${resp.uin}"
+        // Same number, same island, already on this device?
+        if (!force) {
+            val dup = AccountManager.accounts.value.any { a ->
+                SecureStore(appCtx, a.id).let { st ->
+                    st.uin == resp.uin && (st.serverHost ?: RcqApi.DEFAULT_HOST) == (host ?: RcqApi.DEFAULT_HOST)
+                }
+            }
+            if (dup) throw AccountAlreadyHere(resp.uin)
+        }
         val acct = AccountManager.add(serverHost = host, displayLabel = null)
             ?: throw IllegalStateException("Account limit reached")
         SecureStore(appCtx, acct.id).saveIdentity(

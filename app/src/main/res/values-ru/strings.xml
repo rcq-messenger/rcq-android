@@ -93,6 +93,10 @@
     <string name="manage_accounts_active">Активный</string>
     <string name="manage_accounts_add_by_phrase">Добавить аккаунт по фразе восстановления</string>
     <string name="manage_accounts_delete">Удалить</string>
+    <string name="manage_accounts_move_up">Выше</string>
+    <string name="manage_accounts_move_down">Ниже</string>
+    <string name="restore_already_here">Этот аккаунт уже есть на устройстве (#%1$d). Повторное восстановление добавит вторую копию, без истории переписки. Всё равно добавить?</string>
+    <string name="restore_add_anyway">Всё равно добавить</string>
     <string name="manage_accounts_delete_title">Удалить %1$s?</string>
     <string name="manage_accounts_delete_body">Убирает этот аккаунт и его сообщения с этого устройства. Аккаунт остаётся на сервере, его можно добавить снова позже.</string>
 

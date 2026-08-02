@@ -94,6 +94,10 @@
     <string name="manage_accounts_active">Active</string>
     <string name="manage_accounts_add_by_phrase">Add account by recovery phrase</string>
     <string name="manage_accounts_delete">Delete</string>
+    <string name="manage_accounts_move_up">Move up</string>
+    <string name="manage_accounts_move_down">Move down</string>
+    <string name="restore_already_here">This account is already on this device (#%1$d). Restoring again adds a second copy with no message history. Add it anyway?</string>
+    <string name="restore_add_anyway">Add anyway</string>
     <string name="manage_accounts_delete_title">Delete %1$s?</string>
     <string name="manage_accounts_delete_body">Removes this account and its messages from this device. The account stays on the server and can be added again later.</string>
 
