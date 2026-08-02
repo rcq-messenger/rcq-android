@@ -744,6 +744,7 @@
     <string name="random_start">Find someone</string>
     <string name="random_searching">Looking for someone…</string>
     <string name="random_stranger">Anonymous stranger</string>
+    <string name="random_anon_note">Names and numbers stay hidden on both sides</string>
     <string name="random_skip">Skip</string>
     <string name="random_add_contact">Add</string>
     <string name="random_add_sent">Contact request sent</string>
