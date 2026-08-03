@@ -138,12 +138,17 @@ internal fun SettingsScreen(
     // Deep-link: a tapped "we answered your report" notification lands here
     // directly, because the answer is the only reason the user opened the app.
     openMyReports: Boolean = false,
+    // Deep-link: the "your island is not answering" banner on the home screen
+    // told people to make the backup primary "in settings" and left them to
+    // find it (vss did not). The banner is a link now and lands here.
+    openBackupIsland: Boolean = false,
 ) {
     var route by remember {
         mutableStateOf(
             when {
                 openMyReports -> SettingsRoute.MY_REPORTS
                 openDiagnostics -> SettingsRoute.DIAGNOSTICS
+                openBackupIsland -> SettingsRoute.BACKUP_ISLAND
                 else -> SettingsRoute.ROOT
             },
         )
@@ -155,6 +160,7 @@ internal fun SettingsScreen(
     BackHandler(enabled = route != SettingsRoute.ROOT) {
         // Diagnostics opened directly from Home → back closes Settings.
         if (openDiagnostics && route == SettingsRoute.DIAGNOSTICS) { onBack(); return@BackHandler }
+        if (openBackupIsland && route == SettingsRoute.BACKUP_ISLAND) { onBack(); return@BackHandler }
         route = when (route) {
             SettingsRoute.DIAGNOSTICS, SettingsRoute.CUSTOM_SERVER -> SettingsRoute.NETWORK
             else -> SettingsRoute.ROOT

@@ -326,6 +326,7 @@ private fun RcqApp(session: Session) {
     // of our own island (which 404s). null for same-island / known contacts.
     var peerInfoHost by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var settingsToBackupIsland by remember { mutableStateOf(false) }
     // Deep-link Settings straight to Network diagnostics (Home overflow menu).
     var settingsToDiagnostics by remember { mutableStateOf(false) }
     // Deep-link Settings straight to "My reports" (a tapped report-reply push).
@@ -382,7 +383,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
     }
 
     // Kept for "Try again": retrying after a transient failure must re-use the
@@ -610,11 +611,12 @@ private fun RcqApp(session: Session) {
             s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider("settings") {
                 SettingsScreen(
                     session, s.uin,
-                    onBack = { showSettings = false; settingsToDiagnostics = false; settingsToReports = false },
+                    onBack = { showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false },
                     onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
                     onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
                     openDiagnostics = settingsToDiagnostics,
                     openMyReports = settingsToReports,
+                    openBackupIsland = settingsToBackupIsland,
                 )
             }
             s is UiState.Registered -> stateHolder.SaveableStateProvider("home") {
@@ -622,8 +624,9 @@ private fun RcqApp(session: Session) {
                     session, s.uin,
                     onOpenChat = { chatTarget = ChatTarget.Peer(it) },
                     onOpenGroup = { chatTarget = ChatTarget.Group(it) },
-                    onOpenSettings = { settingsToDiagnostics = false; settingsToReports = false; showSettings = true },
+                    onOpenSettings = { settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false; showSettings = true },
                     onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
+                    onOpenBackupIsland = { settingsToBackupIsland = true; showSettings = true },
                     onOpenProfile = { showProfile = true },
                     onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
                     onOpenNews = { showNews = true },
