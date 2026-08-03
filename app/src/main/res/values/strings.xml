@@ -540,6 +540,9 @@
     <string name="presence_info_title">Stay visible after you leave</string>
     <string name="presence_info_body">You keep showing as online for this long after you close the app. Change it in Settings, Privacy &amp; Network.</string>
     <string name="stealth_info_title">Censorship bypass active</string>
+    <string name="stealth_info_body_manual">You switched the bypass on yourself from the menu. While it is on, RCQ goes only through the built-in encrypted tunnel and does not try a direct connection. Switch it off in the same menu.</string>
+    <string name="stealth_shield_green">Green shield: traffic through the bypass is confirmed to reach the island.</string>
+    <string name="stealth_shield_amber">Amber shield: the bypass is on, but data getting through it is not confirmed yet. If it stays amber, try switching the bypass off and on again from the menu.</string>
     <string name="stealth_info_body">Your network looked blocked, so RCQ is connecting through its built-in encrypted bypass. No setup needed, this turns on automatically when the direct connection fails.</string>
     <string name="connecting_stealth">Bypassing the block…</string>
     <string name="pv_profile_card">Profile card</string>

@@ -176,6 +176,7 @@ internal fun HomeScreen(
     onOpenGroup: (Int) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit = {},
+    onOpenBackupIsland: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
     // Open ANOTHER user's profile (peer). Used by add-contact so a search
     // result opens the profile preview before you send the request.
@@ -215,6 +216,7 @@ internal fun HomeScreen(
     // island while the primary is down and nothing on screen says so.
     val viaBackup by session.receivingViaBackup.collectAsState()
     val routeVerified by session.routeVerified.collectAsState()
+    val bypassManual by session.bypassManual.collectAsState()
     // Push reachability nudge: a killed/swiped app only receives messages via a
     // UnifiedPush distributor (ntfy). With none installed the user silently gets
     // nothing while closed ("приложение перестало работать после закрытия").
@@ -343,6 +345,7 @@ internal fun HomeScreen(
                 connected = connected,
                 stealthActive = stealthActive,
                 routeVerified = routeVerified,
+                bypassManual = bypassManual,
                 accounts = accountRows,
                 canAddAccount = accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
                 onPickStatus = { scope.launch { session.setStatus(it) } },
@@ -366,11 +369,22 @@ internal fun HomeScreen(
             )
 
             if (viaBackup) {
+                // Tappable: the text promises that the backup can be made
+                // primary "in settings" and vss could not find where. It is in
+                // Settings -> Backup island, so the sentence that mentions it
+                // now goes there. lineHeight is set explicitly because the
+                // theme's default for this size left the wrapped banner looking
+                // double-spaced (also his report).
                 Text(
                     stringResource(R.string.home_via_backup),
                     color = c.statusBusy,
                     fontSize = 12.sp,
-                    modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
+                    lineHeight = 16.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(c.bgSecondary)
+                        .clickable(onClick = onOpenBackupIsland)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
             }
 
@@ -858,6 +872,7 @@ private fun HomeHeader(
     connected: Boolean,
     stealthActive: Boolean,
     routeVerified: Boolean,
+    bypassManual: Boolean,
     accounts: List<AccountRow>,
     canAddAccount: Boolean,
     onPickStatus: (UserStatus) -> Unit,
@@ -908,7 +923,30 @@ private fun HomeHeader(
                 }
             },
             title = { Text(stringResource(R.string.stealth_info_title), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.stealth_info_body), color = c.textSecondary) },
+            text = {
+                // Two questions from vss, answered in the one place he taps to
+                // ask them. WHY it is on: the old text always said "the network
+                // looked blocked, it turns itself on", which reads as nonsense
+                // to somebody who just switched it on from the menu. And WHAT
+                // THE COLOUR MEANS: green vs amber is a real distinction (is
+                // traffic confirmed to arrive?) that nothing on screen stated.
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        stringResource(
+                            if (bypassManual) R.string.stealth_info_body_manual
+                            else R.string.stealth_info_body,
+                        ),
+                        color = c.textSecondary,
+                    )
+                    Text(
+                        stringResource(
+                            if (routeVerified) R.string.stealth_shield_green
+                            else R.string.stealth_shield_amber,
+                        ),
+                        color = if (routeVerified) c.accent else c.statusAway,
+                    )
+                }
+            },
             containerColor = c.bgSecondary,
         )
     }

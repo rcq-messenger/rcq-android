@@ -281,6 +281,17 @@ class Session(context: Context) {
     private val _stealthActive = MutableStateFlow(false)
     val stealthActive: StateFlow<Boolean> = _stealthActive.asStateFlow()
 
+    /** True when the bypass is on because the USER switched it on, false when
+     *  the app engaged it itself after a direct connection failed.
+     *
+     *  The two are indistinguishable on screen today, so the explainer told
+     *  everybody "the network looked blocked, it turns itself on" even when
+     *  they had just turned it on by hand from the menu (vss). The persisted
+     *  preference already carries the answer: the auto-engage path only fires
+     *  when `isEnabled` is false. */
+    private val _bypassManual = MutableStateFlow(false)
+    val bypassManual: StateFlow<Boolean> = _bypassManual.asStateFlow()
+
     /** True while the PRIMARY island is unreachable but a backup mailbox is
      *  still handing us mail. Without this the failover is completely silent:
      *  the user keeps receiving and has no way to tell their island is down
@@ -545,6 +556,7 @@ class Session(context: Context) {
             transport.start()
         }
         _stealthActive.value = transport.isActive
+        _bypassManual.value = transport.isEnabled(appCtx)
     }
 
     suspend fun registerNewAccount(nickname: String, serverInput: String? = null, invite: String? = null): Int {
@@ -949,6 +961,7 @@ class Session(context: Context) {
                 }
             }
             _stealthActive.value = transport.isActive
+            _bypassManual.value = transport.isEnabled(appCtx)
             _routeVerified.value = transport.isActive && routeOk
             connectAndSync(uin, token)
             // (Crash reports are NOT auto-sent. A captured crash is offered to
@@ -994,6 +1007,7 @@ class Session(context: Context) {
             api = newApi()
             socket = newSocket()
             _stealthActive.value = transport.isActive
+            _bypassManual.value = transport.isEnabled(appCtx)
             _routeVerified.value = transport.isActive && transport.probeCurrentRoute(serverHost())
             connectAndSync(uin, token)
         }
@@ -1027,6 +1041,7 @@ class Session(context: Context) {
             api = newApi()
             socket = newSocket()
             _stealthActive.value = transport.isActive
+            _bypassManual.value = transport.isEnabled(appCtx)
             _routeVerified.value = transport.isActive && transport.probeCurrentRoute(serverHost())
             connectAndSync(uin, token)
         }
