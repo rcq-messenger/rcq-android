@@ -75,6 +75,13 @@ class SecureStore(context: Context, accountId: String) {
         e.apply()
     }
 
+    /** Swap the session token in place, keeping uin/keys/host. Used when the
+     *  server hands back a token that names this install (see
+     *  `Session.claimInstallToken`). */
+    fun updateToken(token: String) {
+        prefs.edit().putString(p + K_TOKEN, token).apply()
+    }
+
     /** Update just the cached display nickname (after a profile edit). */
     fun updateNickname(nickname: String) {
         prefs.edit().putString(p + K_NICK, nickname).apply()

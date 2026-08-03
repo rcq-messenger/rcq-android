@@ -27,6 +27,8 @@ import app.rcq.android.model.PendingRequest
 import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
 import app.rcq.android.net.CrossIslandSender
+import app.rcq.android.net.DeviceId
+import app.rcq.android.net.JwtPeek
 import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.VisitedIslandsStore
 import app.rcq.android.net.Multihome
@@ -578,6 +580,7 @@ class Session(context: Context) {
                 identity_key = Base64.encodeToString(identity.identityPublic, Base64.NO_WRAP),
                 signing_key = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP),
                 invite = invite?.takeIf { it.isNotBlank() },
+                device_id = DeviceId.get(appCtx),
             )
         )
         // Server identity is live. Commit locally: create the account slot,
@@ -784,6 +787,7 @@ class Session(context: Context) {
         val token = store.token ?: return
         started = true
         CrashReporter.crumb(appCtx, "session_start")
+        claimInstallToken(token)
         // Seed the chat list from the cached roster FIRST (cheap, DB-free) so it
         // paints immediately. The heavy SQLCipher open + full history read move
         // into the connect coroutine below (off the main thread) instead of
@@ -2798,6 +2802,32 @@ class Session(context: Context) {
         /** /uin/activate on a number this account does not hold. */
         object NotOwned : PurchaseResult()
         data class Other(val message: String?) : PurchaseResult()
+    }
+
+    /** Tell the server which INSTALL this session is, once.
+     *
+     *  A token minted before the client sent a device id has no `dev` claim,
+     *  so the server keys it as "primary" — the same name every other install
+     *  of the account uses. Two of them then supersede each other's websocket
+     *  in a loop (the reconnect storm), and they share one offline-queue
+     *  cursor, so whichever drains first leaves the other with nothing to
+     *  read. One call swaps the token for one that names this install; the
+     *  server copies the drain cursor across so nothing is re-downloaded.
+     *
+     *  Best effort and silent: an island too old to know the route answers
+     *  404 and we simply keep the token we have. */
+    private fun claimInstallToken(current: String) {
+        if (JwtPeek.hasDeviceClaim(current)) return
+        scope.launch {
+            val fresh = runCatching { api.claimDevice(DeviceId.get(appCtx)) }.getOrNull() ?: return@launch
+            if (fresh.token.isBlank()) return@launch
+            store.updateToken(fresh.token)
+            api.setToken(fresh.token)
+            // The socket authenticates with the token it was handed at dial
+            // time; reconnect so it comes back under the install's own name
+            // instead of "primary".
+            socket.reconnectNow()
+        }
     }
 
     /** Live availability + price preview for a candidate UIN (POST /uin/quote). */

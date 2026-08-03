@@ -152,3 +152,25 @@ object AccessRedeemer {
         }
     }
 }
+
+/** The one thing we ever need to read out of our own session JWT.
+ *
+ *  Not verification — the signature is the server's business and we could not
+ *  check it anyway. This only answers "does this token already name our
+ *  install?", so the app knows whether it still has to call /auth/device. */
+object JwtPeek {
+    fun hasDeviceClaim(token: String): Boolean {
+        val parts = token.split('.')
+        if (parts.size < 2) return false
+        return try {
+            val json = String(
+                android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING),
+                Charsets.UTF_8,
+            )
+            com.google.gson.JsonParser.parseString(json).asJsonObject
+                .get("dev")?.asString?.isNotBlank() == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+}
