@@ -991,4 +991,8 @@
     <string name="myreports_delete">Delete</string>
     <string name="myreports_delete_refused">This one is still under review, so it cannot be deleted yet.</string>
     <string name="burn_failed">Could not reach the server, so nothing was deleted. Your account is untouched. Try again when you have a connection.</string>
+    <plurals name="saved_notes">
+        <item quantity="one">%d note</item>
+        <item quantity="other">%d notes</item>
+    </plurals>
 </resources>

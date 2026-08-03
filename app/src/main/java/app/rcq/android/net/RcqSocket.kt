@@ -137,7 +137,7 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
                 if (gen != generation) return
                 believedConnected = false
                 onState(false)
-                scheduleReconnect()
+                scheduleReconnect(superseded = code == CLOSE_SUPERSEDED)
             }
         })
     }
@@ -155,11 +155,26 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         open()
     }
 
-    private fun scheduleReconnect() {
+    /** @param superseded the server closed us because ANOTHER session for this
+     *  same account and device took the socket over.
+     *
+     *  That case must not be retried on the ordinary one-second backoff, and
+     *  the reason is a loop we measured on prod: two installs of one account
+     *  both key as device "primary", so each redial evicts the other, the
+     *  evicted one is told 4000, reconnects a second later, and evicts the
+     *  first right back. One account produced 707 reconnects in three hours
+     *  from a single address that way. The loser now waits out a long jittered
+     *  pause instead, which breaks the ping-pong while still recovering if the
+     *  winner goes away for good. */
+    private fun scheduleReconnect(superseded: Boolean = false) {
         if (!shouldStayConnected) return
         attempt += 1
         val gen = generation
-        val delayMs = min(30_000L, (1000L shl min(attempt - 1, 5)))
+        val delayMs = if (superseded) {
+            SUPERSEDED_BACKOFF_MS + (Math.random() * SUPERSEDED_JITTER_MS).toLong()
+        } else {
+            min(30_000L, (1000L shl min(attempt - 1, 5)))
+        }
         Thread {
             Thread.sleep(delayMs)
             // Skip if a newer socket was dialed while we waited (reconnectNow
@@ -183,5 +198,16 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         // 3+ missed heartbeat pongs (25s cadence) before declaring the socket
         // silently dead; matches the iOS client's watchdog.
         private const val WATCHDOG_SILENCE_MS = 90_000L
+
+        // The server's "another session of yours took this socket" close code
+        // (ConnectionManager closes the previous socket of a (uin, device)
+        // with exactly this). Not a network failure — retrying it fast is
+        // fighting a decision the server already made.
+        private const val CLOSE_SUPERSEDED = 4000
+
+        // Long and jittered on purpose: two evicted peers must not come back
+        // in step, or they simply resume evicting each other in lockstep.
+        private const val SUPERSEDED_BACKOFF_MS = 30_000L
+        private const val SUPERSEDED_JITTER_MS = 30_000L
     }
 }
