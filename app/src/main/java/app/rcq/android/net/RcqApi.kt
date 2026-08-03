@@ -132,6 +132,10 @@ class RcqApi(
         // honoured only if free on the target island, else a fresh uin is
         // minted. Gson omits when null (the normal primary-register path).
         val desired_uin: Int? = null,
+        // Stable per-install id. Without it the server keys this session as
+        // "primary" like every other install of the account, and two of them
+        // evict each other's websocket forever.
+        val device_id: String? = null,
     )
 
     data class RegisterResponse(val uin: Int, val token: String)
@@ -205,6 +209,16 @@ class RcqApi(
     suspend fun register(req: RegisterRequest): RegisterResponse = withContext(Dispatchers.IO) {
         post("/auth/register", gson.toJson(req), authed = false, RegisterResponse::class.java)
     }
+
+    /** POST /auth/device — trade this session for one that names the install.
+     *  For accounts registered before the client sent a device id: the server
+     *  cannot know which install we are, so we tell it once. Returns the new
+     *  token (same uin). 404 on an island too old to know the route. */
+    suspend fun claimDevice(deviceId: String): SessionResponse = withContext(Dispatchers.IO) {
+        post("/auth/device", gson.toJson(mapOf("device_id" to deviceId)), authed = true, SessionResponse::class.java)
+    }
+
+    data class SessionResponse(val token: String = "", val ws_url: String = "")
 
     suspend fun recoverChallenge(signingKey: String): RecoverChallengeResponse = withContext(Dispatchers.IO) {
         post("/auth/recover/challenge", gson.toJson(RecoverChallengeRequest(signingKey)), authed = false, RecoverChallengeResponse::class.java)
