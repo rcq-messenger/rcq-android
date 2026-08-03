@@ -988,4 +988,10 @@
     <string name="myreports_delete">Удалить</string>
     <string name="myreports_delete_refused">Это обращение ещё рассматривается, поэтому удалить его пока нельзя.</string>
     <string name="burn_failed">Сервер недоступен, поэтому ничего не удалено. Аккаунт на месте. Попробуйте снова, когда появится связь.</string>
+    <plurals name="saved_notes">
+        <item quantity="one">%d заметка</item>
+        <item quantity="few">%d заметки</item>
+        <item quantity="many">%d заметок</item>
+        <item quantity="other">%d заметки</item>
+    </plurals>
 </resources>

@@ -209,6 +209,9 @@ internal fun HomeScreen(
     val pending by session.pending.collectAsState()
     val ciReqs by session.ciRequests.collectAsState()
     val messages by session.messages.collectAsState()
+    // Saved Messages is the thread with yourself. Counted from the map the
+    // screen already has, so this costs nothing extra.
+    val savedCount = messages[uin]?.size ?: 0
     val ownStatus by session.status.collectAsState()
     val connected by session.connected.collectAsState()
     val stealthActive by session.stealthActive.collectAsState()
@@ -486,6 +489,21 @@ internal fun HomeScreen(
                                 GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
                             }
                         }
+                    }
+                }
+
+                // Saved Messages as a real row, but ONLY once there is something
+                // in it (founder). An always-present row would sit at the top
+                // of every list including the many people who never write a
+                // note; an empty one teaches nothing and costs a line forever.
+                // It is still reachable from the overflow menu when empty.
+                if (savedCount > 0) {
+                    item(key = "saved") {
+                        SavedRow(
+                            count = savedCount,
+                            unread = 0,
+                            onClick = onOpenSaved,
+                        )
                     }
                 }
 
@@ -786,6 +804,30 @@ private fun StoryTile(label: String, initial: String, ring: Boolean, onClick: ()
         }
         Spacer(Modifier.height(4.dp))
         Text(label, color = c.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Saved Messages in the chat list. Same shape as a contact row so it does not
+ *  read as a special banner, with a bookmark instead of an avatar. */
+@Composable
+private fun SavedRow(count: Int, unread: Int, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(c.bgSecondary), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Bookmark, null, tint = c.accent, modifier = Modifier.size(20.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.home_menu_saved), color = c.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                pluralStringResource(R.plurals.saved_notes, count, count),
+                color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (unread > 0) UnreadBadge(unread)
     }
 }
 
@@ -1872,6 +1914,7 @@ private fun AddResultRow(
 /** Create another anonymous identity. Server host is optional — blank uses
  *  the default public server; a custom host registers onto an org island /
  *  self-host. The new account is added alongside the current one. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
@@ -1881,128 +1924,159 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
     var token by remember { mutableStateOf("") }
     var checking by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.home_menu_add_account), color = c.textPrimary) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.add_account_body), color = c.textSecondary, fontSize = 13.sp)
-                OutlinedTextField(
-                    value = host,
-                    onValueChange = { host = it.trim() },
-                    label = { Text(stringResource(R.string.csrv_host), color = c.textSecondary) },
-                    placeholder = { Text(app.rcq.android.net.RcqApi.DEFAULT_HOST, color = c.textSecondary) },
-                    singleLine = true,
-                )
-                // Optional access token for a private (closed/masquerade) island.
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it.trim(); err = null },
-                    label = { Text(stringResource(R.string.access_token_label), color = c.textSecondary) },
-                    singleLine = true,
-                )
-                Text(stringResource(R.string.access_token_hint), color = c.textSecondary, fontSize = 11.sp)
-                err?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = !checking, onClick = {
-                val h = host.ifBlank { null }
-                if (h != null && token.isNotBlank()) {
-                    // Redeem the access token for this host FIRST (stores the
-                    // durable token so the registration call passes the gate),
-                    // then proceed. A bad token blocks so the user can fix it.
-                    checking = true; err = null
-                    scope.launch {
-                        val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            app.rcq.android.net.AccessRedeemer.redeem(ctx, h, token)
-                        }
-                        checking = false
-                        if (res is app.rcq.android.net.RedeemResult.BadToken) {
-                            err = ctx.getString(R.string.access_token_bad)
-                        } else {
-                            onAdd(h)
-                        }
-                    }
-                } else {
-                    onAdd(h)
+    // Sheet: two text fields and a keyboard. A centred dialog gets shoved
+    // around by the IME on a short screen and the token field ends up under it.
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                stringResource(R.string.home_menu_add_account),
+                color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Text(stringResource(R.string.add_account_body), color = c.textSecondary, fontSize = 13.sp)
+            OutlinedTextField(
+                value = host,
+                onValueChange = { host = it.trim() },
+                label = { Text(stringResource(R.string.csrv_host), color = c.textSecondary) },
+                placeholder = { Text(app.rcq.android.net.RcqApi.DEFAULT_HOST, color = c.textSecondary) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // Optional access token for a private (closed/masquerade) island.
+            OutlinedTextField(
+                value = token,
+                onValueChange = { token = it.trim(); err = null },
+                label = { Text(stringResource(R.string.access_token_label), color = c.textSecondary) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(stringResource(R.string.access_token_hint), color = c.textSecondary, fontSize = 11.sp)
+            err?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
-            }) {
-                Text(stringResource(R.string.add_account_create), color = c.accent)
+                TextButton(enabled = !checking, onClick = {
+                    val h = host.ifBlank { null }
+                    if (h != null && token.isNotBlank()) {
+                        // Redeem the access token for this host FIRST (stores the
+                        // durable token so the registration call passes the gate),
+                        // then proceed. A bad token blocks so the user can fix it.
+                        checking = true; err = null
+                        scope.launch {
+                            val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                app.rcq.android.net.AccessRedeemer.redeem(ctx, h, token)
+                            }
+                            checking = false
+                            if (res is app.rcq.android.net.RedeemResult.BadToken) {
+                                err = ctx.getString(R.string.access_token_bad)
+                            } else {
+                                onAdd(h)
+                            }
+                        }
+                    } else {
+                        onAdd(h)
+                    }
+                }) {
+                    Text(stringResource(R.string.add_account_create), color = c.accent)
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-    )
+        }
+    }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<Int>) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     var name by remember { mutableStateOf("") }
     val selected = remember { mutableStateMapOf<Int, Boolean>() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.home_new_group), color = c.textPrimary) },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.home_group_name), color = c.textSecondary) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(stringResource(R.string.home_add_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                LazyColumn(Modifier.heightIn(max = 260.dp)) {
-                    items(contacts, key = { it.uin }) { ct ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { selected[ct.uin] = !(selected[ct.uin] ?: false) }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(checked = selected[ct.uin] ?: false, onCheckedChange = { selected[ct.uin] = it })
-                            StatusIcon(ct.presence, size = 22.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
-                        }
+    // Sheet: a name field plus a scrolling member picker. The dialog version
+    // capped the roster at 260dp inside an already-boxed centred surface, so
+    // picking people out of a long contact list meant scrolling a small window
+    // inside a small window.
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                stringResource(R.string.home_new_group),
+                color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            )
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(stringResource(R.string.home_group_name), color = c.textSecondary) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(stringResource(R.string.home_add_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                items(contacts, key = { it.uin }) { ct ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { selected[ct.uin] = !(selected[ct.uin] ?: false) }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = selected[ct.uin] ?: false, onCheckedChange = { selected[ct.uin] = it })
+                        StatusIcon(ct.presence, size = 22.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
                     }
                 }
             }
-        },
-        confirmButton = {
-            val members = selected.filterValues { it }.keys.toList()
-            val ok = name.isNotBlank()
-            TextButton(enabled = ok, onClick = { onCreate(name.trim(), members) }) {
-                Text(stringResource(R.string.home_create), color = if (ok) c.accent else c.textSecondary)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+                val members = selected.filterValues { it }.keys.toList()
+                val ok = name.isNotBlank()
+                TextButton(enabled = ok, onClick = { onCreate(name.trim(), members) }) {
+                    Text(stringResource(R.string.home_create), color = if (ok) c.accent else c.textSecondary)
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-    )
+        }
+    }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     var reason by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.home_report_title, name), color = c.textPrimary) },
-        text = {
+    // A sheet, not a centred box: this is a form with a keyboard, and a dialog
+    // floating mid-screen fights the IME for room (same reasoning as the Add
+    // sheet). Confirmations elsewhere stay dialogs on purpose — a sheet is for
+    // choosing and composing, a dialog is for "are you sure".
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                stringResource(R.string.home_report_title, name),
+                color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            )
             OutlinedTextField(
                 value = reason,
                 onValueChange = { reason = it },
                 label = { Text(stringResource(R.string.home_report_reason), color = c.textSecondary) },
                 minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
             )
-        },
-        confirmButton = {
-            TextButton(enabled = reason.isNotBlank(), onClick = { onSubmit(reason.trim()) }) {
-                Text(stringResource(R.string.home_report_submit), color = if (reason.isNotBlank()) Color(0xFFE5484D) else c.textSecondary)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+                TextButton(enabled = reason.isNotBlank(), onClick = { onSubmit(reason.trim()) }) {
+                    Text(
+                        stringResource(R.string.home_report_submit),
+                        color = if (reason.isNotBlank()) Color(0xFFE5484D) else c.textSecondary,
+                    )
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-    )
+        }
+    }
 }
