@@ -1,6 +1,7 @@
 package app.rcq.android.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -13,6 +14,9 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.core.view.WindowCompat
 
 /**
@@ -148,6 +152,57 @@ fun RcqTheme(mode: ThemeMode, content: @Composable () -> Unit) {
     }
 
     CompositionLocalProvider(LocalRcqColors provides colors) {
-        MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+        MaterialTheme(colorScheme = scheme, typography = tightTypography) {
+            CompositionLocalProvider(LocalTextStyle provides tightTextStyle, content = content)
+        }
     }
+}
+
+/**
+ * Android puts padding above and below every line of text by default
+ * (`includeFontPadding`, kept since 2009 for a font-metrics quirk). It is why
+ * a two-line row here — a name over its subtitle — reads with a gap nobody
+ * asked for, and it compounds with the system font size: on a phone with text
+ * scaled up the list turns into a ladder of half-empty rows. A tester put it
+ * plainly: "do a good deed, remove that huge line spacing everywhere".
+ *
+ * Turning it off is the single change that fixes it everywhere at once,
+ * rather than one screen at a time. `Trim.FirstLineTop + LastLineBottom` does
+ * the same for the line-height slack Material's type scale adds around a
+ * paragraph, so multi-line text keeps its INTERNAL leading (which is what
+ * makes prose readable) and loses only the padding at the block's edges.
+ */
+private val tightPlatformStyle = PlatformTextStyle(includeFontPadding = false)
+private val tightLineHeight = LineHeightStyle(
+    alignment = LineHeightStyle.Alignment.Center,
+    trim = LineHeightStyle.Trim.Both,
+)
+
+private val tightTextStyle = TextStyle(
+    platformStyle = tightPlatformStyle,
+    lineHeightStyle = tightLineHeight,
+)
+
+private val tightTypography: Typography = Typography().let { base ->
+    fun TextStyle.tight() = copy(
+        platformStyle = tightPlatformStyle,
+        lineHeightStyle = tightLineHeight,
+    )
+    base.copy(
+        displayLarge = base.displayLarge.tight(),
+        displayMedium = base.displayMedium.tight(),
+        displaySmall = base.displaySmall.tight(),
+        headlineLarge = base.headlineLarge.tight(),
+        headlineMedium = base.headlineMedium.tight(),
+        headlineSmall = base.headlineSmall.tight(),
+        titleLarge = base.titleLarge.tight(),
+        titleMedium = base.titleMedium.tight(),
+        titleSmall = base.titleSmall.tight(),
+        bodyLarge = base.bodyLarge.tight(),
+        bodyMedium = base.bodyMedium.tight(),
+        bodySmall = base.bodySmall.tight(),
+        labelLarge = base.labelLarge.tight(),
+        labelMedium = base.labelMedium.tight(),
+        labelSmall = base.labelSmall.tight(),
+    )
 }
