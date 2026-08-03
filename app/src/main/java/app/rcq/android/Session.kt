@@ -2741,26 +2741,62 @@ class Session(context: Context) {
         return resp.new_uin
     }
 
-    /** Buy [uin] from the UIN shop (mock IAP receipt) and migrate the account
-     *  onto it. Server-side this is the SAME migration as [migrateToNewUin], so
-     *  local handling is identical — history survives (peer-keyed),
-     *  contacts/groups re-sync. A 409 (someone grabbed it first between quote
-     *  and purchase) maps to [PurchaseResult.Taken] so the shop can prompt for
-     *  a different number; other failures bubble up as [PurchaseResult.Other]. */
-    suspend fun purchaseUin(uin: Int, receipt: String): PurchaseResult {
+    /** Take [uin] from the UIN shop. With [switch] false (the default) the
+     *  number joins this account's collection and nothing else changes — the
+     *  account keeps answering as it does. With [switch] true the server
+     *  performs the SAME migration as [migrateToNewUin], so local handling is
+     *  identical: history survives (peer-keyed), contacts/groups re-sync.
+     *
+     *  A 409 (someone grabbed it first between quote and purchase) maps to
+     *  [PurchaseResult.Taken] so the shop can prompt for a different number;
+     *  other failures bubble up as [PurchaseResult.Other]. */
+    suspend fun purchaseUin(uin: Int, switch: Boolean = false): PurchaseResult {
         val resp = try {
-            api.purchaseUin(uin, receipt)
+            api.purchaseUin(uin, switch)
         } catch (e: Exception) {
             val msg = e.message ?: ""
             return if (msg.contains("HTTP 409")) PurchaseResult.Taken else PurchaseResult.Other(msg)
         }
-        applyMigration(resp)
-        return PurchaseResult.Success(resp.new_uin)
+        return applyTake(resp)
+    }
+
+    /** Everything this account holds, plus the number it answers as now. */
+    suspend fun myUins(): RcqApi.MyUinsResponse = api.myUins()
+
+    /** Answer as [uin], a number already in this account's collection. The
+     *  number in use goes into the collection in its place, so this is
+     *  reversible. Same migration handling as a purchase-with-switch. */
+    suspend fun activateUin(uin: Int): PurchaseResult {
+        val resp = try {
+            api.activateUin(uin)
+        } catch (e: Exception) {
+            val msg = e.message ?: ""
+            return if (msg.contains("HTTP 404")) PurchaseResult.NotOwned else PurchaseResult.Other(msg)
+        }
+        return applyTake(resp)
+    }
+
+    /** Shared tail of /uin/purchase + /uin/activate: migrate when the server
+     *  says it switched us, otherwise just report the new collection. */
+    private fun applyTake(resp: RcqApi.PurchaseResponse): PurchaseResult {
+        val newUin = resp.new_uin
+        val token = resp.token
+        if (resp.switched && newUin != null && !token.isNullOrEmpty()) {
+            applyMigration(newUin, token)
+            return PurchaseResult.Success(newUin)
+        }
+        return PurchaseResult.Held(resp.owned)
     }
 
     sealed class PurchaseResult {
+        /** The account now answers as [newUin]. */
         data class Success(val newUin: Int) : PurchaseResult()
+        /** The number is held; the account still answers as it did. [owned] is
+         *  the collection afterwards. */
+        data class Held(val owned: List<Int>) : PurchaseResult()
         object Taken : PurchaseResult()
+        /** /uin/activate on a number this account does not hold. */
+        object NotOwned : PurchaseResult()
         data class Other(val message: String?) : PurchaseResult()
     }
 
@@ -2772,10 +2808,13 @@ class Session(context: Context) {
      *  keyed by the peer's UIN (which doesn't change; only ours does), so it
      *  stays valid; start() reloads it from the intact db. Contacts/groups
      *  re-sync from the server. Shared by the free migrate + the shop purchase. */
-    private fun applyMigration(resp: RcqApi.MigrateResponse) {
+    private fun applyMigration(resp: RcqApi.MigrateResponse) =
+        applyMigration(resp.new_uin, resp.token)
+
+    private fun applyMigration(newUin: Int, token: String) {
         socket.disconnect()
-        store.updateAccount(resp.new_uin, resp.token)
-        api.setToken(resp.token)
+        store.updateAccount(newUin, token)
+        api.setToken(token)
         peerIdentityCache.clear()
         noV2Peers.clear()
         ackedReads.clear()
