@@ -841,11 +841,46 @@ class RcqApi(
         post("/uin/quote", "{\"uin\":$uin}", authed = true, QuoteResponse::class.java)
     }
 
-    /** POST /uin/purchase — buy the UIN (mock receipt) and migrate the
-     *  account onto it. Same {new_uin, token} shape as /account/migrate; a
-     *  409 means someone grabbed it first (surfaced as "HTTP 409" upstream). */
-    suspend fun purchaseUin(uin: Int, receipt: String): MigrateResponse = withContext(Dispatchers.IO) {
-        post("/uin/purchase", gson.toJson(mapOf("uin" to uin, "receipt" to receipt)), authed = true, MigrateResponse::class.java)
+    /** Superset of [MigrateResponse]: `new_uin`/`token` are filled exactly when
+     *  the caller asked to switch onto the number, `owned` is the collection
+     *  afterwards. The server returns this shape from both /uin/purchase and
+     *  /uin/activate. */
+    data class PurchaseResponse(
+        val new_uin: Int? = null,
+        val token: String? = null,
+        val switched: Boolean = false,
+        val owned: List<Int> = emptyList(),
+    )
+
+    /** POST /uin/purchase — take the UIN. `switch=false` (the default here)
+     *  puts it in the collection and leaves the account answering as it is;
+     *  `switch=true` migrates onto it right away. A 409 means someone grabbed
+     *  it first (surfaced as "HTTP 409" upstream).
+     *
+     *  The old `receipt` field is gone: the server never validated it, and a
+     *  field that looks like a payment check but is not is worse than none. */
+    suspend fun purchaseUin(uin: Int, switch: Boolean = false): PurchaseResponse = withContext(Dispatchers.IO) {
+        post("/uin/purchase", gson.toJson(mapOf("uin" to uin, "switch" to switch)), authed = true, PurchaseResponse::class.java)
+    }
+
+    /** One number held in the collection. `acquired_at` is an ISO-8601 stamp. */
+    data class OwnedUinItem(val uin: Int = 0, val length: Int = 0, val acquired_at: String? = null)
+
+    data class MyUinsResponse(val active: Int = 0, val owned: List<OwnedUinItem> = emptyList())
+
+    /** GET /uin/mine — the number this account answers as, plus everything it
+     *  holds. Answers regardless of the shop toggle: an operator closing the
+     *  shop stops new sales, it does not hide from people what they own. */
+    suspend fun myUins(): MyUinsResponse = withContext(Dispatchers.IO) {
+        get("/uin/mine", authed = true, MyUinsResponse::class.java)
+    }
+
+    /** POST /uin/activate — answer as a number already in the collection. The
+     *  number being used goes into the collection in its place, so this is
+     *  reversible and never loses one. Migrates, hence the {new_uin, token}.
+     *  404 means the number is not held by this account. */
+    suspend fun activateUin(uin: Int): PurchaseResponse = withContext(Dispatchers.IO) {
+        post("/uin/activate", "{\"uin\":$uin}", authed = true, PurchaseResponse::class.java)
     }
 
     // ── server capability discovery (GET /server/info, unauthenticated) ──

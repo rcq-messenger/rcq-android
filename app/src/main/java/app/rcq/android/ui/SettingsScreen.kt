@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Password
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.NetworkCheck
@@ -85,6 +86,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -123,7 +125,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
+private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
 
 @Composable
 internal fun SettingsScreen(
@@ -219,9 +221,16 @@ internal fun SettingsScreen(
         SettingsRoute.UIN_SHOP -> UinShopScreen(
             session,
             onBack = { route = SettingsRoute.ROOT },
-            // A purchase migrates the account; bubble the new UIN up + close
-            // Settings (same flow as the free move / a server switch).
+            // Taking a number no longer migrates by itself, but moving onto one
+            // does; bubble the new UIN up + close Settings (same flow as the
+            // free move / a server switch).
             onMigrated = { newUin -> onMigrated(newUin); onBack() },
+            onOpenMyUins = { route = SettingsRoute.MY_UINS },
+        )
+        SettingsRoute.MY_UINS -> MyUinsScreen(
+            session,
+            onBack = { route = SettingsRoute.ROOT },
+            onActivated = { newUin -> onMigrated(newUin); onBack() },
         )
     }
     }
@@ -243,6 +252,13 @@ private fun SettingsRoot(
     val themeMode by LocalStores.themeMode.collectAsState()
     val contacts by session.contacts.collectAsState()
     val uinShopEnabled by session.uinShopEnabled.collectAsState()
+    // How many numbers this account holds besides the one it uses. Decides
+    // whether "My numbers" is worth a row on an island with no shop; a server
+    // that predates /uin/mine answers 404 and it stays at zero.
+    var heldCount by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        heldCount = runCatching { session.myUins().owned.size }.getOrDefault(0)
+    }
     var confirmBurn by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var confirmMigrate by remember { mutableStateOf(false) }
@@ -381,12 +397,25 @@ private fun SettingsRoot(
             SectionLabel(stringResource(R.string.settings_sec_account))
             // UIN shop — only on servers that advertise it (api.rcq.app);
             // self-host backends report uin_shop=false and the row hides.
-            if (uinShopEnabled) {
+            //
+            // My numbers has its own condition: it shows whenever this account
+            // holds anything, shop or no shop. An operator who closes the shop
+            // must not strand people on the wrong number, and a self-hoster can
+            // hand a member a second one by hand (POST /admin/uin/grant).
+            // Servers too old to know /uin/mine answer 404 and the row hides.
+            if (uinShopEnabled || heldCount > 0) {
                 SettingsGroup {
-                    SettingsRow(Icons.Filled.Sell, stringResource(R.string.settings_row_uin_shop)) { onOpen(SettingsRoute.UIN_SHOP) }
+                    if (uinShopEnabled) {
+                        SettingsRow(Icons.Filled.Sell, stringResource(R.string.settings_row_uin_shop)) { onOpen(SettingsRoute.UIN_SHOP) }
+                        Divider()
+                    }
+                    SettingsRow(Icons.Filled.Inventory2, stringResource(R.string.settings_row_my_uins)) { onOpen(SettingsRoute.MY_UINS) }
                 }
+                // The footer describes the SHOP; without one it would be
+                // advertising a storefront this island does not have.
                 Text(
-                    stringResource(R.string.settings_foot_uin_shop),
+                    if (uinShopEnabled) stringResource(R.string.settings_foot_uin_shop)
+                    else stringResource(R.string.settings_foot_my_uins),
                     color = c.textSecondary, fontSize = 11.sp,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 14.dp),
                     textAlign = TextAlign.Center,

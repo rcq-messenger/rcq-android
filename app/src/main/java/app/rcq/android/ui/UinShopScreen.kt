@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -52,14 +53,25 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * UIN marketplace, iOS UINShopView parity. The user types a 3-9 digit number,
- * the server (/uin/quote) confirms availability, the price flips to accent when
- * free, one tap on the bottom capsule buys it (mock IAP receipt) and migrates
- * the account onto it. Unlike iOS, the Android migration PRESERVES local chat
- * history (it's peer-keyed), so the copy says so.
+ * UIN marketplace. The user types a 3-9 digit number, the server (/uin/quote)
+ * confirms availability, the price flips to accent when free, one tap on the
+ * bottom capsule takes it.
+ *
+ * Taking it no longer makes you it. The number lands in the account's
+ * collection (POST /uin/purchase with switch=false) and answering as it is a
+ * second, deliberate step — offered right here for whoever wants it now, and
+ * on My numbers for everyone else. Buying and changing the identity everyone
+ * knows you by used to be the same tap, which is a bad thing to have one
+ * button away from browsing. Either way local chat history survives: it is
+ * peer-keyed, and only our own number changes.
  */
 @Composable
-fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Unit) {
+fun UinShopScreen(
+    session: Session,
+    onBack: () -> Unit,
+    onMigrated: (Int) -> Unit,
+    onOpenMyUins: () -> Unit,
+) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
 
@@ -68,6 +80,9 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
     var checking by remember { mutableStateOf(false) }
     var buying by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
+    // Set once the number is in the collection: the "it is yours, move onto it
+    // now or later?" step.
+    var held by remember { mutableStateOf<Int?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     // Resolved here (composable scope) so the purchase callback can use them.
     val takenMsg = stringResource(R.string.uin_shop_error_taken)
@@ -110,17 +125,35 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
         val parsed = typed.toIntOrNull() ?: return
         buying = true
         scope.launch {
-            val receipt = "mock-iap-${System.currentTimeMillis()}"
-            when (val r = session.purchaseUin(parsed, receipt)) {
+            when (val r = session.purchaseUin(parsed, switch = false)) {
+                is Session.PurchaseResult.Held -> {
+                    buying = false
+                    held = parsed
+                }
+                // The server only switches when asked, but if it ever does the
+                // account really has moved and the caller has to hear about it.
                 is Session.PurchaseResult.Success -> onMigrated(r.newUin)
                 is Session.PurchaseResult.Taken -> {
                     buying = false
                     quote = null
                     error = takenMsg
                 }
-                is Session.PurchaseResult.Other -> {
+                else -> {
                     buying = false
-                    error = r.message?.takeIf { it.isNotBlank() } ?: genericMsg
+                    error = (r as? Session.PurchaseResult.Other)?.message?.takeIf { it.isNotBlank() } ?: genericMsg
+                }
+            }
+        }
+    }
+
+    fun moveOnto(target: Int) {
+        buying = true
+        scope.launch {
+            when (val r = session.activateUin(target)) {
+                is Session.PurchaseResult.Success -> onMigrated(r.newUin)
+                else -> {
+                    buying = false
+                    error = (r as? Session.PurchaseResult.Other)?.message?.takeIf { it.isNotBlank() } ?: genericMsg
                 }
             }
         }
@@ -205,11 +238,22 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
                 Spacer(Modifier.height(10.dp))
                 Text(
                     if (typed.isEmpty()) stringResource(R.string.uin_shop_plate_hint)
-                    else stringResource(R.string.uin_shop_plate_digits, typed.length),
+                    else pluralStringResource(R.plurals.uin_digits, typed.length, typed.length),
                     color = c.textSecondary,
                     fontSize = 12.sp,
                 )
             }
+
+            // The collection is a screen away, and this is where somebody who
+            // just took a number goes looking for it.
+            Text(
+                stringResource(R.string.uin_shop_my_numbers),
+                color = c.accent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenMyUins).padding(vertical = 4.dp),
+                textAlign = TextAlign.Center,
+            )
 
             // Info block
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -277,6 +321,32 @@ fun UinShopScreen(session: Session, onBack: () -> Unit, onMigrated: (Int) -> Uni
             dismissButton = {
                 TextButton(onClick = { showConfirm = false }) {
                     Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            },
+        )
+    }
+
+    // The number is in the collection. Moving onto it is the second, separate
+    // step; "Later" leaves the account exactly as it was and the number safe.
+    held?.let { target ->
+        AlertDialog(
+            onDismissRequest = { held = null; typed = "" },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.uin_shop_held_title, target.toString()), color = c.textPrimary) },
+            text = {
+                Text(
+                    stringResource(R.string.uin_shop_held_body, (session.uin ?: 0).toString()),
+                    color = c.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { held = null; moveOnto(target) }) {
+                    Text(stringResource(R.string.uin_shop_held_now), color = c.accent)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { held = null; typed = "" }) {
+                    Text(stringResource(R.string.uin_shop_held_later), color = c.textSecondary)
                 }
             },
         )
