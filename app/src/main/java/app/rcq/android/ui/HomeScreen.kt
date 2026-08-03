@@ -98,6 +98,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.PlatformTextStyle
@@ -446,6 +447,26 @@ internal fun HomeScreen(
                     }
                 }
 
+                // Saved Messages as a real row, but ONLY once there is something
+                // in it (founder). An always-present row would cost a line
+                // forever to the many people who never write a note; it stays
+                // reachable from the overflow menu when empty.
+                //
+                // It sits at the TOP, above Favourites: it is your own shelf,
+                // not a conversation, and it used to render after Groups, which
+                // put it in the middle of the list with headers above and below
+                // (vss: "why is it in the middle, it belongs at the very top
+                // next to favourites").
+                if (savedCount > 0) {
+                    item(key = "saved") {
+                        SavedRow(
+                            count = savedCount,
+                            unread = 0,
+                            onClick = onOpenSaved,
+                        )
+                    }
+                }
+
                 // Favorites holds BOTH favorited contacts AND groups (mirrors
                 // the Archive section). A favorited group used to vanish because
                 // this section rendered only contacts.
@@ -489,21 +510,6 @@ internal fun HomeScreen(
                                 GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
                             }
                         }
-                    }
-                }
-
-                // Saved Messages as a real row, but ONLY once there is something
-                // in it (founder). An always-present row would sit at the top
-                // of every list including the many people who never write a
-                // note; an empty one teaches nothing and costs a line forever.
-                // It is still reachable from the overflow menu when empty.
-                if (savedCount > 0) {
-                    item(key = "saved") {
-                        SavedRow(
-                            count = savedCount,
-                            unread = 0,
-                            onClick = onOpenSaved,
-                        )
                     }
                 }
 
@@ -1522,8 +1528,29 @@ private fun androidx.compose.foundation.layout.RowScope.BarButton(icon: ImageVec
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Icon(icon, contentDescription = label, tint = c.textPrimary, modifier = Modifier.size(22.dp))
-        Text(label, color = c.textPrimary, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        // One line, always. Five labels share the width, and the longest of
+        // them ("Настройки") wrapped onto a second line on a device with the
+        // system font scaled up — the tab then stood a row taller than its
+        // neighbours (vss). The cap lets the label grow with the user's font
+        // setting up to a point and no further; the icon above it carries the
+        // meaning anyway, and the alternative is a bar that reflows.
+        Text(
+            label,
+            color = c.textPrimary,
+            fontSize = cappedSp(9f, 1.15f),
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+        )
     }
+}
+
+/** [base] sp, but scaled by the system font setting only up to [maxScale].
+ *  Returns plain sp so the text still respects accessibility below the cap. */
+@Composable
+private fun cappedSp(base: Float, maxScale: Float): androidx.compose.ui.unit.TextUnit {
+    val scale = LocalDensity.current.fontScale
+    if (scale <= maxScale) return base.sp
+    return (base * maxScale / scale).sp
 }
 
 @Composable
