@@ -772,6 +772,26 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             )
         }
 
+        // Writing to somebody on ANOTHER island for the first time: their app
+        // files it as a conversation REQUEST, not a chat, and nothing comes
+        // back until they accept it. The sender has no way to see that — the
+        // tick only says the island took the envelope — so a perfectly working
+        // send looks like silence, and the obvious conclusion is "cross-island
+        // messaging is broken" (vss reported exactly that). Say it once, while
+        // the thread has nothing incoming in it yet.
+        val awaitingAcceptance = !isGroup && !isSelf && peer != null &&
+            (peerContact?.host != null || CrossIslandStore.findByUin(peer) != null) &&
+            rows.any { it is ChatRow.Single && it.m.fromMe } &&
+            rows.none { it is ChatRow.Single && !it.m.fromMe }
+        if (awaitingAcceptance) {
+            Text(
+                stringResource(R.string.chat_cross_island_pending),
+                color = c.textSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
         ChatBackground()  // global chat wallpaper (behind the messages); no-op when default
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
