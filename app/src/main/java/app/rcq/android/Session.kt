@@ -1150,7 +1150,9 @@ class Session(context: Context) {
         // covers an endpoint obtained before login + account/island switches.
         scope.launch {
             runCatching {
-                app.rcq.android.push.Push.savedEndpoint(appCtx)?.let { api.setPushToken(it) }
+                app.rcq.android.push.Push.savedEndpoint(appCtx)?.let {
+                    api.setPushToken(it, app.rcq.android.net.DeviceId.get(appCtx))
+                }
             }
         }
         // Ensure our libsignal prekey bundle is published so peers can start

@@ -749,13 +749,26 @@ class RcqApi(
             postNoContent("/users/me/capabilities", gson.toJson(CapabilitiesBody(senderKeys)), authed = true)
         }
 
-    data class PushTokenBody(val token: String, val platform: String = "android-up")
+    data class PushTokenBody(
+        val token: String,
+        val platform: String = "android-up",
+        /** This install's id — the SAME one the session token carries as its
+         *  `dev` claim, so the server can tell which endpoint belongs to which
+         *  connected device. Without it the server can only ask "is this
+         *  ACCOUNT online", and one open desktop suppressed the wake for every
+         *  other device of the account. */
+        val device_id: String? = null,
+    )
 
     /** Register this device's UnifiedPush endpoint URL so the server can POST
      *  offline wakes to it. Idempotent upsert server-side (uin, token). */
-    suspend fun setPushToken(endpoint: String): Unit =
+    suspend fun setPushToken(endpoint: String, deviceId: String? = null): Unit =
         withContext(Dispatchers.IO) {
-            postNoContent("/users/me/push-token", gson.toJson(PushTokenBody(endpoint)), authed = true)
+            postNoContent(
+                "/users/me/push-token",
+                gson.toJson(PushTokenBody(endpoint, device_id = deviceId)),
+                authed = true,
+            )
         }
 
     /** Drop a UnifiedPush endpoint (distributor unregistered / logout). */
