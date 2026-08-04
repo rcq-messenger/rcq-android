@@ -1116,6 +1116,14 @@ class Session(context: Context) {
         scope.launch { runCatching { withRetry { refreshGroups() } } }
         scope.launch { runCatching { withRetry { loadOwnReadReceiptSetting() } } }
         scope.launch { runCatching { refreshStories() } }
+        // A distributor the server cannot reach AT ALL leaves the user with no
+        // wakes and nothing to explain it — and no way to be told, since being
+        // told would take the push that is broken. Move off it here, once.
+        scope.launch {
+            loadPushHealth()?.let {
+                runCatching { app.rcq.android.push.Push.healUnreachableDistributor(appCtx, it) }
+            }
+        }
         // Only once the Linked Devices screen has been opened: registry events
         // are fire-and-forget pub/sub with no offline queue, so anything that
         // changed while the socket was down would otherwise stay invisible.

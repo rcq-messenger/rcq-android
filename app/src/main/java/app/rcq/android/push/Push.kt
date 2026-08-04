@@ -250,6 +250,71 @@ object Push {
         return true
     }
 
+    /** One-shot: this device already moved off an unreachable distributor.
+     *  Without it, a user who deliberately moved BACK to their own distributor
+     *  would be dragged onto ours again on the next health report. */
+    private const val K_DISTRIBUTOR_HEALED = "distributor_healed"
+
+    /** Is [error] the server saying it could not REACH the push host at all
+     *  (as opposed to the host answering something)?
+     *
+     *  `push_last_error` holds either an HTTP status ("429", "507", "400") or
+     *  the name of the transport exception ("ConnectTimeout", "ConnectError").
+     *  Only the second kind means the host is unreachable from the server: a
+     *  507 is ntfy's ordinary "nobody is subscribed right now", which happens
+     *  to every phone that is simply switched off and must never be treated as
+     *  a broken distributor.
+     */
+    internal fun isUnreachableError(error: String?): Boolean =
+        !error.isNullOrBlank() && error.trim().toIntOrNull() == null
+
+    /** Should this device move to our embedded distributor, given what the
+     *  server says about the endpoint it is registered under?
+     *
+     *  Since 2026-08-01 the flagship's droplet cannot open a TCP connection to
+     *  ntfy.sh at all (IPv4 times out, IPv6 is refused, everything else on the
+     *  internet answers) — it looks like the public instance blocked our IP
+     *  once the v0.76 rollout raised our POST volume. 732 of 877 Android
+     *  endpoints pointed there, so most Android devices stopped being woken
+     *  entirely and messages only appeared when the app was next opened. Those
+     *  users cannot be told to switch, because telling them would need the very
+     *  push that is broken, so the app moves itself.
+     *
+     *  Deliberately narrow: a self-hosted ntfy that is merely rate-limiting or
+     *  has nobody subscribed answers with a STATUS, so it is left alone (three
+     *  accounts on record use their own instance and it works). Pure decision
+     *  function so it can be tested without a distributor.
+     */
+    internal fun shouldSwitchToEmbedded(endpointHost: String?, health: RcqApi.PushHealth): Boolean {
+        val host = endpointHost?.takeIf { it.isNotBlank() } ?: return false
+        val row = health.devices.firstOrNull {
+            it.platform == "android-up" && it.host.equals(host, ignoreCase = true)
+        } ?: return false
+        return isUnreachableError(row.last_error)
+    }
+
+    /** Act on [shouldSwitchToEmbedded]: repoint this device at our own
+     *  distributor (push.rcq.app) and re-register. Returns true when it moved.
+     *  Never fights the user — it runs at most once per install, skips a device
+     *  that already uses ours, and skips one where push is switched off. */
+    fun healUnreachableDistributor(ctx: Context, health: RcqApi.PushHealth): Boolean {
+        if (isUserDisabled(ctx)) return false
+        if (prefs(ctx).getBoolean(K_DISTRIBUTOR_HEALED, false)) return false
+        val saved = UnifiedPush.getSavedDistributor(ctx) ?: return false
+        if (saved == ctx.packageName) return false
+        if (!availableDistributors(ctx).contains(ctx.packageName)) return false
+        val host = runCatching { android.net.Uri.parse(savedEndpoint(ctx)).host }.getOrNull()
+        if (!shouldSwitchToEmbedded(host, health)) return false
+        prefs(ctx).edit().putBoolean(K_DISTRIBUTOR_HEALED, true).apply()
+        // Drop the dead endpoint first: registering mints a new one, and the
+        // server prunes the old row when this account re-registers.
+        clearEndpoint(ctx)
+        UnifiedPush.saveDistributor(ctx, ctx.packageName)
+        UnifiedPush.register(ctx)
+        android.util.Log.w("RCQpush", "moved off unreachable distributor $saved -> embedded")
+        return true
+    }
+
     /** Re-open the embedded distributor's socket if this device uses it. Called
      *  on app start: the service is START_STICKY, but a force-stop (or a system
      *  that could not honour a background start) leaves it down until something
