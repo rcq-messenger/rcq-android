@@ -1,7 +1,9 @@
 package app.rcq.android.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,11 +92,33 @@ fun NewsScreen(session: Session, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NewsCard(post: RcqApi.NewsPost) {
     val c = RcqTheme.colors
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(copied) {
+        if (copied) { kotlinx.coroutines.delay(1600); copied = false }
+    }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).padding(16.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
+            // A post is often a list of changes somebody wants to quote back at
+            // us, or paste to a friend, and there was no way to get the text
+            // out of it at all ("желательно сделать возможность копировать в
+            // буфер текст выбранной новости. Долгим зажатием наверно").
+            .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    val body = post.body
+                    if (!body.isNullOrBlank()) {
+                        (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText("RCQ news", body))
+                        copied = true
+                    }
+                },
+            )
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -109,6 +133,9 @@ private fun NewsCard(post: RcqApi.NewsPost) {
                 Icon(Icons.Filled.AttachFile, null, tint = c.textSecondary, modifier = Modifier.size(15.dp))
                 Text(stringResource(R.string.news_has_media), color = c.textSecondary, fontSize = 12.sp)
             }
+        }
+        if (copied) {
+            Text(stringResource(R.string.news_copied), color = c.accent, fontSize = 12.sp)
         }
     }
 }
