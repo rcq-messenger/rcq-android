@@ -504,8 +504,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
     }
     // A message can land while the chat is already open — re-clear so the
-    // badge never lingers after the user has seen it.
-    LaunchedEffect(messages.size) { app.rcq.android.data.LocalStores.clearUnread(thisThread) }
+    // badge never lingers after the user has seen it. The system notification
+    // goes with it: reading the message IS acting on the wake, whether or not
+    // the notification is what brought you here.
+    LaunchedEffect(messages.size) {
+        app.rcq.android.data.LocalStores.clearUnread(thisThread)
+        app.rcq.android.push.Push.clearThreadNotification(context, if (isGroup) groupId else null)
+    }
 
     // Snapshot the unread count at open (before openThread clears it) so we can
     // mark where reading left off — an "Unread messages" divider, Telegram-style.
@@ -2676,30 +2681,41 @@ private fun FullscreenImageViewer(
                     )
                 }
             }
-            Icon(
-                Icons.Filled.Close,
-                stringResource(R.string.common_close),
-                tint = Color.White,
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).size(28.dp).clickable(onClick = onDismiss),
-            )
+            // White glyphs laid straight on the photo disappear over a light
+            // one — "не видно или видно еле-еле, смотря какой фон" (tester).
+            // A scrim behind each one makes them legible over anything, and
+            // makes the tap target the whole disc rather than the strokes.
+            ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
+                Modifier.align(Alignment.TopEnd).padding(16.dp), onDismiss)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
             ) {
-                Icon(
-                    Icons.Filled.Download,
-                    stringResource(R.string.media_save),
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp).clickable { onSave(bytes) },
-                )
-                Icon(
-                    Icons.Filled.Share,
-                    stringResource(R.string.media_share),
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp).clickable { onShare(bytes) },
-                )
+                ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(bytes) }
+                ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(bytes) }
             }
         }
+    }
+}
+
+/// One control of the full-screen media viewer: a white glyph on a dark disc,
+/// so it stays readable whatever the photo underneath happens to be.
+@Composable
+private fun ViewerAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 

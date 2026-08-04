@@ -78,6 +78,7 @@
     <string name="outgoing_dismiss">Убрать</string>
     <string name="news_title">Новости</string>
     <string name="news_empty">Пока новостей нет.</string>
+    <string name="news_copied">Скопировано</string>
     <string name="news_has_media">С вложением</string>
     <string name="home_menu_saved">Сохранённые сообщения</string>
     <string name="home_menu_add_account">Добавить аккаунт</string>

@@ -305,6 +305,26 @@ object Push {
         }
     }
 
+    /** Take down the message notification for a thread the user has just read
+     *  in the app.
+     *
+     *  A wake that has been acted on is noise: "когда я прочитал сообщение в
+     *  группе, не нажимая на пуш, этот пуш должен исчезнуть сам, а сейчас он
+     *  продолжает висеть". `setAutoCancel` only covers the tap — reading the
+     *  message any other way left it hanging.
+     *
+     *  The id must match the one `showMessage` posts under: per group, and one
+     *  shared "dm" for every 1:1 (a sealed wake does not reveal the sender, so
+     *  they collapse). ⚠ That means opening ONE direct chat clears the wake for
+     *  all of them. It is already a single "New message" with nobody's name on
+     *  it, so there is nothing per-sender to preserve, and a stuck notification
+     *  is the worse of the two.
+     */
+    fun clearThreadNotification(ctx: Context, groupId: Int?) {
+        val id = (groupId?.toString() ?: "dm").hashCode()
+        runCatching { NotificationManagerCompat.from(ctx).cancel(id) }
+    }
+
     /** Whether the app can present a full-screen incoming-call UI. On Android 14+
      *  (UPSIDE_DOWN_CAKE) USE_FULL_SCREEN_INTENT is special-access and is NOT
      *  auto-granted to a non-dialer app, so an incoming call silently degrades to
