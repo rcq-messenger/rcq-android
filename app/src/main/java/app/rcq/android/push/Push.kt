@@ -496,7 +496,8 @@ object Push {
                 val token = store.token ?: continue
                 val host = store.serverHost ?: RcqApi.DEFAULT_HOST
                 runCatching {
-                    RcqApi("https://$host").apply { setToken(token) }.setPushToken(endpoint)
+                    RcqApi("https://$host").apply { setToken(token) }
+                        .setPushToken(endpoint, app.rcq.android.net.DeviceId.get(ctx))
                 }
             }
         }
