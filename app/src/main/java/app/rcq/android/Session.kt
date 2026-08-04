@@ -766,6 +766,10 @@ class Session(context: Context) {
         _groups.value = emptyList()
         _groupMessages.value = emptyMap()
         _stories.value = emptyList()
+        // Back to "never loaded", not to "no devices": another account's
+        // registry is a different list, and leaving this one visible would
+        // show one account's linked sessions under another.
+        _devices.value = null
         activeRandomPeer = null
         activeRandomPairId = null
         _randomMessages.value = emptyList()
@@ -1112,6 +1116,10 @@ class Session(context: Context) {
         scope.launch { runCatching { withRetry { refreshGroups() } } }
         scope.launch { runCatching { withRetry { loadOwnReadReceiptSetting() } } }
         scope.launch { runCatching { refreshStories() } }
+        // Only once the Linked Devices screen has been opened: registry events
+        // are fire-and-forget pub/sub with no offline queue, so anything that
+        // changed while the socket was down would otherwise stay invisible.
+        if (_devices.value != null) scope.launch { runCatching { refreshDevices() } }
         // Optional-surface flags for this server (UIN shop). Best-effort:
         // failure keeps the permissive default so the shop stays reachable.
         scope.launch {
@@ -1531,7 +1539,7 @@ class Session(context: Context) {
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
         peerIdentityCache.clear(); noV2Peers.clear(); ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
-        _groups.value = emptyList(); _groupMessages.value = emptyMap(); _stories.value = emptyList()
+        _groups.value = emptyList(); _groupMessages.value = emptyMap(); _stories.value = emptyList(); _devices.value = null
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
     }
 
@@ -2739,6 +2747,10 @@ class Session(context: Context) {
         _groups.value = emptyList()
         _groupMessages.value = emptyMap()
         _stories.value = emptyList()
+        // Back to "never loaded", not to "no devices": another account's
+        // registry is a different list, and leaving this one visible would
+        // show one account's linked sessions under another.
+        _devices.value = null
         activeRandomPeer = null
         activeRandomPairId = null
         _randomMessages.value = emptyList()
@@ -3153,13 +3165,33 @@ class Session(context: Context) {
         val webPub = Base64.decode(webPubB64, Base64.NO_WRAP)
         val sealed = SealedSender.sealForWebLink(blob, webPub)
         api.depositLink(token, sealed)
+        // The scan starts on the Linked Devices screen but the confirm dialog
+        // (and this call) live in MainActivity, so the screen never heard that
+        // the link went through and kept showing the old list.
+        if (_devices.value != null) runCatching { refreshDevices() }
     }
 
-    /** Linked web sessions for the Linked Devices screen. */
-    suspend fun listDevices(): List<RcqApi.DeviceInfo> = api.listDevices()
+    /** Linked web sessions, for the Linked Devices screen. null = never loaded
+     *  (the screen shows its spinner); the list is kept HERE rather than in the
+     *  screen so a `device_linked`/`device_revoked` socket event can refresh it
+     *  while the user is looking at it — signing out on the desktop used to
+     *  leave the phone listing it as connected until the screen was closed and
+     *  reopened. */
+    private val _devices = MutableStateFlow<List<RcqApi.DeviceInfo>?>(null)
+    val devices: StateFlow<List<RcqApi.DeviceInfo>?> = _devices.asStateFlow()
 
-    /** Disconnect (revoke) a linked web session. */
-    suspend fun revokeDevice(deviceId: String) = api.revokeDevice(deviceId)
+    /** Pull the registry. Throws on failure so the screen can show its retry
+     *  state rather than an empty list that looks like "no devices". */
+    suspend fun refreshDevices() {
+        _devices.value = api.listDevices()
+    }
+
+    /** Disconnect (revoke) a linked web session, then re-read the registry so
+     *  the row disappears even if our own announcement never arrives. */
+    suspend fun revokeDevice(deviceId: String) {
+        api.revokeDevice(deviceId)
+        runCatching { refreshDevices() }
+    }
 
     /** Retry a previously-failed outgoing message (same UUID, so no dup). */
     suspend fun resend(msg: ChatMessage) {
@@ -3992,6 +4024,12 @@ class Session(context: Context) {
             // our incoming list (the row is already gone server-side).
             "contact_request_cancelled" -> {
                 scope.launch { runCatching { refreshPending() } }
+            }
+            // The device registry changed on some device of ours. Only worth a
+            // round-trip once the Linked Devices screen has actually been
+            // opened — before that there is nothing to keep fresh.
+            "device_linked", "device_revoked" -> {
+                if (_devices.value != null) scope.launch { runCatching { refreshDevices() } }
             }
             "typing" -> {
                 val from = obj.get("from_uin")?.asInt

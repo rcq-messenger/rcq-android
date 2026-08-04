@@ -1784,12 +1784,30 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
 /** Web sessions linked to this account (connect-to-web). Lists them and lets
  *  the user disconnect any — removing the last one drops the account back to
  *  single-device (and v=2 resumes). */
+/** Empty/error state of the linked-devices list — same shape for both, only
+ *  the line of text differs. */
+@Composable
+private fun LinkedDevicesPlaceholder(text: String) {
+    val c = RcqTheme.colors
+    Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Spacer(Modifier.height(40.dp))
+        Icon(Icons.Filled.Devices, null, tint = c.textSecondary, modifier = Modifier.size(44.dp))
+        Spacer(Modifier.height(12.dp))
+        Text(text, color = c.textPrimary, fontSize = 15.sp)
+    }
+}
+
 @Composable
 private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var devices by remember { mutableStateOf<List<app.rcq.android.net.RcqApi.DeviceInfo>?>(null) } // null = loading
+    // Held by Session, not here: a device linked or revoked ANYWHERE (this
+    // phone, the desktop signing itself out) arrives as a socket event and
+    // refreshes the list while it is on screen. It used to be a local
+    // remember loaded exactly once, so the only way to see a change was to
+    // leave the screen and come back.
+    val devices by session.devices.collectAsState() // null = loading
     var failed by remember { mutableStateOf(false) }
     var showHow by remember { mutableStateOf(false) }
 
@@ -1815,9 +1833,7 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
 
     suspend fun reload() {
         failed = false
-        runCatching { session.listDevices() }
-            .onSuccess { devices = it }
-            .onFailure { failed = true; devices = emptyList() }
+        runCatching { session.refreshDevices() }.onFailure { failed = true }
     }
     LaunchedEffect(Unit) { reload() }
 
@@ -1852,19 +1868,19 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         when (val list = devices) {
-            null -> Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = c.accent, modifier = Modifier.size(28.dp))
+            // Nothing loaded yet: the spinner while the first read is in
+            // flight, the error state once it has failed. The list stays null
+            // on failure so a later refresh still fills it in, instead of
+            // being frozen as a convincing-looking "no devices".
+            null -> if (failed) {
+                LinkedDevicesPlaceholder(stringResource(R.string.linked_devices_error))
+            } else {
+                Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = c.accent, modifier = Modifier.size(28.dp))
+                }
             }
             else -> if (list.isEmpty()) {
-                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(Modifier.height(40.dp))
-                    Icon(Icons.Filled.Devices, null, tint = c.textSecondary, modifier = Modifier.size(44.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(if (failed) R.string.linked_devices_error else R.string.linked_devices_empty),
-                        color = c.textPrimary, fontSize = 15.sp,
-                    )
-                }
+                LinkedDevicesPlaceholder(stringResource(R.string.linked_devices_empty))
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
                     items(list, key = { it.device_id }) { d ->
