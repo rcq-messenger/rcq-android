@@ -440,6 +440,11 @@ class Session(context: Context) {
     // True once the WebSocket has connected at least once; gates the
     // reconnect-driven graph resync so the initial launch doesn't double up.
     @Volatile
+    /** elapsedRealtime when the socket last went down, 0 while connected. */
+    private var offlineSince = 0L
+    /** elapsedRealtime of the last route-ladder run, so a network that is down
+     *  for everyone cannot turn into a probe storm. */
+    private var lastLadderAt = 0L
     private var everConnected = false
 
     // Default network the device is currently routing through. When it
@@ -859,6 +864,31 @@ class Session(context: Context) {
                         continue
                     }
                 }
+                // Blocked mid-session: the socket has been down for a while and
+                // its own backoff is getting nowhere, so walk the ladder again
+                // (direct -> CF front -> relay). Without this the route decided
+                // at launch was final, and a network that started filtering
+                // while the app was open simply never recovered.
+                val down = offlineSince
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (!_connected.value && down != 0L && now - down >= OFFLINE_RELADDER_MS &&
+                    now - lastLadderAt >= LADDER_COOLDOWN_MS
+                ) {
+                    lastLadderAt = now
+                    android.util.Log.i("RCQroute", "offline ${(now - down) / 1000}s — walking the route ladder again")
+                    val changed = runCatching { runRouteLadder() }.getOrDefault(false)
+                    android.util.Log.i("RCQroute", "ladder done, route changed=$changed front=$frontHost tunnel=${transport.isActive}")
+                    if (changed) {
+                        socket.disconnect()
+                        app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                        store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+                    } else {
+                        // Same route, but give the socket a nudge rather than
+                        // waiting out the rest of its backoff.
+                        socket.reconnectNow()
+                    }
+                    continue
+                }
                 if (!transport.isActive || !transport.onionMode()) { deadStreak = 0; continue }
                 val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) }
                 _routeVerified.value = ok   // keep the home shield honest for onion (never dropped)
@@ -894,83 +924,7 @@ class Session(context: Context) {
             // probe succeeds and we connect directly as before (no transport,
             // no overhead). The blocking sing-box start runs here off the main
             // thread; api/socket are rebuilt so they capture the SOCKS proxy.
-            val transport = app.rcq.android.net.SingBoxTransport
-            val directOk = transport.probeDirect(serverHost())
-            val flagship = store.serverHost.isNullOrBlank() || store.serverHost == RcqApi.DEFAULT_HOST
-            // CF FRONT FALLBACK (tried BEFORE the relay): the flagship is blocked
-            // directly, the user isn't forcing the relay/local-proxy, and the
-            // Cloudflare front reaches the island -> route the API + WS through
-            // cdn.rcq.app (CF's collateral-resistant IPs proxy to api.rcq.app) with
-            // NO relay. Simpler + harder to IP-block than a relay; relays remain the
-            // fallback (and the privacy path) if the front is also blocked. Skipped
-            // under a forced relay/local-proxy and for custom islands (the front only
-            // proxies the flagship).
-            if (!directOk && flagship && !transport.isEnabled(appCtx) && !transport.localProxyMode() &&
-                transport.probeDirect(FRONT_HOST)
-            ) {
-                frontHost = FRONT_HOST
-                api = newApi()
-                socket = newSocket()
-                android.util.Log.i("RCQfront", "direct api blocked, CF front reachable — routing via $FRONT_HOST")
-            }
-            // Engage the relay when the user forced it on, OR (auto-fallback) when
-            // direct is unreachable AND the front didn't take over — UNLESS the user
-            // opted out of auto-engage. The explicit toggle always wins; the opt-out
-            // gates only the probe-driven auto-engage.
-            val engage = frontHost == null && (transport.isEnabled(appCtx) ||
-                (!transport.autoEngageDisabled(appCtx) && !directOk))
-            if (engage && !transport.isActive) {
-                // Use the freshest known relay list (last verified payload off
-                // disk) before building the transport; bundled if none yet.
-                app.rcq.android.net.RelayConfigStore.prime(appCtx)
-                if (transport.start()) {
-                    api = newApi()
-                    socket = newSocket()
-                    // The push socket dials at app start, a beat before this
-                    // engages; leaving it pinned to the direct route means the
-                    // one connection that still has to work on a censored
-                    // network is the one not using the tunnel.
-                    app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
-                }
-            }
-            // Post-engage health check + DIRECT fallback (iOS parity, AppState
-            // re-probe). The trap behind "Резерв включён, но работает только с
-            // VPN": the tunnel engaged (toggle on, or a transient probe miss) but
-            // can't actually carry traffic to the backend, while a DIRECT
-            // connection CAN — e.g. an UNcensored user whose relay/onion path is
-            // broken. Without this they're stuck on a dead tunnel forever (the
-            // watchdog only self-heals onion). So: if the tunnel is up but the
-            // live route is dead AND direct works, drop to direct.
-            // STRICT GATING so a genuinely-blocked user is NEVER silently
-            // de-tunnelled: only fall back when direct actually succeeds (a
-            // censored user's direct probe fails → stays on the tunnel), NEVER
-            // under the user's own local proxy (Tor/i2p — that hard no-fallback
-            // rule is the Tor-leak invariant), and NEVER under an explicit
-            // per-device onion opt-in (preserve the metadata-resistance the user
-            // deliberately chose). Cohort-flipped onion (signed config) on an
-            // open network does fall back — it's a censorship aid, moot when
-            // direct works.
-            var routeOk = false
-            if (transport.isActive) {
-                // Probe the live route once: it tells the shield whether the tunnel
-                // actually carries traffic (read-only /health through the proxy; safe
-                // for onion too — it does NOT tear the chain down).
-                routeOk = transport.probeCurrentRoute(serverHost())
-                // DIRECT fallback only when droppable: tunnel up but dead AND direct
-                // works -> drop. NEVER under a local proxy (Tor-leak rule) nor an
-                // explicit onion opt-in (preserve chosen metadata-resistance).
-                if (!routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx) &&
-                    transport.probeDirect(serverHost())
-                ) {
-                    android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
-                    transport.stop()
-                    api = newApi()
-                    socket = newSocket()
-                }
-            }
-            _stealthActive.value = transport.isActive
-            _bypassManual.value = transport.isEnabled(appCtx)
-            _routeVerified.value = transport.isActive && routeOk
+            runRouteLadder()
             connectAndSync(uin, token)
             // (Crash reports are NOT auto-sent. A captured crash is offered to
             // the user on next launch via a consent dialog in MainActivity —
@@ -1057,6 +1011,100 @@ class Session(context: Context) {
 
     /** Open the WebSocket + pull the contact graph. Split out of [start] so the
      *  transport engage can run first on a background coroutine. */
+    /** Walk the route ladder: direct probe -> CF front -> relay tunnel, then a
+     *  post-engage health check that can drop back to direct.
+     *
+     *  Extracted from [start] so it can be run AGAIN while the app is running.
+     *  It used to happen exactly once, at launch, which meant a network that
+     *  started blocking mid-session was never re-evaluated: the socket just
+     *  retried the dead route with backoff until the user killed the app. From
+     *  the outside that is "RCQ broke", while the bypass sat there unused.
+     *
+     *  Returns true when the route CHANGED (front engaged, tunnel started or
+     *  dropped), so the caller knows the socket has to be rebuilt.
+     */
+    private suspend fun runRouteLadder(): Boolean {
+        val before = frontHost to app.rcq.android.net.SingBoxTransport.isActive
+        val transport = app.rcq.android.net.SingBoxTransport
+        val directOk = transport.probeDirect(serverHost())
+        val flagship = store.serverHost.isNullOrBlank() || store.serverHost == RcqApi.DEFAULT_HOST
+        // CF FRONT FALLBACK (tried BEFORE the relay): the flagship is blocked
+        // directly, the user isn't forcing the relay/local-proxy, and the
+        // Cloudflare front reaches the island -> route the API + WS through
+        // cdn.rcq.app (CF's collateral-resistant IPs proxy to api.rcq.app) with
+        // NO relay. Simpler + harder to IP-block than a relay; relays remain the
+        // fallback (and the privacy path) if the front is also blocked. Skipped
+        // under a forced relay/local-proxy and for custom islands (the front only
+        // proxies the flagship).
+        if (!directOk && flagship && !transport.isEnabled(appCtx) && !transport.localProxyMode() &&
+            transport.probeDirect(FRONT_HOST)
+        ) {
+            frontHost = FRONT_HOST
+            api = newApi()
+            socket = newSocket()
+            android.util.Log.i("RCQfront", "direct api blocked, CF front reachable — routing via $FRONT_HOST")
+        }
+        // Engage the relay when the user forced it on, OR (auto-fallback) when
+        // direct is unreachable AND the front didn't take over — UNLESS the user
+        // opted out of auto-engage. The explicit toggle always wins; the opt-out
+        // gates only the probe-driven auto-engage.
+        val engage = frontHost == null && (transport.isEnabled(appCtx) ||
+            (!transport.autoEngageDisabled(appCtx) && !directOk))
+        if (engage && !transport.isActive) {
+            // Use the freshest known relay list (last verified payload off
+            // disk) before building the transport; bundled if none yet.
+            app.rcq.android.net.RelayConfigStore.prime(appCtx)
+            if (transport.start()) {
+                api = newApi()
+                socket = newSocket()
+                // The push socket dials at app start, a beat before this
+                // engages; leaving it pinned to the direct route means the
+                // one connection that still has to work on a censored
+                // network is the one not using the tunnel.
+                app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+            }
+        }
+        // Post-engage health check + DIRECT fallback (iOS parity, AppState
+        // re-probe). The trap behind "Резерв включён, но работает только с
+        // VPN": the tunnel engaged (toggle on, or a transient probe miss) but
+        // can't actually carry traffic to the backend, while a DIRECT
+        // connection CAN — e.g. an UNcensored user whose relay/onion path is
+        // broken. Without this they're stuck on a dead tunnel forever (the
+        // watchdog only self-heals onion). So: if the tunnel is up but the
+        // live route is dead AND direct works, drop to direct.
+        // STRICT GATING so a genuinely-blocked user is NEVER silently
+        // de-tunnelled: only fall back when direct actually succeeds (a
+        // censored user's direct probe fails → stays on the tunnel), NEVER
+        // under the user's own local proxy (Tor/i2p — that hard no-fallback
+        // rule is the Tor-leak invariant), and NEVER under an explicit
+        // per-device onion opt-in (preserve the metadata-resistance the user
+        // deliberately chose). Cohort-flipped onion (signed config) on an
+        // open network does fall back — it's a censorship aid, moot when
+        // direct works.
+        var routeOk = false
+        if (transport.isActive) {
+            // Probe the live route once: it tells the shield whether the tunnel
+            // actually carries traffic (read-only /health through the proxy; safe
+            // for onion too — it does NOT tear the chain down).
+            routeOk = transport.probeCurrentRoute(serverHost())
+            // DIRECT fallback only when droppable: tunnel up but dead AND direct
+            // works -> drop. NEVER under a local proxy (Tor-leak rule) nor an
+            // explicit onion opt-in (preserve chosen metadata-resistance).
+            if (!routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx) &&
+                transport.probeDirect(serverHost())
+            ) {
+                android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
+                transport.stop()
+                api = newApi()
+                socket = newSocket()
+            }
+        }
+        _stealthActive.value = transport.isActive
+        _bypassManual.value = transport.isEnabled(appCtx)
+        _routeVerified.value = transport.isActive && routeOk
+        return (frontHost to app.rcq.android.net.SingBoxTransport.isActive) != before
+    }
+
     private fun connectAndSync(uin: Int, token: String) {
         socket.connect(
             uin = uin,
@@ -1064,6 +1112,12 @@ class Session(context: Context) {
             onEvent = ::handleEvent,
             onState = { up ->
                 _connected.value = up
+                // When the link went down, so the watchdog below can tell a
+                // blip (the socket's own backoff handles those) from a network
+                // that has started blocking us and needs the whole route
+                // ladder walked again.
+                offlineSince = if (up) 0L else
+                    (offlineSince.takeIf { it != 0L } ?: android.os.SystemClock.elapsedRealtime())
                 // The primary answered: whatever the backup drain thought, we
                 // are not in failover any more.
                 if (up) _receivingViaBackup.value = false
@@ -4389,6 +4443,14 @@ class Session(context: Context) {
     private fun signingPub(): ByteArray = Ed25519PrivateKeyParameters(signingPriv(), 0).generatePublicKey().encoded
 
     private companion object {
+        /** How long the socket must stay down before the route ladder is walked
+         *  again. Longer than the socket's own max backoff (30s) so ordinary
+         *  blips are handled where they belong. */
+        const val OFFLINE_RELADDER_MS = 90_000L
+        /** Floor between two ladder runs. A ladder walk costs up to three
+         *  probes of several seconds each, and on a network that is down for
+         *  everyone it would otherwise repeat every minute forever. */
+        const val LADDER_COOLDOWN_MS = 5 * 60_000L
         /** Newest news post this device has been shown. */
         const val K_NEWS_SEEN = "news_seen_id"
     }
