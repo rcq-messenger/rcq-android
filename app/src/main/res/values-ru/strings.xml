@@ -948,6 +948,8 @@
     <string name="push_channel_messages_desc">Уведомления о новых сообщениях</string>
     <string name="push_new_message">Новое сообщение</string>
     <string name="push_new_group_message">Новое сообщение в группе</string>
+    <string name="push_kind_screenshot">Скриншот</string>
+    <string name="push_kind_relay_share">Поделился подключением</string>
     <string name="push_nudge_title">Сообщения при закрытом приложении</string>
     <string name="push_nudge_body">Чтобы получать сообщения, когда приложение закрыто или выгружено из памяти, установите ntfy (бесплатный сервис пуш-уведомлений). Аккаунт при закрытии не теряется, он просто уходит в оффлайн.</string>
     <string name="push_nudge_setup">Настроить</string>

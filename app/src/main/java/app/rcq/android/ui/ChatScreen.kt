@@ -509,7 +509,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // the notification is what brought you here.
     LaunchedEffect(messages.size) {
         app.rcq.android.data.LocalStores.clearUnread(thisThread)
-        app.rcq.android.push.Push.clearThreadNotification(context, if (isGroup) groupId else null)
+        app.rcq.android.push.Push.clearThreadNotification(
+            context,
+            if (isGroup) groupId else null,
+            if (isGroup) null else peer,
+        )
     }
 
     // Snapshot the unread count at open (before openThread clears it) so we can

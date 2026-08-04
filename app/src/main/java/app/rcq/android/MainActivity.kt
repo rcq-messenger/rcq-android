@@ -142,11 +142,12 @@ object GroupJoinLink {
 }
 
 /** A pending open-this-thread request from a tapped message notification.
- *  [Push.showMessage] stamps the wake's group_id/to_uin as intent extras;
- *  RcqApp consumes this once registered + unlocked, switching to the target
- *  account first when the wake was for a non-active local account. */
+ *  [Push.showMessage] stamps the wake's group_id/to_uin — plus the decrypted
+ *  sender, when the envelope could be opened — as intent extras; RcqApp
+ *  consumes this once registered + unlocked, switching to the target account
+ *  first when the wake was for a non-active local account. */
 object NotificationOpen {
-    data class Req(val groupId: Int?, val toUin: Int?, val reports: Boolean = false)
+    data class Req(val groupId: Int?, val toUin: Int?, val reports: Boolean = false, val peerUin: Int? = null)
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromIntent(i: android.content.Intent?): Req? {
@@ -154,6 +155,7 @@ object NotificationOpen {
         val g = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_GROUP_ID, -1).takeIf { it > 0 }
         val u = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN, -1).takeIf { it > 0 }
         val rep = i.getBooleanExtra(app.rcq.android.push.Push.EXTRA_OPEN_REPORTS, false)
+        val p = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_PEER_UIN, -1).takeIf { it > 0 }
         // Consume: setIntent keeps this intent sticky, so without removing the
         // extras any later activity re-create (language switch calls
         // recreate()) would re-fire the navigation and yank the user back
@@ -161,7 +163,8 @@ object NotificationOpen {
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_GROUP_ID)
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN)
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_REPORTS)
-        return if (g != null || u != null || rep) Req(g, u, rep) else null
+        i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_PEER_UIN)
+        return if (g != null || u != null || rep || p != null) Req(g, u, rep, p) else null
     }
 }
 
@@ -464,7 +467,13 @@ private fun RcqApp(session: Session) {
             showSettings = true
             return@LaunchedEffect
         }
+        // Group first: a group wake never carries a peer, and a peer wake never
+        // carries a group, so the order only decides which wins if the server
+        // ever sends both. The peer branch exists because the receiver can now
+        // open the envelope and name the sender ([PushEnvelope]); wakes that
+        // stayed sealed carry no peer and still land on Home, as before.
         req.groupId?.let { chatTarget = ChatTarget.Group(it) }
+            ?: req.peerUin?.let { chatTarget = ChatTarget.Peer(it) }
     }
 
     Box(

@@ -85,6 +85,20 @@ object CrossIslandStore {
 
     fun list(): List<Contact> = loadAll().values.sortedByDescending { it.addedAt }
 
+    /** Headless lookup in a SPECIFIC account's slot, bypassing [bindAccount].
+     *  The push receiver runs in a process that may have no Session and no
+     *  bound account, and the wake it is handling can be for a sibling local
+     *  account — reading through [acct] there would silently answer "not an
+     *  accepted contact" for everyone and make every cross-island wake
+     *  anonymous. Opens its own prefs handle for the same reason. */
+    fun getFor(ctx: Context, accountId: String, uin: Int, host: String): Contact? {
+        val p = ctx.applicationContext.getSharedPreferences("rcq_crossisland", Context.MODE_PRIVATE)
+        val raw = p.getString(storageKey(accountId), "{}") ?: "{}"
+        val type = object : TypeToken<MutableMap<String, Contact>>() {}.type
+        val all = runCatching { gson.fromJson<MutableMap<String, Contact>>(raw, type) }.getOrNull()
+        return all?.get(ciKey(uin, host))
+    }
+
     fun remove(uin: Int, host: String) {
         val m = loadAll(); m.remove(ciKey(uin, host)); saveAll(m)
     }

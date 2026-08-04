@@ -30,12 +30,15 @@ import org.unifiedpush.android.connector.UnifiedPush
  * island, creating the notification channel, and turning a {type:"msg"} wake
  * into a system notification.
  *
- * STAGE 1 scope: background MESSAGE notifications. The notification shows the
- * server-provided generic title/body/group_name only — NO background
- * decryption (decrypting a v=2 or sender-keys envelope out of band would
- * advance the ratchet and make the live WS/offline-queue copy undecryptable,
- * losing the message). The real sender + text arrive when the app opens and
- * drains the offline queue. Incoming-call wakes ({type:"call"}) are Stage 2.
+ * A message wake carries the sealed envelope in `env`, and [PushEnvelope] opens
+ * it when it can be opened without side effects — v=1 only, because decrypting
+ * a v=2 or sender-keys envelope out of band would advance the ratchet and make
+ * the live WS/offline-queue copy undecryptable, losing the message. When it
+ * opens, the notification names the sender, previews the text, sends the tap to
+ * that exact thread and can finally tell whether a "mentions only" thread was
+ * actually mentioned. When it does not, the wake falls back to the
+ * server-provided generic title/body/group_name and the real content arrives
+ * when the app opens and drains the offline queue.
  */
 object Push {
     const val CHANNEL_MESSAGES = "rcq_messages"
@@ -47,6 +50,12 @@ object Push {
      *  so it can open the right thread (and switch to the right account). */
     const val EXTRA_OPEN_GROUP_ID = "open_group_id"
     const val EXTRA_OPEN_TO_UIN = "open_to_uin"
+
+    /** The SENDER of a 1:1 message, when the wake's envelope could be opened
+     *  ([PushEnvelope]). Absent for a group wake, for a v=2/gmsg envelope we
+     *  deliberately leave sealed, and for an un-accepted cross-island sender
+     *  whose message goes to the quarantine rather than to a thread. */
+    const val EXTRA_OPEN_PEER_UIN = "open_peer_uin"
     /** Set when the wake is "we answered your report": the tap should land on
      *  the reports screen, since that answer is the only reason to open. */
     const val EXTRA_OPEN_REPORTS = "open_reports"
@@ -313,16 +322,23 @@ object Push {
      *  продолжает висеть". `setAutoCancel` only covers the tap — reading the
      *  message any other way left it hanging.
      *
-     *  The id must match the one `showMessage` posts under: per group, and one
-     *  shared "dm" for every 1:1 (a sealed wake does not reveal the sender, so
-     *  they collapse). ⚠ That means opening ONE direct chat clears the wake for
-     *  all of them. It is already a single "New message" with nobody's name on
-     *  it, so there is nothing per-sender to preserve, and a stuck notification
-     *  is the worse of the two.
+     *  The ids must match the ones `showMessage` posts under: per group, per
+     *  sender when the envelope could be opened, and one shared "dm" for the
+     *  wakes that stayed sealed. A direct chat clears BOTH of its possible ids,
+     *  because the same peer can have an identified wake and an anonymous one
+     *  (a v=2 message from their iPhone) waiting at the same time. ⚠ Clearing
+     *  the shared id still takes down every anonymous 1:1 wake at once — those
+     *  carry nobody's name, so there is nothing per-sender to preserve, and a
+     *  stuck notification is the worse of the two.
      */
-    fun clearThreadNotification(ctx: Context, groupId: Int?) {
-        val id = (groupId?.toString() ?: "dm").hashCode()
-        runCatching { NotificationManagerCompat.from(ctx).cancel(id) }
+    fun clearThreadNotification(ctx: Context, groupId: Int?, peerUin: Int? = null) {
+        val nm = NotificationManagerCompat.from(ctx)
+        if (groupId != null) {
+            runCatching { nm.cancel(groupId.toString().hashCode()) }
+            return
+        }
+        if (peerUin != null) runCatching { nm.cancel("peer:$peerUin".hashCode()) }
+        runCatching { nm.cancel("dm".hashCode()) }
     }
 
     /** Whether the app can present a full-screen incoming-call UI. On Android 14+
@@ -457,39 +473,104 @@ object Push {
         val groupId = json.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
         val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val isGroup = groupName != null || groupId != null
-        // Defense in depth: never wake for a group the TARGET account muted, even
-        // if the server's muted_group_ids sync was stale (the v0.63 class of bug).
-        // The wake carries to_uin, so on a multi-account device we consult the
-        // account it is FOR — checking only the active account let a sibling
-        // account's muted group keep buzzing the phone.
-        // The 1:1 sealed wake hides the sender, so peer mute stays a server gate.
-        if (groupId != null) {
-            // Our own post echoing back through a sibling account on this same
-            // device (the anonymous legacy group path the server can't filter).
-            if (isOwnEcho(groupId)) return
-            val acctId = toUin?.let { u ->
-                AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
-            } ?: app.rcq.android.data.AccountManager.activeId.value
-            val thread = app.rcq.android.data.LocalStores.groupThread(groupId)
-            if (acctId != null) {
+
+        // Our own post echoing back through a sibling account on this same
+        // device (the anonymous legacy group path the server can't filter).
+        if (groupId != null && isOwnEcho(groupId)) return
+
+        // Which local account is this wake FOR? It carries to_uin, so on a
+        // multi-account device we consult the account it is addressed to —
+        // checking only the active account let a sibling account's muted group
+        // keep buzzing the phone.
+        val acctId = toUin?.let { u ->
+            AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
+        } ?: app.rcq.android.data.AccountManager.activeId.value
+
+        // A fully muted group is decided before the envelope is touched at all:
+        // there is nothing the plaintext could change about the answer, and the
+        // cheapest decrypt is the one we skip.
+        if (groupId != null && acctId != null &&
+            app.rcq.android.data.LocalStores.isMutedFor(
+                acctId,
+                app.rcq.android.data.LocalStores.groupThread(groupId),
+            )
+        ) {
+            return
+        }
+
+        // Open the envelope the wake carries, when it is one we can open
+        // without touching a ratchet — see [PushEnvelope] for why that is only
+        // v=1. Everything below degrades to the old generic wake when this is
+        // null, so a sealed envelope is never a missing notification.
+        val opened = if (envType == "message" && acctId != null) {
+            str("env")?.let { runCatching { PushEnvelope.open(ctx, acctId, it) }.getOrNull() }
+        } else {
+            null
+        }
+        // A control envelope carries no new message: read receipt, reaction,
+        // edit, delete, presence ping. Waking the user for one is the "ложные
+        // уведомления, новых сообщений нет" report — envType filters the kinds
+        // the server can see, this filters the rest.
+        if (opened != null && opened.preview == null) return
+
+        // The peer this wake is about, once we know it. Absent for a group (the
+        // sender of a group message is not a thread to open), for an envelope we
+        // left sealed, and for an un-accepted cross-island sender (their message
+        // is quarantined as a request, so there is no thread to open and no name
+        // to reveal).
+        val peerUin = opened?.takeIf { !it.quarantined && !isGroup }?.senderUin
+
+        // Defense in depth: never wake for a thread the TARGET account muted,
+        // even if the server's muted_group_ids sync was stale (the v0.63 class
+        // of bug). Peer mute used to be a server-only gate because the sealed
+        // wake hid the sender; with the envelope open it is enforced here too,
+        // so a failed push-preferences PUT no longer lets a muted contact buzz.
+        if (acctId != null) {
+            val thread = when {
+                groupId != null -> app.rcq.android.data.LocalStores.groupThread(groupId)
+                peerUin != null -> app.rcq.android.data.LocalStores.peerThread(peerUin)
+                else -> null
+            }
+            if (thread != null) {
                 // Fully muted (NONE): never wake.
                 if (app.rcq.android.data.LocalStores.isMutedFor(acctId, thread)) return
-                // Mentions-only: the user wants a banner ONLY when @mentioned. Android
-                // does no in-push decrypt (unlike the iOS NSE), so it can't confirm a
-                // mention from a sealed/gmsg wake — stay quiet rather than spam every
-                // message (the "muted RCQ Beta still pushes" report). Real mentions are
-                // still seen in-app; precise server-side mention gating is a follow-up.
-                if (app.rcq.android.data.LocalStores.isMentionsOnlyFor(acctId, thread)) return
+                // Mentions-only: a banner ONLY when actually mentioned. With the
+                // envelope open we can finally tell — before, this was a blanket
+                // return, which made "Mentions" behave exactly like "None" in the
+                // background. A sealed envelope (v=2, gmsg) still stays quiet:
+                // guessing would spam every message, the very report this gate
+                // came from. iOS does the same in its sender-keys fallback.
+                if (app.rcq.android.data.LocalStores.isMentionsOnlyFor(acctId, thread) &&
+                    !(opened?.mentionsMe ?: false)
+                ) {
+                    return
+                }
             }
         }
-        val title = groupName ?: str("title") ?: ctx.getString(R.string.app_name)
-        val body = str("body") ?: ctx.getString(
-            if (isGroup) R.string.push_new_group_message else R.string.push_new_message,
-        )
 
-        // Distinct groups get their own notification; all 1:1 pushes collapse
-        // into one "New message" (the sealed wake doesn't reveal the sender).
-        val id = (str("group_id") ?: "dm").hashCode()
+        val title = when {
+            groupName != null -> groupName
+            opened != null && !opened.quarantined -> opened.senderName
+            else -> str("title") ?: ctx.getString(R.string.app_name)
+        }
+        val body = when {
+            opened?.preview == null || opened.quarantined -> str("body") ?: ctx.getString(
+                if (isGroup) R.string.push_new_group_message else R.string.push_new_message,
+            )
+            // In a group the title is the group, so the sender goes in front of
+            // the text — same shape as the iOS NSE.
+            isGroup -> "${opened.senderName}: ${opened.preview}"
+            else -> opened.preview
+        }
+
+        // Distinct groups get their own notification, and so does each sender we
+        // could identify. Wakes we could not open still collapse into one shared
+        // "New message" — there is no sender to separate them by.
+        val id = when {
+            groupId != null -> (str("group_id") ?: "dm").hashCode()
+            peerUin != null -> "peer:$peerUin".hashCode()
+            else -> "dm".hashCode()
+        }
         val tap = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             // Extras don't participate in Intent.filterEquals, so without a
@@ -498,9 +579,12 @@ object Push {
             // notifications' extras with the newest thread. The rcq://notif
             // authority matches no VIEW filter and the intent is explicit,
             // so this never collides with real deep links.
-            data = android.net.Uri.parse("rcq://notif/${groupId ?: "dm"}/${toUin ?: 0}")
+            data = android.net.Uri.parse(
+                "rcq://notif/${groupId ?: peerUin?.let { "p$it" } ?: "dm"}/${toUin ?: 0}",
+            )
             if (groupId != null) putExtra(EXTRA_OPEN_GROUP_ID, groupId)
             if (toUin != null) putExtra(EXTRA_OPEN_TO_UIN, toUin)
+            if (peerUin != null) putExtra(EXTRA_OPEN_PEER_UIN, peerUin)
             if (str("notif_kind") == "report_reply") putExtra(EXTRA_OPEN_REPORTS, true)
         }
         val pi = PendingIntent.getActivity(

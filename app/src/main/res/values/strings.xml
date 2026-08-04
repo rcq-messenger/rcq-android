@@ -951,6 +951,8 @@
     <string name="push_channel_messages_desc">New message notifications</string>
     <string name="push_new_message">New message</string>
     <string name="push_new_group_message">New group message</string>
+    <string name="push_kind_screenshot">Screenshot</string>
+    <string name="push_kind_relay_share">Shared a connection</string>
     <string name="push_nudge_title">Messages while the app is closed</string>
     <string name="push_nudge_body">To receive messages while the app is closed or evicted from memory, install ntfy (a free push service). Your account is never lost when you close the app, it just goes offline.</string>
     <string name="push_nudge_setup">Set up</string>
