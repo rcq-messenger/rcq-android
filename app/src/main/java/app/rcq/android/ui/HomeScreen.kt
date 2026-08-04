@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -205,6 +206,11 @@ internal fun HomeScreen(
         delay(3000)
         app.rcq.android.CrashReporter.launchComplete(context)
     }
+    // News badge: the server tells us the newest post id, we remember what was
+    // shown. Refreshed on appear rather than pushed — a news post is not worth
+    // a wake-up, and this is the moment the dot would be looked at anyway.
+    val newsUnread by session.newsUnread.collectAsState()
+    LaunchedEffect(Unit) { session.refreshNewsBadge() }
     val contacts by session.contacts.collectAsState()
     val groups by session.groups.collectAsState()
     val pending by session.pending.collectAsState()
@@ -359,6 +365,7 @@ internal fun HomeScreen(
                 onOpenDiagnostics = onOpenDiagnostics,
                 onOpenProfile = onOpenProfile,
                 onOpenNews = onOpenNews,
+                newsUnread = newsUnread,
                 onOpenOutgoing = onOpenOutgoing,
                 onOpenSaved = onOpenSaved,
                 onOpenAudioRooms = onOpenAudioRooms,
@@ -930,6 +937,7 @@ private fun HomeHeader(
     onOpenDiagnostics: () -> Unit,
     onOpenProfile: () -> Unit,
     onOpenNews: () -> Unit,
+    newsUnread: Int,
     onOpenOutgoing: () -> Unit,
     onOpenSaved: () -> Unit,
     onOpenAudioRooms: () -> Unit,
@@ -1121,6 +1129,23 @@ private fun HomeHeader(
                 Icons.Filled.MoreVert, "Menu", tint = c.textPrimary,
                 modifier = Modifier.size(26.dp).clip(CircleShape).clickable { overflowMenu = true },
             )
+            // Unread news. Sits on the corner of the glyph so the ellipsis
+            // stays legible and the dot reads as a status badge, same as iOS.
+            // Without it the only way to learn a post exists was to open the
+            // menu and then the screen, on the off chance.
+            if (newsUnread > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 2.dp, y = (-2).dp)
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(c.bgPrimary)
+                        .padding(1.5.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE5484D)),
+                )
+            }
             DropdownMenu(expanded = overflowMenu, onDismissRequest = { overflowMenu = false }) {
                 // Censorship bypass: manual override, back by request. It also
                 // engages automatically when a direct connection looks blocked,
@@ -1160,7 +1185,16 @@ private fun HomeHeader(
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.home_menu_news), color = c.textPrimary) },
+                    text = {
+                        Text(
+                            if (newsUnread > 0) {
+                                stringResource(R.string.home_menu_news) + "  •  " + newsUnread
+                            } else {
+                                stringResource(R.string.home_menu_news)
+                            },
+                            color = c.textPrimary,
+                        )
+                    },
                     leadingIcon = { Icon(Icons.Filled.Newspaper, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenNews() },
                 )

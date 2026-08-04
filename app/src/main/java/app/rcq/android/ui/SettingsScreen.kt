@@ -113,6 +113,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
@@ -579,7 +580,12 @@ private fun SettingsRoot(
             onDismissRequest = { showAbout = false },
             containerColor = c.bgSecondary,
             confirmButton = { TextButton(onClick = { showAbout = false }) { Text(stringResource(R.string.common_done), color = c.accent) } },
-            title = { Text("RCQ", color = c.textPrimary) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Image(painterResource(R.drawable.rcq_logo), null, modifier = Modifier.size(24.dp))
+                    Text("RCQ", color = c.textPrimary)
+                }
+            },
             text = {
                 // Scrollable: the update notes can be a long bilingual
                 // paragraph that otherwise pushes the "Download and install"
@@ -598,7 +604,6 @@ private fun SettingsRoot(
                         .verticalScroll(aboutScroll)
                         .simpleVerticalScrollbar(aboutScroll, c.textSecondary),
                 ) {
-                    Text(stringResource(R.string.cs_about_tagline), color = c.textSecondary, fontSize = 14.sp)
                     Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp)
                     Text(stringResource(R.string.cs_about_features), color = c.textSecondary, fontSize = 12.sp)
                     Divider()
