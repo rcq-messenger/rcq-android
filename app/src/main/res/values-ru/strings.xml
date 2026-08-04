@@ -950,6 +950,9 @@
     <string name="push_nudge_title">Сообщения при закрытом приложении</string>
     <string name="push_nudge_body">Чтобы получать сообщения, когда приложение закрыто или выгружено из памяти, установите ntfy (бесплатный сервис пуш-уведомлений). Аккаунт при закрытии не теряется, он просто уходит в оффлайн.</string>
     <string name="push_nudge_setup">Настроить</string>
+    <string name="fsi_lost_title">Входящие звонки станут тише</string>
+    <string name="fsi_lost_body">Это обновление сбросило разрешение RCQ показывать звонок на весь экран, поэтому входящий приходит обычным уведомлением, которое легко пропустить. Некоторые телефоны сбрасывают его при каждом обновлении, вернуть можно одним нажатием.</string>
+    <string name="fsi_lost_fix">Разрешить</string>
     <string name="push_nudge_dismiss">Скрыть</string>
     <string name="push_channel_calls">Звонки</string>
     <string name="push_channel_calls_desc">Уведомления о входящих звонках</string>

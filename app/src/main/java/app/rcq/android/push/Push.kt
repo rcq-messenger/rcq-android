@@ -313,6 +313,38 @@ object Push {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
             (ctx.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true)
 
+    /** True when the full-screen-intent grant has gone missing since the last
+     *  version of the app that ran on this device.
+     *
+     *  Stock Android keeps the grant across an in-place update (verified on
+     *  API 35: `appops get` still reports `allow` after `install -r`), but some
+     *  vendor builds clear special access on every update, and a tester on one
+     *  of them had to re-enable it after every release. There is nothing an app
+     *  can do to hold onto a permission the system took away — what it can do
+     *  is notice, instead of leaving the person to find out by missing a call.
+     *
+     *  Only reports a LOSS: the very first run after install records the state
+     *  and says nothing, so this never doubles as a nag for someone who simply
+     *  never granted it. */
+    fun fullScreenIntentLostOnUpdate(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+        val prefs = ctx.applicationContext.getSharedPreferences(FSI_PREFS, Context.MODE_PRIVATE)
+        val granted = fullScreenIntentGranted(ctx)
+        val version = runCatching {
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
+        }.getOrDefault(0L)
+        val seenVersion = prefs.getLong(K_FSI_VERSION, -1L)
+        val hadIt = prefs.getBoolean(K_FSI_GRANTED, false)
+        prefs.edit().putLong(K_FSI_VERSION, version).putBoolean(K_FSI_GRANTED, granted).apply()
+        // Same build as last time, or a first run we have no history for.
+        if (seenVersion < 0 || seenVersion == version) return false
+        return hadIt && !granted
+    }
+
+    private const val FSI_PREFS = "rcq_fsi"
+    private const val K_FSI_VERSION = "version"
+    private const val K_FSI_GRANTED = "granted"
+
     /** Open the system screen where the user grants full-screen-intent access, so
      *  incoming calls pop the full call UI instead of a heads-up. Falls back to
      *  the app's notification settings if the dedicated screen is unavailable. */
