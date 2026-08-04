@@ -953,6 +953,9 @@
     <string name="push_nudge_title">Messages while the app is closed</string>
     <string name="push_nudge_body">To receive messages while the app is closed or evicted from memory, install ntfy (a free push service). Your account is never lost when you close the app, it just goes offline.</string>
     <string name="push_nudge_setup">Set up</string>
+    <string name="fsi_lost_title">Incoming calls will be quieter</string>
+    <string name="fsi_lost_body">This update cleared RCQ\'s permission to show a call on the full screen, so an incoming call now arrives as an ordinary notification that is easy to miss. Some phones clear it on every update; granting it again takes one tap.</string>
+    <string name="fsi_lost_fix">Grant it</string>
     <string name="push_nudge_dismiss">Dismiss</string>
     <string name="push_channel_calls">Calls</string>
     <string name="push_channel_calls_desc">Incoming call notifications</string>

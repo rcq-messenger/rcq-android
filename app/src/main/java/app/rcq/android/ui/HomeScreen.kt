@@ -233,6 +233,13 @@ internal fun HomeScreen(
     // Show a dismissible banner pointing at setup; the account is never lost.
     // Persisted (not remember{}): navigating into a chat and back recreated
     // HomeScreen and resurrected the dismissed banner (v0.66 regression).
+    // Some vendor builds clear special access on every app update, and a call
+    // that arrives without it degrades to a heads-up notification that is easy
+    // to miss. We cannot hold onto the grant, but we can say it went.
+    var fsiLost by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        fsiLost = app.rcq.android.push.Push.fullScreenIntentLostOnUpdate(context)
+    }
     val pushNudgeDismissed by LocalStores.pushNudgeDismissed.collectAsState()
     // remember, NOT a bare call: pushState() asks the PackageManager which apps
     // can act as a UnifiedPush distributor, and this line sits in the body of a
@@ -400,6 +407,17 @@ internal fun HomeScreen(
             }
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                if (fsiLost) {
+                    item(key = "fsi-lost") {
+                        FullScreenIntentBanner(
+                            onFix = {
+                                fsiLost = false
+                                app.rcq.android.push.Push.openFullScreenIntentSettings(context)
+                            },
+                            onDismiss = { fsiLost = false },
+                        )
+                    }
+                }
                 if (showPushNudge) {
                     item(key = "push-nudge") {
                         PushNudgeBanner(
@@ -1459,6 +1477,36 @@ private fun CiPendingRow(tag: String, preview: String, onAccept: () -> Unit, onB
         Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(R.string.ci_block), color = c.textSecondary, modifier = Modifier.clickable(onClick = onBlock).padding(8.dp))
+    }
+}
+
+/// Shown once, after an update that took the full-screen-intent grant with it.
+/// Same shape as the push nudge so it reads as the same kind of message.
+@Composable
+private fun FullScreenIntentBanner(onFix: () -> Unit, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Notifications, null, tint = c.accent, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.fsi_lost_title),
+                color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(stringResource(R.string.fsi_lost_body), color = c.textSecondary, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.push_nudge_dismiss), color = c.textSecondary)
+            }
+            TextButton(onClick = onFix) {
+                Text(stringResource(R.string.fsi_lost_fix), color = c.accent)
+            }
+        }
     }
 }
 
