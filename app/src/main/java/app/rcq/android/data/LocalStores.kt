@@ -670,6 +670,13 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_CONTACTS_CACHE), json).apply()
     }
 
+    /** Headless read of a SPECIFIC account's roster cache, for the push
+     *  receiver: a wake names the account it is for ([to_uin]), which on a
+     *  multi-account phone is often not the bound one, and a background start
+     *  has bound nothing at all. Same shape as [isMutedFor]. */
+    fun cachedContactsJsonFor(accountId: String): String? =
+        if (::prefs.isInitialized) prefs.getString("$accountId.$K_CONTACTS_CACHE", null) else null
+
     fun cachedGroupsJson(): String? =
         if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_GROUPS_CACHE), null) else null
 
