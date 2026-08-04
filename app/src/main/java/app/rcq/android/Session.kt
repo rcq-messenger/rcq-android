@@ -1734,6 +1734,49 @@ class Session(context: Context) {
     /** Fetch the admin-posted news feed (GET /news); null on failure. */
     suspend fun loadNews(): RcqApi.NewsFeed? = runCatching { api.news() }.getOrNull()
 
+    // ── news badge ────────────────────────────────────────────────────────
+    // The server's `latest_id` is the authoritative "newest post"; what the
+    // user has actually looked at is ours to remember. iOS has shown a red dot
+    // on the 3-dot menu off exactly this pair since the feed shipped, and
+    // Android just did not, so an Android user only found a post by opening
+    // the menu and the screen behind it on the off chance.
+    //
+    // Not per-account: the feed is the island's, the same for whoever is
+    // signed in, and a per-account pointer would re-announce a read post on
+    // every account switch.
+    private val newsPrefs by lazy { appCtx.getSharedPreferences("rcq_news", Context.MODE_PRIVATE) }
+
+    private val _newsUnread = MutableStateFlow(0)
+    /** How many posts are newer than the last one this device has seen. Zero
+     *  means no dot. */
+    val newsUnread: StateFlow<Int> = _newsUnread.asStateFlow()
+
+    /** Refresh the badge. Cheap and silent: a failed fetch leaves the previous
+     *  count alone rather than clearing a dot the user has not acted on. */
+    suspend fun refreshNewsBadge() {
+        val feed = loadNews() ?: return
+        // First run after this feature lands: everything already published is
+        // treated as read. These people have been using the app for months
+        // without a badge, so they did not MISS 46 posts — announcing the whole
+        // archive would be both alarming and wrong. From here on, only what is
+        // posted next counts.
+        if (!newsPrefs.contains(K_NEWS_SEEN)) {
+            newsPrefs.edit().putInt(K_NEWS_SEEN, feed.latest_id).apply()
+            _newsUnread.value = 0
+            return
+        }
+        val seen = newsPrefs.getInt(K_NEWS_SEEN, 0)
+        _newsUnread.value = feed.items.count { it.id > seen }
+            .coerceAtLeast(if (feed.latest_id > seen) 1 else 0)
+    }
+
+    /** Called when the news screen opens, so the dot clears on first view. */
+    fun markNewsSeen(latestId: Int) {
+        if (latestId <= newsPrefs.getInt(K_NEWS_SEEN, 0)) return
+        newsPrefs.edit().putInt(K_NEWS_SEEN, latestId).apply()
+        _newsUnread.value = 0
+    }
+
     /** My own reports plus any answer written to them. Soft-fails to null so a
      *  dead network shows the empty state rather than a crash. */
     suspend fun loadMyReports(): List<RcqApi.MyReport>? =
@@ -4296,4 +4339,9 @@ class Session(context: Context) {
     private fun identityPub(): ByteArray = X25519PrivateKeyParameters(identityPriv(), 0).generatePublicKey().encoded
     private fun signingPriv(): ByteArray = store.signingPrivate ?: error("no signing key")
     private fun signingPub(): ByteArray = Ed25519PrivateKeyParameters(signingPriv(), 0).generatePublicKey().encoded
+
+    private companion object {
+        /** Newest news post this device has been shown. */
+        const val K_NEWS_SEEN = "news_seen_id"
+    }
 }

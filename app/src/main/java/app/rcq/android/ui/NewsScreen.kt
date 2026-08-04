@@ -49,6 +49,9 @@ fun NewsScreen(session: Session, onBack: () -> Unit) {
 
     LaunchedEffect(Unit) {
         feed = session.loadNews()
+        // Seen the moment the screen shows them, which is what clears the red
+        // dot on the home menu.
+        feed?.let { session.markNewsSeen(it.latest_id) }
         loading = false
     }
 
