@@ -70,20 +70,31 @@ object RelayConfigStore {
         .callTimeout(12, TimeUnit.SECONDS)
         .build()
 
-    /** Bundled relay pool — mirrors the live signed config (v13). The last-resort
-     *  fallback when no verified remote/disk list is available — CRITICAL for a
-     *  blocked user: both signed-config mirrors (github raw, Cloudflare relay.rcq.app)
-     *  and the broker (api.rcq.app, fetched direct) are themselves DPI-blockable, so
-     *  a censored fresh install may ONLY ever see this list. So it leads with the
-     *  DOMESTIC (RU) relay — a domestic IP is far costlier for a censor to block
-     *  (collateral) than the foreign cloud relays below. Keep in sync with the
-     *  signed config (relay-aws-sg 47.129.249.170 was retired in v13). */
+    /** Bundled relay pool — a copy of the live signed config, last synced with
+     *  **v130 (2026-07-31)**.
+     *
+     *  This is the last-resort fallback when no verified remote/disk list is
+     *  available, and it is CRITICAL for a blocked user: both signed-config
+     *  mirrors (github raw, Cloudflare relay.rcq.app) and the broker
+     *  (api.rcq.app, fetched direct) are themselves DPI-blockable, so a
+     *  censored fresh install may ONLY ever see this list.
+     *
+     *  ⚠ Which is exactly why it must not rot. Until 2026-08-05 it still led
+     *  with the domestic RU relay 45.151.101.221, retired from the signed
+     *  config on 06-18 and dead since — so the first thing a censored client
+     *  did was dial a corpse. The oracle VLESS entry also carried the wrong
+     *  SNI (www.microsoft.com where the signed config says www.apple.com),
+     *  which is the failure that once broke VLESS while Hysteria2 kept
+     *  working on the same box.
+     *
+     *  Keep in step with the signed config: `curl -s
+     *  https://relay.rcq.app/v1/config` and compare tag / server / sni / keys.
+     *  Order mirrors the signed priorities (Hysteria2 first on each host). */
     private val bundled = listOf(
-        SingBoxTransport.Relay("relay-msk-aeza", "vless", "45.151.101.221", 443, "www.yandex.ru", uuid = "9c7174e7-2cb9-4d03-bffb-259bd534b65b", publicKey = "ord-QgtxD57vOVLMsXwGC6Qj7kaK4kb8Tq3MxImQch4", shortId = "5d88ef2912b4fa39", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-do-fra-yandex-hy2", "hysteria2", "165.22.90.214", 443, "www.yandex.ru", password = "JN0qzA4LJfhHPKKN3QHj4eN8", obfsPassword = "jXfGkLToOkTihpeJzDiNf8Bb"),
         SingBoxTransport.Relay("relay-do-fra-yandex", "vless", "165.22.90.214", 443, "www.yandex.ru", uuid = "2081b3c4-faaa-4cce-a0ab-607197b28237", publicKey = "n33TZTLNrc6X7jTGrKWex_sk8aIQ6Qqz-eC8lqYMii8", shortId = "aa5d483441e59ac7", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-oracle-il-hy2", "hysteria2", "129.159.143.135", 443, "www.microsoft.com", password = "bvuvu74CVsiXdcJazcYphnO5", obfsPassword = "PaEHrZABTk36orhfFON7Jure"),
-        SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "www.microsoft.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "www.apple.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-gcp-hy2", "hysteria2", "35.238.53.96", 443, "www.apple.com", password = "QaY3uT8EmfZxfON65jaT5bSu", obfsPassword = "fLpJ2c211xjnZcP9VNcNpbZP"),
         SingBoxTransport.Relay("relay-gcp", "vless", "35.238.53.96", 443, "www.apple.com", uuid = "8e3b35d3-18a6-406d-9ac6-c5558a806663", publicKey = "mQZ8CJeMWyf7oYGWJG8oOI52or2kx4yTthl6AGZkSTw", shortId = "b5b8979af1f27aab", flow = "xtls-rprx-vision"),
     )
