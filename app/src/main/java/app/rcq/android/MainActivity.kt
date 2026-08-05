@@ -92,9 +92,13 @@ object ContactAddLink {
 
     fun fromUri(uri: android.net.Uri?): Req? {
         if (uri == null) return null
-        val isRcq = uri.scheme == "rcq" && uri.host == "add"
+        // Both spellings of the same intent. /u/ is "add this contact", /r/ is
+        // "a friend invited you" — the second is what someone who does not have
+        // RCQ yet is sent, and until now no client claimed that link at all, so
+        // tapping an invite opened a browser and stopped there.
+        val isRcq = uri.scheme == "rcq" && (uri.host == "add" || uri.host == "r")
         val isWeb = (uri.scheme == "https" || uri.scheme == "http") &&
-            uri.host == "rcq.app" && uri.pathSegments.firstOrNull() == "u"
+            uri.host == "rcq.app" && uri.pathSegments.firstOrNull() in setOf("u", "r")
         if (!isRcq && !isWeb) return null
         val uin = uri.lastPathSegment?.toIntOrNull()?.takeIf { it > 0 } ?: return null
         return Req(uin, uri.getQueryParameter("h")?.takeIf { it.isNotBlank() })
