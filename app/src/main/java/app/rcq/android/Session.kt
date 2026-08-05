@@ -581,15 +581,40 @@ class Session(context: Context) {
         // is restorable from a BIP39 phrase (the seed is persisted below).
         val seed = IdentityKeys.newSeed()
         val identity = IdentityKeys.fromSeed(seed)
+        // Did this install arrive by someone's invite link? The pending add is
+        // set by the VIEW intent before any of this runs and survives
+        // onboarding, but until now only a REGISTERED session ever consumed it:
+        // a person who tapped a friend's link, installed, and signed up landed
+        // with an empty contact list and the invite silently dropped. The
+        // server has recorded exactly zero referrals in the project's life,
+        // and this is why — not a missing mechanism, an unreached one.
+        //
+        // Naming the inviter here makes the server connect the pair on both
+        // sides as part of registration (routers/referrals.record_referral), so
+        // the account exists with someone in it rather than nobody.
+        //
+        // Flagship + same-island only: a referral to an account on another
+        // island is not something this island can verify or connect.
+        val inviterUin = ContactAddLink.pending.value
+            ?.takeIf { it.host == null && (host ?: RcqApi.DEFAULT_HOST) == RcqApi.DEFAULT_HOST }
+            ?.uin
         val resp = regApi.register(
             RcqApi.RegisterRequest(
                 nickname = nickname,
                 identity_key = Base64.encodeToString(identity.identityPublic, Base64.NO_WRAP),
                 signing_key = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP),
+                inviter_uin = inviterUin,
                 invite = invite?.takeIf { it.isNotBlank() },
                 device_id = DeviceId.get(appCtx),
             )
         )
+        // Consumed: the server already made the two of them contacts, so the
+        // confirm dialog that normally follows a tapped link would be asking
+        // for something that has happened.
+        if (inviterUin != null) {
+            android.util.Log.i("RCQinvite", "registered from an invite by #$inviterUin")
+            ContactAddLink.pending.value = null
+        }
         // Server identity is live. Commit locally: create the account slot,
         // persist the identity under its prefix, then swap onto it.
         val acct = AccountManager.add(serverHost = host, displayLabel = null)

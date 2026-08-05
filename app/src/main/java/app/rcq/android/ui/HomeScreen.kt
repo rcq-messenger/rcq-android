@@ -468,7 +468,21 @@ internal fun HomeScreen(
                 val connecting = !connected && contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()
                 if (contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()) {
                     item(key = "empty") {
-                        if (connecting) ConnectingState(stealth = stealthActive) else EmptyState(onAdd = { showAdd = true })
+                        if (connecting) ConnectingState(stealth = stealthActive) else EmptyState(onAdd = { showAdd = true }, myUin = uin)
+                    }
+                } else if (contacts.isEmpty() && !connecting) {
+                    // ⚠ The state above is almost never reached: every new
+                    // account is joined to RCQ Beta, so `groups` is never empty
+                    // and the "no contacts yet" screen a first-time user was
+                    // supposed to see does not render for them at all.
+                    //
+                    // And having no CONTACTS is the state three quarters of all
+                    // accounts are in. They are not staring at an empty app —
+                    // they are in one big group chat with nobody of their own,
+                    // and nothing in the interface has ever offered them a way
+                    // to bring someone.
+                    item(key = "no-contacts") {
+                        InviteNudge(myUin = uin, onAdd = { showAdd = true })
                     }
                 }
 
@@ -1538,9 +1552,46 @@ private fun PushNudgeBanner(onSetup: () -> Unit, onDismiss: () -> Unit) {
     }
 }
 
+/// Shown to someone who has groups but not a single contact of their own —
+/// the majority state of this user base. Deliberately a quiet row rather than a
+/// full-screen takeover: it sits above a chat list that is not empty.
 @Composable
-private fun EmptyState(onAdd: () -> Unit) {
+private fun InviteNudge(myUin: Int, onAdd: () -> Unit) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            stringResource(R.string.home_no_contacts_title),
+            color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            stringResource(R.string.home_no_contacts_body),
+            color = c.textSecondary, fontSize = 13.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text(
+                stringResource(R.string.home_empty_invite),
+                color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable { app.rcq.android.net.UpdateChecker.shareInvite(context, myUin) }
+                    .padding(vertical = 4.dp),
+            )
+            Text(
+                stringResource(R.string.home_empty_cta),
+                color = c.textSecondary, fontSize = 14.sp,
+                modifier = Modifier.clickable(onClick = onAdd).padding(vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(onAdd: () -> Unit, myUin: Int) {
+    val c = RcqTheme.colors
+    val context = LocalContext.current
     Column(
         Modifier.fillMaxWidth().padding(vertical = 60.dp, horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1550,6 +1601,19 @@ private fun EmptyState(onAdd: () -> Unit) {
         Text(stringResource(R.string.home_empty_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Text(stringResource(R.string.home_empty_body), color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
         CapsuleButton(stringResource(R.string.home_empty_cta), onClick = onAdd)
+        // The screen three quarters of accounts never leave. "Add a contact"
+        // asks for a UIN, which assumes the other person already has RCQ and is
+        // standing next to you — so for anyone whose friends are not here yet,
+        // this screen was a dead end with a button that could not help.
+        Text(
+            stringResource(R.string.home_empty_invite),
+            color = c.accent,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickable { app.rcq.android.net.UpdateChecker.shareInvite(context, myUin) }
+                .padding(vertical = 6.dp, horizontal = 12.dp),
+        )
     }
 }
 
