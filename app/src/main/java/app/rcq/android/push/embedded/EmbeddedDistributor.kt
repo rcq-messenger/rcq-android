@@ -60,8 +60,23 @@ object EmbeddedDistributor {
     const val EXTRA_REASON = "reason"
 
     /** Our push server. A UnifiedPush topic is conventionally prefixed `up`, and
-     *  `?up=1` marks the publish as a UnifiedPush one on the ntfy side. */
+     *  `?up=1` marks the publish as a UnifiedPush one on the ntfy side.
+     *
+     *  This is the name the ISLAND uses to deliver a wake, so it stays fixed —
+     *  see [subscribeHost] for the leg that can move. */
     const val PUSH_HOST = "https://push.rcq.app"
+
+    /** Where THIS DEVICE subscribes for wakes: the signed config's push front
+     *  when it names one, else the real push host.
+     *
+     *  Split from [PUSH_HOST] on purpose. `push.rcq.app` resolves to the island's
+     *  own address, with no CDN in front of it, so it dies in exactly the case
+     *  the front exists for: the island blocked by name or address while
+     *  Cloudflare still answers. The API and the message socket both follow
+     *  `transport.front` there; without this the push socket alone kept dialling
+     *  the blocked address and the user got no wakes while the app looked fine. */
+    fun subscribeHost(): String =
+        app.rcq.android.net.RelayConfigStore.pushFront ?: PUSH_HOST
     private const val TOPIC_PREFIX = "up"
     private const val TOPIC_RANDOM_CHARS = 16
 

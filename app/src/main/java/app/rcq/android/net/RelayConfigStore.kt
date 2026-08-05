@@ -123,6 +123,25 @@ object RelayConfigStore {
     var frontHost: String = DEFAULT_FRONT
         private set
 
+    /** Front for SUBSCRIBING to the push server, from the signed config.
+     *
+     *  ⚠ Only the subscribe leg. The endpoint we hand the island
+     *  ([EmbeddedDistributor.endpoint]) must keep naming the real push host:
+     *  that URL is fetched by the ISLAND to deliver a wake, and the island is
+     *  not the censored party. Pointing it at a front would route our own
+     *  server-to-server hop through Cloudflare for no reason, and would strand
+     *  every wake if the front ever stopped resolving.
+     *
+     *  Null until a payload names one, and the socket then stays on the
+     *  compiled-in host. This exists because the push socket is the ONE
+     *  connection the CF-front branch of the route ladder cannot rescue: that
+     *  branch deliberately runs with no relay, so a hardcoded push host on a
+     *  blocked address means a user who is otherwise fully working (API and
+     *  message socket both riding the front) silently receives no wakes. */
+    @Volatile
+    var pushFront: String? = null
+        private set
+
     /** What `urltest` fetches to decide which relay is carrying traffic best.
      *
      *  ⚠ This one goes THROUGH each relay, so the relay's allow-list has to
@@ -331,6 +350,8 @@ object RelayConfigStore {
                     ?.takeIf { it.isNotBlank() }?.let { frontHost = it }
                 tr.get("probe")?.takeIf { !it.isJsonNull }?.asString
                     ?.takeIf { it.startsWith("https://") }?.let { probeUrl = it }
+                tr.get("push")?.takeIf { !it.isJsonNull }?.asString
+                    ?.takeIf { it.startsWith("https://") }?.let { pushFront = it }
             }
         }
         val out = ArrayList<Pair<Int, SingBoxTransport.Relay>>()

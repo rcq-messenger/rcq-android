@@ -1,6 +1,7 @@
 package app.rcq.android.net
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.rcq.android.push.embedded.EmbeddedDistributor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -239,6 +240,78 @@ class RelayConfigStoreTest {
         // Accepting a SET must not mean accepting anyone: this key was generated
         // for the test and appears in no build.
         assertNull(RelayConfigStore.verifyAndParse(strangerSigned))
+    }
+
+    // ── push front ──────────────────────────────────────────────────────
+    //
+    // The push socket is the one connection the CF-front branch of the route
+    // ladder cannot rescue by itself: that branch runs with no relay, and the
+    // subscribe host was compiled in. This payload is genuinely signed with the
+    // production key and names a push front, which is the whole delivery
+    // mechanism — the front can be stood up and switched on with no release.
+
+    private val pushFrontSigned = """{
+  "version": 131,
+  "issued_at": "2026-08-05T01:07:49Z",
+  "relays": [
+    {
+      "tag": "relay-do-fra-spaces-hy2",
+      "proto": "hysteria2",
+      "server": "165.22.90.214",
+      "port": 443,
+      "sni": "fra1.digitaloceanspaces.com",
+      "password": "JN0qzA4LJfhHPKKN3QHj4eN8",
+      "obfs_password": "jXfGkLToOkTihpeJzDiNf8Bb",
+      "priority": 0
+    }
+  ],
+  "transport": {
+    "front": "cdn.rcq.app",
+    "probe": "https://api.rcq.app/health",
+    "push": "https://push-front.rcq.app"
+  },
+  "sig": "p8X2k1FPv96e4GYnBBJiNx0lanLUse/Nccg6dAkXJJYlqzVxk8zhSuu85CfNRTXQmrSxNB725I+Q0X+PLh6xCA=="
+}"""
+
+    @Test
+    fun signedTransportBlockMovesThePushSubscribeHost() {
+        assertNotNull("fixture must verify against the production key",
+            RelayConfigStore.verifyAndParse(pushFrontSigned))
+        assertEquals("https://push-front.rcq.app", RelayConfigStore.pushFront)
+        // Only the subscribe leg moves. The endpoint handed to the island is
+        // fetched BY the island to deliver a wake, so pointing it at a front
+        // would route our own server-to-server hop through Cloudflare and
+        // strand every wake the day that front stopped resolving.
+        assertEquals("https://push-front.rcq.app", EmbeddedDistributor.subscribeHost())
+        assertEquals("https://push.rcq.app", EmbeddedDistributor.PUSH_HOST)
+    }
+
+    @Test
+    fun aPayloadWithoutATransportBlockLeavesThePushHostAlone() {
+        // Establish a known value first so this says what it means whichever
+        // test ran before it.
+        assertNotNull(RelayConfigStore.verifyAndParse(pushFrontSigned))
+        assertEquals("https://push-front.rcq.app", RelayConfigStore.pushFront)
+        // `signed` carries no transport block. Absent must mean "unchanged",
+        // not "reset": a rollback to an older payload must not silently drag a
+        // censored client back onto the blocked apex.
+        assertNotNull(RelayConfigStore.verifyAndParse(signed))
+        assertEquals("a payload with no transport block must not clear the front",
+            "https://push-front.rcq.app", RelayConfigStore.pushFront)
+    }
+
+    @Test
+    fun anUnsignedPushHostIsIgnored() {
+        assertNotNull(RelayConfigStore.verifyAndParse(pushFrontSigned))
+        // Same edit as the tamper test, on the field that decides where the
+        // device listens for wakes: whoever can set this is handed every wake
+        // the device is meant to receive, so it has to fall on the signature
+        // check and not on any later validation.
+        val tampered = pushFrontSigned.replace("push-front.rcq.app", "evil.example")
+        assertTrue("test setup: replacement must change the text", tampered != pushFrontSigned)
+        assertNull(RelayConfigStore.verifyAndParse(tampered))
+        assertEquals("a rejected payload must not have moved the host",
+            "https://push-front.rcq.app", RelayConfigStore.pushFront)
     }
 
     @Test

@@ -1045,6 +1045,13 @@ class Session(context: Context) {
             api = newApi()
             socket = newSocket()
             android.util.Log.i("RCQfront", "direct api blocked, CF front reachable — routing via $FRONT_HOST")
+            // The push socket is the one connection this branch does NOT fix by
+            // itself: it dials its own host, and this path deliberately runs
+            // with no relay, so it would keep retrying a blocked address while
+            // the API and the message socket both sail through the front. Kick
+            // it so it re-reads the subscribe host (a signed config naming
+            // `transport.push` moves it onto the front too).
+            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
         }
         // Engage the relay when the user forced it on, OR (auto-fallback) when
         // direct is unreachable AND the front didn't take over — UNLESS the user
