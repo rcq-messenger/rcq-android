@@ -285,6 +285,33 @@ object UpdateChecker {
      *  only answer to the FIRST-install bootstrap when rcq.app is blocked: a new
      *  user can't reach the download or the relays (those live inside the app),
      *  so they get the APK hand-to-hand from someone who already has it. */
+    /** Share an invite LINK, for the person who does not have RCQ yet.
+     *
+     *  [shareApk] below exists for a different problem — installing when
+     *  rcq.app is blocked — and it hands over a 100MB file, which is not what
+     *  anyone sends a friend to say "join me". Until this there was no other
+     *  option in the app, and the server has recorded exactly zero referrals in
+     *  the project's life while three quarters of accounts hold no contact at
+     *  all. The mechanism to connect an invited pair has been finished and
+     *  waiting on the server the whole time; nothing ever called it.
+     *
+     *  The link is the ordinary profile URL, so it already opens the app on a
+     *  device that has it (App Links are verified for rcq.app) and lands on the
+     *  download page on one that does not. Registering from it names the
+     *  inviter, and the island then makes the two of them contacts. */
+    fun shareInvite(context: Context, uin: Int): Boolean = runCatching {
+        val link = "https://rcq.app/u/$uin"
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, context.getString(R.string.invite_share_text, link))
+        }
+        context.startActivity(
+            Intent.createChooser(send, context.getString(R.string.invite_share_title))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        true
+    }.getOrDefault(false)
+
     fun shareApk(context: Context): Boolean = runCatching {
         val src = File(context.applicationInfo.sourceDir)
         val dir = File(context.cacheDir, "files").apply { mkdirs() }

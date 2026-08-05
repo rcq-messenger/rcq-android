@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.activity.result.contract.ActivityResultContracts
@@ -381,6 +382,14 @@ private fun SettingsRoot(
                 // Hand the APK to a friend offline — the only way to install RCQ
                 // first-time when rcq.app is blocked (the relays live inside the
                 // app, so a brand-new user can't reach the download otherwise).
+                // Invite a person who does not have RCQ. Distinct from the APK
+                // row below, which solves a different problem (installing when
+                // rcq.app is blocked) and hands over a 100MB file — not what
+                // anyone sends to say "join me".
+                SettingsRow(Icons.Filled.PersonAdd, stringResource(R.string.settings_row_invite)) {
+                    app.rcq.android.net.UpdateChecker.shareInvite(context, uin)
+                }
+                Divider()
                 SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app)) {
                     app.rcq.android.net.UpdateChecker.shareApk(context)
                 }

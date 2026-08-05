@@ -1018,4 +1018,10 @@
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>
     </plurals>
+    <string name="invite_share_title">Invite a friend</string>
+    <string name="invite_share_text">RCQ is a messenger that needs no phone number. Join me: %1$s</string>
+    <string name="home_empty_invite">Invite a friend</string>
+    <string name="settings_row_invite">Invite a friend</string>
+    <string name="home_no_contacts_title">No contacts of your own yet</string>
+    <string name="home_no_contacts_body">Groups are one thing, but RCQ is better with people you know.</string>
 </resources>

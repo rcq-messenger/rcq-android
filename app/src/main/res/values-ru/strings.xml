@@ -1017,4 +1017,10 @@
         <item quantity="many">%d заметок</item>
         <item quantity="other">%d заметки</item>
     </plurals>
+    <string name="invite_share_title">Пригласить друга</string>
+    <string name="invite_share_text">Я в RCQ, это мессенджер без номера телефона. Заходи: %1$s</string>
+    <string name="home_empty_invite">Пригласить друга</string>
+    <string name="settings_row_invite">Пригласить друга</string>
+    <string name="home_no_contacts_title">Своих контактов пока нет</string>
+    <string name="home_no_contacts_body">Группы это одно, но RCQ живее с теми, кого вы знаете.</string>
 </resources>
