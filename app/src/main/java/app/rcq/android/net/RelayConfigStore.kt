@@ -170,7 +170,7 @@ object RelayConfigStore {
         .build()
 
     /** Bundled relay pool — a copy of the live signed config, last synced with
-     *  **v142 (2026-08-05)**, all 14 endpoints across 7 machines.
+     *  **v143 (2026-08-05)**, all 14 endpoints across 7 machines.
      *
      *  This is the last-resort fallback when no verified remote/disk list is
      *  available, and it is CRITICAL for a blocked user: both signed-config
@@ -193,8 +193,15 @@ object RelayConfigStore {
      *  address owner, and Reality's resistance to ACTIVE probing does nothing
      *  about it. DigitalOcean and the four Vultr machines now present their own
      *  cloud's object storage, which genuinely lives on the same ASN and near
-     *  the same region. Oracle and GCP still carry Akamai-hosted names: moving
-     *  them off fails Reality handshakes for a reason not yet found.
+     *  the same region. Oracle joined them in v143 with identity.oraclecloud.com
+     *  (AS31898, the relay's own ASN). GCP still carries an Akamai-hosted name:
+     *  the fix is the same shape, but we no longer have access to that machine.
+     *
+     *  ⚠ The earlier attempts on Oracle failed for reasons worth keeping: the
+     *  dest has to speak TLS 1.3 AND settle on X25519. java.com does not do 1.3
+     *  at all, and Oracle's own object storage answers with P-256. Both were
+     *  recorded as "reachable, TLS 1.3 + X25519" without anyone measuring it
+     *  from the relay itself.
      *
      *  Keep in step with the signed config: `curl -s
      *  https://relay.rcq.app/v1/config` and compare tag / server / sni / keys.
@@ -203,7 +210,7 @@ object RelayConfigStore {
         SingBoxTransport.Relay("relay-do-fra-spaces-hy2", "hysteria2", "165.22.90.214", 443, "fra1.digitaloceanspaces.com", password = "JN0qzA4LJfhHPKKN3QHj4eN8", obfsPassword = "jXfGkLToOkTihpeJzDiNf8Bb"),
         SingBoxTransport.Relay("relay-do-fra-spaces", "vless", "165.22.90.214", 443, "fra1.digitaloceanspaces.com", uuid = "2081b3c4-faaa-4cce-a0ab-607197b28237", publicKey = "n33TZTLNrc6X7jTGrKWex_sk8aIQ6Qqz-eC8lqYMii8", shortId = "aa5d483441e59ac7", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-oracle-il-hy2", "hysteria2", "129.159.143.135", 443, "www.microsoft.com", password = "bvuvu74CVsiXdcJazcYphnO5", obfsPassword = "PaEHrZABTk36orhfFON7Jure"),
-        SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "www.apple.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "identity.oraclecloud.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-gcp-hy2", "hysteria2", "35.238.53.96", 443, "www.apple.com", password = "QaY3uT8EmfZxfON65jaT5bSu", obfsPassword = "fLpJ2c211xjnZcP9VNcNpbZP"),
         SingBoxTransport.Relay("relay-gcp", "vless", "35.238.53.96", 443, "www.apple.com", uuid = "8e3b35d3-18a6-406d-9ac6-c5558a806663", publicKey = "mQZ8CJeMWyf7oYGWJG8oOI52or2kx4yTthl6AGZkSTw", shortId = "b5b8979af1f27aab", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-vultr-waw-hy2", "hysteria2", "64.176.71.251", 443, "ams1.vultrobjects.com", password = "c8Hy1pVwL9WD1LwmRJhNGFUo", obfsPassword = "8idmG6yKcCPKsMy64fd3jDcg"),
