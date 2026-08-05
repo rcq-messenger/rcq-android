@@ -76,6 +76,13 @@ object RelayConfigStore {
 
     private const val CACHE_FILE = "relay-config.json"
 
+    /** Compiled-in transport names, used until a signed payload says otherwise
+     *  and kept as the value a payload without a `transport` block leaves
+     *  alone. Both live under the flagship apex, which is the single point this
+     *  mechanism exists to move off. */
+    private const val DEFAULT_FRONT = "cdn.rcq.app"
+    private const val DEFAULT_PROBE = "https://api.rcq.app/health"
+
     @Volatile
     private var cached: List<SingBoxTransport.Relay>? = null
 
@@ -93,6 +100,28 @@ object RelayConfigStore {
      *  rollout is a signed-config push to a cohort, ZERO app release. */
     @Volatile
     var onionEnabled: Boolean = false
+        private set
+
+    /** Cloudflare front for the flagship, from the signed config. Used on a
+     *  DIRECT connection when the island itself is blocked, so it never travels
+     *  through a relay and needs nothing from a relay's allow-list. */
+    @Volatile
+    var frontHost: String = DEFAULT_FRONT
+        private set
+
+    /** What `urltest` fetches to decide which relay is carrying traffic best.
+     *
+     *  ⚠ This one goes THROUGH each relay, so the relay's allow-list has to
+     *  permit it. Relays derive that list from this same signed config, but they
+     *  do it on a timer — so publishing a probe on a name relays do not yet
+     *  allow breaks relay selection for everyone until they catch up, and a
+     *  client that can measure no relay has no tunnel at all. Move the relays
+     *  first, then the probe. `relay-lockdown.sh --check` reports the mismatch.
+     *
+     *  Keeping it under a name relays already allow is why a probe change is
+     *  ordinary and a probe MOVE is not. */
+    @Volatile
+    var probeUrl: String = DEFAULT_PROBE
         private set
 
     /** True when [currentRelays] is serving a verified remote list (in memory),
@@ -271,6 +300,17 @@ object RelayConfigStore {
         // published, or a rollback would silently narrow the channel back down
         // to the two compiled-in names.
         parseSources(root)?.let { remoteSources = it }
+        // Transport names, if this payload carries them. Absent leaves the
+        // current values alone rather than resetting to the compiled-in ones:
+        // a rollback must not silently drag every client back onto the apex.
+        runCatching {
+            root.asJsonObject.getAsJsonObject("transport")?.let { tr ->
+                tr.get("front")?.takeIf { !it.isJsonNull }?.asString
+                    ?.takeIf { it.isNotBlank() }?.let { frontHost = it }
+                tr.get("probe")?.takeIf { !it.isJsonNull }?.asString
+                    ?.takeIf { it.startsWith("https://") }?.let { probeUrl = it }
+            }
+        }
         val out = ArrayList<Pair<Int, SingBoxTransport.Relay>>()
         for (el in root.getAsJsonArray("relays")) {
             val o = el.asJsonObject

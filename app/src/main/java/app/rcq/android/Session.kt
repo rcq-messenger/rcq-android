@@ -122,7 +122,9 @@ class Session(context: Context) {
     // api.rcq.app, so a blocked user reaches the island WITHOUT a relay. serverHost()
     // stays the island identity (api.rcq.app) — this only changes the transport URL.
     private var frontHost: String? = null
-    private val FRONT_HOST = "cdn.rcq.app"   // Cloudflare front for api.rcq.app
+    // Which host fronts the flagship comes from the signed config, so moving
+    // off the apex is a config push rather than a release.
+    private val FRONT_HOST: String get() = app.rcq.android.net.RelayConfigStore.frontHost
     private fun apiHost(): String = frontHost ?: serverHost()
     private var api = newApi()
     private var socket = newSocket()
