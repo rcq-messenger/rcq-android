@@ -240,4 +240,20 @@ class RelayConfigStoreTest {
         // for the test and appears in no build.
         assertNull(RelayConfigStore.verifyAndParse(strangerSigned))
     }
+
+    @Test
+    fun anOlderSignedPayloadCannotWalkTheClientBackwards() {
+        // The v9 fixture is genuinely signed — replaying it is not forgery, it is
+        // just an old truth served late. Anyone who can answer for a mirror can
+        // do it, and before this check the client took it and went back to a
+        // relay set retired in June.
+        // The floor is passed in rather than read from shared state, so this
+        // says what it means and does not depend on which test ran first.
+        assertNotNull("v131 is accepted when the floor is 130",
+            RelayConfigStore.verifyAndParse(successorSigned, minVersion = 130))
+        assertNull("the v9 payload is validly signed and must STILL be refused",
+            RelayConfigStore.verifyAndParse(signed, minVersion = 130))
+        assertNotNull("with no floor the same old payload parses fine",
+            RelayConfigStore.verifyAndParse(signed))
+    }
 }
