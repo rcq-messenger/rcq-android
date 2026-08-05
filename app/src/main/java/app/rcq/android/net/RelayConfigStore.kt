@@ -31,12 +31,32 @@ object RelayConfigStore {
     // Raw 32-byte Ed25519 public key (base64), same key embedded in iOS.
     private const val PUBKEY_B64 = "TY834OFcBvtUqHcnVw/QrPBOaEAZo7a1GAmABMhjkT8="
 
-    // Tried in order; first signature-valid payload wins. GitHub raw is primary
-    // (hit far less by RU DPI than Cloudflare); CF is the secondary mirror.
-    private val SOURCES = listOf(
+    // The two mirrors compiled into the app. Tried in order; first
+    // signature-valid payload wins. GitHub raw is primary (hit far less by RU
+    // DPI than Cloudflare); CF is the secondary mirror.
+    //
+    // ⚠ These two names are also the whole attack surface of the delivery
+    // channel: a censor who blocks both leaves a client with nothing but the
+    // bundled pool and a hand-pasted token. That is what [remoteSources] is
+    // for — see [effectiveSources].
+    private val BUNDLED_SOURCES = listOf(
         "https://raw.githubusercontent.com/rcq-messenger/rcq-ios/main/relay-config.json",
         "https://relay.rcq.app/v1/config",
     )
+
+    /** Extra mirrors carried BY the signed config, so a new delivery channel
+     *  (a domain bought at another registrar, a mirror somewhere expensive to
+     *  block wholesale) reaches installed clients without an app release.
+     *
+     *  Null until a signature-valid payload has been parsed. */
+    @Volatile
+    private var remoteSources: List<String>? = null
+
+    /** How many mirrors we are willing to walk in one refresh. A refresh runs
+     *  before the transport is up, so each dead entry costs its full timeout;
+     *  a payload listing fifty of them would turn startup into a stall. */
+    private const val MAX_SOURCES = 8
+
     private const val CACHE_FILE = "relay-config.json"
 
     @Volatile
@@ -126,7 +146,7 @@ object RelayConfigStore {
         // for next launch. Unblocked users (tunnel off) fetch direct as before;
         // the signed config is PUBLIC, so tunnelling it leaks nothing.
         val fetchClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
-        for (url in SOURCES) {
+        for (url in effectiveSources()) {
             val body = runCatching {
                 fetchClient.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
                     if (resp.isSuccessful) resp.body?.string() else null
@@ -138,6 +158,40 @@ object RelayConfigStore {
             break
         }
     }
+
+    /** The mirrors to walk, freshest knowledge first: the ones the signed
+     *  config named, then the compiled-in pair.
+     *
+     *  ★ The bundled pair is ALWAYS appended and never replaced. A published
+     *  source list is an ADDITION, not a substitution — otherwise one bad push
+     *  (a typo'd host, a domain that lapses) would point every installed
+     *  client at a dead mirror with no route back, and no later push could
+     *  reach them to fix it. Being additive means the worst a bad entry costs
+     *  is one timeout before the known-good names are tried.
+     *
+     *  Config entries lead because they are the reason this exists: the two
+     *  bundled names are exactly what a censor enumerates and blocks first, so
+     *  on the network that needs them the new mirror is the one likely to
+     *  answer. */
+    fun effectiveSources(): List<String> {
+        val remote = remoteSources ?: return BUNDLED_SOURCES
+        return (remote + BUNDLED_SOURCES).distinct().take(MAX_SOURCES)
+    }
+
+    /** Parse the optional `sources` array: `[{"type":"https","url":"..."}]`.
+     *  Unknown types are skipped rather than rejected, so a payload that adds a
+     *  channel this build does not implement stays usable for everything else.
+     *  Absent or empty → null, i.e. the bundled pair alone. */
+    private fun parseSources(root: JsonElement): List<String>? = runCatching {
+        val arr = root.asJsonObject.getAsJsonArray("sources") ?: return null
+        arr.mapNotNull { el ->
+            val o = el.asJsonObject
+            val type = o.get("type")?.takeIf { !it.isJsonNull }?.asString ?: "https"
+            if (type != "https") return@mapNotNull null
+            o.get("url")?.takeIf { !it.isJsonNull }?.asString
+                ?.takeIf { it.startsWith("https://") }
+        }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
 
     /** Verify the Ed25519 signature, then parse relays (sorted by priority).
      *  Returns null on any failure — a bad signature is treated as no list. */
@@ -157,6 +211,11 @@ object RelayConfigStore {
         onionEnabled = runCatching {
             root.getAsJsonObject("onion")?.get("enabled")?.asBoolean ?: false
         }.getOrDefault(false)
+        // Only replace the known mirrors when this payload actually carries a
+        // list; a config without `sources` must not wipe one an earlier payload
+        // published, or a rollback would silently narrow the channel back down
+        // to the two compiled-in names.
+        parseSources(root)?.let { remoteSources = it }
         val out = ArrayList<Pair<Int, SingBoxTransport.Relay>>()
         for (el in root.getAsJsonArray("relays")) {
             val o = el.asJsonObject
