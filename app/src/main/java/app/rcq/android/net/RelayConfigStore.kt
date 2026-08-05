@@ -91,7 +91,7 @@ object RelayConfigStore {
         .build()
 
     /** Bundled relay pool — a copy of the live signed config, last synced with
-     *  **v130 (2026-07-31)**.
+     *  **v131 (2026-08-05)**.
      *
      *  This is the last-resort fallback when no verified remote/disk list is
      *  available, and it is CRITICAL for a blocked user: both signed-config
@@ -107,12 +107,22 @@ object RelayConfigStore {
      *  which is the failure that once broke VLESS while Hysteria2 kept
      *  working on the same box.
      *
+     *  ⚠ The SNI has to be plausible for the ADDRESS, not just innocuous on its
+     *  own. This pair presented `www.yandex.ru` from a DigitalOcean address
+     *  until 2026-08-05: Yandex is never served out of DigitalOcean, so a
+     *  passive observer finds every one of our connections with a single join
+     *  of SNI against the address owner, and Reality's resistance to ACTIVE
+     *  probing does nothing about it. It now presents a name that genuinely
+     *  lives on the same ASN and in the same region as the relay. Oracle and
+     *  GCP still carry Akamai-hosted names for want of admin access to those
+     *  two machines.
+     *
      *  Keep in step with the signed config: `curl -s
      *  https://relay.rcq.app/v1/config` and compare tag / server / sni / keys.
      *  Order mirrors the signed priorities (Hysteria2 first on each host). */
     private val bundled = listOf(
-        SingBoxTransport.Relay("relay-do-fra-yandex-hy2", "hysteria2", "165.22.90.214", 443, "www.yandex.ru", password = "JN0qzA4LJfhHPKKN3QHj4eN8", obfsPassword = "jXfGkLToOkTihpeJzDiNf8Bb"),
-        SingBoxTransport.Relay("relay-do-fra-yandex", "vless", "165.22.90.214", 443, "www.yandex.ru", uuid = "2081b3c4-faaa-4cce-a0ab-607197b28237", publicKey = "n33TZTLNrc6X7jTGrKWex_sk8aIQ6Qqz-eC8lqYMii8", shortId = "aa5d483441e59ac7", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-do-fra-spaces-hy2", "hysteria2", "165.22.90.214", 443, "fra1.digitaloceanspaces.com", password = "JN0qzA4LJfhHPKKN3QHj4eN8", obfsPassword = "jXfGkLToOkTihpeJzDiNf8Bb"),
+        SingBoxTransport.Relay("relay-do-fra-spaces", "vless", "165.22.90.214", 443, "fra1.digitaloceanspaces.com", uuid = "2081b3c4-faaa-4cce-a0ab-607197b28237", publicKey = "n33TZTLNrc6X7jTGrKWex_sk8aIQ6Qqz-eC8lqYMii8", shortId = "aa5d483441e59ac7", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-oracle-il-hy2", "hysteria2", "129.159.143.135", 443, "www.microsoft.com", password = "bvuvu74CVsiXdcJazcYphnO5", obfsPassword = "PaEHrZABTk36orhfFON7Jure"),
         SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "www.apple.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-gcp-hy2", "hysteria2", "35.238.53.96", 443, "www.apple.com", password = "QaY3uT8EmfZxfON65jaT5bSu", obfsPassword = "fLpJ2c211xjnZcP9VNcNpbZP"),
