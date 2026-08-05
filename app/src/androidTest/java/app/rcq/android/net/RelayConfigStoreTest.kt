@@ -150,4 +150,94 @@ class RelayConfigStoreTest {
         val noSig = signed.substring(0, cut) + "\n}"
         assertNull(RelayConfigStore.verifyAndParse(noSig))
     }
+
+    // ── key rotation ────────────────────────────────────────────────────
+    //
+    // The payloads below are the live v131 config (trimmed to two relays)
+    // re-signed with keys other than the one in use. They are what proves the
+    // client can be handed a payload signed by a DIFFERENT key without an app
+    // release — the property that makes rotating a leaked key possible at all,
+    // and the one that is silently absent until something actually verifies it.
+
+    private val successorSigned = """{
+  "version": 131,
+  "issued_at": "2026-08-05T01:07:49Z",
+  "relays": [
+    {
+      "tag": "relay-do-fra-spaces-hy2",
+      "proto": "hysteria2",
+      "server": "165.22.90.214",
+      "port": 443,
+      "sni": "fra1.digitaloceanspaces.com",
+      "password": "JN0qzA4LJfhHPKKN3QHj4eN8",
+      "obfs_password": "jXfGkLToOkTihpeJzDiNf8Bb",
+      "priority": 0
+    },
+    {
+      "tag": "relay-do-fra-spaces",
+      "proto": "vless",
+      "server": "165.22.90.214",
+      "port": 443,
+      "sni": "fra1.digitaloceanspaces.com",
+      "uuid": "2081b3c4-faaa-4cce-a0ab-607197b28237",
+      "public_key": "n33TZTLNrc6X7jTGrKWex_sk8aIQ6Qqz-eC8lqYMii8",
+      "short_id": "aa5d483441e59ac7",
+      "flow": "xtls-rprx-vision",
+      "priority": 1
+    }
+  ],
+  "onion": {
+    "enabled": true
+  },
+  "sig": "yogGP3rjyMAAg8K1qao153pPSJFChsfk/3nCD574tiLFfxOg8bjnjQaYW0xwDqMDaDEhOqk9Tt4G+BmUX6kWAw=="
+}"""
+
+    private val strangerSigned = """{
+  "version": 131,
+  "issued_at": "2026-08-05T01:07:49Z",
+  "relays": [
+    {
+      "tag": "relay-do-fra-spaces-hy2",
+      "proto": "hysteria2",
+      "server": "165.22.90.214",
+      "port": 443,
+      "sni": "fra1.digitaloceanspaces.com",
+      "password": "JN0qzA4LJfhHPKKN3QHj4eN8",
+      "obfs_password": "jXfGkLToOkTihpeJzDiNf8Bb",
+      "priority": 0
+    },
+    {
+      "tag": "relay-do-fra-spaces",
+      "proto": "vless",
+      "server": "165.22.90.214",
+      "port": 443,
+      "sni": "fra1.digitaloceanspaces.com",
+      "uuid": "2081b3c4-faaa-4cce-a0ab-607197b28237",
+      "public_key": "n33TZTLNrc6X7jTGrKWex_sk8aIQ6Qqz-eC8lqYMii8",
+      "short_id": "aa5d483441e59ac7",
+      "flow": "xtls-rprx-vision",
+      "priority": 1
+    }
+  ],
+  "onion": {
+    "enabled": true
+  },
+  "sig": "cb05b4Rut1+p1aaFlN6+USTrsO3DQ8UdkMpWMFxU/KDENMMOjgNB0pcRmtGUj+MtQPqpJi0+Z14RXaUvEVj8Dw=="
+}"""
+
+    @Test
+    fun payloadSignedByTheSuccessorKeyIsAccepted() {
+        // Never signed anything in production; ships so that switching to it is
+        // a signing decision rather than a release.
+        val relays = RelayConfigStore.verifyAndParse(successorSigned)
+        assertNotNull("successor key must verify — without this, rotation is impossible", relays)
+        assertEquals(2, relays!!.size)
+    }
+
+    @Test
+    fun payloadSignedByAnUnknownKeyIsRejected() {
+        // Accepting a SET must not mean accepting anyone: this key was generated
+        // for the test and appears in no build.
+        assertNull(RelayConfigStore.verifyAndParse(strangerSigned))
+    }
 }

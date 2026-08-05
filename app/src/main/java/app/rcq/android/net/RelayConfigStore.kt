@@ -1,15 +1,12 @@
 package app.rcq.android.net
 
 import android.content.Context
-import android.util.Base64
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
-import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -28,8 +25,9 @@ import java.util.concurrent.TimeUnit
  * verifier (`JSONSerialization [.sortedKeys, .withoutEscapingSlashes]`).
  */
 object RelayConfigStore {
-    // Raw 32-byte Ed25519 public key (base64), same key embedded in iOS.
-    private const val PUBKEY_B64 = "TY834OFcBvtUqHcnVw/QrPBOaEAZo7a1GAmABMhjkT8="
+    // Which keys may sign this payload lives in [SigningKeys]; it is a SET, so
+    // the signing key can be changed without a release. See that file for why
+    // the set is compiled in rather than carried by the payload itself.
 
     // The two mirrors compiled into the app. Tried in order; first
     // signature-valid payload wins. GitHub raw is primary (hit far less by RU
@@ -212,9 +210,7 @@ object RelayConfigStore {
         val signed = root.deepCopy()
         signed.remove("sig")
         val message = canonical(signed).toByteArray(Charsets.UTF_8)
-        val pub = Ed25519PublicKeyParameters(Base64.decode(PUBKEY_B64, Base64.DEFAULT), 0)
-        val signer = Ed25519Signer().apply { init(false, pub); update(message, 0, message.size) }
-        if (!signer.verifySignature(Base64.decode(sigB64, Base64.DEFAULT))) return null
+        if (!SigningKeys.verify(SigningKeys.Role.RELAY_CONFIG, message, sigB64)) return null
 
         root.get("version")?.takeIf { !it.isJsonNull }?.let { version = runCatching { it.asInt }.getOrNull() }
         // Optional onion policy (O3): `{"onion":{"enabled":true}}`. Absent → off.
