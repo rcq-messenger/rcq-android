@@ -837,6 +837,7 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
     var profileVis by remember { mutableStateOf(cached?.profile_visibility ?: "everyone") }
     var invitePolicy by remember { mutableStateOf(cached?.group_invite_policy ?: "everyone") }
     var receipts by remember { mutableStateOf(cached?.read_receipts_visibility ?: "everyone") }
+    var callPolicy by remember { mutableStateOf(cached?.call_policy ?: "everyone") }
     var presencePersistent by remember { mutableStateOf(cached?.presence_persistent ?: false) }
     var presenceTtl by remember { mutableStateOf(cached?.presence_ttl_minutes ?: 1440) }
     var hofOptIn by remember { mutableStateOf(cached?.hof_opt_in ?: false) }
@@ -925,6 +926,10 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
             VisibilityPicker(stringResource(R.string.common_gender), genderVis, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_gender_desc)) { genderVis = it; save(RcqApi.UpdateMeBody(gender_visibility = it)) }
             VisibilityPicker(stringResource(R.string.pv_invite), invitePolicy, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_invite_desc)) { invitePolicy = it; save(RcqApi.UpdateMeBody(group_invite_policy = it)) }
             VisibilityPicker(stringResource(R.string.pv_receipts), receipts, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_receipts_desc)) { receipts = it; save(RcqApi.UpdateMeBody(read_receipts_visibility = it)) }
+            // The server has enforced this since calls shipped and iOS has
+            // offered it since; on Android the only answer to "a stranger is
+            // calling me" was to leave the app.
+            VisibilityPicker(stringResource(R.string.pv_calls), callPolicy, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_calls_desc)) { callPolicy = it; save(RcqApi.UpdateMeBody(call_policy = it)) }
 
             // Block screenshots (device-local; FLAG_SECURE applied by MainActivity).
             Row(verticalAlignment = Alignment.CenterVertically) {
