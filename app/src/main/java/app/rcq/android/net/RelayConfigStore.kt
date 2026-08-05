@@ -49,16 +49,30 @@ object RelayConfigStore {
      *  half the internet needs to stay up. */
     data class Source(val kind: String, val value: String)
 
-    /** DoH endpoints, tried in order. RFC 8484 wire format rather than any
-     *  resolver's JSON API, because the JSON one is Cloudflare's and Google's
-     *  alone — and those two are the most likely to be unreachable exactly where
-     *  this channel matters. The domestic resolver is in the list for the same
-     *  reason: a resolver cannot forge a signed payload, so asking one that
-     *  answers beats insisting on one that does not. */
+    /** DoH endpoints, tried in order, addressed by IP.
+     *
+     *  By IP on purpose. Asking a resolver by NAME means resolving that name
+     *  through ordinary DNS first — the very thing being tampered with on the
+     *  networks this channel exists for. Their certificates carry the addresses
+     *  in the SAN, so verification is unaffected.
+     *
+     *  ⚠ This list first read `common.dns.yandex.net`, which does not exist:
+     *  the one resolver included specifically because it answers inside RU would
+     *  never have returned anything. All four below were checked live against a
+     *  published record.
+     *
+     *  RFC 8484 wire format rather than any resolver's JSON API, because that
+     *  API is Cloudflare's and Google's alone — and those two are the most
+     *  likely to be unreachable exactly where this channel matters. A resolver
+     *  cannot forge a signed payload, so one that answers beats one that does
+     *  not: hence the domestic entry, and hence four jurisdictions rather than
+     *  one.
+     */
     private val DOH_RESOLVERS = listOf(
-        "https://cloudflare-dns.com/dns-query",
-        "https://common.dns.yandex.net/dns-query",
-        "https://dns.google/dns-query",
+        "https://1.1.1.1/dns-query",      // Cloudflare
+        "https://77.88.8.8/dns-query",    // Yandex — answers inside RU
+        "https://8.8.8.8/dns-query",      // Google
+        "https://9.9.9.9/dns-query",      // Quad9
     )
 
     /** Extra mirrors carried BY the signed config, so a new delivery channel
