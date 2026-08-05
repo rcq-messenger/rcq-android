@@ -1,6 +1,7 @@
 package app.rcq.android.net
 
 import android.content.Context
+import android.util.Base64
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
@@ -38,8 +39,26 @@ object RelayConfigStore {
     // bundled pool and a hand-pasted token. That is what [remoteSources] is
     // for — see [effectiveSources].
     private val BUNDLED_SOURCES = listOf(
-        "https://raw.githubusercontent.com/rcq-messenger/rcq-ios/main/relay-config.json",
-        "https://relay.rcq.app/v1/config",
+        Source("https", "https://raw.githubusercontent.com/rcq-messenger/rcq-ios/main/relay-config.json"),
+        Source("https", "https://relay.rcq.app/v1/config"),
+    )
+
+    /** Where a payload can be read from. `https` is a mirror URL; `dns-txt` is a
+     *  name whose TXT record carries a signed seed, read over DoH — a channel
+     *  that survives both mirror names being blocked, since it rides resolvers
+     *  half the internet needs to stay up. */
+    data class Source(val kind: String, val value: String)
+
+    /** DoH endpoints, tried in order. RFC 8484 wire format rather than any
+     *  resolver's JSON API, because the JSON one is Cloudflare's and Google's
+     *  alone — and those two are the most likely to be unreachable exactly where
+     *  this channel matters. The domestic resolver is in the list for the same
+     *  reason: a resolver cannot forge a signed payload, so asking one that
+     *  answers beats insisting on one that does not. */
+    private val DOH_RESOLVERS = listOf(
+        "https://cloudflare-dns.com/dns-query",
+        "https://common.dns.yandex.net/dns-query",
+        "https://dns.google/dns-query",
     )
 
     /** Extra mirrors carried BY the signed config, so a new delivery channel
@@ -48,7 +67,7 @@ object RelayConfigStore {
      *
      *  Null until a signature-valid payload has been parsed. */
     @Volatile
-    private var remoteSources: List<String>? = null
+    private var remoteSources: List<Source>? = null
 
     /** How many mirrors we are willing to walk in one refresh. A refresh runs
      *  before the transport is up, so each dead entry costs its full timeout;
@@ -154,12 +173,19 @@ object RelayConfigStore {
         // for next launch. Unblocked users (tunnel off) fetch direct as before;
         // the signed config is PUBLIC, so tunnelling it leaks nothing.
         val fetchClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
-        for (url in effectiveSources()) {
-            val body = runCatching {
-                fetchClient.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
-                    if (resp.isSuccessful) resp.body?.string() else null
-                }
-            }.getOrNull() ?: continue
+        for (source in effectiveSources()) {
+            val body = when (source.kind) {
+                "https" -> runCatching {
+                    fetchClient.newCall(Request.Builder().url(source.value).get().build()).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.string() else null
+                    }
+                }.getOrNull()
+                "dns-txt" -> runCatching {
+                    DnsTxt.fetch(source.value, DOH_RESOLVERS, fetchClient)
+                        ?.let { String(Base64.decode(it, Base64.DEFAULT), Charsets.UTF_8) }
+                }.getOrNull()
+                else -> null
+            } ?: continue
             // The floor is whatever we already trust, so a mirror serving a stale
             // but genuinely signed payload cannot move us backwards.
             val relays = verifyAndParse(body, minVersion = version) ?: continue
@@ -183,7 +209,7 @@ object RelayConfigStore {
      *  bundled names are exactly what a censor enumerates and blocks first, so
      *  on the network that needs them the new mirror is the one likely to
      *  answer. */
-    fun effectiveSources(): List<String> {
+    fun effectiveSources(): List<Source> {
         val remote = remoteSources ?: return BUNDLED_SOURCES
         return (remote + BUNDLED_SOURCES).distinct().take(MAX_SOURCES)
     }
@@ -192,14 +218,16 @@ object RelayConfigStore {
      *  Unknown types are skipped rather than rejected, so a payload that adds a
      *  channel this build does not implement stays usable for everything else.
      *  Absent or empty → null, i.e. the bundled pair alone. */
-    private fun parseSources(root: JsonElement): List<String>? = runCatching {
+    private fun parseSources(root: JsonElement): List<Source>? = runCatching {
         val arr = root.asJsonObject.getAsJsonArray("sources") ?: return null
         arr.mapNotNull { el ->
             val o = el.asJsonObject
-            val type = o.get("type")?.takeIf { !it.isJsonNull }?.asString ?: "https"
-            if (type != "https") return@mapNotNull null
-            o.get("url")?.takeIf { !it.isJsonNull }?.asString
-                ?.takeIf { it.startsWith("https://") }
+            fun s(k: String) = o.get(k)?.takeIf { !it.isJsonNull }?.asString
+            when (s("type") ?: "https") {
+                "https" -> s("url")?.takeIf { it.startsWith("https://") }?.let { Source("https", it) }
+                "dns-txt" -> s("name")?.takeIf { it.isNotBlank() }?.let { Source("dns-txt", it) }
+                else -> null   // a channel this build cannot speak; the rest stays usable
+            }
         }.takeIf { it.isNotEmpty() }
     }.getOrNull()
 
