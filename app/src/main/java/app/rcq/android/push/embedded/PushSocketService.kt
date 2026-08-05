@@ -65,6 +65,12 @@ class PushSocketService : Service() {
      *  topic, and without this the service happily kept listening on the old
      *  one — connected, healthy, and deaf to every wake the server sent. */
     private var connectedTopic: String? = null
+    /** Host the live socket is subscribed through. A signed-config push can name
+     *  a push front (or withdraw one) while this socket is up and the topic
+     *  unchanged, and the dial host is fixed for the life of the socket — so
+     *  without this the new name would only take effect at the next unrelated
+     *  reconnect, which on a working socket may be never. */
+    private var connectedHost: String? = null
     @Volatile private var stopping = false
     private var attempt = 0
     /** Bumped every time we deliberately drop a socket. A superseded socket
@@ -100,9 +106,14 @@ class PushSocketService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInForeground()
         val wanted = EmbeddedDistributor.topic(this)
+        val wantedHost = EmbeddedDistributor.subscribeHost()
         val forced = intent?.getBooleanExtra(EmbeddedDistributor.EXTRA_RECONNECT, false) == true
-        if (socket != null && (forced || connectedTopic != wanted)) {
-            Log.i(TAG, if (forced) "transport changed — redialling" else "topic changed — resubscribing")
+        if (socket != null && (forced || connectedTopic != wanted || connectedHost != wantedHost)) {
+            Log.i(TAG, when {
+                forced -> "transport changed — redialling"
+                connectedTopic != wanted -> "topic changed — resubscribing"
+                else -> "push host changed — redialling via $wantedHost"
+            })
             dropSocket()
         }
         if (socket == null && !stopping) connect()
@@ -119,6 +130,7 @@ class PushSocketService : Service() {
         runCatching { socket?.close(1000, "superseded") }
         socket = null
         connectedTopic = null
+        connectedHost = null
     }
 
     override fun onDestroy() {
@@ -191,13 +203,19 @@ class PushSocketService : Service() {
             Log.i(TAG, "transport: ${if (proxy != null) "relay" else "direct"}")
         }
         val since = EmbeddedDistributor.since(this)
+        // Subscribe leg only — the endpoint the island publishes to is
+        // unaffected. Re-read per dial so a config push that names a front
+        // reaches the socket on its next reconnect, with no app release.
+        val host = EmbeddedDistributor.subscribeHost()
         val url = buildString {
-            append(EmbeddedDistributor.PUSH_HOST.replaceFirst("https://", "wss://"))
+            append(host.replaceFirst("https://", "wss://"))
             append('/').append(topic).append("/ws")
             if (since != null) append("?since=").append(since)
         }
+        if (host != EmbeddedDistributor.PUSH_HOST) Log.i(TAG, "subscribing via front $host")
         val req = Request.Builder().url(url).build()
         connectedTopic = topic
+        connectedHost = host
         socket = client?.newWebSocket(req, Listener(generation))
     }
 
