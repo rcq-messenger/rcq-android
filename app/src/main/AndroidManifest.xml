@@ -109,6 +109,18 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/u/" />
+                <!-- /r/<uin> is the same thing said to a different reader: "you
+                     are invited" rather than "add this contact". The site has
+                     served that page for months and no client has ever claimed
+                     the link, so tapping an invite on Android opened a browser
+                     and the invite ended there. -->
+                <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/r/" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="rcq" android:host="r" />
             </intent-filter>
             <!-- Group-invite deep link: rcq://group/<id>@<host> + the https form
                  https://rcq.app/g/<id>@<host>. Opening a shared link opens the

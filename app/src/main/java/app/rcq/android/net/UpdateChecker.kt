@@ -300,7 +300,10 @@ object UpdateChecker {
      *  download page on one that does not. Registering from it names the
      *  inviter, and the island then makes the two of them contacts. */
     fun shareInvite(context: Context, uin: Int): Boolean = runCatching {
-        val link = "https://rcq.app/u/$uin"
+        // /r/ rather than /u/: the page behind it says "you are invited"
+        // instead of "add to contacts", which is the right sentence for someone
+        // who has never heard of RCQ.
+        val link = "https://rcq.app/r/$uin"
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, context.getString(R.string.invite_share_text, link))
