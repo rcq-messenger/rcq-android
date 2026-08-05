@@ -160,7 +160,9 @@ object RelayConfigStore {
                     if (resp.isSuccessful) resp.body?.string() else null
                 }
             }.getOrNull() ?: continue
-            val relays = verifyAndParse(body) ?: continue
+            // The floor is whatever we already trust, so a mirror serving a stale
+            // but genuinely signed payload cannot move us backwards.
+            val relays = verifyAndParse(body, minVersion = version) ?: continue
             cached = relays
             runCatching { File(ctx.filesDir, CACHE_FILE).writeText(body) }
             break
@@ -202,8 +204,24 @@ object RelayConfigStore {
     }.getOrNull()
 
     /** Verify the Ed25519 signature, then parse relays (sorted by priority).
-     *  Returns null on any failure — a bad signature is treated as no list. */
-    fun verifyAndParse(text: String): List<SingBoxTransport.Relay>? = runCatching {
+     *  Returns null on any failure — a bad signature is treated as no list.
+     *
+     *  [minVersion] refuses a payload older than one we already trust. A
+     *  signature proves a payload came from us; it says nothing about WHEN.
+     *  Anyone who can answer for a mirror, or sit on the path to one, can replay
+     *  an OLD signed payload and walk a client back onto a relay set we retired
+     *  months ago — no forgery required, just an old truth served late.
+     *
+     *  Both app updaters were always safe from this because they compare against
+     *  what is installed (Android refuses `vc <= current`, and the OS refuses a
+     *  downgrade install; the Tauri plugin requires `remote > current`). This
+     *  list had no such check on EITHER side until now, and the guard added to
+     *  the signer today only stops us doing it to ourselves by accident.
+     *
+     *  Null means no floor, which is what disk-priming and the tests want.
+     *  Recovering from a bad push is done by publishing a HIGHER version
+     *  carrying corrected content, never by re-publishing an older number. */
+    fun verifyAndParse(text: String, minVersion: Int? = null): List<SingBoxTransport.Relay>? = runCatching {
         val root = JsonParser.parseString(text).asJsonObject
         val sigB64 = root.get("sig")?.asString ?: return null
         // Sign over everything except `sig`.
@@ -212,7 +230,10 @@ object RelayConfigStore {
         val message = canonical(signed).toByteArray(Charsets.UTF_8)
         if (!SigningKeys.verify(SigningKeys.Role.RELAY_CONFIG, message, sigB64)) return null
 
-        root.get("version")?.takeIf { !it.isJsonNull }?.let { version = runCatching { it.asInt }.getOrNull() }
+        val parsedVersion = root.get("version")?.takeIf { !it.isJsonNull }
+            ?.let { runCatching { it.asInt }.getOrNull() }
+        if (parsedVersion != null && minVersion != null && parsedVersion < minVersion) return null
+        if (parsedVersion != null) version = parsedVersion
         // Optional onion policy (O3): `{"onion":{"enabled":true}}`. Absent → off.
         onionEnabled = runCatching {
             root.getAsJsonObject("onion")?.get("enabled")?.asBoolean ?: false
