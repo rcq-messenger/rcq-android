@@ -1099,13 +1099,30 @@ class Session(context: Context) {
             // DIRECT fallback only when droppable: tunnel up but dead AND direct
             // works -> drop. NEVER under a local proxy (Tor-leak rule) nor an
             // explicit onion opt-in (preserve chosen metadata-resistance).
-            if (!routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx) &&
-                transport.probeDirect(serverHost())
-            ) {
+            val droppable = !routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx)
+            if (droppable && transport.probeDirect(serverHost())) {
                 android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
                 transport.stop()
                 api = newApi()
                 socket = newSocket()
+            } else if (droppable && flagship && transport.probeDirect(FRONT_HOST)) {
+                // Tunnel dead AND direct dead — the state where this install has
+                // nothing left. The front was skipped on the way in because the
+                // bypass was engaged, and that is right while the tunnel works:
+                // a relay hides the user's address from the island, the front
+                // does not. But an engaged tunnel that carries nothing is not
+                // privacy, it is an app that does not open, and the front is
+                // the one path still standing when both the island's address
+                // and the relays are blocked while Cloudflare is not.
+                //
+                // Same gating as the direct fallback above: never under the
+                // user's own local proxy, never under an explicit onion opt-in.
+                android.util.Log.i("RCQfront", "tunnel and direct both dead — routing via $FRONT_HOST")
+                transport.stop()
+                frontHost = FRONT_HOST
+                api = newApi()
+                socket = newSocket()
+                app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
             }
         }
         _stealthActive.value = transport.isActive
