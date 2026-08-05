@@ -956,6 +956,10 @@ class RcqApi(
         val profile_visibility: String? = null,
         val group_invite_policy: String? = null,
         val read_receipts_visibility: String? = null,
+        /** everyone | contacts | nobody. The one policy the server has always
+         *  enforced and this client could never set: a person being called by
+         *  strangers had no way to stop it except on an iPhone. */
+        val call_policy: String? = null,
         val presence_persistent: Boolean? = null,
         val presence_ttl_minutes: Int? = null,
         val hof_opt_in: Boolean? = null,
@@ -1145,6 +1149,7 @@ class RcqApi(
         val profile_visibility: String? = null,
         val group_invite_policy: String? = null,
         val read_receipts_visibility: String? = null,
+        val call_policy: String? = null,
         val presence_persistent: Boolean? = null,
         val presence_ttl_minutes: Int? = null,
         val hof_opt_in: Boolean? = null,

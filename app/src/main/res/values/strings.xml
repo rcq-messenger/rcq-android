@@ -1024,4 +1024,6 @@
     <string name="settings_row_invite">Invite a friend</string>
     <string name="home_no_contacts_title">No contacts of your own yet</string>
     <string name="home_no_contacts_body">Groups are one thing, but RCQ is better with people you know.</string>
+    <string name="pv_calls">Who can call you</string>
+    <string name="pv_calls_desc">Incoming calls from anyone outside this circle are refused.</string>
 </resources>

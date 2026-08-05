@@ -1023,4 +1023,6 @@
     <string name="settings_row_invite">Пригласить друга</string>
     <string name="home_no_contacts_title">Своих контактов пока нет</string>
     <string name="home_no_contacts_body">Группы это одно, но RCQ живее с теми, кого вы знаете.</string>
+    <string name="pv_calls">Кто может звонить</string>
+    <string name="pv_calls_desc">Входящие звонки от всех, кто вне этого круга, отклоняются.</string>
 </resources>
