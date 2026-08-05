@@ -151,7 +151,7 @@ object RelayConfigStore {
         .build()
 
     /** Bundled relay pool — a copy of the live signed config, last synced with
-     *  **v131 (2026-08-05)**.
+     *  **v142 (2026-08-05)**, all 14 endpoints across 7 machines.
      *
      *  This is the last-resort fallback when no verified remote/disk list is
      *  available, and it is CRITICAL for a blocked user: both signed-config
@@ -168,14 +168,14 @@ object RelayConfigStore {
      *  working on the same box.
      *
      *  ⚠ The SNI has to be plausible for the ADDRESS, not just innocuous on its
-     *  own. This pair presented `www.yandex.ru` from a DigitalOcean address
-     *  until 2026-08-05: Yandex is never served out of DigitalOcean, so a
-     *  passive observer finds every one of our connections with a single join
-     *  of SNI against the address owner, and Reality's resistance to ACTIVE
-     *  probing does nothing about it. It now presents a name that genuinely
-     *  lives on the same ASN and in the same region as the relay. Oracle and
-     *  GCP still carry Akamai-hosted names for want of admin access to those
-     *  two machines.
+     *  own. The DigitalOcean pair presented `www.yandex.ru` until 2026-08-05:
+     *  Yandex is never served out of DigitalOcean, so a passive observer finds
+     *  every one of our connections with a single join of SNI against the
+     *  address owner, and Reality's resistance to ACTIVE probing does nothing
+     *  about it. DigitalOcean and the four Vultr machines now present their own
+     *  cloud's object storage, which genuinely lives on the same ASN and near
+     *  the same region. Oracle and GCP still carry Akamai-hosted names: moving
+     *  them off fails Reality handshakes for a reason not yet found.
      *
      *  Keep in step with the signed config: `curl -s
      *  https://relay.rcq.app/v1/config` and compare tag / server / sni / keys.
@@ -187,6 +187,14 @@ object RelayConfigStore {
         SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "www.apple.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-gcp-hy2", "hysteria2", "35.238.53.96", 443, "www.apple.com", password = "QaY3uT8EmfZxfON65jaT5bSu", obfsPassword = "fLpJ2c211xjnZcP9VNcNpbZP"),
         SingBoxTransport.Relay("relay-gcp", "vless", "35.238.53.96", 443, "www.apple.com", uuid = "8e3b35d3-18a6-406d-9ac6-c5558a806663", publicKey = "mQZ8CJeMWyf7oYGWJG8oOI52or2kx4yTthl6AGZkSTw", shortId = "b5b8979af1f27aab", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-vultr-waw-hy2", "hysteria2", "64.176.71.251", 443, "ams1.vultrobjects.com", password = "c8Hy1pVwL9WD1LwmRJhNGFUo", obfsPassword = "8idmG6yKcCPKsMy64fd3jDcg"),
+        SingBoxTransport.Relay("relay-vultr-waw", "vless", "64.176.71.251", 443, "ams1.vultrobjects.com", uuid = "2dc3cc4a-3d74-47a4-8f29-657073848dcc", publicKey = "jNGlh9lw8faMZxgjZ0crsqcjD7dyOAySnxi8jwUsa1Y", shortId = "ec8b28c68570d463", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-vultr-sto-hy2", "hysteria2", "70.34.202.59", 443, "ams1.vultrobjects.com", password = "2bueOgUc8lnL9GGADukx3V38", obfsPassword = "M8MxAKjD4UgfCT2JOwkeWKYp"),
+        SingBoxTransport.Relay("relay-vultr-sto", "vless", "70.34.202.59", 443, "ams1.vultrobjects.com", uuid = "3652f269-d343-4206-8a27-dab72305d44b", publicKey = "b8Q-XENkmpr7mAu2_e-_MWBv4WBFUFb0hq1dNSTViCA", shortId = "b4957b7708c70f80", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-vultr-nrt-hy2", "hysteria2", "139.180.194.73", 443, "nrt1.vultrobjects.com", password = "End6wDZP7I3A1VQfCIdNezbP", obfsPassword = "lXRUg2N6BQztKtho87GJmmos"),
+        SingBoxTransport.Relay("relay-vultr-nrt", "vless", "139.180.194.73", 443, "nrt1.vultrobjects.com", uuid = "9bafd931-cbb8-4d67-b448-0495a8e325bd", publicKey = "yrARhKJ0ICe2wVf9J5uk5O2dHvWhE_I8Vx_904zwQGM", shortId = "b264d5f88bc0589c", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-vultr-sgp-hy2", "hysteria2", "45.76.161.32", 443, "sgp1.vultrobjects.com", password = "7CGkcQoLzH8piLuhTsO7P7za", obfsPassword = "W50oij0htTu06KYbhVEVtpfU"),
+        SingBoxTransport.Relay("relay-vultr-sgp", "vless", "45.76.161.32", 443, "sgp1.vultrobjects.com", uuid = "17d55bda-9ba1-4e6e-8409-f46b2ba97bd0", publicKey = "mYfGMTa0mgxLm06jf2_HTum9U5gUk6AIcMCSzIuRsXQ", shortId = "ed11110c170bd554", flow = "xtls-rprx-vision"),
     )
 
     /** The relay list to use right now: verified remote (in memory) -> bundled.
