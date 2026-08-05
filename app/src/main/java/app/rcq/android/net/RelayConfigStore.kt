@@ -170,7 +170,7 @@ object RelayConfigStore {
         .build()
 
     /** Bundled relay pool — a copy of the live signed config, last synced with
-     *  **v143 (2026-08-05)**, all 14 endpoints across 7 machines.
+     *  **v144 (2026-08-05)**, all 14 endpoints across 7 machines.
      *
      *  This is the last-resort fallback when no verified remote/disk list is
      *  available, and it is CRITICAL for a blocked user: both signed-config
@@ -194,8 +194,15 @@ object RelayConfigStore {
      *  about it. DigitalOcean and the four Vultr machines now present their own
      *  cloud's object storage, which genuinely lives on the same ASN and near
      *  the same region. Oracle joined them in v143 with identity.oraclecloud.com
-     *  (AS31898, the relay's own ASN). GCP still carries an Akamai-hosted name:
-     *  the fix is the same shape, but we no longer have access to that machine.
+     *  (AS31898, the relay's own ASN) and GCP in v144 with storage.googleapis.com.
+     *
+     *  ⚠ GCP is the one that does not match exactly: its name is on AS15169
+     *  while the machine is on AS396982. Both are Google LLC, and no public TLS
+     *  service lives on 396982 at all — that space is customer VMs. So the join
+     *  an observer can cheaply make (who owns the SNI vs who owns the address)
+     *  agrees, while an exact-ASN check would not. It is the best available
+     *  there, and far better than the Akamai name it replaced, which agreed
+     *  with nothing.
      *
      *  ⚠ The earlier attempts on Oracle failed for reasons worth keeping: the
      *  dest has to speak TLS 1.3 AND settle on X25519. java.com does not do 1.3
@@ -212,7 +219,7 @@ object RelayConfigStore {
         SingBoxTransport.Relay("relay-oracle-il-hy2", "hysteria2", "129.159.143.135", 443, "www.microsoft.com", password = "bvuvu74CVsiXdcJazcYphnO5", obfsPassword = "PaEHrZABTk36orhfFON7Jure"),
         SingBoxTransport.Relay("relay-oracle-il", "vless", "129.159.143.135", 443, "identity.oraclecloud.com", uuid = "ff005e0c-175e-4475-a166-eeac88f514e2", publicKey = "_Hhc-2pjkvR914mddMdmuoOVaT74vWR8Gby7KmJp9F8", shortId = "318567678ac9878e", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-gcp-hy2", "hysteria2", "35.238.53.96", 443, "www.apple.com", password = "QaY3uT8EmfZxfON65jaT5bSu", obfsPassword = "fLpJ2c211xjnZcP9VNcNpbZP"),
-        SingBoxTransport.Relay("relay-gcp", "vless", "35.238.53.96", 443, "www.apple.com", uuid = "8e3b35d3-18a6-406d-9ac6-c5558a806663", publicKey = "mQZ8CJeMWyf7oYGWJG8oOI52or2kx4yTthl6AGZkSTw", shortId = "b5b8979af1f27aab", flow = "xtls-rprx-vision"),
+        SingBoxTransport.Relay("relay-gcp", "vless", "35.238.53.96", 443, "storage.googleapis.com", uuid = "8e3b35d3-18a6-406d-9ac6-c5558a806663", publicKey = "mQZ8CJeMWyf7oYGWJG8oOI52or2kx4yTthl6AGZkSTw", shortId = "b5b8979af1f27aab", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-vultr-waw-hy2", "hysteria2", "64.176.71.251", 443, "ams1.vultrobjects.com", password = "c8Hy1pVwL9WD1LwmRJhNGFUo", obfsPassword = "8idmG6yKcCPKsMy64fd3jDcg"),
         SingBoxTransport.Relay("relay-vultr-waw", "vless", "64.176.71.251", 443, "ams1.vultrobjects.com", uuid = "2dc3cc4a-3d74-47a4-8f29-657073848dcc", publicKey = "jNGlh9lw8faMZxgjZ0crsqcjD7dyOAySnxi8jwUsa1Y", shortId = "ec8b28c68570d463", flow = "xtls-rprx-vision"),
         SingBoxTransport.Relay("relay-vultr-sto-hy2", "hysteria2", "70.34.202.59", 443, "ams1.vultrobjects.com", password = "2bueOgUc8lnL9GGADukx3V38", obfsPassword = "M8MxAKjD4UgfCT2JOwkeWKYp"),
