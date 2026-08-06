@@ -1035,4 +1035,5 @@
     <string name="diag_audit_unclear">Однозначного вывода нет. Пришлите нам строчку ниже.</string>
     <string name="common_copied">Скопировано</string>
     <string name="common_copy">Копировать</string>
+    <string name="chat_delete">Удалить</string>
 </resources>
