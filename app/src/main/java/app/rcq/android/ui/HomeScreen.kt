@@ -604,7 +604,7 @@ internal fun HomeScreen(
 
         previewContact?.let { ct ->
             PreviewOverlay(
-                title = ct.nickname,
+                title = session.contactName(ct.uin),
                 subtitle = "#${ct.uin}",
                 avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp, host = ct.host) },
                 actions = contactActions(ct, session, scope, context, onOpenChat,
@@ -688,7 +688,7 @@ internal fun HomeScreen(
     }
     reportTarget?.let { ct ->
         ReportDialog(
-            name = ct.nickname,
+            name = session.contactName(ct.uin),
             onSubmit = { reason -> scope.launch { runCatching { session.report(ct.uin, reason) } }; reportTarget = null },
             onDismiss = { reportTarget = null },
         )
@@ -1786,7 +1786,13 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
     var query by remember { mutableStateOf("") }
     val filtered = remember(query, contacts) {
         if (query.isBlank()) contacts
-        else contacts.filter { it.nickname.contains(query, true) || it.uin.toString().contains(query) }
+        // Search my own name for them too: renaming someone and then not
+        // finding them by that name is the obvious next complaint.
+        else contacts.filter {
+            it.nickname.contains(query, true) ||
+                (LocalStores.aliasFor(it.uin)?.contains(query, true) == true) ||
+                it.uin.toString().contains(query)
+        }
     }
     Column(Modifier.fillMaxSize().background(c.bgPrimary).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
