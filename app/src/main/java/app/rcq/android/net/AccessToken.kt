@@ -55,6 +55,26 @@ object AccessTokenStore {
 /** Adds X-RCQ-Auth to any request whose host has a stored access token, unless
  *  the caller already set the header (the redeem call sets the ENTERED token
  *  explicitly and must not be overridden). No token for the host = no header. */
+/** Names this build to the island on every request, HTTP and the socket
+ *  upgrade alike.
+ *
+ *  Android was the only client that never introduced itself: iOS gets
+ *  `RCQ/<build>` for free from CFNetwork and the browser sends its own, while
+ *  every Android request arrived as a bare `okhttp/4.12.0`. The cost of that
+ *  showed up the day one account started hammering the server and the only
+ *  honest answer to "which build is it, or is it even ours" was that we could
+ *  not tell.
+ *
+ *  Deliberately just the version: no OS release, no device model, no locale.
+ *  This is a tool people use to not be identified, and the question being
+ *  answered here is only "which build of ours is this". */
+object UserAgentInterceptor : Interceptor {
+    private val value = "RCQ/${app.rcq.android.BuildConfig.VERSION_NAME} (Android)"
+
+    override fun intercept(chain: Interceptor.Chain): Response =
+        chain.proceed(chain.request().newBuilder().header("User-Agent", value).build())
+}
+
 object AccessTokenInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
