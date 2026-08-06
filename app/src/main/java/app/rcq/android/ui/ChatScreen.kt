@@ -145,7 +145,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
@@ -523,8 +525,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // `size - unread` on every size change slid the marker DOWN as new messages
     // arrived, so it always sat N-from-the-end instead of staying where the
     // user left off.
+    // Count back over INBOUND messages only. Your own cannot be unread, and
+    // counting raw positions put the divider inside the unread block whenever
+    // you had sent anything after them: reported as "непрочитанных 5, три
+    // видно, четвёртое вылезло, пятое дальше".
     val unreadAnchorId = remember(target, messages.isNotEmpty()) {
-        if (initialUnread in 1..messages.size) messages[messages.size - initialUnread].id else null
+        if (initialUnread < 1) null
+        else {
+            var left = initialUnread
+            var id: String? = null
+            for (i in messages.indices.reversed()) {
+                if (messages[i].fromMe) continue
+                left--
+                if (left == 0) { id = messages[i].id; break }
+            }
+            id
+        }
     }
     val firstUnreadIndex = remember(messages, unreadAnchorId) {
         unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
@@ -887,7 +903,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (deepestSeen < 0) return@derivedStateOf 0
                     val from = deepestSeen + 1
                     if (from > rows.lastIndex) 0
-                    else (from..rows.lastIndex).count { rows[it] is ChatRow.Single || rows[it] is ChatRow.Album }
+                    // Own messages are never unread, so they must not raise the
+                    // red badge: sending while scrolled up made it flash "1" for
+                    // the message you had just written yourself.
+                    else (from..rows.lastIndex).count { i ->
+                        when (val r = rows[i]) {
+                            is ChatRow.Single -> !r.m.fromMe
+                            is ChatRow.Album -> r.items.none { it.fromMe }
+                            else -> false
+                        }
+                    }
                 }
             }
             if (showJumpDown) {
@@ -1079,8 +1104,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // "Delete for everyone" is offered for your own message, OR (in a group)
         // when you're a moderator: the owner, or a member granted the `delete`
         // cap. Recipients re-check the same rule on receipt.
-        val canDeleteAll = m.fromMe ||
-            (group != null && group.members.firstOrNull { it.uin == ownUin }?.canDelete(group.ownerUin) == true)
+        // Saved (notes to self) has no "everyone" — you ARE everyone there, and
+        // offering both "delete for everyone" and "delete for me" on your own
+        // note only asks the user to decide something meaningless. Reported by
+        // vss: "У кого «всех»? Надо один пункт просто Удалить."
+        val canDeleteAll = !isSelf && (m.fromMe ||
+            (group != null && group.members.firstOrNull { it.uin == ownUin }?.canDelete(group.ownerUin) == true))
         // A sheet, not a centre dialog: this is the most-used menu in the app and
         // it belongs under the thumb, next to the message it acts on (iOS has
         // had it as a sheet from the start; on Android everything was a centred
@@ -1140,14 +1169,26 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (canDeleteAll) MessageAction(stringResource(R.string.chat_delete_all), danger = true) {
                         scope.launch { runCatching { session.sendDeleteForEveryone(m) } }; actionMsg = null
                     }
-                    MessageAction(stringResource(R.string.chat_delete_me), danger = true) { session.deleteLocal(m); actionMsg = null }
+                    MessageAction(
+                        stringResource(if (isSelf) R.string.chat_delete else R.string.chat_delete_me),
+                        danger = true,
+                    ) { session.deleteLocal(m); actionMsg = null }
                 }
             }
         }
     }
 
     editMsg?.let { m ->
-        var editText by remember(m.id) { mutableStateOf(m.body) }
+        // TextFieldValue, not String: with a plain String the caret starts at
+        // position 0, so opening a long message for editing showed its FIRST
+        // line and left the rest below the fold with nothing pointing there.
+        // Reported as "текст переходит на новую строку под этим окном,
+        // приходится самому прокручивать вверх". Selecting the end makes the
+        // field scroll to the caret on its own, which is also where you want to
+        // type.
+        var editValue by remember(m.id) {
+            mutableStateOf(TextFieldValue(m.body, selection = TextRange(m.body.length)))
+        }
         AlertDialog(
             onDismissRequest = { editMsg = null },
             // The dialog window is its OWN sub-window and does NOT inherit the
@@ -1163,8 +1204,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     Modifier.fillMaxWidth().imePadding().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     BasicTextField(
-                        value = editText,
-                        onValueChange = { editText = it },
+                        value = editValue,
+                        onValueChange = { editValue = it },
                         textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
                         cursorBrush = SolidColor(c.accent),
                         modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
@@ -1173,7 +1214,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val newText = editText.trim()
+                    val newText = editValue.text.trim()
                     val orig = m
                     editMsg = null
                     if (newText.isNotEmpty() && newText != orig.body) scope.launch { runCatching { session.sendEdit(orig, newText) } }
