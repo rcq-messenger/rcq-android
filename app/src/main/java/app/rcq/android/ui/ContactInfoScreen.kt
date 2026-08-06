@@ -145,7 +145,14 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             // Identity block.
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusIcon(presence, size = 80.dp, crossIsland = crossIslandHost != null)
+                // A picture is the anchor of a contact card when there is one.
+                // Cross-island contacts keep the glyph: the blob lives on their
+                // island and presence does not cross either.
+                if (crossIslandHost == null && !contact?.avatarMediaId.isNullOrEmpty()) {
+                    PersonAvatar(contact?.avatarMediaId, contact?.avatarMediaKey, presence, session, 80.dp, animated = true)
+                } else {
+                    StatusIcon(presence, size = 80.dp, crossIsland = crossIslandHost != null)
+                }
                 Text(nickname, color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 val sub = when {
                     // Cross-island: presence/last_seen don't cross islands — show

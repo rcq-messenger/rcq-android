@@ -154,6 +154,50 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
     }
 }
 
+/** A person's profile picture, or their status glyph when there is none.
+ *
+ *  Same decode path as [GroupAvatarMedia] (native for JPEG/PNG, the pure-Java
+ *  decoder for GIF, because the platform GIF decoder crashes natively on some
+ *  ROMs) — only the fallback differs: a person without a picture keeps the
+ *  status flower everyone already knows, so nothing regresses for the people
+ *  who never set one.
+ *
+ *  ⚠ Deliberately NOT used where strangers meet: Random, Nearby, the hood, and
+ *  an unaccepted contact request all keep the glyph. A picture is for people
+ *  you already have a relationship with, and an incoming request is otherwise
+ *  a way to push an image onto someone's screen.
+ */
+@Composable
+internal fun PersonAvatar(
+    id: String?,
+    key: String?,
+    status: app.rcq.android.model.UserStatus,
+    session: Session,
+    size: Dp,
+    host: String? = null,
+    animated: Boolean = false,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
+        value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) {
+            app.rcq.android.CrashReporter.crumb(ctx, "person_avatar")
+            session.fetchImage(id, key, host)
+        } else null
+    }
+    val nativeImage = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 384)
+    val gifImage = rememberGifFirstFrame(bytes)
+    val image = nativeImage ?: gifImage
+    val animatableGif = bytes?.takeIf { animated && it.isGif() }
+    if (image == null && animatableGif == null) {
+        StatusIcon(status, size = size)
+        return
+    }
+    Box(Modifier.size(size).clip(CircleShape), contentAlignment = Alignment.Center) {
+        if (animatableGif != null) SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
+        else Image(bitmap = image!!, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    }
+}
+
 /** Red unread-count capsule, anchored top-end over an avatar (iOS-style).
  *  Renders nothing when [count] is 0. */
 @Composable

@@ -2424,6 +2424,33 @@ class Session(context: Context) {
         upsertGroup(mapGroupCtx(ctx, ctx.api.patchGroup(ctx.gid, RcqApi.GroupPatchBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))))
     }
 
+    /** Set or clear MY profile picture. Same shape as a group's: encrypt with
+     *  a fresh per-blob key, upload, then hand the island the id and the key
+     *  so it can pass them on to the people allowed to see it.
+     *
+     *  Passing null clears the picture: the island takes two blank strings as
+     *  "remove", while leaving both fields out entirely means "do not touch",
+     *  which is what every other profile patch does. */
+    suspend fun setOwnAvatar(bytes: ByteArray?) {
+        if (bytes == null) {
+            api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = "", avatar_media_key = ""))
+            _ownAvatar.value = null
+            return
+        }
+        val key = MediaCrypto.newKey()
+        val blob = MediaCrypto.seal(bytes, key)
+        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val upload = api.uploadBlob(blob)
+        imageCache.put(upload.media_id, bytes)
+        api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))
+        _ownAvatar.value = upload.media_id to keyB64
+    }
+
+    /** My own picture (id to key), so Settings can draw it without a round
+     *  trip. Seeded from the profile load, updated by [setOwnAvatar]. */
+    private val _ownAvatar = MutableStateFlow<Pair<String, String>?>(null)
+    val ownAvatar: StateFlow<Pair<String, String>?> = _ownAvatar.asStateFlow()
+
     /** Owner/admin: rename / re-describe / re-pin a group. */
     suspend fun patchGroup(
         id: Int,
@@ -2464,6 +2491,11 @@ class Session(context: Context) {
         // never silently shows the permissive "everyone" defaults (which a
         // user reads as their restrictions having reset). See LocalStores.
         if (net == null) return cached
+        // Keep the settings avatar in step with the island without a second
+        // round trip: the profile load already carries it.
+        _ownAvatar.value = net.avatar_media_id
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { id -> net.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { id to it } }
         // Server is the source of truth, but a reply that omits the
         // owner-self visibility fields (auth/owner-self edge) must NOT
         // clobber a known cached choice — merge field-by-field.
@@ -4040,6 +4072,8 @@ class Session(context: Context) {
                 gender = it.gender,
                 lastSeen = parseIso(it.last_seen),
                 callable = it.callable,
+                avatarMediaId = it.avatar_media_id,
+                avatarMediaKey = it.avatar_media_key,
             )
         }
         if (prevPresence.isNotEmpty()) {

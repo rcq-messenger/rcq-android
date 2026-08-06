@@ -698,6 +698,25 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
     var interests by remember { mutableStateOf("") }
     var homepage by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
+    val ownAvatar by session.ownAvatar.collectAsState()
+    var avatarBusy by remember { mutableStateOf(false) }
+    // GIFs go up as-is (a moving avatar is the point of allowing them);
+    // everything else is re-encoded to JPEG like a group avatar, so a 12MP
+    // photo does not become a 6MB blob every viewer has to pull.
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            avatarBusy = true
+            val bytes = withContext(Dispatchers.IO) {
+                val mime = context.contentResolver.getType(uri) ?: ""
+                if (mime == "image/gif") {
+                    runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+                        .getOrNull()?.takeIf { it.size <= 2_000_000 }
+                } else compressImageFor(context, uri)
+            }
+            if (bytes != null) runCatching { session.setOwnAvatar(bytes) }
+            avatarBusy = false
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         session.loadProfile()?.let { p ->
@@ -757,7 +776,33 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
             // Identity header card (avatar + UIN), like the iOS profile.
             // The number is copyable + shareable here too (beta report).
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatusIcon(ownStatus, size = 48.dp)
+                // The picture becomes the anchor of this card when there is
+                // one, and the status flower stands in when there is not, so
+                // nothing moves for people who never set a picture.
+                Box(contentAlignment = Alignment.Center) {
+                    if (ownAvatar != null) {
+                        PersonAvatar(ownAvatar?.first, ownAvatar?.second, ownStatus, session, 64.dp, animated = true)
+                    } else {
+                        StatusIcon(ownStatus, size = 48.dp)
+                    }
+                    if (avatarBusy) CircularProgressIndicator(Modifier.size(24.dp), color = c.accent, strokeWidth = 2.dp)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(if (ownAvatar == null) R.string.pe_avatar_set else R.string.pe_avatar_change),
+                        color = c.accent, fontSize = 13.sp,
+                        modifier = Modifier.clickable(enabled = !avatarBusy) { avatarPicker.launch("image/*") },
+                    )
+                    if (ownAvatar != null) {
+                        Text(
+                            stringResource(R.string.pe_avatar_remove),
+                            color = c.textSecondary, fontSize = 12.sp,
+                            modifier = Modifier.clickable(enabled = !avatarBusy) {
+                                scope.launch { avatarBusy = true; runCatching { session.setOwnAvatar(null) }; avatarBusy = false }
+                            },
+                        )
+                    }
+                }
                 Column {
                     Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

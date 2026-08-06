@@ -1036,4 +1036,7 @@
     <string name="common_copied">Скопировано</string>
     <string name="common_copy">Копировать</string>
     <string name="chat_delete">Удалить</string>
+    <string name="pe_avatar_set">Поставить фото</string>
+    <string name="pe_avatar_change">Сменить фото</string>
+    <string name="pe_avatar_remove">Убрать</string>
 </resources>

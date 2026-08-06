@@ -242,6 +242,9 @@ class RcqApi(
         val identity_key: String?,        // base64 raw X25519 public
         val signing_key: String?,         // base64 raw Ed25519 public
         val signal_identity_key: String? = null,  // base64 libsignal IdentityKey; null = v=1 only
+        // Null unless we are a mutual contact of theirs (or it is our own row).
+        val avatar_media_id: String? = null,
+        val avatar_media_key: String? = null,
     )
 
     suspend fun userInfo(uin: Int): UserInfo = withContext(Dispatchers.IO) {
@@ -516,6 +519,10 @@ class RcqApi(
         val callable: Boolean = true,    // false = peer's call_policy is "nobody"
         val identity_key: String?,
         val signing_key: String?,
+        // Profile picture, same shape as a group's: encrypted blob + its key.
+        // The server only fills these in for people allowed to see it.
+        val avatar_media_id: String? = null,
+        val avatar_media_key: String? = null,
     )
 
     suspend fun contacts(): List<ContactRow> = withContext(Dispatchers.IO) {
@@ -941,6 +948,8 @@ class RcqApi(
     data class MeProfile(
         val uin: Int = 0,
         val nickname: String? = null,
+        val avatar_media_id: String? = null,
+        val avatar_media_key: String? = null,
         val first_name: String? = null,
         val last_name: String? = null,
         val age: Int? = null,
@@ -1133,6 +1142,10 @@ class RcqApi(
     /** Partial profile/privacy update (PUT /me). Gson omits null fields,
      *  so only what the caller sets is changed. */
     data class UpdateMeBody(
+        // Both blank clears the picture; both absent leaves it untouched, so a
+        // patch that only changes a nickname cannot wipe it.
+        val avatar_media_id: String? = null,
+        val avatar_media_key: String? = null,
         val nickname: String? = null,
         val status_message: String? = null,
         val gender: String? = null,
