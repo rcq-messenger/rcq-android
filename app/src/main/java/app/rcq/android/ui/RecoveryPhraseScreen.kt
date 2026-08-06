@@ -38,6 +38,8 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -100,6 +102,11 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
         val scope = rememberCoroutineScope()
         var confirmReissue by remember { mutableStateOf(false) }
         var rotating by remember { mutableStateOf(false) }
+        // Blurred until asked for, the way iOS and the web already do it. The
+        // phrase is the whole account, and it was being painted the instant the
+        // screen opened: a glance over a shoulder, a screen recording or a
+        // screenshot in a support chat was enough to take it.
+        var revealed by remember { mutableStateOf(false) }
 
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -109,7 +116,13 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
 
             // Two-column numbered grid of the words (24 for seed, 48 for legacy).
             val mid = words.size / 2
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box {
+            Row(
+                Modifier.fillMaxWidth()
+                    .then(if (revealed) Modifier else Modifier.blur(12.dp))
+                    .then(if (revealed) Modifier else Modifier.alpha(0.65f)),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 listOf(words.subList(0, mid), words.subList(mid, words.size)).forEachIndexed { col, half ->
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         half.forEachIndexed { i, w ->
@@ -126,7 +139,18 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
                 }
             }
 
-            CapsuleButton(stringResource(R.string.recovery_copy), enabled = !rotating, modifier = Modifier.fillMaxWidth()) {
+            if (!revealed) {
+                Box(Modifier.matchParentSize().clickable { revealed = true }, contentAlignment = Alignment.Center) {
+                    Text(
+                        stringResource(R.string.recovery_reveal),
+                        color = c.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+            }
+            }
+
+            CapsuleButton(stringResource(R.string.recovery_copy), enabled = !rotating && revealed, modifier = Modifier.fillMaxWidth()) {
                 copyToClipboard(context, words.joinToString(" "))
                 Toast.makeText(context, context.getString(R.string.recovery_copied), Toast.LENGTH_SHORT).show()
             }

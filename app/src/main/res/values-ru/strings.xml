@@ -153,7 +153,7 @@
     <string name="addlink_failed">Не удалось добавить контакт. Проверьте соединение и попробуйте снова.</string>
     <string name="addlink_request_sent">Запрос отправлен</string>
     <string name="settings_row_linked_devices">Подключённые устройства</string>
-    <string name="settings_row_backup_island">Резервная копия на другом острове</string>
+    <string name="settings_row_backup_island">Запасной остров</string>
     <string name="backup_island_body">Это автоматический резерв, а не второй вход: вы никуда не переключаетесь и не входите. Пока основной остров работает, копия каждого входящего сообщения кладётся и на резервный. Если основной заблокируют или он упадёт, приложение само продолжит получать с резервного. Номер на резервном острове может оказаться другим (острова нумеруют независимо), а ваш основной номер не меняется.</string>
     <string name="backup_island_row_uin">почтовый ящик на этом острове: #%1$d</string>
     <string name="home_via_backup">Ваш остров не отвечает. Почта приходит через резервный остров; чтобы и отправлять с него, сделайте его основным в настройках.</string>
@@ -1047,7 +1047,7 @@
     <string name="ci_clear_name">Убрать</string>
     <string name="uin_shop_error_too_many">У вас уже столько номеров, сколько может держать один аккаунт. Освободите один, чтобы взять новый.</string>
     <string name="my_uins_held_count">%1$d из %2$d</string>
-    <string name="settings_row_backup">Резервная копия</string>
+    <string name="settings_row_backup">Копия переписки в файл</string>
     <string name="backup_intro">Сохраняет историю этого устройства в файл, зашифрованный вашей фразой восстановления. Файл ваш: храните его там, где храните всё остальное. К нам он не уходит, и прочитать его мы не можем.</string>
     <string name="backup_media_title">Вместе с вложениями</string>
     <string name="backup_media_desc">Фотографии, видео и голосовые тоже лягут в файл. Дольше и заметно больше по размеру, зато картинки откроются и через годы, даже если на острове их уже нет.</string>
@@ -1061,4 +1061,5 @@
     <string name="backup_restored">Восстановлено: %1$d добавлено, %2$d уже были.</string>
     <string name="backup_no_phrase">На этом устройстве нет фразы восстановления, поэтому файл здесь не открыть.</string>
     <string name="backup_warning">Этот файл вместе с вашей фразой это вся ваша переписка. Берегите его так же, как фразу. Ключей в нём нет, войти по нему нельзя.</string>
+    <string name="recovery_reveal">Показать фразу</string>
 </resources>
