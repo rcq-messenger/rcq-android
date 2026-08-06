@@ -130,7 +130,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
+private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
 
 @Composable
 internal fun SettingsScreen(
@@ -220,6 +220,7 @@ internal fun SettingsScreen(
         SettingsRoute.BLOCKED -> BlockedUsersScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.PIN_CODES -> PinCodesScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.RECOVERY_PHRASE -> RecoveryPhraseScreen(session) { route = SettingsRoute.ROOT }
+        SettingsRoute.BACKUP -> BackupScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.LINKED_DEVICES -> LinkedDevicesScreen(session) { route = SettingsRoute.ROOT }
         // Promote rebinds the session to another island (new uin) — bubble it
         // up like a migration so the Home header re-registers immediately.
@@ -374,6 +375,8 @@ private fun SettingsRoot(
                 ) { onOpen(SettingsRoute.PIN_CODES) }
                 Divider()
                 SettingsRow(Icons.Filled.Key, stringResource(R.string.settings_row_recovery)) { onOpen(SettingsRoute.RECOVERY_PHRASE) }
+                Divider()
+                SettingsRow(Icons.Filled.Inventory2, stringResource(R.string.settings_row_backup)) { onOpen(SettingsRoute.BACKUP) }
                 Divider()
                 SettingsRow(Icons.Filled.Devices, stringResource(R.string.settings_row_linked_devices)) { onOpen(SettingsRoute.LINKED_DEVICES) }
                 Divider()
@@ -1537,6 +1540,98 @@ private fun SoundsScreen(onBack: () -> Unit) {
                 }
             }
             SectionFooter(stringResource(R.string.snd_footer))
+        }
+    }
+}
+
+
+/** Export the history to a file, or add a file's history back.
+ *
+ *  Deliberately a plain file and nothing else: no cloud of ours, no account
+ *  needed to hold it. The person keeps it wherever they keep things, which on
+ *  a phone means their own drive, a USB stick, or a chat with themselves. We
+ *  cannot lose what we never had, and we cannot be made to hand it over. */
+@Composable
+private fun BackupScreen(session: Session, onBack: () -> Unit) {
+    val c = RcqTheme.colors
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var includeMedia by remember { mutableStateOf(true) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val exportName = remember {
+        val d = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        "rcq-$d.rcqbak"
+    }
+    val exporter = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = context.getString(R.string.backup_working)
+            error = null; result = null
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    app.rcq.android.backup.BackupService.export(session, out, includeMedia) { p ->
+                        busy = context.getString(R.string.backup_media_progress, p.done, p.total)
+                    }
+                } ?: error("cannot write there")
+            }.onSuccess { result = context.getString(R.string.backup_saved) }
+                .onFailure { error = it.message }
+            busy = null
+        }
+    }
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = context.getString(R.string.backup_working)
+            error = null; result = null
+            val phrase = session.recoveryPhrase()?.joinToString(" ")
+            if (phrase == null) {
+                error = context.getString(R.string.backup_no_phrase)
+                busy = null
+                return@launch
+            }
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    app.rcq.android.backup.BackupService.restore(session, input, phrase) { p ->
+                        busy = context.getString(R.string.backup_restore_progress, p.done, p.total)
+                    }
+                } ?: error("cannot read that file")
+            }.onSuccess { r ->
+                result = context.getString(R.string.backup_restored, r.added, r.skipped)
+            }.onFailure { error = it.message }
+            busy = null
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        SettingsTopBar(stringResource(R.string.settings_row_backup), onBack)
+        Column(
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SectionFooter(stringResource(R.string.backup_intro))
+            SettingsGroup {
+                SettingToggleRow(
+                    stringResource(R.string.backup_media_title),
+                    stringResource(R.string.backup_media_desc),
+                    includeMedia,
+                ) { includeMedia = it }
+            }
+            CapsuleButton(stringResource(R.string.backup_export), enabled = busy == null) {
+                exporter.launch(exportName)
+            }
+            SectionFooter(stringResource(R.string.backup_restore_desc))
+            CapsuleButton(stringResource(R.string.backup_restore), enabled = busy == null) {
+                importer.launch("*/*")
+            }
+            busy?.let { Text(it, color = c.textSecondary, fontSize = 13.sp) }
+            result?.let { Text(it, color = c.accent, fontSize = 13.sp) }
+            error?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
+            SectionFooter(stringResource(R.string.backup_warning))
         }
     }
 }

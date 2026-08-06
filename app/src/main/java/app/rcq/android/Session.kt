@@ -2995,6 +2995,23 @@ class Session(context: Context) {
         return applyTake(resp)
     }
 
+    // ── backup ───────────────────────────────────────────────────────
+
+    /** Every message on this device, oldest first, for an export. */
+    fun allMessagesForBackup(): List<ChatMessage> =
+        if (::db.isInitialized) db.all() else emptyList()
+
+    /** Add one restored message. Returns false when it was already here: a
+     *  restore only ever ADDS, so an old archive can never eat newer history. */
+    fun insertRestoredMessage(msg: ChatMessage): Boolean =
+        if (::db.isInitialized) runCatching { db.insert(msg) }.getOrDefault(false) else false
+
+    /** Put a restored attachment back in the decrypted cache, so the picture
+     *  shows even when the blob has long aged off the island. */
+    fun cacheRestoredMedia(mediaId: String, bytes: ByteArray) {
+        if (mediaId.isNotEmpty() && bytes.isNotEmpty()) imageCache.put(mediaId, bytes)
+    }
+
     /** Everything this account holds, plus the number it answers as now. */
     suspend fun myUins(): RcqApi.MyUinsResponse = api.myUins()
 

@@ -1047,4 +1047,18 @@
     <string name="ci_clear_name">Убрать</string>
     <string name="uin_shop_error_too_many">У вас уже столько номеров, сколько может держать один аккаунт. Освободите один, чтобы взять новый.</string>
     <string name="my_uins_held_count">%1$d из %2$d</string>
+    <string name="settings_row_backup">Резервная копия</string>
+    <string name="backup_intro">Сохраняет историю этого устройства в файл, зашифрованный вашей фразой восстановления. Файл ваш: храните его там, где храните всё остальное. К нам он не уходит, и прочитать его мы не можем.</string>
+    <string name="backup_media_title">Вместе с вложениями</string>
+    <string name="backup_media_desc">Фотографии, видео и голосовые тоже лягут в файл. Дольше и заметно больше по размеру, зато картинки откроются и через годы, даже если на острове их уже нет.</string>
+    <string name="backup_export">Сохранить копию</string>
+    <string name="backup_restore">Восстановить из файла</string>
+    <string name="backup_restore_desc">Восстановление только ДОБАВЛЯЕТ. Ничего из того, что уже есть на устройстве, не удаляется и не перезаписывается, а знакомые сообщения пропускаются.</string>
+    <string name="backup_working">Работаю…</string>
+    <string name="backup_media_progress">Вложения: %1$d из %2$d</string>
+    <string name="backup_restore_progress">Сообщения: %1$d из %2$d</string>
+    <string name="backup_saved">Сохранено.</string>
+    <string name="backup_restored">Восстановлено: %1$d добавлено, %2$d уже были.</string>
+    <string name="backup_no_phrase">На этом устройстве нет фразы восстановления, поэтому файл здесь не открыть.</string>
+    <string name="backup_warning">Этот файл вместе с вашей фразой это вся ваша переписка. Берегите его так же, как фразу. Ключей в нём нет, войти по нему нельзя.</string>
 </resources>
