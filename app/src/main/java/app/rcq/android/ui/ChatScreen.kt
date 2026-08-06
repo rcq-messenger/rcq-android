@@ -692,7 +692,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             } else {
                 val isCrossIsland = peerContact?.host != null ||
                     (peerContact == null && CrossIslandStore.findByUin(peer ?: 0) != null)
-                StatusIcon(peerContact?.presence ?: UserStatus.OFFLINE, size = 26.dp, crossIsland = isCrossIsland)
+                if (!isCrossIsland && !peerContact?.avatarMediaId.isNullOrEmpty()) {
+                    // Animated here and only here: one avatar on screen, so a
+                    // moving GIF costs nothing, while a list of them would.
+                    PersonAvatar(
+                        peerContact?.avatarMediaId, peerContact?.avatarMediaKey,
+                        peerContact?.presence ?: UserStatus.OFFLINE, session, 26.dp, animated = true,
+                    )
+                } else {
+                    StatusIcon(peerContact?.presence ?: UserStatus.OFFLINE, size = 26.dp, crossIsland = isCrossIsland)
+                }
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {

@@ -16,6 +16,10 @@ data class Contact(
     // Gson leaves it null for roster rows). Drives the "Other islands" home
     // section + the gray presence flower.
     val host: String? = null,
+    // Profile picture: encrypted blob id + its key. Null = no picture, or we
+    // are not someone allowed to see it, and the status glyph stands in.
+    val avatarMediaId: String? = null,
+    val avatarMediaKey: String? = null,
 ) {
     /** Presence as a typed enum (server never sends `invisible` for peers). */
     val presence: UserStatus get() = UserStatus.from(status)

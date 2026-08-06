@@ -1037,4 +1037,7 @@
     <string name="common_copied">Copied</string>
     <string name="common_copy">Copy</string>
     <string name="chat_delete">Delete</string>
+    <string name="pe_avatar_set">Set a picture</string>
+    <string name="pe_avatar_change">Change picture</string>
+    <string name="pe_avatar_remove">Remove</string>
 </resources>

@@ -519,7 +519,7 @@ internal fun HomeScreen(
                     }
                     if (!collapsedFavorites) {
                         items(favContacts, key = { "fav_${it.uin}" }) { ct ->
-                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
                         }
                         items(favGroups, key = { "favg_${it.id}" }) { g ->
                             GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
@@ -552,9 +552,9 @@ internal fun HomeScreen(
                     }
                 }
 
-                contactSection(secOnline, onlineContacts, collapsedOnline, "on", unread, { LocalStores.setSectionFlag("sec:online", !collapsedOnline) }, onOpenChat, onLongPress = { previewContact = it })
-                contactSection(secOffline, offlineContacts, collapsedOffline, "off", unread, { LocalStores.setSectionFlag("sec:offline", !collapsedOffline) }, onOpenChat, onLongPress = { previewContact = it })
-                contactSection(secCrossIsland, crossIslandContacts, collapsedCrossIsland, "cisl", unread, { LocalStores.setSectionFlag("sec:ci", !collapsedCrossIsland) }, onOpenChat, onLongPress = { previewContact = it })
+                contactSection(secOnline, onlineContacts, collapsedOnline, "on", unread, session, { LocalStores.setSectionFlag("sec:online", !collapsedOnline) }, onOpenChat, onLongPress = { previewContact = it })
+                contactSection(secOffline, offlineContacts, collapsedOffline, "off", unread, session, { LocalStores.setSectionFlag("sec:offline", !collapsedOffline) }, onOpenChat, onLongPress = { previewContact = it })
+                contactSection(secCrossIsland, crossIslandContacts, collapsedCrossIsland, "cisl", unread, session, { LocalStores.setSectionFlag("sec:ci", !collapsedCrossIsland) }, onOpenChat, onLongPress = { previewContact = it })
                 // Archive holds BOTH archived contacts AND archived groups.
                 // (Bug fix: an archived group was filtered out of the main list
                 // but never rendered here, so it vanished entirely and couldn't
@@ -569,7 +569,7 @@ internal fun HomeScreen(
                     }
                     if (!collapsedArchive) {
                         items(archivedContacts, key = { "arch_${it.uin}" }) { ct ->
-                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
                         }
                         items(archivedGroups, key = { "archg_${it.id}" }) { g ->
                             GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
@@ -605,7 +605,7 @@ internal fun HomeScreen(
             PreviewOverlay(
                 title = ct.nickname,
                 subtitle = "#${ct.uin}",
-                avatar = { StatusIcon(ct.presence, size = 36.dp) },
+                avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp, host = ct.host) },
                 actions = contactActions(ct, session, scope, context, onOpenChat,
                     onReport = { reportTarget = it },
                     onClearThread = { clearPeerTarget = it },
@@ -1307,6 +1307,7 @@ private fun LazyListScope.contactSection(
     collapsed: Boolean,
     keyPrefix: String,
     unread: Map<String, Int>,
+    session: Session,
     onToggle: () -> Unit,
     onOpenChat: (Int) -> Unit,
     onLongPress: (Contact) -> Unit,
@@ -1322,7 +1323,7 @@ private fun LazyListScope.contactSection(
     }
     if (!collapsed) {
         items(rows, key = { "${keyPrefix}_${it.uin}" }) { ct ->
-            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, onClick = { onOpenChat(ct.uin) }, onLongPress = { onLongPress(ct) })
+            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { onLongPress(ct) })
         }
     }
 }
@@ -1383,7 +1384,7 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, onLongPress: () -> Unit) {
+private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onClick: () -> Unit, onLongPress: () -> Unit) {
     val c = RcqTheme.colors
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
@@ -1407,7 +1408,14 @@ private fun ContactRowItem(contact: Contact, unread: Int, onClick: () -> Unit, o
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            StatusIcon(contact.presence, size = 28.dp, crossIsland = contact.host != null)
+            // A picture when the contact has one, the status flower otherwise.
+            // Cross-island rows keep the glyph: presence does not cross islands
+            // and neither does the blob.
+            if (contact.host == null && !contact.avatarMediaId.isNullOrEmpty()) {
+                PersonAvatar(contact.avatarMediaId, contact.avatarMediaKey, contact.presence, session, 28.dp)
+            } else {
+                StatusIcon(contact.presence, size = 28.dp, crossIsland = contact.host != null)
+            }
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd))
         }
         Column(Modifier.weight(1f)) {
