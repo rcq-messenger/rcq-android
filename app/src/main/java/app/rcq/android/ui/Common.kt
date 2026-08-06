@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -212,15 +213,20 @@ internal fun PersonAvatar(
             if (animatableGif != null) SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
             else Image(bitmap = image!!, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
+        // The badge sits ON the picture's lower-left edge and sticks out past
+        // it, the way the site draws it in the Hall of Fame. Keeping it fully
+        // inside the square put it in the corner the round image never reaches,
+        // so it read as clipped and half-swallowed by the avatar.
         Box(
             Modifier.align(Alignment.BottomStart)
+                .offset(x = -(badge / 4), y = badge / 4)
                 .size(badge)
                 .clip(CircleShape)
                 .background(c.bgPrimary)
                 .then(if (onStatusClick != null) Modifier.clickable(onClick = onStatusClick) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
-            StatusIcon(status, size = badge * 0.86f, crossIsland = crossIsland)
+            StatusIcon(status, size = badge * 0.82f, crossIsland = crossIsland)
         }
     }
 }
