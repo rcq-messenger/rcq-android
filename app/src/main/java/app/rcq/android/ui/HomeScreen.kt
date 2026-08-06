@@ -1104,19 +1104,24 @@ private fun HomeHeader(
                     ownAv?.first, ownAv?.second, effectiveStatus, session, 30.dp,
                     onStatusClick = { statusMenu = true },
                 )
-                // Always-visible connection indicator (#16): a small dot on the
-                // identity flower. Green = socket up, amber = connecting /
-                // offline (the app auto-reconnects). Non-interactive overlay.
-                Box(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(11.dp)
-                        .clip(CircleShape)
-                        .background(c.bgPrimary)
-                        .padding(2.dp)
-                        .clip(CircleShape)
-                        .background(if (connected) c.statusOnline else c.statusAway),
-                )
+                // Connection indicator (#16): green = socket up, amber =
+                // connecting. Drawn ONLY when there is no picture. With a
+                // picture the status badge already carries this: it is fed
+                // `effectiveStatus`, which goes OFFLINE the moment the socket
+                // does, so a second dot on the same small circle says the same
+                // thing twice and crowds the corner.
+                if (ownAv == null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(11.dp)
+                            .clip(CircleShape)
+                            .background(c.bgPrimary)
+                            .padding(2.dp)
+                            .clip(CircleShape)
+                            .background(if (connected) c.statusOnline else c.statusAway),
+                    )
+                }
                 DropdownMenu(expanded = statusMenu, onDismissRequest = { statusMenu = false }) {
                     // "Stay visible after you leave" countdown, top-right of the
                     // status menu (moved here from the home header).
