@@ -3,6 +3,7 @@ package app.rcq.android.backup
 import app.rcq.android.Session
 import app.rcq.android.data.LocalStores
 import app.rcq.android.model.ChatMessage
+import app.rcq.android.model.DeliveryState
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -41,6 +42,102 @@ object BackupService {
 
     private val gson = Gson()
 
+    /**
+     * The neutral message record that actually travels in the archive.
+     *
+     * Deliberately NOT this client's own model: Android keeps a `ChatMessage`,
+     * the browser keeps its own rows and iOS keeps a third shape, so writing
+     * any one of them into the file would make "took it on Android, restored it
+     * on an iPhone" a lie. Every client maps to and from THIS, and adding a
+     * field here is additive — an older client ignores what it does not know.
+     */
+    data class Record(
+        val id: String,
+        val peer: Int?,          // 1:1 thread, null for a group message
+        val group: Int?,         // group thread, null for 1:1
+        val from_me: Boolean,
+        val sender: Int?,        // group message author
+        val sent_at: Long,
+        val kind: String,
+        val body: String,
+        val media_id: String? = null,
+        val media_key: String? = null,
+        val file_name: String? = null,
+        val file_mime: String? = null,
+        val file_size: Long? = null,
+        val duration_sec: Int? = null,
+        val thumb_b64: String? = null,
+        val lat: Double? = null,
+        val lng: Double? = null,
+        val spoiler: Boolean = false,
+        val album_id: String? = null,
+        val edited: Boolean = false,
+        val reply_to_id: String? = null,
+        val reply_to_author: String? = null,
+        val reply_to_snippet: String? = null,
+        val reactions: Map<String, String> = emptyMap(),
+        val expires_at: Long? = null,
+    )
+
+    private fun ChatMessage.toRecord() = Record(
+        id = id,
+        peer = if (groupId == null) peerUin else null,
+        group = groupId,
+        from_me = fromMe,
+        sender = senderUin,
+        sent_at = sentAt,
+        kind = kind,
+        body = body,
+        media_id = mediaId,
+        media_key = mediaKey,
+        file_name = fileName,
+        file_mime = fileMime,
+        file_size = fileSize,
+        duration_sec = durationSec,
+        thumb_b64 = thumbB64,
+        lat = lat,
+        lng = lng,
+        spoiler = spoiler,
+        album_id = albumId,
+        edited = edited,
+        reply_to_id = replyToId,
+        reply_to_author = replyToAuthor,
+        reply_to_snippet = replyToSnippet,
+        reactions = reactions.mapKeys { it.key.toString() },
+        expires_at = expiresAt,
+    )
+
+    private fun Record.toMessage() = ChatMessage(
+        id = id,
+        peerUin = peer ?: 0,
+        fromMe = from_me,
+        body = body,
+        sentAt = sent_at,
+        // Anything restored is history: it either arrived or it was sent long
+        // ago, so it is never left looking like it is still on its way.
+        state = DeliveryState.DELIVERED,
+        kind = kind,
+        mediaId = media_id,
+        mediaKey = media_key,
+        replyToSnippet = reply_to_snippet,
+        replyToAuthor = reply_to_author,
+        replyToId = reply_to_id,
+        groupId = group,
+        senderUin = sender,
+        reactions = reactions.mapNotNull { (k, v) -> k.toIntOrNull()?.let { it to v } }.toMap(),
+        edited = edited,
+        fileName = file_name,
+        fileMime = file_mime,
+        fileSize = file_size,
+        durationSec = duration_sec,
+        thumbB64 = thumb_b64,
+        lat = lat,
+        lng = lng,
+        spoiler = spoiler,
+        albumId = album_id,
+        expiresAt = expires_at,
+    )
+
     suspend fun export(
         session: Session,
         out: OutputStream,
@@ -63,7 +160,7 @@ object BackupService {
         writer.entry("manifest.json", manifest.toString().toByteArray())
 
         val sb = StringBuilder()
-        messages.forEach { sb.append(gson.toJson(it)).append('\n') }
+        messages.forEach { sb.append(gson.toJson(it.toRecord())).append('\n') }
         writer.entry("messages.ndjson", sb.toString().toByteArray())
 
         val local = JsonObject().apply {
@@ -114,7 +211,7 @@ object BackupService {
                     val lines = String(bytes).split('\n').filter { it.isNotBlank() }
                     lines.forEachIndexed { i, line ->
                         if (i % 200 == 0) onProgress(Progress("messages", i, lines.size))
-                        val msg = runCatching { gson.fromJson(line, ChatMessage::class.java) }.getOrNull()
+                        val msg = runCatching { gson.fromJson(line, Record::class.java).toMessage() }.getOrNull()
                         if (msg != null) {
                             if (session.insertRestoredMessage(msg)) added++ else skipped++
                         }
