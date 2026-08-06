@@ -639,6 +639,7 @@
     <string name="snd_message_desc">Проигрывать сигнал при новом сообщении в чате, который не открыт.</string>
     <string name="snd_presence_title">Контакт в сети / не в сети</string>
     <string name="snd_presence_desc">Проигрывать сигнал, когда контакт заходит в сеть или выходит.</string>
+    <string name="snd_volume_title">Громкость оповещения</string>
     <string name="snd_footer">Громкость сигналов регулируется кнопками громкости (медиа). В беззвучном режиме, режиме вибрации и «Не беспокоить» сигналы не проигрываются. Мьют чата (долгое нажатие на чат на главном экране) отключает звуки сообщений для него.</string>
 
     <!-- Settings: language / notifications / blocked -->

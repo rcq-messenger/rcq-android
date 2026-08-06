@@ -91,7 +91,24 @@ class WebRtcClient(private val appContext: Context) {
                 .setPassword(credential)
                 .createIceServer(),
         )
+        // Our own STUN, taken from whatever host the island handed out for TURN.
+        // coturn answers STUN on the same port, and the bundled set is Google's,
+        // which is exactly what is unreachable in the networks where calls are
+        // reported dead ("ни с обходом, ни без"). Without a reachable STUN there
+        // are no srflx candidates at all, so a call between two NATs has nothing
+        // to try until TURN allocates. Ours first, Google kept as a fallback for
+        // everyone whose network is fine.
+        ownStun = urls.firstNotNullOfOrNull { url ->
+            Regex("^turns?:([^:/?]+)(?::(\\d+))?").find(url)?.let { m ->
+                val host = m.groupValues[1]
+                val port = m.groupValues[2].ifBlank { "3478" }
+                PeerConnection.IceServer.builder("stun:$host:$port").createIceServer()
+            }
+        }
     }
+
+    /** STUN on the island's own TURN host; null until credentials arrive. */
+    private var ownStun: PeerConnection.IceServer? = null
 
     // ── call lifecycle ──────────────────────────────────────────────────
     suspend fun createOffer(media: Media): String {
@@ -247,7 +264,9 @@ class WebRtcClient(private val appContext: Context) {
 
     // ── internals ─────────────────────────────────────────────────────────
     private fun makePeerConnection(): PeerConnection {
-        val servers = ArrayList(STUN)
+        val servers = ArrayList<PeerConnection.IceServer>()
+        ownStun?.let { servers.add(it) }
+        servers.addAll(STUN)
         servers.addAll(turnServers)
         candHost = 0; candSrflx = 0; candRelay = 0
         android.util.Log.i("RCQcall", "peerConnection: ${turnServers.size} TURN server(s) configured")

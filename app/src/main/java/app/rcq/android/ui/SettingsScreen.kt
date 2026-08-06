@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -79,6 +80,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -179,6 +182,13 @@ internal fun SettingsScreen(
     // route saves the outgoing page's state and restores the incoming one.
     val settingsStateHolder = rememberSaveableStateHolder()
     settingsStateHolder.SaveableStateProvider(route.name) {
+    // Keyboard insets for EVERY settings sub-screen at once. Reported against
+    // profile editing ("нижние поля ввода проваливаются под клавиатуру"): each
+    // sub-screen builds its own root Column and none of them consumed the IME
+    // inset, so with adjustResize the scroll area kept its full height and the
+    // last fields sat behind the keyboard. Chat/Random/Hood already did this per
+    // screen; doing it here covers the ones that come later too.
+    Box(Modifier.fillMaxSize().imePadding()) {
     when (route) {
         SettingsRoute.ROOT -> SettingsRoot(
             session, uin,
@@ -234,6 +244,7 @@ internal fun SettingsScreen(
             onBack = { route = SettingsRoute.ROOT },
             onActivated = { newUin -> onMigrated(newUin); onBack() },
         )
+    }
     }
     }
 }
@@ -1391,12 +1402,30 @@ private fun SoundsScreen(onBack: () -> Unit) {
     val masterOn by LocalStores.soundMaster.collectAsState()
     val msgOn by LocalStores.soundMessages.collectAsState()
     val presOn by LocalStores.soundPresence.collectAsState()
+    val volume by LocalStores.soundVolume.collectAsState()
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_sounds), onBack)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingToggleRow(stringResource(R.string.snd_master_title), stringResource(R.string.snd_master_desc), masterOn) { LocalStores.setSoundMaster(it) }
             SettingToggleRow(stringResource(R.string.snd_message_title), stringResource(R.string.snd_message_desc), msgOn, enabled = masterOn) { LocalStores.setSoundMessages(it) }
             SettingToggleRow(stringResource(R.string.snd_presence_title), stringResource(R.string.snd_presence_desc), presOn, enabled = masterOn) { LocalStores.setSoundPresence(it) }
+            // Volume for the in-app tones only. Releasing the thumb plays the
+            // message tone so the level is audible while choosing it.
+            SettingsGroup {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.snd_volume_title), color = if (masterOn) c.textPrimary else c.textSecondary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text("${(volume * 100).toInt()}%", color = c.textSecondary, fontSize = 13.sp)
+                    }
+                    Slider(
+                        value = volume,
+                        onValueChange = { LocalStores.setSoundVolume(it) },
+                        onValueChangeFinished = { app.rcq.android.media.SoundService.previewMessage() },
+                        enabled = masterOn,
+                        colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
+                    )
+                }
+            }
             SectionFooter(stringResource(R.string.snd_footer))
         }
     }

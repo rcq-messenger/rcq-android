@@ -640,6 +640,7 @@
     <string name="snd_message_desc">Play a tone when a new message arrives in a chat you don\'t have open.</string>
     <string name="snd_presence_title">Contact online / offline</string>
     <string name="snd_presence_desc">Play a tone when one of your contacts comes online or goes offline.</string>
+    <string name="snd_volume_title">Notification tone volume</string>
     <string name="snd_footer">Tone volume follows the media volume (the volume buttons). Tones stay quiet in silent, vibrate and Do Not Disturb modes. Per-chat mute (long-press a chat on the home screen) silences message sounds for that chat.</string>
 
     <!-- Settings: language / notifications / blocked -->
