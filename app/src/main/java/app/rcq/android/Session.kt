@@ -2983,7 +2983,14 @@ class Session(context: Context) {
             api.purchaseUin(uin, switch)
         } catch (e: Exception) {
             val msg = e.message ?: ""
-            return if (msg.contains("HTTP 409")) PurchaseResult.Taken else PurchaseResult.Other(msg)
+            // Both arrive as 409: "someone took it first" and "your collection
+            // is full" are different answers to the user, so tell them apart by
+            // the code the island sends rather than by the status alone.
+            return when {
+                msg.contains("too_many_uins") -> PurchaseResult.TooMany
+                msg.contains("HTTP 409") -> PurchaseResult.Taken
+                else -> PurchaseResult.Other(msg)
+            }
         }
         return applyTake(resp)
     }
@@ -3023,6 +3030,10 @@ class Session(context: Context) {
          *  the collection afterwards. */
         data class Held(val owned: List<Int>) : PurchaseResult()
         object Taken : PurchaseResult()
+        /** The collection is full. The island caps how many numbers one
+         *  account may hold, so the answer is "let one go first", not
+         *  "try another number". */
+        object TooMany : PurchaseResult()
         /** /uin/activate on a number this account does not hold. */
         object NotOwned : PurchaseResult()
         data class Other(val message: String?) : PurchaseResult()

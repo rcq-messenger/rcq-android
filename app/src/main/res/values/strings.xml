@@ -1046,4 +1046,5 @@
     <string name="ci_their_name">They call themselves %1$s</string>
     <string name="ci_name_hint">Stays on this device only. The other person is never told.</string>
     <string name="ci_clear_name">Clear</string>
+    <string name="uin_shop_error_too_many">You are holding as many numbers as one account may. Let one go before taking another.</string>
 </resources>
