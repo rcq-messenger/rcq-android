@@ -1039,4 +1039,5 @@
     <string name="pe_avatar_set">Поставить фото</string>
     <string name="pe_avatar_change">Сменить фото</string>
     <string name="pe_avatar_remove">Убрать</string>
+    <string name="chat_caption_hint">Подпись (необязательно)</string>
 </resources>
