@@ -35,8 +35,21 @@ object BackupService {
 
     data class Progress(val stage: String, val done: Int, val total: Int)
 
-    /** Result of a restore, for a plain sentence at the end of it. */
-    data class RestoreResult(val added: Int, val skipped: Int, val media: Int)
+    /** Result of a restore, for a plain sentence at the end of it.
+     *
+     *  [unreadable] is counted separately and on purpose: a line this build
+     *  cannot turn into a message is neither added nor already here, and
+     *  folding it into either number is how a restore reports success while
+     *  quietly handing back a shorter history. */
+    data class RestoreResult(val added: Int, val skipped: Int, val media: Int, val unreadable: Int)
+
+    /** What an export actually managed to put in the file.
+     *
+     *  [mediaMissed] exists because attachments are fetched from the island at
+     *  export time: a blob that has aged off, or a phone with no connection,
+     *  leaves the file short while the manifest still says it carries media.
+     *  The person is told the number instead of finding out years later. */
+    data class ExportResult(val messages: Int, val media: Int, val mediaMissed: Int)
 
     class Refused(message: String) : Exception(message)
 
@@ -50,16 +63,25 @@ object BackupService {
      * any one of them into the file would make "took it on Android, restored it
      * on an iPhone" a lie. Every client maps to and from THIS, and adding a
      * field here is additive — an older client ignores what it does not know.
+     *
+     * ⚠ Every field is nullable with a default, and that is load-bearing rather
+     * than tidy. A writer that has nothing to put in a field leaves the key out
+     * altogether — the browser does exactly that with `reactions` — and Gson
+     * builds this class through Unsafe whenever a parameter lacks a default,
+     * which skips Kotlin's defaults and leaves the field genuinely null behind
+     * a non-null type. A web-written archive therefore threw on the first
+     * message and lost all of them, silently, because the throw happened inside
+     * a runCatching. Absent must read as empty here, not as a crash.
      */
     data class Record(
-        val id: String,
-        val peer: Int?,          // 1:1 thread, null for a group message
-        val group: Int?,         // group thread, null for 1:1
-        val from_me: Boolean,
-        val sender: Int?,        // group message author
-        val sent_at: Long,
-        val kind: String,
-        val body: String,
+        val id: String? = null,
+        val peer: Int? = null,   // 1:1 thread, null for a group message
+        val group: Int? = null,  // group thread, null for 1:1
+        val from_me: Boolean = false,
+        val sender: Int? = null, // group message author
+        val sent_at: Long = 0L,
+        val kind: String? = null,
+        val body: String? = null,
         val media_id: String? = null,
         val media_key: String? = null,
         val file_name: String? = null,
@@ -75,7 +97,7 @@ object BackupService {
         val reply_to_id: String? = null,
         val reply_to_author: String? = null,
         val reply_to_snippet: String? = null,
-        val reactions: Map<String, String> = emptyMap(),
+        val reactions: Map<String, String>? = null,
         val expires_at: Long? = null,
     )
 
@@ -107,36 +129,45 @@ object BackupService {
         expires_at = expiresAt,
     )
 
-    private fun Record.toMessage() = ChatMessage(
-        id = id,
-        peerUin = peer ?: 0,
-        fromMe = from_me,
-        body = body,
-        sentAt = sent_at,
-        // Anything restored is history: it either arrived or it was sent long
-        // ago, so it is never left looking like it is still on its way.
-        state = DeliveryState.DELIVERED,
-        kind = kind,
-        mediaId = media_id,
-        mediaKey = media_key,
-        replyToSnippet = reply_to_snippet,
-        replyToAuthor = reply_to_author,
-        replyToId = reply_to_id,
-        groupId = group,
-        senderUin = sender,
-        reactions = reactions.mapNotNull { (k, v) -> k.toIntOrNull()?.let { it to v } }.toMap(),
-        edited = edited,
-        fileName = file_name,
-        fileMime = file_mime,
-        fileSize = file_size,
-        durationSec = duration_sec,
-        thumbB64 = thumb_b64,
-        lat = lat,
-        lng = lng,
-        spoiler = spoiler,
-        albumId = album_id,
-        expiresAt = expires_at,
-    )
+    /** Back into this client's shape, or null when the line cannot be a message
+     *  here at all. Null rather than an exception: one unreadable record must
+     *  cost that record and nothing more. */
+    private fun Record.toMessageOrNull(): ChatMessage? {
+        val msgId = id?.takeIf { it.isNotBlank() } ?: return null
+        // Exactly one of the two is set; a record naming neither thread has
+        // nowhere to land and would otherwise appear as a chat with #0.
+        if (peer == null && group == null) return null
+        return ChatMessage(
+            id = msgId,
+            peerUin = peer ?: 0,
+            fromMe = from_me,
+            body = body.orEmpty(),
+            sentAt = sent_at,
+            // Anything restored is history: it either arrived or it was sent
+            // long ago, so it is never left looking like it is still on its way.
+            state = DeliveryState.DELIVERED,
+            kind = kind ?: "text",
+            mediaId = media_id,
+            mediaKey = media_key,
+            replyToSnippet = reply_to_snippet,
+            replyToAuthor = reply_to_author,
+            replyToId = reply_to_id,
+            groupId = group,
+            senderUin = sender,
+            reactions = reactions.orEmpty().mapNotNull { (k, v) -> k.toIntOrNull()?.let { it to v } }.toMap(),
+            edited = edited,
+            fileName = file_name,
+            fileMime = file_mime,
+            fileSize = file_size,
+            durationSec = duration_sec,
+            thumbB64 = thumb_b64,
+            lat = lat,
+            lng = lng,
+            spoiler = spoiler,
+            albumId = album_id,
+            expiresAt = expires_at,
+        )
+    }
 
     suspend fun export(
         session: Session,
@@ -167,23 +198,38 @@ object BackupService {
             add("aliases", gson.toJsonTree(LocalStores.aliases.value))
             add("favorites", gson.toJsonTree(LocalStores.favorites.value))
             add("muted", gson.toJsonTree(LocalStores.muted.value))
+            add("mentions_only", gson.toJsonTree(LocalStores.mentionsOnly.value))
             add("archived", gson.toJsonTree(LocalStores.archived.value))
         }
         writer.entry("local.json", local.toString().toByteArray())
 
+        var saved = 0
+        var missed = 0
         if (includeMedia) {
             // Attachments are fetched and decrypted one at a time, so a
             // multi-gigabyte account never has to fit in memory. A blob that
             // has already aged off the island is skipped rather than failing
-            // the whole export: some history is better than none.
-            val withMedia = messages.filter { !it.mediaId.isNullOrEmpty() && !it.mediaKey.isNullOrEmpty() }
+            // the whole export: some history is better than none, and the
+            // count of what was missed is handed back rather than swallowed.
+            // distinctBy the blob, not the message: one video forwarded into six
+            // chats is six rows pointing at one media id, and without this it
+            // was fetched, decrypted and written into the file six times.
+            val withMedia = messages
+                .filter { !it.mediaId.isNullOrEmpty() && !it.mediaKey.isNullOrEmpty() }
+                .distinctBy { it.mediaId }
             withMedia.forEachIndexed { i, m ->
                 onProgress(Progress("media", i + 1, withMedia.size))
                 val bytes = runCatching { session.fetchImage(m.mediaId!!, m.mediaKey!!) }.getOrNull()
-                if (bytes != null) writer.entry("media/${m.mediaId}", bytes)
+                if (bytes != null) {
+                    writer.entry("media/${m.mediaId}", bytes)
+                    saved++
+                } else {
+                    missed++
+                }
             }
         }
         writer.finish()
+        ExportResult(messages = messages.size, media = saved, mediaMissed = missed)
     }
 
     suspend fun restore(
@@ -205,15 +251,25 @@ object BackupService {
         var added = 0
         var skipped = 0
         var media = 0
+        var unreadable = 0
+        // media/<id> entries carry the decrypted bytes but not the key that
+        // seals them on disk; the key rides in the records, which the writer
+        // always puts in the file before the blobs.
+        val mediaKeys = HashMap<String, String>()
         reader.forEachEntry { name, bytes ->
             when {
                 name == "messages.ndjson" -> {
                     val lines = String(bytes).split('\n').filter { it.isNotBlank() }
                     lines.forEachIndexed { i, line ->
                         if (i % 200 == 0) onProgress(Progress("messages", i, lines.size))
-                        val msg = runCatching { gson.fromJson(line, Record::class.java).toMessage() }.getOrNull()
-                        if (msg != null) {
-                            if (session.insertRestoredMessage(msg)) added++ else skipped++
+                        val msg = runCatching { gson.fromJson(line, Record::class.java).toMessageOrNull() }.getOrNull()
+                        when {
+                            msg == null -> unreadable++
+                            session.insertRestoredMessage(msg) -> added++
+                            else -> skipped++
+                        }
+                        if (msg != null && !msg.mediaId.isNullOrEmpty() && !msg.mediaKey.isNullOrEmpty()) {
+                            mediaKeys[msg.mediaId!!] = msg.mediaKey!!
                         }
                     }
                 }
@@ -226,13 +282,35 @@ object BackupService {
                             if (LocalStores.aliasFor(uin) == null) LocalStores.setAlias(uin, v.asString)
                         }
                     }
+                    // These three went into every archive from the first version
+                    // and were read back by nothing, so a restore quietly lost
+                    // every pinned, muted and archived thread. Additive like the
+                    // aliases: a thread already in the state stays as it is.
+                    fun threads(key: String): List<String> =
+                        obj.getAsJsonArray(key)?.mapNotNull { runCatching { it.asString }.getOrNull() } ?: emptyList()
+                    threads("favorites").forEach { if (!LocalStores.isFavorite(it)) LocalStores.toggleFavorite(it) }
+                    threads("archived").forEach { if (!LocalStores.isArchived(it)) LocalStores.toggleArchive(it) }
+                    // Mute is one of three notify modes rather than a flag of its
+                    // own, so it is set through the mode: the sets behind it have
+                    // to stay mutually exclusive.
+                    threads("muted").forEach {
+                        if (LocalStores.notifyMode(it) == LocalStores.NotifyMode.ALL) {
+                            LocalStores.setNotifyMode(it, LocalStores.NotifyMode.NONE)
+                        }
+                    }
+                    threads("mentions_only").forEach {
+                        if (LocalStores.notifyMode(it) == LocalStores.NotifyMode.ALL) {
+                            LocalStores.setNotifyMode(it, LocalStores.NotifyMode.MENTIONS)
+                        }
+                    }
                 }
                 name.startsWith("media/") -> {
-                    session.cacheRestoredMedia(name.removePrefix("media/"), bytes)
+                    val mediaId = name.removePrefix("media/")
+                    session.cacheRestoredMedia(mediaId, bytes, mediaKeys[mediaId])
                     media++
                 }
             }
         }
-        RestoreResult(added = added, skipped = skipped, media = media)
+        RestoreResult(added = added, skipped = skipped, media = media, unreadable = unreadable)
     }
 }

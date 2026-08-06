@@ -1578,8 +1578,18 @@ private fun BackupScreen(session: Session, onBack: () -> Unit) {
                         busy = context.getString(R.string.backup_media_progress, p.done, p.total)
                     }
                 } ?: error("cannot write there")
-            }.onSuccess { result = context.getString(R.string.backup_saved) }
-                .onFailure { error = it.message }
+            }.onSuccess { r ->
+                // Said out loud rather than left to the manifest: attachments
+                // are pulled from the island as the file is written, so a blob
+                // that has aged off simply is not there, and the only moment
+                // the person can act on that is now.
+                result = when {
+                    !includeMedia -> context.getString(R.string.backup_saved)
+                    r.mediaMissed > 0 ->
+                        context.getString(R.string.backup_saved_media_missed, r.messages, r.media, r.mediaMissed)
+                    else -> context.getString(R.string.backup_saved_media, r.messages, r.media)
+                }
+            }.onFailure { error = it.message }
             busy = null
         }
     }
@@ -1601,7 +1611,11 @@ private fun BackupScreen(session: Session, onBack: () -> Unit) {
                     }
                 } ?: error("cannot read that file")
             }.onSuccess { r ->
-                result = context.getString(R.string.backup_restored, r.added, r.skipped)
+                result = if (r.unreadable > 0) {
+                    context.getString(R.string.backup_restored_unreadable, r.added, r.skipped, r.unreadable)
+                } else {
+                    context.getString(R.string.backup_restored, r.added, r.skipped)
+                }
             }.onFailure { error = it.message }
             busy = null
         }

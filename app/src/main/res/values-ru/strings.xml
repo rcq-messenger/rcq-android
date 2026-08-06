@@ -1058,7 +1058,10 @@
     <string name="backup_media_progress">Вложения: %1$d из %2$d</string>
     <string name="backup_restore_progress">Сообщения: %1$d из %2$d</string>
     <string name="backup_saved">Сохранено.</string>
+    <string name="backup_saved_media">Сохранено: %1$d сообщений и %2$d вложений.</string>
+    <string name="backup_saved_media_missed">Сохранено: %1$d сообщений и %2$d вложений. %3$d вложений забрать не удалось, в файле их нет.</string>
     <string name="backup_restored">Восстановлено: %1$d добавлено, %2$d уже были.</string>
+    <string name="backup_restored_unreadable">Восстановлено: %1$d добавлено, %2$d уже были, %3$d эта версия прочитать не смогла.</string>
     <string name="backup_no_phrase">На этом устройстве нет фразы восстановления, поэтому файл здесь не открыть.</string>
     <string name="backup_warning">Этот файл вместе с вашей фразой это вся ваша переписка. Берегите его так же, как фразу. Ключей в нём нет, войти по нему нельзя.</string>
     <string name="recovery_reveal">Показать фразу</string>

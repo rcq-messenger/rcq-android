@@ -1059,7 +1059,10 @@
     <string name="backup_media_progress">Attachments: %1$d of %2$d</string>
     <string name="backup_restore_progress">Messages: %1$d of %2$d</string>
     <string name="backup_saved">Saved.</string>
+    <string name="backup_saved_media">Saved: %1$d messages and %2$d attachments.</string>
+    <string name="backup_saved_media_missed">Saved: %1$d messages and %2$d attachments. %3$d attachments could not be fetched and are not in the file.</string>
     <string name="backup_restored">Restored: %1$d added, %2$d already here.</string>
+    <string name="backup_restored_unreadable">Restored: %1$d added, %2$d already here, %3$d this version could not read.</string>
     <string name="backup_no_phrase">This device has no recovery phrase, so the file cannot be opened here.</string>
     <string name="backup_warning">This file plus your recovery phrase is your whole history. Keep it as carefully as the phrase itself. It does not contain your keys and cannot be used to sign in.</string>
     <string name="recovery_reveal">Show the phrase</string>
