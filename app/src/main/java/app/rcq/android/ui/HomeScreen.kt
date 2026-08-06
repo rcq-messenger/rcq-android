@@ -355,6 +355,7 @@ internal fun HomeScreen(
         HomeBackground()
         Column(Modifier.fillMaxSize()) {
             HomeHeader(
+                session = session,
                 nickname = session.nickname,
                 uin = uin,
                 serverHost = session.currentServer,
@@ -952,6 +953,7 @@ private fun groupActions(
  *  "coming soon" dialog. */
 @Composable
 private fun HomeHeader(
+    session: Session,
     nickname: String,
     uin: Int,
     serverHost: String,
@@ -1095,7 +1097,13 @@ private fun HomeHeader(
                 // OFFLINE when not connected; the status-picker menu below stays bound
                 // to the real ownStatus so the user's choice isn't lost.
                 val effectiveStatus = if (connected) ownStatus else UserStatus.OFFLINE
-                StatusIcon(effectiveStatus, size = 30.dp, modifier = Modifier.clip(CircleShape).clickable { statusMenu = true })
+                // Own picture in the header, with the status still on it and
+                // still opening the status menu when tapped.
+                val ownAv by session.ownAvatar.collectAsState()
+                PersonAvatar(
+                    ownAv?.first, ownAv?.second, effectiveStatus, session, 30.dp,
+                    onStatusClick = { statusMenu = true },
+                )
                 // Always-visible connection indicator (#16): a small dot on the
                 // identity flower. Green = socket up, amber = connecting /
                 // offline (the app auto-reconnects). Non-interactive overlay.
@@ -1411,11 +1419,10 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
             // A picture when the contact has one, the status flower otherwise.
             // Cross-island rows keep the glyph: presence does not cross islands
             // and neither does the blob.
-            if (contact.host == null && !contact.avatarMediaId.isNullOrEmpty()) {
-                PersonAvatar(contact.avatarMediaId, contact.avatarMediaKey, contact.presence, session, 28.dp)
-            } else {
-                StatusIcon(contact.presence, size = 28.dp, crossIsland = contact.host != null)
-            }
+            PersonAvatar(
+                contact.avatarMediaId.takeIf { contact.host == null }, contact.avatarMediaKey,
+                contact.presence, session, 28.dp, crossIsland = contact.host != null,
+            )
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd))
         }
         Column(Modifier.weight(1f)) {

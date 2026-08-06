@@ -1504,7 +1504,14 @@ class Session(context: Context) {
      *  setting before emitting any receipts. */
     private suspend fun loadOwnReadReceiptSetting() {
         val me = store.uin ?: return
-        api.getMe(me).read_receipts_visibility?.let { readReceiptsVisibility = it }
+        val profile = api.getMe(me)
+        profile.read_receipts_visibility?.let { readReceiptsVisibility = it }
+        // Seed my own picture here too. It used to arrive only when the profile
+        // EDITOR was opened, so a fresh launch showed the status flower in the
+        // header until you went looking for your own profile.
+        _ownAvatar.value = profile.avatar_media_id
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { id -> profile.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { id to it } }
     }
 
     fun stop() = socket.disconnect()

@@ -320,7 +320,10 @@ private fun SettingsRoot(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                StatusIcon(ownStatus, size = 44.dp)
+                // Settings shows the same face the header does. The status is
+                // still there, on the picture, so nothing about presence is lost.
+                val ownAv by session.ownAvatar.collectAsState()
+                PersonAvatar(ownAv?.first, ownAv?.second, ownStatus, session, 44.dp)
                 Column(Modifier.weight(1f)) {
                     Text(session.nickname, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -779,31 +782,37 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                 // The picture becomes the anchor of this card when there is
                 // one, and the status flower stands in when there is not, so
                 // nothing moves for people who never set a picture.
-                Box(contentAlignment = Alignment.Center) {
-                    if (ownAvatar != null) {
-                        PersonAvatar(ownAvatar?.first, ownAvatar?.second, ownStatus, session, 64.dp, animated = true)
-                    } else {
-                        StatusIcon(ownStatus, size = 48.dp)
+                // The picture itself is the button, the way every messenger does
+                // it: a separate link between the picture and the name split
+                // the header row in two and pushed the nickname sideways. The
+                // caption sits UNDER the picture so the name keeps its place.
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Box(
+                        Modifier.clip(CircleShape).clickable(enabled = !avatarBusy) { avatarPicker.launch("image/*") },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PersonAvatar(ownAvatar?.first, ownAvatar?.second, ownStatus, session, 56.dp, animated = true)
+                        if (avatarBusy) CircularProgressIndicator(Modifier.size(22.dp), color = c.accent, strokeWidth = 2.dp)
                     }
-                    if (avatarBusy) CircularProgressIndicator(Modifier.size(24.dp), color = c.accent, strokeWidth = 2.dp)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         stringResource(if (ownAvatar == null) R.string.pe_avatar_set else R.string.pe_avatar_change),
-                        color = c.accent, fontSize = 13.sp,
+                        color = c.accent, fontSize = 11.sp,
                         modifier = Modifier.clickable(enabled = !avatarBusy) { avatarPicker.launch("image/*") },
                     )
                     if (ownAvatar != null) {
                         Text(
                             stringResource(R.string.pe_avatar_remove),
-                            color = c.textSecondary, fontSize = 12.sp,
+                            color = c.textSecondary, fontSize = 11.sp,
                             modifier = Modifier.clickable(enabled = !avatarBusy) {
                                 scope.launch { avatarBusy = true; runCatching { session.setOwnAvatar(null) }; avatarBusy = false }
                             },
                         )
                     }
                 }
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("#$ownUin", color = c.textMono, fontSize = 13.sp)
