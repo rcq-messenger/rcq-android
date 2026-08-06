@@ -900,7 +900,13 @@ class RcqApi(
     /** One number held in the collection. `acquired_at` is an ISO-8601 stamp. */
     data class OwnedUinItem(val uin: Int = 0, val length: Int = 0, val acquired_at: String? = null)
 
-    data class MyUinsResponse(val active: Int = 0, val owned: List<OwnedUinItem> = emptyList())
+    data class MyUinsResponse(
+        val active: Int = 0,
+        val owned: List<OwnedUinItem> = emptyList(),
+        // How many one account may hold on THIS island. Defaults to 10 so a
+        // server that predates the field still gives a sane number to show.
+        val max_owned: Int = 10,
+    )
 
     /** GET /uin/mine — the number this account answers as, plus everything it
      *  holds. Answers regardless of the shop toggle: an operator closing the
