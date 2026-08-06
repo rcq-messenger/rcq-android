@@ -1040,4 +1040,9 @@
     <string name="pe_avatar_change">Сменить фото</string>
     <string name="pe_avatar_remove">Убрать</string>
     <string name="chat_caption_hint">Подпись (необязательно)</string>
+    <string name="ci_set_name">Задать своё имя</string>
+    <string name="ci_change_name">Изменить заданное имя</string>
+    <string name="ci_their_name">Себя называет %1$s</string>
+    <string name="ci_name_hint">Остаётся только на этом устройстве. Собеседник об этом не узнает.</string>
+    <string name="ci_clear_name">Убрать</string>
 </resources>

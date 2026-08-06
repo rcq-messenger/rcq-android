@@ -4125,8 +4125,14 @@ class Session(context: Context) {
         runCatching { refreshOutgoing() }
     }
 
+    /** What to CALL this person on screen: my own name for them when I set one,
+     *  otherwise the nickname they chose, otherwise their number. Every surface
+     *  that shows a person's name goes through here, so a rename lands
+     *  everywhere at once. */
     fun contactName(uin: Int): String =
-        _contacts.value.firstOrNull { it.uin == uin }?.nickname ?: "#$uin"
+        app.rcq.android.data.LocalStores.aliasFor(uin)
+            ?: _contacts.value.firstOrNull { it.uin == uin }?.nickname
+            ?: "#$uin"
 
     /** Append a call-summary line to the 1:1 thread (kind="call"), so a
      *  finished/missed call shows in the chat history. Called by

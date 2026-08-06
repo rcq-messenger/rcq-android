@@ -1041,4 +1041,9 @@
     <string name="pe_avatar_change">Change picture</string>
     <string name="pe_avatar_remove">Remove</string>
     <string name="chat_caption_hint">Caption (optional)</string>
+    <string name="ci_set_name">Set your own name</string>
+    <string name="ci_change_name">Change the name you gave</string>
+    <string name="ci_their_name">They call themselves %1$s</string>
+    <string name="ci_name_hint">Stays on this device only. The other person is never told.</string>
+    <string name="ci_clear_name">Clear</string>
 </resources>

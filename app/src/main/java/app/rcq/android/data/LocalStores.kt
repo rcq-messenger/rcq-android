@@ -37,6 +37,13 @@ object LocalStores {
     // ── per-account flows ────────────────────────────────────────────────
     private val _favorites = MutableStateFlow<Set<String>>(emptySet())
     val favorites: StateFlow<Set<String>> = _favorites.asStateFlow()
+    /** My own name for a contact, keyed by UIN. DEVICE-ONLY on purpose: what I
+     *  chose to call someone says more about the relationship than the contact
+     *  row itself, it serves no server-side function, and an island that stores
+     *  it is an island that can be made to hand it over. The cost is honest:
+     *  aliases do not follow you to another device until the backup does. */
+    private val _aliases = MutableStateFlow<Map<Int, String>>(emptyMap())
+    val aliases: StateFlow<Map<Int, String>> = _aliases.asStateFlow()
 
     private val _muted = MutableStateFlow<Set<String>>(emptySet())
     val muted: StateFlow<Set<String>> = _muted.asStateFlow()
@@ -261,9 +268,15 @@ object LocalStores {
             _mentionSeenAt.value = emptyMap()
             _presenceWindow.value = null
             _secureThreads.value = emptySet()
+            _aliases.value = emptyMap()
             return
         }
         _favorites.value = prefs.getStringSet(pk(K_FAV), emptySet())!!.toSet()
+        _aliases.value = (prefs.getStringSet(pk(K_ALIAS), emptySet()) ?: emptySet())
+            .mapNotNull { row ->
+                val i = row.indexOf('=')
+                if (i <= 0) null else row.take(i).toIntOrNull()?.let { it to row.substring(i + 1) }
+            }.toMap()
         _muted.value = prefs.getStringSet(pk(K_MUTE), emptySet())!!.toSet()
         _mentionsOnly.value = prefs.getStringSet(pk(K_MENTIONS), emptySet())!!.toSet()
         _archived.value = prefs.getStringSet(pk(K_ARCH), emptySet())!!.toSet()
@@ -296,6 +309,19 @@ object LocalStores {
     // ── thread-key helpers ───────────────────────────────────────────
     fun peerThread(uin: Int) = "peer:$uin"
     fun groupThread(id: Int) = "group:$id"
+
+    /** My name for [uin], or null when I never set one. */
+    fun aliasFor(uin: Int): String? = _aliases.value[uin]
+
+    /** Set (or, with blank, clear) my own name for [uin]. */
+    fun setAlias(uin: Int, name: String?) {
+        if (acct == null) return
+        val trimmed = name?.trim()?.take(48)?.takeIf { it.isNotEmpty() }
+        val next = _aliases.value.toMutableMap()
+        if (trimmed == null) next.remove(uin) else next[uin] = trimmed
+        _aliases.value = next
+        prefs.edit().putStringSet(pk(K_ALIAS), next.map { "${it.key}=${it.value}" }.toSet()).apply()
+    }
 
     fun isFavorite(thread: String) = thread in _favorites.value
     fun toggleFavorite(thread: String) = toggle(_favorites, K_FAV, thread)
@@ -723,6 +749,7 @@ object LocalStores {
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_MENTION_INBOX = "mention_inbox"
     private const val K_MENTION_SEEN = "mention_seen_at"
+    private const val K_ALIAS = "contact_aliases"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -116,7 +117,15 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         }
     }
 
-    val nickname = profile?.nickname ?: ciCardName ?: contact?.nickname ?: session.contactName(uin)
+    // My own name for them wins over anything the island says. Kept separate
+    // from `theirNickname` so the card can show both: "what I call them" on top,
+    // "what they call themselves" underneath, otherwise a rename quietly hides
+    // who you are actually talking to.
+    val aliases by app.rcq.android.data.LocalStores.aliases.collectAsState()
+    val alias = aliases[uin]
+    val theirNickname = profile?.nickname ?: ciCardName ?: contact?.nickname ?: "#$uin"
+    val nickname = alias ?: theirNickname
+    var editAlias by remember(uin) { mutableStateOf<String?>(null) }
     val presence = contact?.presence ?: UserStatus.OFFLINE
     val statusMessage = profile?.status_message?.takeIf { it.isNotBlank() }
         ?: contact?.statusMessage?.takeIf { it.isNotBlank() }
@@ -153,6 +162,17 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     presence, session, 80.dp, animated = true, crossIsland = crossIslandHost != null,
                 )
                 Text(nickname, color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                if (alias != null && theirNickname != alias) {
+                    Text(
+                        stringResource(R.string.ci_their_name, theirNickname),
+                        color = c.textSecondary, fontSize = 13.sp,
+                    )
+                }
+                Text(
+                    stringResource(if (alias == null) R.string.ci_set_name else R.string.ci_change_name),
+                    color = c.accent, fontSize = 13.sp,
+                    modifier = Modifier.clickable { editAlias = alias ?: "" },
+                )
                 val sub = when {
                     // Cross-island: presence/last_seen don't cross islands — show
                     // the island instead of a misleading "offline".
@@ -317,6 +337,46 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             }
             Spacer(Modifier.height(20.dp))
         }
+    }
+
+    editAlias?.let { current ->
+        var draft by remember(current) { mutableStateOf(current) }
+        AlertDialog(
+            onDismissRequest = { editAlias = null },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.ci_set_name), color = c.textPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.ci_name_hint), color = c.textSecondary, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { if (it.length <= 48) draft = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(theirNickname, color = c.textSecondary) },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    app.rcq.android.data.LocalStores.setAlias(uin, draft)
+                    editAlias = null
+                }) { Text(stringResource(R.string.common_save), color = c.accent) }
+            },
+            dismissButton = {
+                Row {
+                    if (alias != null) {
+                        TextButton(onClick = {
+                            app.rcq.android.data.LocalStores.setAlias(uin, null)
+                            editAlias = null
+                        }) { Text(stringResource(R.string.ci_clear_name), color = c.textSecondary) }
+                    }
+                    TextButton(onClick = { editAlias = null }) {
+                        Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                    }
+                }
+            },
+        )
     }
 
     if (confirmRemove) {

@@ -1398,6 +1398,11 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onClick: () -> Unit, onLongPress: () -> Unit) {
+    val aliases by LocalStores.aliases.collectAsState()
+    // My own name for this person wins over the nickname they chose. Device-only
+    // (see LocalStores.aliases) — a rename says more about the relationship than
+    // the contact row does, and the island has no business holding it.
+    val shownName = aliases[contact.uin] ?: contact.nickname
     val c = RcqTheme.colors
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
@@ -1433,7 +1438,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    contact.nickname,
+                    shownName,
                     color = if (contact.presence == UserStatus.OFFLINE) c.textSecondary else c.textPrimary,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
