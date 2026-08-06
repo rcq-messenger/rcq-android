@@ -1026,4 +1026,13 @@
     <string name="home_no_contacts_body">Группы это одно, но RCQ живее с теми, кого вы знаете.</string>
     <string name="pv_calls">Кто может звонить</string>
     <string name="pv_calls_desc">Входящие звонки от всех, кто вне этого круга, отклоняются.</string>
+    <string name="diag_audit_run">Полная проверка сети</string>
+    <string name="diag_audit_hint">Открывает обычные сокеты к этому острову, фронту, релеям и двум заведомо разрешённым узлам, чтобы понять, что именно режет сеть. Никуда ничего не отправляется, результат вы копируете сами.</string>
+    <string name="diag_audit_fine">Остров отвечает напрямую. Здесь ничего не режется.</string>
+    <string name="diag_audit_no_net">Недоступны даже контрольные узлы: на устройстве нет рабочего интернета, и всё остальное не про RCQ.</string>
+    <string name="diag_audit_by_name">Наш адрес отвечает под чужим именем. Режут по ИМЕНИ, значит другое имя перед тем же сервером должно проходить.</string>
+    <string name="diag_audit_by_addr">Наш адрес молчит под любым именем, а разрешённый адрес принимает наше. Режут по АДРЕСУ, помогает только хостинг внутри разрешённого списка.</string>
+    <string name="diag_audit_unclear">Однозначного вывода нет. Пришлите нам строчку ниже.</string>
+    <string name="common_copied">Скопировано</string>
+    <string name="common_copy">Копировать</string>
 </resources>

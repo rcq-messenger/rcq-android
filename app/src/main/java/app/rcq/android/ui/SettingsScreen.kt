@@ -1323,7 +1323,10 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
     val store = app.rcq.android.net.RelayConfigStore
     val connected by session.connected.collectAsState()
 
+    val context = LocalContext.current
     var running by remember { mutableStateOf(true) }
+    var auditing by remember { mutableStateOf(false) }
+    var audit by remember { mutableStateOf<app.rcq.android.net.NetworkAudit.Report?>(null) }
     var directOk by remember { mutableStateOf<Boolean?>(null) }
     var routeOk by remember { mutableStateOf<Boolean?>(null) }
 
@@ -1371,6 +1374,59 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
             }
             SectionFooter(stringResource(R.string.diag_footer))
             CapsuleButton(stringResource(R.string.diag_run_again), enabled = !running) { run() }
+
+            // Full network audit. Separate button because it opens raw sockets
+            // to a couple of third-party control hosts, which should never
+            // happen without the user asking for it.
+            Spacer(Modifier.height(4.dp))
+            SectionFooter(stringResource(R.string.diag_audit_hint))
+            CapsuleButton(stringResource(R.string.diag_audit_run), enabled = !auditing) {
+                auditing = true; audit = null
+                scope.launch {
+                    audit = withContext(Dispatchers.IO) {
+                        runCatching { app.rcq.android.net.NetworkAudit.run(session.currentServer) }.getOrNull()
+                    }
+                    auditing = false
+                }
+            }
+            audit?.let { a ->
+                SettingsGroup {
+                    a.lines.forEachIndexed { i, l ->
+                        if (i > 0) Divider()
+                        DiagRow(l.name, l.detail, ok = l.ok)
+                    }
+                }
+                Text(
+                    stringResource(
+                        when (a.verdict) {
+                            app.rcq.android.net.NetworkAudit.Verdict.ALL_FINE -> R.string.diag_audit_fine
+                            app.rcq.android.net.NetworkAudit.Verdict.NO_INTERNET -> R.string.diag_audit_no_net
+                            app.rcq.android.net.NetworkAudit.Verdict.BY_NAME -> R.string.diag_audit_by_name
+                            app.rcq.android.net.NetworkAudit.Verdict.BY_ADDRESS -> R.string.diag_audit_by_addr
+                            else -> R.string.diag_audit_unclear
+                        },
+                    ),
+                    color = c.textPrimary, fontSize = 13.sp,
+                )
+                Text(a.compact, color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CapsuleButton(stringResource(R.string.common_copy)) {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("RCQ network audit", a.compact))
+                        Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                    }
+                    CapsuleButton(stringResource(R.string.qr_share)) {
+                        context.startActivity(
+                            Intent.createChooser(
+                                Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"; putExtra(Intent.EXTRA_TEXT, a.compact)
+                                },
+                                context.getString(R.string.qr_share),
+                            ),
+                        )
+                    }
+                }
+            }
         }
     }
 }
