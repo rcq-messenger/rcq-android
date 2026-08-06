@@ -134,9 +134,15 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
             }
 
             Spacer(Modifier.height(6.dp))
-            SectionCaption(c, stringResource(R.string.my_uins_held_caption))
-
+            // "3 of 10" — the cap exists, so it should be visible before you
+            // hit it rather than only in the refusal at the eleventh number.
             val owned = data?.owned.orEmpty()
+            val cap = data?.max_owned ?: 10
+            SectionCaption(
+                c,
+                stringResource(R.string.my_uins_held_caption) + "  " +
+                    stringResource(R.string.my_uins_held_count, owned.size, cap),
+            )
             when {
                 loading && data == null -> Box(Modifier.fillMaxWidth().padding(vertical = 28.dp), Alignment.Center) {
                     CircularProgressIndicator(color = c.textSecondary, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))

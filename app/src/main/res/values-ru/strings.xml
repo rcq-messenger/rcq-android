@@ -1046,4 +1046,5 @@
     <string name="ci_name_hint">Остаётся только на этом устройстве. Собеседник об этом не узнает.</string>
     <string name="ci_clear_name">Убрать</string>
     <string name="uin_shop_error_too_many">У вас уже столько номеров, сколько может держать один аккаунт. Освободите один, чтобы взять новый.</string>
+    <string name="my_uins_held_count">%1$d из %2$d</string>
 </resources>
