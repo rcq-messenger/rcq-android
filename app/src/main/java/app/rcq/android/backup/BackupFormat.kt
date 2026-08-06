@@ -58,11 +58,11 @@ object BackupFormat {
 
     class BackupError(message: String) : Exception(message)
 
-    fun deriveKey(phrase: String, salt: ByteArray): ByteArray {
+    fun deriveKey(phrase: String, salt: ByteArray, rounds: Int = PBKDF2_ROUNDS): ByteArray {
         // Normalised so "Word  Word" and "word word" derive the same key: the
         // phrase is typed by hand on the restoring device.
         val norm = phrase.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
-        val spec = PBEKeySpec(norm.toCharArray(), salt, PBKDF2_ROUNDS, 256)
+        val spec = PBEKeySpec(norm.toCharArray(), salt, rounds, 256)
         return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
     }
 
@@ -74,11 +74,20 @@ object BackupFormat {
         var off = 0
         while (off < 4) {
             val n = input.read(b, off, 4 - off)
-            if (n < 0) throw EOFException()
+            // A BackupError and not a bare EOFException: the screen shows
+            // `it.message`, and EOFException carries none, so a file that ended
+            // early used to leave the restore finishing in total silence.
+            if (n < 0) throw BackupError("backup is truncated")
             off += n
         }
         return ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN).int
     }
+
+    /** Entry names go into a JSON line built by hand, so the two characters
+     *  that could break that line are escaped. Names are ASCII by contract
+     *  (see the format doc); this is the belt for a future client that forgets. */
+    private fun escapeName(name: String): String =
+        name.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private fun aad(header: ByteArray, index: Long): ByteArray =
         header + ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(index).array()
@@ -140,14 +149,14 @@ object BackupFormat {
          *  bytes. Deliberately dumb so the other two clients can read it without
          *  a library. */
         fun entry(name: String, bytes: ByteArray) {
-            val head = "{\"name\":\"$name\",\"size\":${bytes.size}}\n".toByteArray()
+            val head = "{\"name\":\"${escapeName(name)}\",\"size\":${bytes.size}}\n".toByteArray()
             raw(head, 0, head.size)
             raw(bytes, 0, bytes.size)
         }
 
         /** Same, for something too big to hold in memory. */
         fun entryStream(name: String, size: Long, source: InputStream) {
-            val head = "{\"name\":\"$name\",\"size\":$size}\n".toByteArray()
+            val head = "{\"name\":\"${escapeName(name)}\",\"size\":$size}\n".toByteArray()
             raw(head, 0, head.size)
             val tmp = ByteArray(64 * 1024)
             var left = size
@@ -200,12 +209,22 @@ object BackupFormat {
                 if (n < 0) throw BackupError("backup header is truncated")
                 off += n
             }
-            val json = com.google.gson.JsonParser.parseString(String(header)).asJsonObject
+            val json = com.google.gson.JsonParser.parseString(String(header, Charsets.UTF_8)).asJsonObject
             version = json.get("version").asInt
             if (version > VERSION) throw BackupError("this backup was made by a newer version")
             uin = json.get("uin").asInt
+            // The header advertises how the key was derived, so it is obeyed
+            // rather than assumed. Getting this wrong looks exactly like a
+            // wrong phrase, which sends the person to check the one thing that
+            // was never at fault.
+            val kdf = json.get("kdf")?.asString ?: "pbkdf2-sha256"
+            val cipher = json.get("cipher")?.asString ?: "aes-256-gcm"
+            if (kdf != "pbkdf2-sha256") throw BackupError("this backup uses a key derivation this version does not know: $kdf")
+            if (cipher != "aes-256-gcm") throw BackupError("this backup uses a cipher this version does not know: $cipher")
+            val rounds = json.get("rounds")?.asInt ?: PBKDF2_ROUNDS
+            if (rounds !in 1..10_000_000) throw BackupError("backup header looks wrong")
             val salt = android.util.Base64.decode(json.get("salt").asString, android.util.Base64.NO_WRAP)
-            key = SecretKeySpec(deriveKey(phrase, salt), "AES")
+            key = SecretKeySpec(deriveKey(phrase, salt, rounds), "AES")
         }
 
         private fun fill(): Boolean {
@@ -247,14 +266,18 @@ object BackupFormat {
             return true
         }
 
+        /** Collected as BYTES and decoded as UTF-8 at the end. Appending each
+         *  byte as a Char read it as Latin-1, so anything above 0x7F came back
+         *  as a different name than the browser wrote — and the browser encodes
+         *  and decodes this line as UTF-8. */
         private fun readLine(): String? {
-            val sb = StringBuilder()
+            val out = java.io.ByteArrayOutputStream()
             val one = ByteArray(1)
             while (true) {
-                if (!read(one, 1)) return if (sb.isEmpty()) null else sb.toString()
-                if (one[0] == '\n'.code.toByte()) return sb.toString()
-                sb.append(one[0].toInt().toChar())
-                if (sb.length > 4096) throw BackupError("backup is damaged")
+                if (!read(one, 1)) return if (out.size() == 0) null else String(out.toByteArray(), Charsets.UTF_8)
+                if (one[0] == '\n'.code.toByte()) return String(out.toByteArray(), Charsets.UTF_8)
+                out.write(one[0].toInt())
+                if (out.size() > 4096) throw BackupError("backup is damaged")
             }
         }
 

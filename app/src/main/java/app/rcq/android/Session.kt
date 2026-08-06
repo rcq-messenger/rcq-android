@@ -3006,10 +3006,24 @@ class Session(context: Context) {
     fun insertRestoredMessage(msg: ChatMessage): Boolean =
         if (::db.isInitialized) runCatching { db.insert(msg) }.getOrDefault(false) else false
 
-    /** Put a restored attachment back in the decrypted cache, so the picture
-     *  shows even when the blob has long aged off the island. */
-    fun cacheRestoredMedia(mediaId: String, bytes: ByteArray) {
-        if (mediaId.isNotEmpty() && bytes.isNotEmpty()) imageCache.put(mediaId, bytes)
+    /** Put a restored attachment back where [fetchImage] will find it, so the
+     *  picture shows even when the blob has long aged off the island.
+     *
+     *  ⚠ The memory cache alone is not enough and used to be all this did: it
+     *  is an LRU of a few tens of megabytes, so a large restore evicted its own
+     *  pictures while it was still running and the rest were gone at the next
+     *  app start — while the screen promised they would open years from now.
+     *  The archive holds the DECRYPTED bytes, the disk cache holds the sealed
+     *  blob, so it is re-sealed with the key that travelled in the record. */
+    fun cacheRestoredMedia(mediaId: String, bytes: ByteArray, mediaKey: String?) {
+        if (mediaId.isEmpty() || bytes.isEmpty()) return
+        imageCache.put(mediaId, bytes)
+        if (mediaKey.isNullOrEmpty()) return
+        runCatching {
+            val key = Base64.decode(mediaKey, Base64.NO_WRAP)
+            mediaDiskFile(mediaId).writeBytes(MediaCrypto.seal(bytes, key))
+            trimMediaDiskCache()
+        }
     }
 
     /** Everything this account holds, plus the number it answers as now. */
