@@ -61,8 +61,17 @@ object SoundService {
 
     private fun play(id: Int) {
         if (!LocalStores.soundMasterOn() || systemWantsSilence()) return
-        pool?.play(id, 1f, 1f, 1, 0, 1f)
+        // Own volume knob: the tones ride the MEDIA stream so the rocker moves
+        // them together with music, and someone who wants a quieter "о-оу"
+        // without quieter everything else had nothing to turn.
+        val vol = LocalStores.soundVolumeLevel()
+        if (vol <= 0f) return
+        pool?.play(id, vol, vol, 1, 0, 1f)
     }
+
+    /** Play the message tone regardless of the per-kind toggle, for the
+     *  settings slider preview. Still honours master + system silence. */
+    fun previewMessage() = play(msg)
 
     /** Inbound message to a non-active, non-muted thread. */
     fun message() { if (LocalStores.soundMessagesOn()) play(msg) }

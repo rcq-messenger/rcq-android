@@ -41,7 +41,11 @@ import org.unifiedpush.android.connector.UnifiedPush
  * when the app opens and drains the offline queue.
  */
 object Push {
-    const val CHANNEL_MESSAGES = "rcq_messages"
+    // v2 because a channel's sound cannot be changed after it exists: the
+    // original "rcq_messages" was created soundless and installs kept the
+    // system default. Deleted on first run of this build (see ensureChannels).
+    const val CHANNEL_MESSAGES = "rcq_messages_v2"
+    private const val CHANNEL_MESSAGES_LEGACY = "rcq_messages"
     const val CHANNEL_CALLS = "rcq_calls"
     const val CHANNEL_CALLS_RING = "rcq_calls_ring"
     private const val CALL_NOTIF_ID = 0x2C01
@@ -150,13 +154,31 @@ object Push {
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        // The message channel carries OUR tone, not the phone's default one.
+        // Reported: with the app closed or the screen locked the system chime
+        // played instead of the "о-оу" everyone expects, because the channel was
+        // created without a sound and Android then uses the default. A channel's
+        // sound is immutable after creation, so correcting it needs a NEW id and
+        // the old one deleted, otherwise every existing install keeps the wrong
+        // sound forever.
+        nm.deleteNotificationChannel(CHANNEL_MESSAGES_LEGACY)
         if (nm.getNotificationChannel(CHANNEL_MESSAGES) == null) {
             nm.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_MESSAGES,
                     ctx.getString(R.string.push_channel_messages),
                     NotificationManager.IMPORTANCE_HIGH,
-                ).apply { description = ctx.getString(R.string.push_channel_messages_desc) },
+                ).apply {
+                    description = ctx.getString(R.string.push_channel_messages_desc)
+                    val tone = android.net.Uri.parse(
+                        "android.resource://${ctx.packageName}/${R.raw.snd_message}",
+                    )
+                    val attrs = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    setSound(tone, attrs)
+                },
             )
         }
         if (nm.getNotificationChannel(CHANNEL_CALLS) == null) {
@@ -657,6 +679,20 @@ object Push {
             ctx, id, tap,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // Ring once per burst, not once per message. Reported: a night offline
+        // then reconnect meant fifty wakes for fifty queued messages, so the
+        // phone chimed fifty times for one conversation. The notification
+        // already collapses (same id per thread), but every notify() re-alerts
+        // unless told otherwise. So the first wake in a thread alerts and
+        // anything arriving within the burst window only updates the text; a
+        // message later in the day rings again like it should.
+        val now = android.os.SystemClock.elapsedRealtime()
+        val quiet = synchronized(lastAlertAt) {
+            val prev = lastAlertAt[id]
+            lastAlertAt[id] = now
+            if (lastAlertAt.size > 64) lastAlertAt.entries.removeAll { now - it.value > BURST_WINDOW_MS * 4 }
+            prev != null && now - prev < BURST_WINDOW_MS
+        }
         val notif = NotificationCompat.Builder(ctx, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
@@ -665,9 +701,14 @@ object Push {
             .setContentIntent(pi)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(quiet)
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(id, notif) }
     }
+
+    /** Last time each notification id made a sound, for burst coalescing. */
+    private val lastAlertAt = HashMap<Int, Long>()
+    private const val BURST_WINDOW_MS = 20_000L
 
     /** Raise a full-screen incoming-call wake for a {type:"call"} payload, or
      *  dismiss it when kind=="end". The full-screen-intent surfaces

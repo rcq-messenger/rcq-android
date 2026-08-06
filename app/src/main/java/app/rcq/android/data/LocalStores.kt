@@ -146,6 +146,10 @@ object LocalStores {
     /** Notification-sound toggles (iOS SoundService parity). */
     private val _soundMaster = MutableStateFlow(true)
     val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
+    // In-app tone volume, 0f..1f. Requested because the tones ride the MEDIA
+    // stream: turning them down meant turning music down with them.
+    private val _soundVolume = MutableStateFlow(1f)
+    val soundVolume: StateFlow<Float> = _soundVolume.asStateFlow()
 
     private val _soundMessages = MutableStateFlow(true)
     val soundMessages: StateFlow<Boolean> = _soundMessages.asStateFlow()
@@ -224,6 +228,7 @@ object LocalStores {
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
+        _soundVolume.value = prefs.getFloat(K_SND_VOL, 1f).coerceIn(0f, 1f)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
         _pushNudgeDismissed.value = prefs.getBoolean(K_PUSH_NUDGE_DISMISSED, false)
         _sectionFlags.value = prefs.getStringSet(K_SECTION_FLAGS, emptySet())!!.toSet()
@@ -465,6 +470,12 @@ object LocalStores {
     fun setSoundMaster(on: Boolean) { _soundMaster.value = on; prefs.edit().putBoolean(K_SND_MASTER, on).apply() }
     fun setSoundMessages(on: Boolean) { _soundMessages.value = on; prefs.edit().putBoolean(K_SND_MSG, on).apply() }
     fun setSoundPresence(on: Boolean) { _soundPresence.value = on; prefs.edit().putBoolean(K_SND_PRES, on).apply() }
+    fun soundVolumeLevel() = _soundVolume.value
+    fun setSoundVolume(v: Float) {
+        val clamped = v.coerceIn(0f, 1f)
+        _soundVolume.value = clamped
+        prefs.edit().putFloat(K_SND_VOL, clamped).apply()
+    }
 
     fun screenSecurityOn() = _screenSecurity.value
     fun setScreenSecurity(on: Boolean) { _screenSecurity.value = on; prefs.edit().putBoolean(K_SCREEN_SEC, on).apply() }
@@ -715,6 +726,7 @@ object LocalStores {
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"
+    private const val K_SND_VOL = "sound_volume"
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PUSH_NUDGE_DISMISSED = "push_nudge_dismissed"
     private const val K_PRES_WIN = "presence_window"

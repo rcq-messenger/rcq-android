@@ -1690,18 +1690,33 @@ class Session(context: Context) {
     ): BugReportResult {
         val me = store.uin ?: return BugReportResult.FAILED
         val tag = "[Android ${app.rcq.android.BuildConfig.VERSION_NAME}]"
-        return runCatching { api.report(me, "$tag $text", "bug_bounty", attachments) }.fold(
+        val body = "$tag $text"
+        return runCatching { api.report(me, body, "bug_bounty", attachments) }.fold(
             onSuccess = { BugReportResult.SENT },
             onFailure = { e ->
                 when {
                     e.message?.contains("429") == true -> BugReportResult.RATE_LIMITED
                     // The operator switched reports off on this island.
                     e.message?.contains("403") == true -> BugReportResult.CLOSED
-                    else -> BugReportResult.FAILED
+                    // No HTTP status means the ANSWER never came back, which is
+                    // not the same as the request never arriving: reported as
+                    // "не удалось отправить" while the report sat in the list on
+                    // the server. Ask the island whether it has the report before
+                    // telling the user it failed.
+                    else -> if (landedOnIsland(body)) BugReportResult.SENT else BugReportResult.FAILED
                 }
             },
         )
     }
+
+    /** Did [body] actually reach the island despite a failed round trip? Reads
+     *  back my own reports and looks for the exact text. Any failure here means
+     *  we genuinely cannot tell, so it answers false and the caller says the
+     *  send failed, which is the safe direction (a duplicate is cheaper than a
+     *  lost report, but a false "sent" is worse than both). */
+    private suspend fun landedOnIsland(body: String): Boolean = runCatching {
+        api.myReports().any { it.reason?.trim() == body.trim() }
+    }.getOrDefault(false)
 
     /** Encrypt [bytes] with a fresh per-blob key, upload it, and return the
      *  attachment descriptor (id + key + mime) for a bug report. Null on
