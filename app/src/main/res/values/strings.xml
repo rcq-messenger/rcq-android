@@ -1027,4 +1027,13 @@
     <string name="home_no_contacts_body">Groups are one thing, but RCQ is better with people you know.</string>
     <string name="pv_calls">Who can call you</string>
     <string name="pv_calls_desc">Incoming calls from anyone outside this circle are refused.</string>
+    <string name="diag_audit_run">Full network check</string>
+    <string name="diag_audit_hint">Opens plain sockets to this island, the front, the relays and two well-known control hosts, to work out what this network filters. Nothing is sent anywhere; copy the result out yourself.</string>
+    <string name="diag_audit_fine">The island answers directly. Nothing is being filtered here.</string>
+    <string name="diag_audit_no_net">Even the control hosts are unreachable: this device has no working internet, so nothing below is about RCQ.</string>
+    <string name="diag_audit_by_name">Our address answers under another name. The filter goes by NAME, so a different name in front of the same server should get through.</string>
+    <string name="diag_audit_by_addr">Our address is dead under any name while a permitted address takes ours. The filter goes by ADDRESS, and only hosting inside the permitted set helps.</string>
+    <string name="diag_audit_unclear">Not conclusive. Send us the line below.</string>
+    <string name="common_copied">Copied</string>
+    <string name="common_copy">Copy</string>
 </resources>
