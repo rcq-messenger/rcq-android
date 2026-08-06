@@ -151,7 +151,17 @@ object LocalStores {
     val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
 
     /** Notification-sound toggles (iOS SoundService parity). */
+    /// Whether an animated avatar is allowed to actually animate.
+    ///
+    /// Lists already draw a still first frame; this covers the places that do
+    /// animate — a chat header, a contact card, the group rows on the home
+    /// screen. Decoding a GIF frame by frame is the kind of work that costs
+    /// battery all day for something nobody is looking at, so it can be turned
+    /// off entirely. Device-local: the island never sees it.
+    private val _animateAvatars = MutableStateFlow(true)
+
     private val _soundMaster = MutableStateFlow(true)
+    val animateAvatars: StateFlow<Boolean> = _animateAvatars.asStateFlow()
     val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
     // In-app tone volume, 0f..1f. Requested because the tones ride the MEDIA
     // stream: turning them down meant turning music down with them.
@@ -232,6 +242,7 @@ object LocalStores {
         _homeBackground.value = prefs.getString(K_HOME_BG, "") ?: ""
         _fontScale.value = prefs.getFloat(K_FONT_SCALE, 1.0f)
         _lockGrace.value = prefs.getInt(K_LOCK_GRACE, 0)
+        _animateAvatars.value = prefs.getBoolean(K_ANIM_AVATARS, true)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
@@ -487,6 +498,12 @@ object LocalStores {
         val capped = list.distinct().take(6)
         _reactionEmojis.value = capped
         if (::prefs.isInitialized) prefs.edit().putString(K_REACTION_EMOJI, capped.joinToString(",")).apply()
+    }
+
+    fun animateAvatarsOn() = _animateAvatars.value
+    fun setAnimateAvatars(on: Boolean) {
+        _animateAvatars.value = on
+        if (::prefs.isInitialized) prefs.edit().putBoolean(K_ANIM_AVATARS, on).apply()
     }
 
     // ── sound toggles ────────────────────────────────────────────────
@@ -750,6 +767,7 @@ object LocalStores {
     private const val K_MENTION_INBOX = "mention_inbox"
     private const val K_MENTION_SEEN = "mention_seen_at"
     private const val K_ALIAS = "contact_aliases"
+    private const val K_ANIM_AVATARS = "animate_avatars"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"

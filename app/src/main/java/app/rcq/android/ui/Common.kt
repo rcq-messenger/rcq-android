@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Male
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -143,7 +144,10 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
     val nativeImage = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 384)
     val gifImage = rememberGifFirstFrame(bytes)
     val image = nativeImage ?: gifImage
-    val animatableGif = bytes?.takeIf { animated && it.isGif() }
+    // The caller asks for animation; the person's setting decides. Gated here
+    // rather than at the seven call sites so a new one cannot forget it.
+    val mayAnimate by app.rcq.android.data.LocalStores.animateAvatars.collectAsState()
+    val animatableGif = bytes?.takeIf { animated && mayAnimate && it.isGif() }
     Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
         when {
             // Animated GIF avatar (chat header only) — pure-Java decoder, safe
@@ -191,7 +195,10 @@ internal fun PersonAvatar(
     val nativeImage = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 384)
     val gifImage = rememberGifFirstFrame(bytes)
     val image = nativeImage ?: gifImage
-    val animatableGif = bytes?.takeIf { animated && it.isGif() }
+    // The caller asks for animation; the person's setting decides. Gated here
+    // rather than at the seven call sites so a new one cannot forget it.
+    val mayAnimate by app.rcq.android.data.LocalStores.animateAvatars.collectAsState()
+    val animatableGif = bytes?.takeIf { animated && mayAnimate && it.isGif() }
     // No picture: nothing changes at all for the people who never set one.
     if (image == null && animatableGif == null) {
         StatusIcon(

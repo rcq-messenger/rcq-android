@@ -52,6 +52,7 @@ class RcqApi(
         // Stamp X-RCQ-Auth from the per-host store so a closed (masquerade)
         // island — own OR foreign — is reachable; no token = no header.
         .addInterceptor(AccessTokenInterceptor)
+        .addInterceptor(UserAgentInterceptor)
         .build()
     private val gson = Gson()
 

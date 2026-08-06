@@ -32,6 +32,7 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         // Stamp X-RCQ-Auth on the WS upgrade so a closed (masquerade) island's
         // socket passes the gate (OkHttp runs the handshake through interceptors).
         .addInterceptor(AccessTokenInterceptor)
+        .addInterceptor(UserAgentInterceptor)
         .build()
 
     private var ws: WebSocket? = null

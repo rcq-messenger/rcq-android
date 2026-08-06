@@ -354,6 +354,14 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_chat_bg)) { onOpen(SettingsRoute.CHAT_BG) }
                 SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_home_bg)) { onOpen(SettingsRoute.HOME_BG) }
             }
+            val animAvatars by LocalStores.animateAvatars.collectAsState()
+            SettingsGroup {
+                SettingToggleRow(
+                    stringResource(R.string.settings_anim_avatars_title),
+                    stringResource(R.string.settings_anim_avatars_desc),
+                    animAvatars,
+                ) { LocalStores.setAnimateAvatars(it) }
+            }
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_privacy))

@@ -35,6 +35,7 @@ object CrossIslandSender {
         // island is reachable; no token for the host = no header (public
         // islands unaffected). proxiedClient inherits this via newBuilder().
         .addInterceptor(AccessTokenInterceptor)
+        .addInterceptor(UserAgentInterceptor)
         .build()
     @Volatile private var proxiedClient: OkHttpClient? = null
 
