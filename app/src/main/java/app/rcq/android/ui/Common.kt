@@ -176,7 +176,10 @@ internal fun PersonAvatar(
     size: Dp,
     host: String? = null,
     animated: Boolean = false,
+    crossIsland: Boolean = false,
+    onStatusClick: (() -> Unit)? = null,
 ) {
+    val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
         value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) {
@@ -188,13 +191,37 @@ internal fun PersonAvatar(
     val gifImage = rememberGifFirstFrame(bytes)
     val image = nativeImage ?: gifImage
     val animatableGif = bytes?.takeIf { animated && it.isGif() }
+    // No picture: nothing changes at all for the people who never set one.
     if (image == null && animatableGif == null) {
-        StatusIcon(status, size = size)
+        StatusIcon(
+            status,
+            size = size,
+            crossIsland = crossIsland,
+            modifier = if (onStatusClick != null) Modifier.clip(CircleShape).clickable(onClick = onStatusClick) else Modifier,
+        )
         return
     }
-    Box(Modifier.size(size).clip(CircleShape), contentAlignment = Alignment.Center) {
-        if (animatableGif != null) SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
-        else Image(bitmap = image!!, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    // A picture does NOT replace the status: presence is still the thing this
+    // app is built around, so the flower moves to a badge on the lower-left
+    // corner and keeps working, including the tap that opens the status menu.
+    // Big enough to read at 26dp in a list, small enough not to swallow a
+    // 80dp contact card. Capped at both ends rather than a flat fraction.
+    val badge = (size * 0.36f).coerceIn(12.dp, 26.dp)
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Box(Modifier.matchParentSize().clip(CircleShape)) {
+            if (animatableGif != null) SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
+            else Image(bitmap = image!!, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+        Box(
+            Modifier.align(Alignment.BottomStart)
+                .size(badge)
+                .clip(CircleShape)
+                .background(c.bgPrimary)
+                .then(if (onStatusClick != null) Modifier.clickable(onClick = onStatusClick) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            StatusIcon(status, size = badge * 0.86f, crossIsland = crossIsland)
+        }
     }
 }
 
