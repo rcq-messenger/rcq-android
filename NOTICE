@@ -33,6 +33,26 @@ Permissive:
     (BOM 2024.09.00) — Google — Apache-2.0
   - Kotlin standard library 2.2.10 — JetBrains — Apache-2.0
 
+Bundled non-code assets:
+
+  - KOLOBOK emoticon set — app/src/main/assets/emoticons/ (60 GIFs) — the
+    mid-2000s community "smiles" set, redistributed by its authors under a
+    non-commercial / attribution-respected grant stated on the original site.
+    The same files ship on iOS; see that repository's NOTICE for the identical
+    entry. ⚠ The non-commercial grant does NOT cover a paid product: before RCQ
+    charges for anything, this needs explicit written permission from the
+    rights-holder covering commercial use and store redistribution, or the set
+    has to be replaced with commissioned originals. A rights-holder who wants
+    attribution changed, or the files removed, should write to security@rcq.app.
+
+  - UI sounds — app/src/main/res/raw/snd_message.wav, snd_online.wav,
+    snd_offline.wav. ⚠ PROVENANCE UNRESOLVED. These three are not ours and
+    their licence has never been established, so they are the one item in this
+    file that cannot be made correct by writing a better paragraph. They must
+    be replaced with commissioned originals or CC0 assets before a store
+    release, and this entry replaced with a real attribution. Do not add
+    further sounds until that is done.
+
 This file used to say the list would be written "once the first build lands".
 Forty-eight releases landed. An AGPL app that links AGPL and GPL code and ships
 a placeholder where its attributions belong is not a small thing to leave
