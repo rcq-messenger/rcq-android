@@ -5,17 +5,18 @@ a number the network issues you. No phone number, no email, no name, no ads.
 Censorship circumvention is built into the app rather than left to the user.
 
 - Site and downloads: <https://rcq.app>
-- Latest release: [v0.75](../../releases/latest) (`rcq-universal.apk` plus
-  per-ABI builds; the same files are mirrored at <https://rcq.app/android/>
-  for networks where GitHub is throttled)
+- Latest release: [the releases page](../../releases/latest) (`rcq-universal.apk`
+  plus per-ABI builds; the same files are mirrored at <https://rcq.app/android/>
+  for networks where GitHub is throttled). Deliberately not a number here — the
+  one that used to be written out sat at v0.75 through seventeen releases.
 - Protocol spec: <https://github.com/rcq-messenger/rcq-spec>
 - Reference server: <https://github.com/rcq-messenger/rcq-server-ref>
 - iOS client: <https://github.com/rcq-messenger/rcq-ios>
 
 **Status: open beta.** Published outside Google Play by sideloading; the app
-self-updates from the manifest at `rcq.app/android/latest.json`. Messages,
-groups, calls, media and stories are cross-platform with the iOS and web
-clients.
+self-updates from a manifest, trying `dl.rcq.app/android/latest.json` first and
+`rcq.app/android/latest.json` after it. Messages, groups, calls and media are
+cross-platform with the iOS and web clients; stories are on the phones only.
 
 ## What is in here
 
@@ -25,8 +26,9 @@ clients.
 | `app/src/main/java/app/rcq/android/net` | REST + WebSocket client, and `SingBoxTransport`, the embedded circumvention transport |
 | `app/src/main/java/app/rcq/android/push` | UnifiedPush connector, plus `push/embedded`: our own in-app UnifiedPush distributor |
 | `app/src/main/java/app/rcq/android/ui` | Compose screens |
-| `app/src/main/java/app/rcq/android/radio` | Radio Chat, the offline mesh over BLE + Wi-Fi Direct |
-| `docs/` | Design notes |
+| `app/src/main/java/app/rcq/android/nearby` | Nearby, district chat, and Radio Chat — the offline mesh over BLE + Wi-Fi Direct |
+| `app/src/main/java/app/rcq/android/backup` | The `.rcqbak` archive: the same file the iOS and web clients read |
+| `docs/` | `REPRODUCIBLE-BUILDS.md` — how to check a published APK against this source |
 
 ## Building
 
@@ -34,7 +36,12 @@ clients.
 ./gradlew :app:assembleDebug
 ```
 
-Requirements: JDK 17+, Android SDK 36. Everything else is fetched by Gradle.
+Requirements: Android SDK 36, and a JDK. Any JDK 17 or newer builds a debug
+APK. Reproducing a **published** APK is a different question and needs the
+exact toolchain — JetBrains Runtime 21.0.9, the one bundled with Android
+Studio. See [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md);
+building a release on a different JDK will not match the signature you are
+trying to verify. Everything else is fetched by Gradle.
 
 A release build reads `keystore.properties` from the repo root for signing.
 That file is gitignored and our release key is obviously not in here; without
