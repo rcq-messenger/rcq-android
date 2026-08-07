@@ -43,6 +43,33 @@ object NetworkAudit {
      *  anything. Two of them so one operator's quirk does not decide it. */
     private val CONTROL_HOSTS = listOf("ya.ru", "dzen.ru")
 
+    /** Object storage of the clouds a whitelisted network is most likely to
+     *  already permit, because ordinary permitted apps fetch their assets from
+     *  them.
+     *
+     *  This is the question the earlier version could not answer. Knowing the
+     *  filter works by ADDRESS tells us our machines are unreachable; it does
+     *  NOT tell us where a reachable machine could stand. If one of these
+     *  answers TLS while our own address does not, that names the cloud a
+     *  relay would have to live in to be reachable at all — and turns "nothing
+     *  can be done" into a decision with a price and a jurisdiction attached.
+     *
+     *  ⚠ Reachability is not a recommendation. Hosting inside the permitted
+     *  perimeter means hosting under its jurisdiction, and that is a founder
+     *  call, not a technical one. */
+    private val CARRIERS = listOf(
+        "storage.yandexcloud.net",
+        "hb.bizmrg.com",
+        "s3.twcstorage.ru",
+    )
+
+    /** Does anything UDP get out at all. Hysteria2 is UDP, and a whitelist
+     *  that passes TCP:443 while dropping UDP wholesale would make half our
+     *  relay pool useless for reasons that have nothing to do with our
+     *  addresses. Asked as a plain DNS query to a resolver the network is
+     *  likely to permit. */
+    private const val UDP_RESOLVER = "77.88.8.8"
+
     data class Line(val name: String, val ok: Boolean?, val detail: String)
 
     data class Report(val lines: List<Line>, val verdict: Verdict, val compact: String)
@@ -108,6 +135,32 @@ object NetworkAudit {
     private fun resolve(host: String): String? =
         runCatching { InetAddress.getAllByName(host).firstOrNull()?.hostAddress }.getOrNull()
 
+    /** True if a plain DNS query gets an answer over UDP. Hand-rolled rather
+     *  than using the resolver so this measures UDP itself and not Android's
+     *  cache: a query the system already knows would come back without a
+     *  single packet leaving the phone. */
+    private fun udpWorks(timeoutMs: Int = 4000): Boolean = runCatching {
+        val query = byteArrayOf(
+            0x12, 0x34,             // id
+            0x01, 0x00,             // standard query, recursion desired
+            0x00, 0x01,             // one question
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x02, 'y'.code.toByte(), 'a'.code.toByte(),
+            0x02, 'r'.code.toByte(), 'u'.code.toByte(),
+            0x00,                   // end of name
+            0x00, 0x01,             // A
+            0x00, 0x01,             // IN
+        )
+        java.net.DatagramSocket().use { s ->
+            s.soTimeout = timeoutMs
+            s.send(java.net.DatagramPacket(query, query.size, InetAddress.getByName(UDP_RESOLVER), 53))
+            val buf = ByteArray(512)
+            s.receive(java.net.DatagramPacket(buf, buf.size))
+            // Same transaction id back = a real answer, not a stray packet.
+            buf[0] == 0x12.toByte() && buf[1] == 0x34.toByte()
+        }
+    }.getOrDefault(false)
+
     fun run(islandHost: String): Report {
         val lines = ArrayList<Line>()
         fun add(name: String, r: Pair<Reach, String>) {
@@ -149,6 +202,31 @@ object NetworkAudit {
         val crossAddr = islandIp?.let { probe(it, 443, CONTROL_HOSTS.first()) }
         crossAddr?.let { add("наш адрес + чужое имя", it) }
 
+        // 5. If our own address is unreachable, where COULD a machine stand?
+        //    Only worth the seconds when something is actually wrong; on a
+        //    healthy network it would just be noise in the report.
+        var carriersOpen = 0
+        var carrierNames = ""
+        var udpOk: Boolean? = null
+        if (direct.first != Reach.OPEN) {
+            val reachable = ArrayList<String>()
+            for (c in CARRIERS) {
+                if (probe(c, 443, c, timeoutMs = 4000).first != Reach.BLOCKED) {
+                    carriersOpen++
+                    reachable += c.substringBefore('.')
+                }
+            }
+            carrierNames = reachable.joinToString("+")
+            lines += Line(
+                "разрешённые облака",
+                carriersOpen > 0,
+                if (carriersOpen > 0) "$carriersOpen из ${CARRIERS.size} отвечают ($carrierNames)"
+                else "ни одно из ${CARRIERS.size} не отвечает",
+            )
+            udpOk = udpWorks()
+            lines += Line("UDP наружу", udpOk, if (udpOk) "проходит" else "не проходит")
+        }
+
         val verdict = when {
             !controlOk && direct.first == Reach.BLOCKED -> Verdict.NO_INTERNET
             direct.first == Reach.OPEN -> Verdict.ALL_FINE
@@ -164,7 +242,10 @@ object NetworkAudit {
 
         // One line, short enough to retype off a screen if it comes to that.
         val compact = buildString {
-            append("RCQ-NET/1 ")
+            // Bumped to /2 when the carrier + udp fields were added: a line
+            // without them is from an older build, not from a network that
+            // lacked them.
+            append("RCQ-NET/2 ")
             append(if (controlOk) "ctl:ok " else "ctl:dead ")
             append("dns:${if (islandIp != null) "ok" else "fail"} ")
             append("dir:${short(direct.first)} ")
@@ -172,6 +253,15 @@ object NetworkAudit {
             append("relay:$relaysOpen/${relays.size} ")
             append("xname:${crossName?.first?.let { short(it) } ?: "-"} ")
             append("xaddr:${crossAddr?.first?.let { short(it) } ?: "-"} ")
+            // Only present when something was wrong, which is also the only
+            // time they were measured. `carrier` names where a reachable
+            // machine could stand; `udp` says whether Hysteria2 has any chance
+            // on this network at all.
+            if (direct.first != Reach.OPEN) {
+                append("carrier:$carriersOpen/${CARRIERS.size}")
+                if (carrierNames.isNotEmpty()) append("($carrierNames)")
+                append(" udp:${if (udpOk == true) "ok" else "block"} ")
+            }
             append("=> ${verdict.name}")
         }
         return Report(lines, verdict, compact)
