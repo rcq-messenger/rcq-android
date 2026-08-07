@@ -1020,6 +1020,9 @@
     <string name="pv_calls">Кто может звонить</string>
     <string name="pv_calls_desc">Входящие звонки от всех, кто вне этого круга, отклоняются.</string>
     <string name="diag_audit_run">Полная проверка сети</string>
+    <string name="diag_audit_running">\u041f\u0440\u043e\u0432\u0435\u0440\u044f\u044e\u2026</string>
+    <string name="onboard_cta_netcheck">RCQ \u043d\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u0435\u0442\u0441\u044f? \u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0441\u0435\u0442\u044c</string>
+    <string name="onboard_netcheck_send">\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u0442\u0440\u043e\u043a\u0443 \u0438 \u043f\u0440\u0438\u0441\u043b\u0430\u0442\u044c \u043d\u0430\u043c</string>
     <string name="diag_audit_hint">Открывает обычные сокеты к этому острову, фронту, релеям и двум заведомо разрешённым узлам, чтобы понять, что именно режет сеть. Никуда ничего не отправляется, результат вы копируете сами.</string>
     <string name="diag_audit_fine">Остров отвечает напрямую. Здесь ничего не режется.</string>
     <string name="diag_audit_no_net">Недоступны даже контрольные узлы: на устройстве нет рабочего интернета, и всё остальное не про RCQ.</string>
