@@ -226,6 +226,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val messages = if (isGroup) groupAll[groupId] ?: emptyList() else peerAll[peer] ?: emptyList()
     val peerContact = peer?.let { p -> contacts.firstOrNull { it.uin == p } }
     val group = groupId?.let { gid -> groups.firstOrNull { it.id == gid } }
+    // The chat list is fetched without rosters, and this screen needs one for
+    // more than sending: an author's name, an @mention, and a moderator's own
+    // delete/pin rights all come out of the roster, and without it the screen
+    // shows bare uins where names belong. Fetched once on arrival; a no-op when
+    // it is already here or when the group lives on another island.
+    LaunchedEffect(groupId) { groupId?.let { session.ensureRoster(it) } }
     val canPost = group?.canPost(ownUin) ?: true
     // Resolve a `#<uin>` mention in a message body to a nick (group member or
     // contact), for clickable mentions in the bubble — like the pinned banner.
@@ -712,7 +718,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = when {
                     isGroup -> {
-                        val n = group?.members?.size ?: 0
+                        // The count, not the roster's size: the roster arrives a
+                        // moment later than the header does.
+                        val n = group?.memberCount ?: 0
                         pluralStringResource(R.plurals.members, n, n)
                     }
                     isSelf -> stringResource(R.string.chat_saved_subtitle)
