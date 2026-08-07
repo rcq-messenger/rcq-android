@@ -71,6 +71,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.AttachFile
@@ -826,6 +827,32 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
         ChatBackground()  // global chat wallpaper (behind the messages); no-op when default
+        // A brand-new thread had nothing in it at all here — just wallpaper —
+        // while iOS has always said what the screen is and what to do with it.
+        // A first-time reader could not tell an empty conversation from one
+        // that failed to load.
+        if (rows.isEmpty()) {
+            Column(
+                Modifier.fillMaxSize().padding(top = 96.dp, start = 32.dp, end = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Message,
+                    contentDescription = null,
+                    tint = c.divider,
+                    modifier = Modifier.size(38.dp),
+                )
+                Text(
+                    stringResource(R.string.chat_empty_title),
+                    color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    stringResource(R.string.chat_empty_body),
+                    color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
+                )
+            }
+        }
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(
                 rows,

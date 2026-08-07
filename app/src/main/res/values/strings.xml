@@ -385,20 +385,13 @@
     <string name="nearby_stranger">Stranger nearby</string>
     <string name="nearby_add">Add</string>
     <string name="nearby_request_sent">Contact request sent</string>
-    <!-- Hood Chat + Banners (district) -->
+    <!-- Hood Chat (district) -->
     <string name="hood_title">District chat</string>
     <string name="hood_here">%1$d here</string>
     <string name="hood_unencrypted">Public, not encrypted</string>
     <string name="hood_deleted">Message deleted</string>
     <string name="hood_hint">Message the district…</string>
     <string name="hood_send">Send</string>
-    <string name="banners_title">Announcements</string>
-    <string name="banners_post">Post</string>
-    <string name="banners_empty">No announcements yet.</string>
-    <string name="banners_anon">Anonymous</string>
-    <string name="banners_text_hint">Your announcement…</string>
-    <string name="banners_anon_post">Post anonymously</string>
-    <string name="banners_mock_note">Payment is mocked in this build.</string>
     <string name="settings_sec_history">History</string>
     <string name="settings_sec_about">About</string>
     <string name="settings_sec_account">Account</string>
@@ -1068,4 +1061,9 @@
     <string name="recovery_reveal">Show the phrase</string>
     <string name="settings_anim_avatars_title">Animated avatars</string>
     <string name="settings_anim_avatars_desc">Play avatars that are animated pictures. Turning this off shows their first frame instead, which is easier on the battery.</string>
+    <string name="common_interests">Interests</string>
+    <string name="common_homepage">Website</string>
+    <string name="common_real_name">Name</string>
+    <string name="chat_empty_title">No messages yet</string>
+    <string name="chat_empty_body">Say hi — your first message starts the thread.</string>
 </resources>

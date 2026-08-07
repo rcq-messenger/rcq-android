@@ -173,14 +173,18 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     color = c.accent, fontSize = 13.sp,
                     modifier = Modifier.clickable { editAlias = alias ?: "" },
                 )
+                // The status word itself is deliberately absent: the flower on the
+                // avatar right above already says it, in colour, and repeating
+                // "away" underneath is the same fact twice. What is NOT on the
+                // avatar goes here — the island for a cross-island person, and
+                // when someone was last around if they are offline.
                 val sub = when {
-                    // Cross-island: presence/last_seen don't cross islands — show
-                    // the island instead of a misleading "offline".
                     crossIslandHost != null -> crossIslandHost
-                    presence == UserStatus.OFFLINE && contact?.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen!!, context))
-                    else -> stringResource(presence.labelRes).lowercase()
+                    presence == UserStatus.OFFLINE && contact?.lastSeen != null ->
+                        stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen!!, context))
+                    else -> null
                 }
-                Text(sub, color = c.textSecondary, fontSize = 13.sp)
+                sub?.let { Text(it, color = c.textSecondary, fontSize = 13.sp) }
                 statusMessage?.let { Text(it, color = c.textPrimary, fontSize = 14.sp, textAlign = TextAlign.Center) }
             }
 
@@ -272,6 +276,9 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             val lblCity = stringResource(R.string.common_city)
             val lblCountry = stringResource(R.string.common_country)
             val lblAbout = stringResource(R.string.common_about)
+            val lblInterests = stringResource(R.string.common_interests)
+            val lblHomepage = stringResource(R.string.common_homepage)
+            val lblRealName = stringResource(R.string.common_real_name)
             val genderValue = when (profile?.gender?.lowercase()) {
                 "male", "m" -> stringResource(R.string.common_male)
                 "female", "f" -> stringResource(R.string.common_female)
@@ -284,6 +291,17 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 profile?.city?.takeIf { it.isNotBlank() }?.let { add(lblCity to it) }
                 profile?.country?.takeIf { it.isNotBlank() }?.let { add(lblCountry to it) }
                 profile?.about?.takeIf { it.isNotBlank() }?.let { add(lblAbout to it) }
+                // These three the island has been returning all along and this
+                // screen simply never read, so a person could fill in their
+                // interests or their site and no one on Android would ever see
+                // it. iOS shows all of them.
+                profile?.interests?.takeIf { it.isNotEmpty() }
+                    ?.let { add(lblInterests to it.joinToString(", ")) }
+                profile?.homepage?.takeIf { it.isNotBlank() }?.let { add(lblHomepage to it) }
+                listOfNotNull(
+                    profile?.first_name?.takeIf { it.isNotBlank() },
+                    profile?.last_name?.takeIf { it.isNotBlank() },
+                ).joinToString(" ").takeIf { it.isNotBlank() }?.let { add(lblRealName to it) }
             }
             if (fields.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))

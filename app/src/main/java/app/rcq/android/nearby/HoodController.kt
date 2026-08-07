@@ -10,12 +10,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Hood Chat (district chat) + Hood Banners (district announcements) — both
+ * Hood Chat (district chat) — the district thread for a geohash bucket.
  * scoped to a geohash bucket, the server-backed half of People Nearby. Port of
- * the iOS HoodChatService + the banner endpoints. NOT end-to-end encrypted
+ * Mirrors the iOS HoodChatService. NOT end-to-end encrypted
  * (pseudonymous via the Nearby display name); the chat UI shows an "unencrypted"
  * notice. Chat state flows through the WS (hood_* events routed from
- * Session.handleEvent); banners are plain REST.
+ * Session.handleEvent).
  */
 class HoodController(
     private val scope: CoroutineScope,
@@ -110,42 +110,10 @@ class HoodController(
         else (cur + m).sortedBy { it.id }
     }
 
-    // ── banners ───────────────────────────────────────────────────────
-    private val _banners = MutableStateFlow<List<RcqApi.Banner>>(emptyList())
-    val banners: StateFlow<List<RcqApi.Banner>> = _banners.asStateFlow()
-    private val _canPost = MutableStateFlow(true)
-    val canPostBanner: StateFlow<Boolean> = _canPost.asStateFlow()
-    private val _pricing = MutableStateFlow<List<RcqApi.BannerPricing>>(emptyList())
-    val pricing: StateFlow<List<RcqApi.BannerPricing>> = _pricing.asStateFlow()
-
-    fun loadBanners(bucket: String) {
-        scope.launch {
-            runCatching { api().banners(bucket) }.onSuccess { _banners.value = it.items; _canPost.value = it.can_post }
-            if (_pricing.value.isEmpty()) runCatching { api().bannerPricing() }.onSuccess { _pricing.value = it }
-        }
-    }
-
-    suspend fun postBanner(bucket: String, text: String, anonymous: Boolean, duration: String): Boolean = runCatching {
-        // Mock IAP receipt — any non-empty string passes server-side today.
-        api().createBanner(
-            RcqApi.CreateBannerBody(
-                bucket_id = bucket, text = text.trim(), is_anonymous = anonymous,
-                duration = duration, receipt = "android-mock-$duration",
-            ),
-        )
-        loadBanners(bucket)
-        true
-    }.getOrDefault(false)
-
-    fun deleteBanner(id: Int, bucket: String) {
-        scope.launch { runCatching { api().deleteBanner(id) }; loadBanners(bucket) }
-    }
-
     fun teardown() {
         if (_bucket.value != null) runCatching { send(JsonObject().apply { addProperty("type", "hood_unsubscribe") }) }
         _bucket.value = null
         _messages.value = emptyList()
         _bucketCount.value = 0
-        _banners.value = emptyList()
     }
 }
