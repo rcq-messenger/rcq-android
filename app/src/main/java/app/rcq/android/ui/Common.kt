@@ -244,6 +244,39 @@ internal fun PersonAvatar(
     }
 }
 
+/** The sender's picture beside their nick on a group message — and NOTHING at
+ *  all when they have not set one, so that row stays exactly the plain nick it
+ *  has always been.
+ *
+ *  Deliberately not [PersonAvatar]: that one falls back to the status flower
+ *  and keeps presence as a badge, which is right in a list of people and wrong
+ *  here. Presence on a bubble would be the sender's status NOW, sitting next to
+ *  something they said hours ago, and a coloured dot on every message is noise
+ *  where the list needs it to be signal.
+ */
+@Composable
+internal fun SenderAvatar(id: String?, key: String?, session: Session, size: Dp) {
+    if (id.isNullOrEmpty() || key.isNullOrEmpty()) return
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Seeded from the memory cache, like PersonAvatar: bubbles recycle
+    // constantly while scrolling and starting at null flickers the row.
+    val bytes by produceState<ByteArray?>(initialValue = session.cachedImage(id), id, key) {
+        app.rcq.android.CrashReporter.crumb(ctx, "sender_avatar")
+        value = session.fetchImage(id, key, null)
+    }
+    // A still frame even for a GIF: an animation per message would be its own
+    // kind of noise, and the picture here is 16dp of identification.
+    val image = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 96)
+        ?: rememberGifFirstFrame(bytes)
+    if (image == null) return
+    Image(
+        bitmap = image,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.size(size).clip(CircleShape),
+    )
+}
+
 /** Red unread-count capsule, anchored top-end over an avatar (iOS-style).
  *  Renders nothing when [count] is 0. */
 @Composable

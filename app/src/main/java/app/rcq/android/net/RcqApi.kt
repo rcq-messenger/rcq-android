@@ -612,6 +612,11 @@ class RcqApi(
         val permissions: List<String> = emptyList(),
         // Sender-keys capability of this member's account (gmsg/skdm support).
         val sender_keys: Boolean = false,
+        // Profile picture, gated by MEMBERSHIP rather than by the contact list:
+        // sharing a group is the relationship here, the same one that already
+        // exposes the nickname on this row.
+        val avatar_media_id: String? = null,
+        val avatar_media_key: String? = null,
     )
 
     data class GroupOut(

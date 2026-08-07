@@ -2153,6 +2153,8 @@ class Session(context: Context) {
                 signingKey = it.signing_key,
                 permissions = it.permissions,
                 senderKeys = it.sender_keys,
+                avatarMediaId = it.avatar_media_id,
+                avatarMediaKey = it.avatar_media_key,
             )
         },
         createdAt = parseIso(g.created_at),
@@ -2323,11 +2325,23 @@ class Session(context: Context) {
      *  through [group]. The list is fetched without rosters now, so a cached
      *  group can legitimately have an empty member list, and sending against
      *  that would deliver to nobody while looking like it worked. A foreign
-     *  group is left alone: its roster comes from its own island. */
+     *  group is left alone: its roster comes from its own island.
+     *
+     *  Fetched once per group per app run even when a roster is already here,
+     *  because the one that is here came off the DISK, from whatever version
+     *  of this app wrote it. A cached roster written before member pictures
+     *  existed has no pictures in it, and "only refetch when empty" would
+     *  never have gone back for them — the list no longer carries a roster to
+     *  overwrite it with. Once per run also picks up who joined and who
+     *  renamed themselves, which the old every-poll roster used to do. */
+    private val rosterFetched = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
     suspend fun ensureRoster(id: Int): RcqGroup? {
         val cached = group(id) ?: return null
-        if (cached.members.isNotEmpty() || cached.host != null) return cached
+        if (cached.host != null) return cached
+        if (cached.members.isNotEmpty() && id in rosterFetched) return cached
         val full = runCatching { mapGroup(api.groupInfo(id)) }.getOrNull() ?: return cached
+        rosterFetched.add(id)
         val merged = cached.copy(members = full.members, memberCount = full.memberCount)
         _groups.value = _groups.value.map { if (it.id == id) merged else it }
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }

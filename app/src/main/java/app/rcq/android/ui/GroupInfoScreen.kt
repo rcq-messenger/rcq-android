@@ -328,7 +328,19 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     ) {
                         // Our own row reflects the locally-known status (the
                         // server folds self→offline for "other viewers").
-                        StatusIcon(if (m.uin == ownUin) ownStatus else m.presence, size = 26.dp)
+                        // A member's picture is part of the roster, gated by
+                        // membership; without one this is the plain flower, so
+                        // the screen is unchanged for everyone who never set
+                        // one. Presence stays on it as the badge — this is a
+                        // list of people, which is exactly where it means
+                        // something.
+                        PersonAvatar(
+                            id = m.avatarMediaId,
+                            key = m.avatarMediaKey,
+                            status = if (m.uin == ownUin) ownStatus else m.presence,
+                            session = session,
+                            size = 26.dp,
+                        )
                         Column(Modifier.weight(1f)) {
                             Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)
                             Text("#${m.uin}", color = c.textMono, fontSize = 12.sp)

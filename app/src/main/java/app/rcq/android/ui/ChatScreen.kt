@@ -365,6 +365,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         isGroup -> group?.memberName(m.senderUin ?: 0) ?: "${m.senderUin}"
         else -> session.contactName(peer ?: 0)
     }
+    // The sender's roster row, for the picture that goes beside their nick.
+    // Null for my own messages and for anyone who is not in the roster yet;
+    // a member without a picture simply keeps the plain nick.
+    fun authorMember(m: ChatMessage): app.rcq.android.model.GroupMember? =
+        if (isGroup && !m.fromMe) group?.members?.firstOrNull { it.uin == m.senderUin } else null
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
@@ -905,9 +910,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         } else if (m.kind == "system") {
                             SystemNoticeRow(m)
                         } else {
+                            val senderPic = if (row.showSender) authorMember(m) else null
                             MessageBubble(
                                 session, m,
                                 senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
+                                senderAvatarId = senderPic?.avatarMediaId,
+                                senderAvatarKey = senderPic?.avatarMediaKey,
                                 replyAuthorOverride = if (row.replyMine) youLabel else null,
                                 onRetry = { scope.launch { runCatching { session.resend(m) } } },
                                 onLongPress = { actionMsg = m },
@@ -926,6 +934,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     is ChatRow.Album -> AlbumBubble(
                         session, row.items,
                         senderName = if (isGroup && !row.items.first().fromMe && row.showSender) authorName(row.items.first()) else null,
+                        senderAvatarId = if (row.showSender) authorMember(row.items.first())?.avatarMediaId else null,
+                        senderAvatarKey = if (row.showSender) authorMember(row.items.first())?.avatarMediaKey else null,
                         onLongPress = { actionMsg = row.items.first() },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                     )
@@ -2390,7 +2400,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -2399,11 +2409,15 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
     val onWallpaper = LocalStores.chatBackground.collectAsState().value.isNotEmpty()
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (first.fromMe) Alignment.End else Alignment.Start) {
         if (senderName != null) {
-            Text(
-                senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.padding(start = 4.dp, bottom = 1.dp)
                     .then(if (onSenderClick != null) Modifier.clickable { onSenderClick() } else Modifier),
-            )
+            ) {
+                SenderAvatar(senderAvatarId, senderAvatarKey, session, 15.dp)
+                Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
         AlbumGrid(session, items, onLongPress)
         items.firstOrNull { it.body.isNotEmpty() }?.let { cap ->
@@ -2513,7 +2527,7 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -2552,11 +2566,17 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
         // Media/voice/file/poll/location/relay keep the sender name ABOVE the
         // bubble; a plain text bubble renders it INSIDE, at the top (Telegram).
         if (senderName != null && !isPlainText) {
-            Text(
-                senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.padding(start = 4.dp, bottom = 1.dp)
                     .then(if (onSenderClick != null) Modifier.clickable { onSenderClick() } else Modifier),
-            )
+            ) {
+                // Beside the nick, never instead of it, and only when there is
+                // a picture: without one the line stays what it always was.
+                SenderAvatar(senderAvatarId, senderAvatarKey, session, 15.dp)
+                Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
         if (groupLinkId != null) {
             GroupLinkBubble(session, groupLinkId, onOpenGroup, onLongPress)
@@ -2597,11 +2617,15 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
             ) {
                 // Sender name as the first line INSIDE the bubble (Telegram-style).
                 if (senderName != null) {
-                    Text(
-                        senderName, color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         modifier = Modifier.padding(bottom = 2.dp)
                             .then(if (onSenderClick != null) Modifier.clickable { onSenderClick() } else Modifier),
-                    )
+                    ) {
+                        SenderAvatar(senderAvatarId, senderAvatarKey, session, 16.dp)
+                        Text(senderName, color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
                 if (m.replyToSnippet != null) {
                     val tappable = m.replyToId != null && onTapReply != null
