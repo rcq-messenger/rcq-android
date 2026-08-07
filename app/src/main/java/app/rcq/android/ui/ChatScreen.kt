@@ -32,6 +32,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.ui.input.pointer.pointerInput
@@ -128,6 +129,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -566,10 +568,30 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // animation) — the old animateScroll-on-every-size-change was the "mota к
     // последнему / eats resources" complaint (#1).
     LaunchedEffect(rows.size) {
-        if (rows.isNotEmpty() && !didInitialScroll) {
-            didInitialScroll = true
-            val u = rows.indexOfFirst { it is ChatRow.Unread }
-            listState.scrollToItem((if (u >= 0) u else rows.lastIndex).coerceAtLeast(0))
+        if (rows.isEmpty() || didInitialScroll) return@LaunchedEffect
+        didInitialScroll = true
+        val u = rows.indexOfFirst { it is ChatRow.Unread }
+        if (u >= 0) {
+            listState.scrollToItem(u)
+            return@LaunchedEffect
+        }
+        listState.scrollToItem(rows.lastIndex.coerceAtLeast(0))
+        // `scrollToItem` anchors the list to an ITEM, and that anchor survives
+        // the screen settling around it. The pinned banner, the header and the
+        // composer all take their final height a frame or two after this runs,
+        // the viewport shrinks under the list, and the list keeps the anchor
+        // instead of staying at the end — so the newest message opens already
+        // half-hidden behind the composer. (Reported on a group whose last
+        // message follows a date divider, which is simply tall enough to make
+        // the missing strip obvious.) Push to the real end for a few frames
+        // while the layout is still moving; a drag outranks us and takes the
+        // scroll away, which ends this on its own.
+        repeat(6) {
+            withFrameNanos {}
+            // Any distance past the end of the content; the scroll clamps
+            // itself, so this is "as far down as it goes" without having to
+            // measure how far that is.
+            listState.scrollBy(1_000_000f)
         }
     }
 
