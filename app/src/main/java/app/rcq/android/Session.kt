@@ -2156,10 +2156,19 @@ class Session(context: Context) {
             )
         },
         createdAt = parseIso(g.created_at),
+        // Older islands do not send it; the roster's own size is right there.
+        memberCount = if (g.member_count > 0) g.member_count else g.members.size,
     )
 
     private suspend fun refreshGroups() {
-        val own = api.groups().map(::mapGroup)
+        // Without the roster: the chat list wants a name, a picture and a count,
+        // and the roster is the expensive half — every member with two base64
+        // keys. It is fetched per group, on demand, by `ensureRoster`.
+        val known = _groups.value.associateBy { it.id }
+        val own = api.groups(withMembers = false).map(::mapGroup).map { g ->
+            // Keep a roster we already paid for rather than dropping it.
+            if (g.members.isEmpty()) g.copy(members = known[g.id]?.members ?: emptyList()) else g
+        }
         // §5c: groups hosted on OTHER islands, fetched with that island's creds;
         // ids rewritten to the local alias at this boundary. The host can be a
         // visited/guest island OR one of our BACKUP islands (multihome) — a group
@@ -2307,6 +2316,23 @@ class Session(context: Context) {
         groupCtx(groupId).api.uploadBlob(blob)
 
     fun group(id: Int): RcqGroup? = _groups.value.firstOrNull { it.id == id }
+
+    /** The group WITH its roster, fetching it if the list did not carry one.
+     *
+     *  ⚠ Anything that encrypts per recipient must go through this and not
+     *  through [group]. The list is fetched without rosters now, so a cached
+     *  group can legitimately have an empty member list, and sending against
+     *  that would deliver to nobody while looking like it worked. A foreign
+     *  group is left alone: its roster comes from its own island. */
+    suspend fun ensureRoster(id: Int): RcqGroup? {
+        val cached = group(id) ?: return null
+        if (cached.members.isNotEmpty() || cached.host != null) return cached
+        val full = runCatching { mapGroup(api.groupInfo(id)) }.getOrNull() ?: return cached
+        val merged = cached.copy(members = full.members, memberCount = full.memberCount)
+        _groups.value = _groups.value.map { if (it.id == id) merged else it }
+        runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
+        return merged
+    }
     fun groupName(id: Int): String = group(id)?.name ?: "Group $id"
 
     suspend fun createGroup(name: String, memberUins: List<Int>): RcqGroup {
@@ -2626,6 +2652,7 @@ class Session(context: Context) {
     /** Encrypt [env] once per member (skipping self) and POST the fan-out;
      *  flips the local bubble's delivery state. Shared by send + resend. */
     private suspend fun fanOutGroup(groupId: Int, env: Envelope, id: String) = withContext(Dispatchers.IO) {
+        ensureRoster(groupId)
         // §5c: a foreign group seals AS the guest identity (the sender uin must
         // be our per-island uin so the roster resolves it; keys are identical)
         // and POSTs to the group's island with the guest jwt.
@@ -3702,6 +3729,7 @@ class Session(context: Context) {
      *  groupCtx so a FOREIGN group's control lands on ITS island with guest
      *  creds instead of misrouting to ours. */
     private suspend fun fanOutControl(groupId: Int, env: Envelope) = withContext(Dispatchers.IO) {
+        ensureRoster(groupId)
         val ctx = groupCtx(groupId)
         val me = ctx.myUin.takeIf { it != 0 } ?: return@withContext
         val group = group(groupId) ?: return@withContext

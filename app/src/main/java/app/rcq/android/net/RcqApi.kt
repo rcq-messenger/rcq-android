@@ -626,11 +626,24 @@ class RcqApi(
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
         val created_at: String? = null,
+        // Present even when the roster is not, so a list can say "1869 members"
+        // without paying for the roster. Older islands omit it; fall back to
+        // the roster's own size.
+        val member_count: Int = 0,
         val members: List<GroupMemberOut> = emptyList(),
     )
 
-    suspend fun groups(): List<GroupOut> = withContext(Dispatchers.IO) {
-        get("/groups", authed = true, Array<GroupOut>::class.java).toList()
+    /** The account's groups.
+     *
+     *  [withMembers]=false asks the island to leave the roster out, which is
+     *  the expensive part: every member with two base64 keys each, on a group
+     *  with a couple of thousand people. The count still rides along, and the
+     *  roster is one `groupInfo` away for the moments that genuinely need it.
+     *  Older islands ignore the parameter and answer with the roster anyway,
+     *  which is exactly the safe direction. */
+    suspend fun groups(withMembers: Boolean = true): List<GroupOut> = withContext(Dispatchers.IO) {
+        val path = if (withMembers) "/groups" else "/groups?members=0"
+        get(path, authed = true, Array<GroupOut>::class.java).toList()
     }
 
     data class CreateGroupBody(val name: String, val member_uins: List<Int>)

@@ -102,6 +102,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // own row from the locally-known status instead (home-header parity).
     val ownStatus by session.status.collectAsState()
     val group = groups.firstOrNull { it.id == groupId }
+    // The chat list is fetched without rosters, so this screen — the one place
+    // that actually shows the members — asks for it on arrival. No-op when it
+    // is already here or when the group lives on another island.
+    androidx.compose.runtime.LaunchedEffect(groupId) { session.ensureRoster(groupId) }
     val ownUin = session.uin ?: 0
     val isOwner = group?.ownerUin == ownUin
     var confirmDestructive by remember { mutableStateOf(false) }
@@ -158,7 +162,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 }
             }
             Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(pluralStringResource(R.plurals.members, group.members.size, group.members.size), color = c.textSecondary, fontSize = 13.sp)
+            Text(pluralStringResource(R.plurals.members, group.memberCount, group.memberCount), color = c.textSecondary, fontSize = 13.sp)
             group.description?.takeIf { it.isNotBlank() }?.let {
                 Text(it, color = c.textSecondary, fontSize = 13.sp)
             }

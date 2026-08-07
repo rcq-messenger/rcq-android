@@ -42,6 +42,11 @@ data class RcqGroup(
     val avatarMediaId: String? = null,
     val avatarMediaKey: String? = null,
     val members: List<GroupMember> = emptyList(),
+    /// How many people are in the group, independent of whether [members] was
+    /// fetched. The chat list needs the number and nothing else, and the roster
+    /// is the expensive half of a group payload — every member with two base64
+    /// keys, which on the beta group is most of a megabyte.
+    val memberCount: Int = 0,
     val createdAt: Long? = null,
     // CLIENT-SIDE only (§5c): the island a cross-island group lives on. When
     // set, [id] is the local NEGATIVE alias and the server-side id lives in

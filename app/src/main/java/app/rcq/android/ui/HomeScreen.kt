@@ -617,7 +617,7 @@ internal fun HomeScreen(
         previewGroup?.let { g ->
             PreviewOverlay(
                 title = g.name,
-                subtitle = pluralStringResource(R.plurals.members, g.members.size, g.members.size),
+                subtitle = pluralStringResource(R.plurals.members, g.memberCount, g.memberCount),
                 avatar = { GroupAvatar(g, session, 36.dp) },
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
                     onClearThread = { clearGroupTarget = it }),
@@ -1380,7 +1380,7 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
             }
             Text(
-                pluralStringResource(R.plurals.members, group.members.size, group.members.size) +
+                pluralStringResource(R.plurals.members, group.memberCount, group.memberCount) +
                     (group.host?.let { " · $it" } ?: ""),
                 color = c.textSecondary, fontSize = 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
