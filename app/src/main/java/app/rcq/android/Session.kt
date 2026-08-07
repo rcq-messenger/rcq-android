@@ -3601,6 +3601,10 @@ class Session(context: Context) {
      *  granted the `delete` cap. Recipients re-check the same rule on receipt. */
     suspend fun sendDeleteForEveryone(target: ChatMessage) {
         val gid = target.groupId
+        // My own cap lives in the roster, so ask for it before deciding: a
+        // moderator whose roster has not arrived would silently fail to
+        // retract someone else's message.
+        if (gid != null) ensureRoster(gid)
         val canModerate = gid != null && run {
             val g = group(gid)
             val me = store.uin
