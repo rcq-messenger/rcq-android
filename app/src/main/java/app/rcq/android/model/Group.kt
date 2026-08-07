@@ -15,6 +15,11 @@ data class GroupMember(
     // broadcast + skdm). False → only the legacy per-member fan-out reaches
     // them (dual-send migration). See RCQ/docs/sender-keys-design.md.
     val senderKeys: Boolean = false,
+    // Profile picture, gated by MEMBERSHIP rather than by the contact list:
+    // sharing a group is the relationship here, the same one that already
+    // exposes the nickname on this row.
+    val avatarMediaId: String? = null,
+    val avatarMediaKey: String? = null,
 ) {
     val presence: UserStatus get() = UserStatus.from(status)
     /** True if this member may delete anyone's message (owner OR `delete` cap). */
