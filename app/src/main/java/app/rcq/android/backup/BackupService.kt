@@ -262,7 +262,13 @@ object BackupService {
                     val lines = String(bytes).split('\n').filter { it.isNotBlank() }
                     lines.forEachIndexed { i, line ->
                         if (i % 200 == 0) onProgress(Progress("messages", i, lines.size))
-                        val msg = runCatching { gson.fromJson(line, Record::class.java).toMessageOrNull() }.getOrNull()
+                        val msg = runCatching { gson.fromJson(line, Record::class.java).toMessageOrNull() }
+                            .getOrNull()
+                            // An archive written before disappearing messages
+                            // were excluded can still carry one. Its timer does
+                            // not pause because it sat in a file, so anything
+                            // already past its moment stays gone.
+                            ?.takeIf { it.expiresAt == null || it.expiresAt!! > System.currentTimeMillis() }
                         when {
                             msg == null -> unreadable++
                             session.insertRestoredMessage(msg) -> added++

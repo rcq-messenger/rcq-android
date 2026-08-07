@@ -2998,8 +2998,15 @@ class Session(context: Context) {
     // ── backup ───────────────────────────────────────────────────────
 
     /** Every message on this device, oldest first, for an export. */
+    /** Every message on this device that is allowed to outlive it.
+     *
+     *  ⚠ Disappearing messages are excluded, and that is the point of them.
+     *  Someone who sets a one-day timer is saying this should not exist
+     *  tomorrow; writing it into a file that survives on a drive for years,
+     *  in the clear, would quietly undo the one guarantee they asked for.
+     *  Decided by the founder on 2026-08-07 and written into the format doc. */
     fun allMessagesForBackup(): List<ChatMessage> =
-        if (::db.isInitialized) db.all() else emptyList()
+        if (::db.isInitialized) db.all().filter { it.expiresAt == null } else emptyList()
 
     /** Add one restored message. Returns false when it was already here: a
      *  restore only ever ADDS, so an old archive can never eat newer history. */
