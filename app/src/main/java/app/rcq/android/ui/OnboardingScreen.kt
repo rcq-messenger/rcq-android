@@ -53,6 +53,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import android.content.Context
+import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -104,6 +108,10 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
     val lastPage = pager.currentPage == pages.size - 1
 
     var server by remember { mutableStateOf(RcqApi.DEFAULT_HOST) }
+    val ctx = LocalContext.current
+    // Network check, available before an account exists (see below).
+    var auditing by remember { mutableStateOf(false) }
+    var audit by remember { mutableStateOf<app.rcq.android.net.NetworkAudit.Report?>(null) }
     var showServer by remember { mutableStateOf(false) }
     var showLang by remember { mutableStateOf(false) }
 
@@ -166,6 +174,49 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
                 color = c.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onRestore() }.padding(horizontal = 12.dp, vertical = 8.dp),
             )
+        }
+        // The network check, before there is an account to check it from.
+        //
+        // It used to live in Settings only, which a person reaches by getting
+        // in — and the person we most need a measurement from is exactly the
+        // one who cannot. On a filtered network registration is the FIRST
+        // thing that fails, and until now the app answered that with a spinner
+        // and nothing else. Deliberately quiet: a line of text under Restore,
+        // invisible to anyone whose network works.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text(
+                if (auditing) stringResource(R.string.diag_audit_running) else stringResource(R.string.onboard_cta_netcheck),
+                color = c.textSecondary, fontSize = 12.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !auditing) {
+                        auditing = true; audit = null
+                        scope.launch {
+                            audit = withContext(Dispatchers.IO) {
+                                runCatching { app.rcq.android.net.NetworkAudit.run(server) }.getOrNull()
+                            }
+                            auditing = false
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+        audit?.let { a ->
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(a.compact, color = c.textMono, fontSize = 11.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                Text(
+                    stringResource(R.string.onboard_netcheck_send),
+                    color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("RCQ network audit", a.compact))
+                        Toast.makeText(ctx, ctx.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                    }.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
         Spacer(Modifier.height(16.dp))
     }
