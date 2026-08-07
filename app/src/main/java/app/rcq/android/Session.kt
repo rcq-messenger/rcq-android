@@ -3760,6 +3760,18 @@ class Session(context: Context) {
         }
     }
 
+    /** The decrypted bytes if they are already in memory, without suspending.
+     *
+     *  For the avatars: their composable used to start every appearance at
+     *  `null` and load asynchronously, so leaving a screen and coming back drew
+     *  the status glyph first and popped the picture in a moment later, even
+     *  though the bytes had been sitting in this cache the whole time. It read
+     *  as "the avatars reload every time", which is exactly what it looked
+     *  like. A synchronous peek gives the first frame the picture it already
+     *  has, and the suspending path still covers a genuine miss. */
+    fun cachedImage(mediaId: String?): ByteArray? =
+        mediaId?.takeIf { it.isNotEmpty() }?.let { imageCache.get(it) }
+
     /** Download + decrypt a media blob. Cached in memory by media id, and on
      *  disk as the still-encrypted blob so it's available offline / after a
      *  restart (decrypt key stays in the encrypted DB). */

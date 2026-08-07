@@ -123,7 +123,10 @@ internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize
 internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, host: String? = null, animated: Boolean = false) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
+    // Seeded from the memory cache rather than from null: see
+    // Session.cachedImage. Starting at null redrew the status glyph on every
+    // appearance and swapped the picture in a frame later.
+    val bytes by produceState<ByteArray?>(initialValue = session.cachedImage(id), id, key) {
         value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) {
             // Native-crash breadcrumb (#1): a launch crash "when the beta chat
             // loads" is suspected around group-avatar decode — mark the stage.
@@ -186,7 +189,10 @@ internal fun PersonAvatar(
 ) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val bytes by produceState<ByteArray?>(initialValue = null, id, key) {
+    // Seeded from the memory cache rather than from null: see
+    // Session.cachedImage. Starting at null redrew the status glyph on every
+    // appearance and swapped the picture in a frame later.
+    val bytes by produceState<ByteArray?>(initialValue = session.cachedImage(id), id, key) {
         value = if (!id.isNullOrEmpty() && !key.isNullOrEmpty()) {
             app.rcq.android.CrashReporter.crumb(ctx, "person_avatar")
             session.fetchImage(id, key, host)

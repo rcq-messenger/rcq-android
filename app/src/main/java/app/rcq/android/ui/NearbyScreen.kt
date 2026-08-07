@@ -72,9 +72,7 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
 
     // Nested nav into the bucket-scoped district screens.
     var hoodChatBucket by remember { mutableStateOf<String?>(null) }
-    var bannersBucket by remember { mutableStateOf<String?>(null) }
     hoodChatBucket?.let { return HoodChatScreen(session, it) { hoodChatBucket = null } }
-    bannersBucket?.let { return HoodBannersScreen(session, it) { bannersBucket = null } }
 
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val granted = result.values.any { it }
@@ -123,7 +121,6 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
                     // Full-width stacked (was a 2-up Row where "Announcements"
                     // overflowed the half-width capsule) so both labels fit.
                     if (hoodEnabled) CapsuleButton(stringResource(R.string.hood_title), modifier = Modifier.fillMaxWidth()) { hoodChatBucket = activeBucket }
-                    CapsuleButton(stringResource(R.string.banners_title), modifier = Modifier.fillMaxWidth()) { bannersBucket = activeBucket }
                     CapsuleButton(stringResource(R.string.nearby_stop), modifier = Modifier.fillMaxWidth()) { controller.stop() }
                 }
                 is NearbyController.State.Pending -> {

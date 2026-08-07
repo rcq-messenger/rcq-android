@@ -384,20 +384,13 @@
     <string name="nearby_stranger">Незнакомец рядом</string>
     <string name="nearby_add">Добавить</string>
     <string name="nearby_request_sent">Запрос в контакты отправлен</string>
-    <!-- Hood Chat + Banners (district) -->
+    <!-- Hood Chat (district) -->
     <string name="hood_title">Чат района</string>
     <string name="hood_here">%1$d рядом</string>
     <string name="hood_unencrypted">Публичный, без шифрования</string>
     <string name="hood_deleted">Сообщение удалено</string>
     <string name="hood_hint">Написать в район…</string>
     <string name="hood_send">Отправить</string>
-    <string name="banners_title">Объявления</string>
-    <string name="banners_post">Разместить</string>
-    <string name="banners_empty">Пока нет объявлений.</string>
-    <string name="banners_anon">Аноним</string>
-    <string name="banners_text_hint">Текст объявления…</string>
-    <string name="banners_anon_post">Анонимно</string>
-    <string name="banners_mock_note">Оплата в этой сборке имитируется.</string>
     <string name="settings_sec_history">История</string>
     <string name="settings_sec_about">О приложении</string>
     <string name="settings_sec_account">Аккаунт</string>
@@ -1067,4 +1060,9 @@
     <string name="recovery_reveal">Показать фразу</string>
     <string name="settings_anim_avatars_title">Живые аватарки</string>
     <string name="settings_anim_avatars_desc">Проигрывать аватарки, которые являются анимированными картинками. Если выключить, будет показан первый кадр, и батарея проживёт дольше.</string>
+    <string name="common_interests">Интересы</string>
+    <string name="common_homepage">Сайт</string>
+    <string name="common_real_name">Имя</string>
+    <string name="chat_empty_title">Сообщений пока нет</string>
+    <string name="chat_empty_body">Поздоровайтесь: первое сообщение и начнёт разговор.</string>
 </resources>

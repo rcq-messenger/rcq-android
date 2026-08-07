@@ -1104,48 +1104,6 @@ class RcqApi(
         sendNoResult("POST", "/hood/messages/$id/react", gson.toJson(mapOf("emoji" to emoji)), authed = true)
     }
 
-    // ── Hood Banners (district announcements, mock-IAP paid) ──────────
-    data class Banner(
-        val id: Int,
-        val bucket_id: String = "",
-        val text: String = "",
-        val image_url: String? = null,
-        val image_thumb_url: String? = null,
-        val is_anonymous: Boolean = false,
-        val is_mine: Boolean = false,
-        val owner_nickname: String? = null,
-        val owner_uin: Int? = null,
-        val duration: String = "",
-        val created_at: String? = null,
-        val expires_at: String? = null,
-    )
-    data class BannerList(val items: List<Banner> = emptyList(), val total_active: Int = 0, val can_post: Boolean = true)
-    data class BannerPricing(val duration: String, val label: String = "", val price_cents: Int = 0, val price_display: String = "")
-    data class CreateBannerBody(
-        val bucket_id: String,
-        val text: String,
-        val is_anonymous: Boolean,
-        val duration: String,
-        val receipt: String,
-        val image_url: String? = null,
-        val image_thumb_url: String? = null,
-    )
-    private data class CreateBannerResult(val banner: Banner)
-
-    suspend fun banners(bucket: String): BannerList = withContext(Dispatchers.IO) {
-        val b = java.net.URLEncoder.encode(bucket, "UTF-8")
-        get("/hood/banners/$b", authed = true, BannerList::class.java)
-    }
-    suspend fun bannerPricing(): List<BannerPricing> = withContext(Dispatchers.IO) {
-        get("/hood/banners/pricing", authed = true, Array<BannerPricing>::class.java).toList()
-    }
-    suspend fun createBanner(body: CreateBannerBody): Banner = withContext(Dispatchers.IO) {
-        request("POST", "/hood/banners", gson.toJson(body), authed = true, CreateBannerResult::class.java).banner
-    }
-    suspend fun deleteBanner(id: Int) = withContext(Dispatchers.IO) {
-        sendNoResult("DELETE", "/hood/banners/$id", null, authed = true)
-    }
-
     /** Partial profile/privacy update (PUT /me). Gson omits null fields,
      *  so only what the caller sets is changed. */
     data class UpdateMeBody(
