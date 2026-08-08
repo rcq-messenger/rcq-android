@@ -129,9 +129,15 @@ private fun ReportCard(report: RcqApi.MyReport, onDelete: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            // "Waiting" is about waiting for an ANSWER, so an answered report
+            // must stop saying it even while it is still open on our side: the
+            // operator replies first and picks a verdict later, by design. The
+            // reporter read the unchanged label as us ignoring him (#417).
+            val answered = !report.reply.isNullOrBlank()
             Text(
-                statusLabel(report.status),
-                color = if (report.status == "open") c.accent else c.textSecondary,
+                if (answered && report.status == "open") stringResource(R.string.myreports_status_answered)
+                else statusLabel(report.status),
+                color = if (report.status == "open" && !answered) c.accent else c.textSecondary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
             )

@@ -59,8 +59,23 @@ object SoundService {
         return filter != null && filter != NotificationManager.INTERRUPTION_FILTER_ALL
     }
 
+    /** A call is up — a cellular one, an RCQ one, or anyone else's VoIP.
+     *
+     *  `AudioManager.mode` is the right question here rather than our own call
+     *  state: report #424 was someone on an ordinary phone call hearing a
+     *  contact come online at full volume, and that call is not ours to know
+     *  about. MODE_IN_CALL is telephony, MODE_IN_COMMUNICATION is VoIP
+     *  (including ours), and neither needs a permission to read. */
+    private fun inAnyCall(): Boolean {
+        val mode = runCatching { audioManager?.mode }.getOrNull() ?: return false
+        return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
+    }
+
     private fun play(id: Int) {
         if (!LocalStores.soundMasterOn() || systemWantsSilence()) return
+        // Presence chirps during a call are pure interruption: the person is
+        // talking, and "someone came online" can wait.
+        if (inAnyCall()) return
         // Own volume knob: the tones ride the MEDIA stream so the rocker moves
         // them together with music, and someone who wants a quieter "о-оу"
         // without quieter everything else had nothing to turn.

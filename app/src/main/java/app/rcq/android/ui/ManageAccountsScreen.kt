@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -61,7 +62,12 @@ import app.rcq.android.net.RcqApi
  * Privacy & Network.
  */
 @Composable
-internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit, onAddBySeed: () -> Unit = {}) {
+internal fun ManageAccountsScreen(
+    session: Session,
+    onBack: () -> Unit,
+    onAddBySeed: () -> Unit = {},
+    onSwitchAccount: (String) -> Unit = {},
+) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     // Decoy-aware: only the decoy account shows while decoy mode is active.
@@ -135,24 +141,39 @@ internal fun ManageAccountsScreen(session: Session, onBack: () -> Unit, onAddByS
                     // Reorder: with several identities, creation order is rarely
                     // the order you want to see them in (user request).
                     val index = sorted.indexOfFirst { it.id == account.id }
+                    // 22dp icons with no padding gave two 22dp targets touching
+                    // each other, which is under the 48dp minimum and reads as one
+                    // control (#409). Same stacked order, room to hit them.
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Filled.KeyboardArrowUp, stringResource(R.string.manage_accounts_move_up),
                             tint = if (index > 0) c.textSecondary else c.divider,
-                            modifier = Modifier.size(22.dp)
-                                .clickable(enabled = index > 0) { AccountManager.move(account.id, up = true) },
+                            modifier = Modifier.clip(CircleShape)
+                                .clickable(enabled = index > 0) { AccountManager.move(account.id, up = true) }
+                                .padding(6.dp).size(22.dp),
                         )
                         Icon(
                             Icons.Filled.KeyboardArrowDown, stringResource(R.string.manage_accounts_move_down),
                             tint = if (index < sorted.lastIndex) c.textSecondary else c.divider,
-                            modifier = Modifier.size(22.dp)
-                                .clickable(enabled = index < sorted.lastIndex) { AccountManager.move(account.id, up = false) },
+                            modifier = Modifier.clip(CircleShape)
+                                .clickable(enabled = index < sorted.lastIndex) { AccountManager.move(account.id, up = false) }
+                                .padding(6.dp).size(22.dp),
                         )
                     }
                     Spacer(Modifier.width(6.dp))
+                    // The active row used to end in a tick. It sat in the column
+                    // where every other row has an action, did nothing when
+                    // tapped, and duplicated the ACTIVE label two lines to the
+                    // left. The other rows now get the action it looked like it
+                    // was: switch to this account without leaving the screen.
                     if (isActive) {
-                        Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                        TextButton(onClick = { pendingDelete = account }) {
+                            Text(stringResource(R.string.manage_accounts_delete), color = Color(0xFFE5484D))
+                        }
                     } else {
+                        TextButton(onClick = { onSwitchAccount(account.id) }) {
+                            Text(stringResource(R.string.manage_accounts_switch), color = c.accent)
+                        }
                         TextButton(onClick = { pendingDelete = account }) {
                             Text(stringResource(R.string.manage_accounts_delete), color = Color(0xFFE5484D))
                         }

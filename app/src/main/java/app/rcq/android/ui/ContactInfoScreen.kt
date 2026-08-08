@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -64,6 +65,9 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 private val DANGER = Color(0xFFE5484D)
+// Amber, not red: a safety-number change asks you to check something, it
+// does not forbid anything. Red read as "blocked" to the reporter (#407).
+private val WARNING = Color(0xFFF5A524)
 
 /** Profile card for a 1:1 contact — the peer analogue of [GroupInfoScreen],
  *  opened by tapping the chat header. Shows presence/last-seen, status
@@ -257,15 +261,34 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             }
 
             // Safety-number-changed warning (re-register / new device / MITM).
+            //
+            // Tapping it opens the code, which is what the text tells you to do.
+            // It used to be inert: the copy said "open it to compare again", the
+            // banner ignored taps, and the thing to open was an unlabelled row
+            // further down the screen (#407). The icon is amber, not red: this is
+            // a warning to check something, not a prohibition, and the reporter
+            // said as much.
             if (identityChanged) {
                 Spacer(Modifier.height(12.dp))
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).padding(14.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
+                        .clickable {
+                            showSafety = true
+                            safetyLoading = true
+                            session.acknowledgePeerIdentity(uin)
+                            identityChanged = false
+                            scope.launch {
+                                safetyNumber = session.safetyNumber(uin)
+                                safetyLoading = false
+                            }
+                        }
+                        .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Filled.Warning, null, tint = DANGER, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Filled.Warning, null, tint = WARNING, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
                     Text(stringResource(R.string.ci_identity_changed), color = c.textPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = c.textSecondary, modifier = Modifier.size(14.dp))
                 }
             }
 
@@ -343,14 +366,22 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
-            Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).clickable { confirmRemove = true }.padding(vertical = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Filled.PersonRemove, null, tint = DANGER, modifier = Modifier.size(18.dp))
-                    Text(stringResource(R.string.ci_remove), color = DANGER, fontWeight = FontWeight.SemiBold)
+            // Only offer to remove someone who is actually in the roster.
+            // `contact` is null for a person whose request you never accepted
+            // (and for a cross-island group member), and the screen already
+            // branches on that above to show "Add contact" instead — but the
+            // remove button was drawn unconditionally, so the profile of
+            // someone who is not your contact offered to delete them (#425).
+            if (contact != null) {
+                Spacer(Modifier.height(16.dp))
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).clickable { confirmRemove = true }.padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.PersonRemove, null, tint = DANGER, modifier = Modifier.size(18.dp))
+                        Text(stringResource(R.string.ci_remove), color = DANGER, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
             Spacer(Modifier.height(20.dp))

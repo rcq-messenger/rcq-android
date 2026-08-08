@@ -255,8 +255,14 @@ private fun RadioChatView(session: Session, onLeave: () -> Unit, onBack: () -> U
                 }
                 Text(sub, color = c.textSecondary, fontSize = 12.sp)
             }
+            // Same thing as the back arrow above, which does onLeave() AND
+            // onBack(). This one only left the session and kept you on the
+            // screen you had just left, so the two controls disagreed about
+            // what "leave" means and the reporter asked which was which (#416).
+            // Neither deletes the room: that is a separate owner-only action in
+            // the room list.
             Text(stringResource(R.string.radio_leave), color = c.accent, fontSize = 14.sp,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onLeave() }.padding(horizontal = 8.dp, vertical = 4.dp))
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onLeave(); onBack() }.padding(horizontal = 8.dp, vertical = 4.dp))
         }
 
         if (speakers.isNotEmpty()) {
