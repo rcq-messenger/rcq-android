@@ -651,11 +651,69 @@ object Push {
             else -> opened.preview
         }
 
+        // The SAME wake delivered twice must never sound twice. The server
+        // retries a publish whose response it lost (~30s later, i.e. outside the
+        // burst window below), ntfy replays its 12h cache to a distributor that
+        // redials with `since=`, and a device that still has an old distributor
+        // registered gets the copy sent there too. All of those carry a
+        // byte-identical `env`, so the ciphertext IS the identity of the wake.
+        val repeat = str("env")?.let { !SeenWakes.firstTime(it) } ?: false
+
+        post(
+            ctx,
+            title = title,
+            body = body,
+            groupId = groupId,
+            peerUin = peerUin,
+            toUin = toUin,
+            openReports = str("notif_kind") == "report_reply",
+            forceQuiet = repeat,
+        )
+    }
+
+    /** Raise the message notification for an envelope that arrived over the
+     *  LIVE socket while the app was in the background.
+     *
+     *  Until this existed the two delivery paths were lopsided: a wake posted a
+     *  notification, while a message the running app received itself only
+     *  played an in-app tone — audible with the screen off, invisible in the
+     *  shade, and impossible to silence from the notification settings. Same id
+     *  scheme and same burst window as [showMessage], so whichever path gets
+     *  there first alerts and the other one only refreshes the text. */
+    fun showLocalMessage(
+        ctx: Context,
+        title: String,
+        body: String,
+        groupId: Int?,
+        peerUin: Int?,
+        toUin: Int?,
+    ): Boolean {
+        // Someone who blocked our notifications in Android settings would hear
+        // NOTHING at all if we simply posted into the void, since the in-app
+        // tone is now the foreground's job. Say so, and let the caller chirp
+        // like it used to.
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return false
+        ensureChannels(ctx)
+        post(ctx, title, body, groupId, peerUin, toUin, openReports = false, forceQuiet = false)
+        return true
+    }
+
+    /** Build + post the message notification both delivery paths share. */
+    private fun post(
+        ctx: Context,
+        title: String,
+        body: String,
+        groupId: Int?,
+        peerUin: Int?,
+        toUin: Int?,
+        openReports: Boolean,
+        forceQuiet: Boolean,
+    ) {
         // Distinct groups get their own notification, and so does each sender we
         // could identify. Wakes we could not open still collapse into one shared
         // "New message" — there is no sender to separate them by.
         val id = when {
-            groupId != null -> (str("group_id") ?: "dm").hashCode()
+            groupId != null -> groupId.toString().hashCode()
             peerUin != null -> "peer:$peerUin".hashCode()
             else -> "dm".hashCode()
         }
@@ -673,7 +731,7 @@ object Push {
             if (groupId != null) putExtra(EXTRA_OPEN_GROUP_ID, groupId)
             if (toUin != null) putExtra(EXTRA_OPEN_TO_UIN, toUin)
             if (peerUin != null) putExtra(EXTRA_OPEN_PEER_UIN, peerUin)
-            if (str("notif_kind") == "report_reply") putExtra(EXTRA_OPEN_REPORTS, true)
+            if (openReports) putExtra(EXTRA_OPEN_REPORTS, true)
         }
         val pi = PendingIntent.getActivity(
             ctx, id, tap,
@@ -686,13 +744,29 @@ object Push {
         // unless told otherwise. So the first wake in a thread alerts and
         // anything arriving within the burst window only updates the text; a
         // message later in the day rings again like it should.
+        //
+        // ⚠ The timestamp is only refreshed when we actually ALERT. Stamping it
+        // on every post let a chain of duplicates keep extending the silence, so
+        // a real message twenty seconds later went unheard.
         val now = android.os.SystemClock.elapsedRealtime()
-        val quiet = synchronized(lastAlertAt) {
+        val burstQuiet = synchronized(lastAlertAt) {
             val prev = lastAlertAt[id]
-            lastAlertAt[id] = now
+            val within = prev != null && now - prev < BURST_WINDOW_MS
+            if (!within) lastAlertAt[id] = now
             if (lastAlertAt.size > 64) lastAlertAt.entries.removeAll { now - it.value > BURST_WINDOW_MS * 4 }
-            prev != null && now - prev < BURST_WINDOW_MS
+            within
         }
+        // The app in front makes its own noise (in-app tone + banner), so a
+        // second, louder chime from the system on top of it is the "о-оу
+        // несколько раз, тихо и громко" report. The notification is still
+        // posted — silently — so the shade holds it once the user leaves.
+        val foregroundQuiet = app.rcq.android.RcqApp.foreground
+        // Honour the app's own sound switches. The channel carries our tone, so
+        // "App sounds: off" or "Message sounds: off" used to silence only half
+        // of the paths and the phone kept chiming.
+        val settingsQuiet = !app.rcq.android.data.LocalStores.soundMasterOn() ||
+            !app.rcq.android.data.LocalStores.soundMessagesOn()
+        val quiet = forceQuiet || burstQuiet || foregroundQuiet || settingsQuiet
         val notif = NotificationCompat.Builder(ctx, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
@@ -701,6 +775,11 @@ object Push {
             .setContentIntent(pi)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // ⚠ setOnlyAlertOnce is NOT enough on its own: it suppresses the
+            // alert only while the previous notification is still showing, and
+            // a tap (autoCancel) or an in-app read takes it down — after which
+            // the duplicate posts as "new" and rings. setSilent is absolute.
+            .setSilent(quiet)
             .setOnlyAlertOnce(quiet)
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(id, notif) }
@@ -709,6 +788,25 @@ object Push {
     /** Last time each notification id made a sound, for burst coalescing. */
     private val lastAlertAt = HashMap<Int, Long>()
     private const val BURST_WINDOW_MS = 20_000L
+
+    /** Wakes already turned into a sound, keyed by the ciphertext they carry.
+     *
+     *  A duplicate wake is not hypothetical: the server treats a lost response
+     *  as a failed publish and retries at ~6s and ~24s (the second one lands
+     *  outside the burst window above), and ntfy hands a reconnecting
+     *  distributor everything since the last id it saw. Bounded and in-memory:
+     *  a process restart at worst costs one duplicate chime. */
+    private object SeenWakes {
+        private const val CAP = 64
+        private val keys = object : LinkedHashMap<Int, Unit>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Unit>) = size > CAP
+        }
+
+        /** True when this ciphertext has not been signalled before. */
+        fun firstTime(envB64: String): Boolean = synchronized(keys) {
+            keys.put(envB64.hashCode(), Unit) == null
+        }
+    }
 
     /** Raise a full-screen incoming-call wake for a {type:"call"} payload, or
      *  dismiss it when kind=="end". The full-screen-intent surfaces

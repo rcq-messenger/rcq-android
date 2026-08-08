@@ -690,7 +690,13 @@ class Session(context: Context) {
         val signingPubB64 = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP)
         val challenge = regApi.recoverChallenge(signingPubB64).challenge
         val signature = app.rcq.android.crypto.RecoveryPhrase.signChallenge(identity.signingPrivate, challenge)
-        val resp = regApi.recover(RcqApi.RecoverRequest(signingPubB64, challenge, signature))
+        val resp = regApi.recover(
+            // Name this install straight away: a token without it makes the
+            // island treat the session as the anonymous "primary" device, and
+            // it can no longer suppress a push for a message this very device
+            // just took over its own socket.
+            RcqApi.RecoverRequest(signingPubB64, challenge, signature, DeviceId.get(appCtx)),
+        )
         // Fetch the real nickname back (the server kept the profile).
         regApi.setToken(resp.token)
         val nick = runCatching { regApi.userInfo(resp.uin).nickname }
@@ -761,6 +767,14 @@ class Session(context: Context) {
             seed = seed,
         )
         api.setToken(resp.token)
+        // ⚠ /auth/reissue mints a token WITHOUT the `dev` claim, so from the
+        // island's point of view this session stops being a named install and
+        // becomes the generic "primary" — after which it can no longer match
+        // the socket to the push endpoint, and every 1:1 message wakes the very
+        // device that just received it over that socket (one tone from the app,
+        // one from the notification). Claim the install back immediately; the
+        // session is NOT restarted here, so nothing else would.
+        claimInstallToken(resp.token)
         // Rotate the libsignal identity too (upload-first; throws on failure so
         // the UI can ask the user to retry). This is what changes the safety
         // number that warns contacts.
@@ -1485,12 +1499,14 @@ class Session(context: Context) {
                 !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())
         }
         withContext(Dispatchers.IO) {
-            Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
-                // A group row in a BACKUP mailbox = that island also hosts a
-                // group we joined (§5c, same identity = same mailbox) — file it
-                // under the local alias like the visited-island drain does.
-                if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
-                else ingest(payload)
+            asBacklog {
+                Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
+                    // A group row in a BACKUP mailbox = that island also hosts a
+                    // group we joined (§5c, same identity = same mailbox) — file it
+                    // under the local alias like the visited-island drain does.
+                    if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
+                    else ingest(payload)
+                }
             }
         }
     }
@@ -1505,9 +1521,11 @@ class Session(context: Context) {
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
         withContext(Dispatchers.IO) {
-            Multihome.drainVisitedQueues(sp, pp) { payload, groupId, host ->
-                if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
-                else ingest(payload)
+            asBacklog {
+                Multihome.drainVisitedQueues(sp, pp) { payload, groupId, host ->
+                    if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
+                    else ingest(payload)
+                }
             }
         }
     }
@@ -4038,14 +4056,16 @@ class Session(context: Context) {
         // row that turned out to be a duplicate is harmless.
         val directIds = ArrayList<Int>()
         val groupIds = ArrayList<Int>()
-        api.drainQueue().forEach { q ->
-            val payload = q.payload ?: return@forEach
-            when {
-                q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id)
-                q.group_id != null -> ingestGroup(payload, q.group_id)
-                else -> ingest(payload)
+        asBacklog {
+            api.drainQueue().forEach { q ->
+                val payload = q.payload ?: return@forEach
+                when {
+                    q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id)
+                    q.group_id != null -> ingestGroup(payload, q.group_id)
+                    else -> ingest(payload)
+                }
+                if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
             }
-            if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
         }
         // Best-effort ack. If it fails the server redelivers next drain and the
         // UUID dedupe collapses the repeat, so we never lose and never double.
@@ -4492,21 +4512,112 @@ class Session(context: Context) {
         if (msg.groupId != null && !msg.fromMe && thread != activeThread && bodyMentionsMe(msg.body)) {
             LocalStores.markMention(LocalStores.groupThread(msg.groupId))
         }
-        // Skip the receive sound during the post-connect backfill window so a
-        // pile of messages missed while away doesn't ring N times on open.
-        val live = System.currentTimeMillis() >= soundsSuppressedUntil
+        // Skip the receive sound for BACKLOG: a message pulled out of an
+        // offline queue was already announced by the push that woke us, and
+        // announcing it a second time is what "о-оу несколько раз" is. The
+        // short post-connect window stays as a second net for the burst the
+        // server replays over the socket itself.
+        val live = drainDepth.get() == 0 && System.currentTimeMillis() >= soundsSuppressedUntil
         // Notify gate (#11): NONE = silent, MENTIONS = only when @mentioned,
-        // ALL = always. One authoritative read of the mute state (no second
-        // push path on Android), so mute is deterministic.
+        // ALL = always. One authoritative read of the mute state, so mute is
+        // deterministic on both the socket and the push path.
         val ring = when (LocalStores.notifyMode(thread)) {
             LocalStores.NotifyMode.NONE -> false
             LocalStores.NotifyMode.MENTIONS -> msg.groupId != null && bodyMentionsMe(msg.body)
             LocalStores.NotifyMode.ALL -> true
         }
-        if (live && ring) app.rcq.android.media.SoundService.message()
-        // In-app banner for a thread you're NOT looking at — same gate as the
-        // sound, so a muted / non-mention message never interrupts.
-        if (live && ring && thread != activeThread) emitBanner(msg, thread)
+        // A call-summary row is written locally when a call ends — it is not an
+        // arriving message, and playing the MESSAGE tone for it made a missed
+        // call chime like one.
+        if (!live || !ring || msg.kind == "call") return
+        if (app.rcq.android.RcqApp.foreground) {
+            // On screen: the in-app tone (media stream, the app's own volume
+            // slider) plus the in-app banner ARE the notification.
+            app.rcq.android.media.SoundService.message()
+            // In-app banner for a thread you're NOT looking at.
+            if (thread != activeThread) emitBanner(msg, thread)
+        } else {
+            // Backgrounded: the alert belongs in the shade at the system's
+            // notification volume, exactly like a wake. Two things were wrong
+            // before. A message that arrived over the live socket only chirped
+            // — audible with the screen off, invisible in the shade, and
+            // unaffected by the notification settings. And when the wake ALSO
+            // arrived (a device whose live socket the server failed to place),
+            // the same message sounded twice: quietly here, loudly there. Both
+            // paths now post the same notification id inside the same burst
+            // window, so whichever gets there first is the one that alerts.
+            // If notifications are switched off at the OS level there is no
+            // shade to post into, so fall back to the tone rather than to
+            // silence.
+            if (!notifyInBackground(msg)) app.rcq.android.media.SoundService.message()
+        }
+    }
+
+    /** Raise the system notification for a message that arrived over the live
+     *  socket while the app was in the background. False when the OS has our
+     *  notifications switched off and nothing was shown. */
+    private fun notifyInBackground(msg: ChatMessage): Boolean {
+        val gid = msg.groupId
+        // While the app is locked its own history is unreadable, so a preview in
+        // the shade would walk straight around the panic PIN. Same rule the wake
+        // path follows (PushEnvelope refuses to open anything while locked).
+        val locked = app.rcq.android.security.PanicPinService.isLocked
+        val preview = notificationPreview(msg)
+        return app.rcq.android.push.Push.showLocalMessage(
+            ctx = appCtx,
+            title = when {
+                locked -> appCtx.getString(app.rcq.android.R.string.app_name)
+                gid != null -> groupName(gid)
+                else -> contactName(msg.peerUin)
+            },
+            body = when {
+                locked -> appCtx.getString(
+                    if (gid != null) app.rcq.android.R.string.push_new_group_message
+                    else app.rcq.android.R.string.push_new_message,
+                )
+                // In a group the title is the group, so the sender goes in front
+                // of the text — same shape as the wake and as the iOS NSE.
+                gid != null && msg.senderUin != null -> "${contactName(msg.senderUin)}: $preview"
+                else -> preview
+            },
+            groupId = gid,
+            peerUin = if (gid == null) msg.peerUin else null,
+            toUin = store.uin,
+        )
+    }
+
+    /** One line of the message for a notification — the same shapes
+     *  [app.rcq.android.push.PushEnvelope] gives a wake, so a message announced
+     *  by the socket and one announced by a push read identically. */
+    private fun notificationPreview(msg: ChatMessage): String {
+        val text = msg.body.takeIf { it.isNotBlank() }
+        fun r(id: Int) = appCtx.getString(id)
+        return when (msg.kind) {
+            "photo" -> text ?: ("📷 " + r(app.rcq.android.R.string.kind_photo))
+            "video" -> text ?: ("🎬 " + r(app.rcq.android.R.string.kind_video))
+            "voice" -> "🎤 " + r(app.rcq.android.R.string.kind_voice)
+            "file" -> "📎 " + (text ?: r(app.rcq.android.R.string.kind_file))
+            "location" -> "📍 " + r(app.rcq.android.R.string.kind_location)
+            "poll" -> "📊 " + (text ?: r(app.rcq.android.R.string.kind_message))
+            "relay" -> "🛡️ " + r(app.rcq.android.R.string.push_kind_relay_share)
+            else -> text ?: r(app.rcq.android.R.string.kind_message)
+        }
+    }
+
+    /** Non-zero while a mailbox drain is feeding [store] — see [live] above.
+     *  A counter rather than a flag because the primary, the backup islands and
+     *  the visited islands drain concurrently. */
+    private val drainDepth = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** Run [block] with everything it ingests treated as backlog (no sound, no
+     *  banner, no notification): the push already announced it. */
+    private inline fun <T> asBacklog(block: () -> T): T {
+        drainDepth.incrementAndGet()
+        try {
+            return block()
+        } finally {
+            drainDepth.decrementAndGet()
+        }
     }
 
     private fun emitBanner(msg: ChatMessage, thread: String) {

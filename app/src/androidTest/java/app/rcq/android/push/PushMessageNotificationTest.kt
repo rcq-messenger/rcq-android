@@ -141,10 +141,23 @@ class PushMessageNotificationTest {
     }
 
     /** For the silences: give a post the window it would have needed to show
-     *  up, so "nothing there" is an answer and not just an early read. */
+     *  up, so "nothing there" is an answer and not just an early read.
+     *
+     *  ⚠ Counts the MESSAGE channel only. On a device where the app is actually
+     *  running, the push socket's foreground service holds a permanent
+     *  notification of its own that no `cancelAll` may remove, and asserting on
+     *  the whole app made these four tests fail for a reason that has nothing to
+     *  do with wakes. */
     private fun assertNothingPosted() {
         Thread.sleep(750)
-        assertEquals("nothing at all should be posted", 0, nm.activeNotifications.size)
+        val onMessageChannel = nm.activeNotifications
+            .filter { it.notification.channelId == Push.CHANNEL_MESSAGES }
+        assertEquals(
+            "no message notification should be posted, got " +
+                onMessageChannel.map { it.notification.extras.getString("android.title") },
+            0,
+            onMessageChannel.size,
+        )
     }
 
     private fun mute(thread: String) {
@@ -242,6 +255,82 @@ class PushMessageNotificationTest {
     fun ownCarbonDoesNotWake() {
         Push.showMessage(ctx, wake(sealed(Envelope.Text("n8", "себе"), fromUin = myUin)))
         assertNothingPosted()
+    }
+
+    // ── one message, one alert ───────────────────────────────────────
+
+    /** Waits for [id] to be posted with the marks androidx puts on a silenced
+     *  notification: group "silent" + GROUP_ALERT_SUMMARY, which is the only
+     *  way to keep a channel with a sound from playing it on API 26+. */
+    private fun awaitSilent(id: Int, timeoutMs: Long = 3_000): Boolean {
+        val until = android.os.SystemClock.uptimeMillis() + timeoutMs
+        while (android.os.SystemClock.uptimeMillis() < until) {
+            val n = posted(id)?.notification
+            if (n != null && n.group == "silent" &&
+                n.groupAlertBehavior == android.app.Notification.GROUP_ALERT_SUMMARY
+            ) {
+                return true
+            }
+            Thread.sleep(25)
+        }
+        return false
+    }
+
+    private fun alerting(id: Int) = posted(id)?.notification?.group == null
+
+    /**
+     * The tester's report of 2026-08-08: one message, several "о-оу" — some
+     * quiet (the app's own tone, on the media stream) and some loud (the
+     * notification channel, which carries the same tone at the system's
+     * notification volume).
+     *
+     * A message that the running app receives over its socket now raises the
+     * SAME notification a wake would, so when both paths fire for one message
+     * only the first one alerts.
+     */
+    @Test
+    fun socketMessageAndItsWakeAlertOnlyOnce() {
+        val peer = 700601
+        val id = "peer:$peer".hashCode()
+        assertTrue(
+            "a socket-delivered message must reach the shade",
+            Push.showLocalMessage(ctx, "Вася", "как дела", null, peer, myUin),
+        )
+        assertNotNull(awaitPosted(id))
+        assertTrue("the first announcement is the one that alerts", alerting(id))
+
+        Push.showLocalMessage(ctx, "Вася", "и ещё раз", null, peer, myUin)
+        assertTrue("the second one inside the burst window must be silent", awaitSilent(id))
+    }
+
+    /** The server retries a publish whose response it lost, and ntfy replays its
+     *  cache to a distributor that reconnects with `since=`. Both hand the app a
+     *  byte-identical envelope, and the second copy used to ring again. */
+    @Test
+    fun theSameWakeTwiceRingsOnce() {
+        val env = sealed(Envelope.Text("dup1", "дубль"), fromUin = 700602)
+        val id = "peer:700602".hashCode()
+        Push.showMessage(ctx, wake(env))
+        assertNotNull(awaitPosted(id))
+        assertTrue(alerting(id))
+
+        Push.showMessage(ctx, wake(env))
+        assertTrue("the same ciphertext must never sound twice", awaitSilent(id))
+    }
+
+    /** "Message sounds: off" used to silence only the app's own tone while the
+     *  channel kept chiming, because the wake path never read the setting. */
+    @Test
+    fun appSoundSwitchSilencesTheNotificationToo() {
+        LocalStores.setSoundMessages(false)
+        try {
+            val id = "peer:700603".hashCode()
+            Push.showMessage(ctx, wake(sealed(Envelope.Text("q1", "тихо"), fromUin = 700603)))
+            assertNotNull(awaitPosted(id))
+            assertTrue("sounds are off, so the notification must be silent", awaitSilent(id))
+        } finally {
+            LocalStores.setSoundMessages(true)
+        }
     }
 
     // ── the tap ──────────────────────────────────────────────────────

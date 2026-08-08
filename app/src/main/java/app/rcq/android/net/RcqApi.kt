@@ -145,7 +145,18 @@ class RcqApi(
     // rebind a fresh device to the same UIN. Reuses RegisterResponse {uin,token}.
     data class RecoverChallengeRequest(val signing_key: String)
     data class RecoverChallengeResponse(val challenge: String)
-    data class RecoverRequest(val signing_key: String, val challenge: String, val signature: String)
+    /** `device_id` names the install to the island, so the token it hands back
+     *  carries a `dev` claim like a fresh registration's does. Without it a
+     *  recovered session is anonymous ("primary"), and the island can no longer
+     *  tell that the device it is about to wake is the one already holding the
+     *  socket — the message then arrives twice, once as a tone and once as a
+     *  notification. Nullable so an island too old to read it still works. */
+    data class RecoverRequest(
+        val signing_key: String,
+        val challenge: String,
+        val signature: String,
+        val device_id: String? = null,
+    )
     // In-place identity key rotation for the current (authed) account: replaces
     // the long-term X25519 identity + Ed25519 signing keys; the UIN is unchanged.
     data class ReissueRequest(val identity_key: String, val signing_key: String)

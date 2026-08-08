@@ -173,6 +173,22 @@ object Multihome {
         }
     }
 
+    /** Advance a secondary island's drain cursor past the rows we just ingested.
+     *
+     *  `drainQueue()` asks with `?ack=1`, which means the island KEEPS every row
+     *  until the device confirms it — and these two drains never confirmed. The
+     *  same envelopes therefore came back on every pass of the 30-second loop
+     *  for as long as the mailbox lived. The uuid dedup hid it while the local
+     *  copy existed, but once that copy was gone (a disappearing message
+     *  expired, the thread was cleared) each pass re-inserted the message and
+     *  played the receive tone again — "о-оу" every half minute for one old
+     *  message. Best effort: a lost ack just means one more redelivery. */
+    private suspend fun ack(api: RcqApi, rows: List<RcqApi.QueuedEnvelope>) {
+        val direct = rows.filter { it.group_id == null }.map { it.id }
+        val group = rows.filter { it.group_id != null }.map { it.id }
+        runCatching { api.ackQueue(direct, group) }
+    }
+
     /** Drain every backup mailbox, feeding each payload to [onPayload] (the
      *  session's ingest — dedup happens there). A 401 refreshes the token via
      *  recover and retries once. Never throws. */
@@ -201,6 +217,7 @@ object Multihome {
                     } else throw e
                 }
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
+                ack(api, rows)
             }.onFailure {
                 android.util.Log.w("RCQfed", "multihome drain ${home.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
@@ -230,6 +247,7 @@ object Multihome {
                     } else throw e
                 }
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
+                ack(api, rows)
             }.onFailure {
                 android.util.Log.w("RCQfed", "visited drain ${v.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
