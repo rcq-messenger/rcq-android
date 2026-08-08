@@ -1,5 +1,11 @@
 package app.rcq.android.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,9 +32,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -149,7 +157,29 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
                             else stringResource(R.string.rooms_key_fmt, room.joinKey)
                             Text(sub, color = c.textSecondary, fontSize = 12.sp)
                         }
+                        // The key is the only way anyone else gets in, and it was
+                        // printed as text you had to retype by hand (#418).
+                        Icon(
+                            Icons.Filled.ContentCopy, stringResource(R.string.rooms_copy_key), tint = c.textSecondary,
+                            modifier = Modifier.size(20.dp).clip(CircleShape).clickable {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("RCQ room key", room.joinKey))
+                                Toast.makeText(context, context.getString(R.string.rooms_key_copied), Toast.LENGTH_SHORT).show()
+                            },
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Icon(
+                            Icons.Filled.Share, stringResource(R.string.rooms_share_key), tint = c.textSecondary,
+                            modifier = Modifier.size(20.dp).clip(CircleShape).clickable {
+                                val text = context.getString(R.string.rooms_share_text, room.name, room.joinKey)
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) },
+                                    null,
+                                ))
+                            },
+                        )
                         if (room.ownerUin == ownUin) {
+                            Spacer(Modifier.width(12.dp))
                             Icon(Icons.Filled.Delete, stringResource(R.string.rooms_delete), tint = c.textSecondary,
                                 modifier = Modifier.size(20.dp).clip(CircleShape).clickable { scope.launch { controller.delete(room.id) } })
                         }

@@ -110,6 +110,15 @@ class AudioRoomController(
     fun exit() {
         val id = _activeRoomId.value ?: return
         send(JsonObject().apply { addProperty("type", "room_leave"); addProperty("room_id", id) })
+        // Take ourselves off the cached headcount. The server knows we left, but
+        // it only tells the people still inside (`room_member_left`), and we are
+        // no longer one of them — so the room list kept showing the number from
+        // the moment we walked out, including us. Someone who was alone in a
+        // room saw "1 в комнате" after leaving it, and it corrected itself only
+        // on the next fetch, which is why re-entering the screen fixed it (#418).
+        _rooms.value = _rooms.value.map {
+            if (it.id == id) it.copy(activeCount = (it.activeCount - 1).coerceAtLeast(0)) else it
+        }
         tearDownLocal()
     }
 

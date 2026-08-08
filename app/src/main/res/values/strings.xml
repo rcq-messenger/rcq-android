@@ -95,6 +95,7 @@
     <string name="manage_accounts_active">Active</string>
     <string name="manage_accounts_add_by_phrase">Add account by recovery phrase</string>
     <string name="manage_accounts_delete">Delete</string>
+    <string name="manage_accounts_switch">Switch</string>
     <string name="manage_accounts_move_up">Move up</string>
     <string name="manage_accounts_move_down">Move down</string>
     <string name="restore_already_here">You already have this number on this device (#%1$d). A second copy cannot be added: a number holds one set of keys on the server, so two copies would stop seeing each other’s group messages. Switch to the account you already have from the main screen.</string>
@@ -359,6 +360,10 @@
     <string name="rooms_in_room">%1$d in room</string>
     <string name="rooms_key_fmt">Key: %1$s</string>
     <string name="rooms_delete">Delete</string>
+    <string name="rooms_copy_key">Copy key</string>
+    <string name="rooms_share_key">Share key</string>
+    <string name="rooms_key_copied">Key copied</string>
+    <string name="rooms_share_text">Join my RCQ room “%1$s” with the key %2$s</string>
     <string name="rooms_joining">Joining…</string>
     <string name="rooms_you">You</string>
     <string name="rooms_leave">Leave</string>
@@ -1005,6 +1010,7 @@
     <string name="myreports_empty">You have not sent any reports. If you do, the answer appears here.</string>
     <string name="myreports_answer">Answer</string>
     <string name="myreports_status_open">Waiting</string>
+    <string name="myreports_status_answered">Answered</string>
     <string name="myreports_status_resolved">Resolved</string>
     <string name="myreports_status_dismissed">Declined</string>
     <string name="myreports_status_duplicate">Duplicate</string>

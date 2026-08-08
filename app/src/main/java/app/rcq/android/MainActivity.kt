@@ -586,6 +586,7 @@ private fun RcqApp(session: Session) {
                 session,
                 onBack = { showManageAccounts = false },
                 onAddBySeed = { showManageAccounts = false; showRestore = true },
+                onSwitchAccount = { id -> showManageAccounts = false; switchAccount(id) },
             )
             s is UiState.Registered && showNews -> app.rcq.android.ui.NewsScreen(
                 session,
