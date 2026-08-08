@@ -96,7 +96,7 @@
     <string name="manage_accounts_delete">Удалить</string>
     <string name="manage_accounts_move_up">Выше</string>
     <string name="manage_accounts_move_down">Ниже</string>
-    <string name="restore_already_here">Этот аккаунт уже есть на устройстве (#%1$d). Повторное восстановление добавит вторую копию, без истории переписки. Всё равно добавить?</string>
+    <string name="restore_already_here">Этот номер уже есть на устройстве (#%1$d). Вторую копию добавить нельзя: у номера один набор ключей на сервере, и две копии перестали бы видеть групповые сообщения друг друга. Переключитесь на уже имеющийся аккаунт с главного экрана.</string>
     <string name="restore_add_anyway">Всё равно добавить</string>
     <string name="manage_accounts_delete_title">Удалить %1$s?</string>
     <string name="manage_accounts_delete_body">Убирает этот аккаунт и его сообщения с этого устройства. Аккаунт остаётся на сервере, его можно добавить снова позже.</string>
@@ -156,7 +156,7 @@
     <string name="settings_row_backup_island">Запасной остров</string>
     <string name="backup_island_body">Это автоматический резерв, а не второй вход: вы никуда не переключаетесь и не входите. Пока основной остров работает, копия каждого входящего сообщения кладётся и на резервный. Если основной заблокируют или он упадёт, приложение само продолжит получать с резервного. Номер на резервном острове может оказаться другим (острова нумеруют независимо), а ваш основной номер не меняется.</string>
     <string name="backup_island_row_uin">почтовый ящик на этом острове: #%1$d</string>
-    <string name="home_via_backup">Ваш остров не отвечает. Почта приходит через резервный остров; чтобы и отправлять с него, сделайте его основным в настройках.</string>
+    <string name="home_via_backup">Ваш остров не отвечает. Сообщения приходят через резервный остров; чтобы и отправлять с него, сделайте его основным в настройках.</string>
     <string name="backup_island_row_uin_diff">почтовый ящик на этом острове: #%1$d (острова нумеруют независимо, ваш #%2$d здесь занят)</string>
     <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
     <string name="backup_island_auto_sub">Остров подбирается автоматически из публичного каталога</string>
@@ -891,6 +891,8 @@
     <string name="home_clear_chat">Удалить переписку</string>
     <string name="home_clear_chat_body">Все сообщения с %1$s будут стёрты с этого устройства. У собеседника они останутся, вернуть их отсюда нельзя.</string>
     <string name="home_clear_chat_body_group">Все сообщения в %1$s будут стёрты с этого устройства. Группа продолжит работать, у остальных участников переписка останется, вернуть её отсюда нельзя.</string>
+    <string name="home_clear_chat_self">Удалить заметки</string>
+    <string name="home_clear_chat_body_self">Все заметки будут стёрты с этого устройства. Никому они не отправлялись, вернуть их нельзя.</string>
     <string name="home_clear_chat_confirm">Удалить</string>
     <string name="home_remove_title">Удалить %1$s?</string>
     <string name="home_remove_body">Вы пропадёте из контактов друг у друга. Что сделать с перепиской на этом устройстве?</string>

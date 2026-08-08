@@ -97,7 +97,7 @@
     <string name="manage_accounts_delete">Delete</string>
     <string name="manage_accounts_move_up">Move up</string>
     <string name="manage_accounts_move_down">Move down</string>
-    <string name="restore_already_here">This account is already on this device (#%1$d). Restoring again adds a second copy with no message history. Add it anyway?</string>
+    <string name="restore_already_here">You already have this number on this device (#%1$d). A second copy cannot be added: a number holds one set of keys on the server, so two copies would stop seeing each other’s group messages. Switch to the account you already have from the main screen.</string>
     <string name="restore_add_anyway">Add anyway</string>
     <string name="manage_accounts_delete_title">Delete %1$s?</string>
     <string name="manage_accounts_delete_body">Removes this account and its messages from this device. The account stays on the server and can be added again later.</string>
@@ -157,7 +157,7 @@
     <string name="settings_row_backup_island">Standby island</string>
     <string name="backup_island_body">Automatic backup, not a second login — you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
     <string name="backup_island_row_uin">mailbox on this island: #%1$d</string>
-    <string name="home_via_backup">Your island is not answering. Mail is arriving through your backup island; to send from there, make it the main one in Settings.</string>
+    <string name="home_via_backup">Your island is not answering. Messages are arriving through your backup island; to send from there, make it the main one in Settings.</string>
     <string name="backup_island_row_uin_diff">mailbox on this island: #%1$d (islands number independently and your #%2$d was taken here)</string>
     <string name="backup_island_auto_title">Keep a backup on another island</string>
     <string name="backup_island_auto_sub">The island is picked automatically from the public catalogue</string>
@@ -892,6 +892,10 @@
     <string name="home_clear_chat">Delete conversation</string>
     <string name="home_clear_chat_body">Deletes every message with %1$s from this device. It stays on theirs, and this cannot be undone here.</string>
     <string name="home_clear_chat_body_group">Deletes every message in %1$s from this device. The group carries on and other members keep their copies; this cannot be undone here.</string>
+    <!-- Saved messages are a chat with yourself: there is no other side, so the
+         1:1 wording ("it stays on theirs") named a person who does not exist. -->
+    <string name="home_clear_chat_self">Delete saved messages</string>
+    <string name="home_clear_chat_body_self">Deletes every saved message from this device. Nothing here was sent to anyone else, and this cannot be undone.</string>
     <string name="home_clear_chat_confirm">Delete</string>
     <string name="home_remove_title">Remove %1$s?</string>
     <string name="home_remove_body">You will disappear from each other\'s contacts. What should happen to the messages on this device?</string>

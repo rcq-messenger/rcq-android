@@ -695,11 +695,26 @@ internal fun HomeScreen(
     }
     // "Clear conversation": local, irreversible, says so.
     clearPeerTarget?.let { ct ->
+        // Saved messages reach this dialog too (the thread with your own uin),
+        // and the 1:1 copy warns about a contact who is not involved. Same
+        // three-way split as ChatScreen — see #413.
+        val clearingSelf = ct.uin == session.uin
         AlertDialog(
             onDismissRequest = { clearPeerTarget = null },
             containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.home_clear_chat), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.home_clear_chat_body, ct.nickname), color = c.textSecondary) },
+            title = {
+                Text(
+                    stringResource(if (clearingSelf) R.string.home_clear_chat_self else R.string.home_clear_chat),
+                    color = c.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    if (clearingSelf) stringResource(R.string.home_clear_chat_body_self)
+                    else stringResource(R.string.home_clear_chat_body, ct.nickname),
+                    color = c.textSecondary,
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { session.clearPeerThread(ct.uin); clearPeerTarget = null }) {
                     Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D))

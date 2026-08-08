@@ -55,10 +55,9 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
     var server by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     // Set when the phrase resolves to an identity this device already holds;
-    // drives the confirm dialog. `forceAdd` survives the retry so the second
-    // attempt goes through.
+    // drives the dead-end dialog below. There is no `forceAdd` any more — see
+    // the dialog for why a second local copy of one number cannot be allowed.
     var duplicateUin by remember { mutableStateOf<Int?>(null) }
-    var forceAdd by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val wordCount = remember(phrase) { RecoveryPhrase.parse(phrase).size }
@@ -110,7 +109,7 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
                     scope.launch {
                         val words = RecoveryPhrase.parse(phrase)
                         val res = runCatching {
-                            session.recoverAccount(words, server.trim().ifBlank { null }, force = forceAdd)
+                            session.recoverAccount(words, server.trim().ifBlank { null })
                         }
                         busy = false
                         res.onSuccess { onRestored(it) }
@@ -130,6 +129,22 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
         }
     }
 
+    // The same number, already on this device. There is no "add anyway" here
+    // any more, and the reason is not tidiness.
+    //
+    // A number has exactly ONE libsignal bundle on the server (it lives on the
+    // user row; the devices table is for secondary devices, which only the web
+    // client registers). Two local copies of one number therefore both act as
+    // device 1 with their own local key state, the server keeps whichever
+    // uploaded last, and a group's sender key can only be opened by that one.
+    // The other copy never sees group messages from the first — permanently,
+    // not until a reconnect. Report #421 was exactly this: two copies of #134
+    // in one group, each missing the other's messages.
+    //
+    // The old dialog offered to add the copy anyway and warned only that it
+    // would have "no message history", so the user agreed to lose history and
+    // silently lost working group chat instead. Restoring a number you already
+    // hold has no use case that this cost is worth: you already have it.
     duplicateUin?.let { dupUin ->
         AlertDialog(
             onDismissRequest = { duplicateUin = null },
@@ -137,22 +152,8 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
             title = { Text(stringResource(R.string.restore_title), color = RcqTheme.colors.textPrimary) },
             text = { Text(stringResource(R.string.restore_already_here, dupUin), color = RcqTheme.colors.textSecondary) },
             confirmButton = {
-                TextButton(onClick = {
-                    duplicateUin = null
-                    forceAdd = true
-                    busy = true
-                    scope.launch {
-                        val words = RecoveryPhrase.parse(phrase)
-                        val res = runCatching { session.recoverAccount(words, server.trim().ifBlank { null }, force = true) }
-                        busy = false
-                        res.onSuccess { onRestored(it) }
-                            .onFailure { error = context.getString(R.string.restore_err_generic) }
-                    }
-                }) { Text(stringResource(R.string.restore_add_anyway), color = RcqTheme.colors.accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { duplicateUin = null }) {
-                    Text(stringResource(R.string.common_cancel), color = RcqTheme.colors.textSecondary)
+                TextButton(onClick = { duplicateUin = null; onBack() }) {
+                    Text(stringResource(R.string.common_ok), color = RcqTheme.colors.accent)
                 }
             },
         )

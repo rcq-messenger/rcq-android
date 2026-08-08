@@ -1464,10 +1464,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         AlertDialog(
             onDismissRequest = { confirmClearThread = false },
             containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.home_clear_chat), color = c.textPrimary) },
+            // Three cases, not two. Saved messages are a thread with yourself,
+            // and it used to fall through to the 1:1 copy — which promised the
+            // messages would stay with "your contact" and warned about someone
+            // who is not there (#413).
+            title = {
+                Text(
+                    stringResource(if (isSelf) R.string.home_clear_chat_self else R.string.home_clear_chat),
+                    color = c.textPrimary,
+                )
+            },
             text = {
                 Text(
-                    stringResource(
+                    if (isSelf) stringResource(R.string.home_clear_chat_body_self)
+                    else stringResource(
                         if (isGroup) R.string.home_clear_chat_body_group else R.string.home_clear_chat_body,
                         threadName,
                     ),
