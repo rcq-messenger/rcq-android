@@ -698,7 +698,13 @@ internal fun HomeScreen(
         // Saved messages reach this dialog too (the thread with your own uin),
         // and the 1:1 copy warns about a contact who is not involved. Same
         // three-way split as ChatScreen — see #413.
-        val clearingSelf = ct.uin == session.uin
+        //
+        // `host == null` is load-bearing, not defensive noise: islands number
+        // independently, so a cross-island contact can legitimately carry YOUR
+        // uin. Comparing the number alone would tell someone deleting a real
+        // conversation that "nothing here was sent to anyone else" — the exact
+        // lie this fix exists to remove, just pointed the other way.
+        val clearingSelf = ct.uin == session.uin && ct.host == null
         AlertDialog(
             onDismissRequest = { clearPeerTarget = null },
             containerColor = c.bgSecondary,
