@@ -670,7 +670,7 @@ class Session(context: Context) {
      *  force it. */
     class AccountAlreadyHere(val uin: Int) : IllegalStateException("account_already_here")
 
-    suspend fun recoverAccount(words: List<String>, serverInput: String? = null, force: Boolean = false): Int {
+    suspend fun recoverAccount(words: List<String>, serverInput: String? = null): Int {
         if (AccountManager.isAtLimit) throw IllegalStateException("Account limit reached")
         val decoded = app.rcq.android.crypto.RecoveryPhrase.decode(words, appCtx)
             ?: throw IllegalArgumentException("invalid_phrase")
@@ -695,8 +695,14 @@ class Session(context: Context) {
         regApi.setToken(resp.token)
         val nick = runCatching { regApi.userInfo(resp.uin).nickname }
             .getOrNull()?.takeIf { it.isNotBlank() } ?: "user-${resp.uin}"
-        // Same number, same island, already on this device?
-        if (!force) {
+        // Same number, same island, already on this device? This is a hard
+        // stop, not a warning. There used to be a `force` parameter that skipped
+        // it; it is gone rather than merely unused, because a second local copy
+        // of one number permanently loses that number's group messages (one
+        // bundle per uin on the server, last writer wins) and leaving the
+        // parameter in place meant one argument from any future caller could
+        // reintroduce that silently. See RestoreScreen and report #421.
+        run {
             val dup = AccountManager.accounts.value.any { a ->
                 SecureStore(appCtx, a.id).let { st ->
                     st.uin == resp.uin && (st.serverHost ?: RcqApi.DEFAULT_HOST) == (host ?: RcqApi.DEFAULT_HOST)
@@ -1556,6 +1562,12 @@ class Session(context: Context) {
         if (::db.isInitialized) { db.close() }
         started = false
         everConnected = false
+        // The roster is deliberately KEPT here (the chat list must survive a
+        // lock), so its presence values are frozen at lock time. That makes
+        // them a stale baseline: unlock hours later and the first live refresh
+        // would knock once for everyone who came online in the meantime, which
+        // is #422 again on a path the roster-clearing resets do not cover.
+        presenceBaselineLive = false
     }
 
     /** Set a real PIN: create the vault, then rekey EVERY account's message DB

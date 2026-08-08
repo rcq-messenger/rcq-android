@@ -147,7 +147,11 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
     // hold has no use case that this cost is worth: you already have it.
     duplicateUin?.let { dupUin ->
         AlertDialog(
-            onDismissRequest = { duplicateUin = null },
+            // Both ways out lead out. Dismissing by tapping outside used to
+            // just hide the dialog and leave the phrase typed with Restore
+            // still armed, so the only thing the next tap could do was show
+            // this same dialog again.
+            onDismissRequest = { duplicateUin = null; onBack() },
             containerColor = RcqTheme.colors.bgSecondary,
             title = { Text(stringResource(R.string.restore_title), color = RcqTheme.colors.textPrimary) },
             text = { Text(stringResource(R.string.restore_already_here, dupUin), color = RcqTheme.colors.textSecondary) },
