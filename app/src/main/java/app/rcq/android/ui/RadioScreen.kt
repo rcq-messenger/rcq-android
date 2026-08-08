@@ -3,6 +3,7 @@ package app.rcq.android.ui
 import android.Manifest
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -98,7 +99,13 @@ fun RadioScreen(session: Session, onBack: () -> Unit) {
     }
 
     if (inChat) {
-        RadioChatView(session, onLeave = { radio.leaveActiveSession() }, onBack = onBack)
+        // System back inside a room leaves the room, nothing more. The
+        // Activity-level handler would have closed the whole Radio section,
+        // which is the same "why am I on the home screen" the two buttons in
+        // the header used to cause. A handler declared here is registered after
+        // that one, so it wins while a session is up.
+        BackHandler { radio.leaveActiveSession() }
+        RadioChatView(session, onLeave = { radio.leaveActiveSession() })
     } else {
         RadioDiscoveryView(
             session = session,
@@ -210,7 +217,7 @@ private fun RadioDiscoveryView(
 
 // ── chat ──────────────────────────────────────────────────────────────
 @Composable
-private fun RadioChatView(session: Session, onLeave: () -> Unit, onBack: () -> Unit) {
+private fun RadioChatView(session: Session, onLeave: () -> Unit) {
     val c = RcqTheme.colors
     val radio = session.radio
     val context = LocalContext.current
@@ -244,7 +251,7 @@ private fun RadioChatView(session: Session, onLeave: () -> Unit, onBack: () -> U
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent,
-                modifier = Modifier.size(26.dp).clip(CircleShape).clickable { onLeave(); onBack() })
+                modifier = Modifier.size(26.dp).clip(CircleShape).clickable { onLeave() })
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
@@ -255,14 +262,16 @@ private fun RadioChatView(session: Session, onLeave: () -> Unit, onBack: () -> U
                 }
                 Text(sub, color = c.textSecondary, fontSize = 12.sp)
             }
-            // Same thing as the back arrow above, which does onLeave() AND
-            // onBack(). This one only left the session and kept you on the
-            // screen you had just left, so the two controls disagreed about
-            // what "leave" means and the reporter asked which was which (#416).
-            // Neither deletes the room: that is a separate owner-only action in
-            // the room list.
+            // Same thing as the back arrow above: both leave the session and
+            // land back on the Radio list. They used to disagree about what
+            // "leave" means (#416), and the fix for that made BOTH of them exit
+            // the Radio section entirely — so leaving a room dropped you on the
+            // home screen instead of back among the rooms you could rejoin
+            // (2026-08-08). Leaving the session is enough: `inChat` goes false
+            // and the discovery list is what renders. Neither deletes the room,
+            // that is a separate owner-only action in the list.
             Text(stringResource(R.string.radio_leave), color = c.accent, fontSize = 14.sp,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onLeave(); onBack() }.padding(horizontal = 8.dp, vertical = 4.dp))
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onLeave() }.padding(horizontal = 8.dp, vertical = 4.dp))
         }
 
         if (speakers.isNotEmpty()) {
