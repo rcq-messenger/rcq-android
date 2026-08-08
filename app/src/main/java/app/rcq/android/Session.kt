@@ -3070,7 +3070,7 @@ class Session(context: Context) {
     /** Add one restored message. Returns false when it was already here: a
      *  restore only ever ADDS, so an old archive can never eat newer history. */
     fun insertRestoredMessage(msg: ChatMessage): Boolean =
-        if (::db.isInitialized) runCatching { db.insert(msg) }.getOrDefault(false) else false
+        if (::db.isInitialized) runCatching { db.insert(msg, honourTombstones = false) }.getOrDefault(false) else false
 
     /** Put a restored attachment back where [fetchImage] will find it, so the
      *  picture shows even when the blob has long aged off the island.
