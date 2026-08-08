@@ -665,7 +665,7 @@ private fun RcqApp(session: Session) {
         // FCM/VoIP push yet).
         val callState by session.calls.state.collectAsState()
         if (s is UiState.Registered && !locked && callState !is app.rcq.android.call.CallController.State.Idle) {
-            app.rcq.android.ui.CallScreen(session.calls)
+            app.rcq.android.ui.CallScreen(session.calls, session)
         }
 
         // In-app update prompt: the APK ships from the website, so we self-check

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import app.rcq.android.Session
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -60,7 +61,7 @@ import org.webrtc.VideoTrack
  * the whole call surface.
  */
 @Composable
-fun CallScreen(controller: CallController) {
+fun CallScreen(controller: CallController, session: Session? = null) {
     val state by controller.state.collectAsState()
     val info = state.info ?: return
 
@@ -89,14 +90,32 @@ fun CallScreen(controller: CallController) {
                 Modifier.fillMaxSize().padding(top = 120.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(
-                    Modifier.size(96.dp).clip(CircleShape).background(Color(0xFF2A2D34)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        info.peerNickname.firstOrNull()?.uppercase() ?: "?",
-                        color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.SemiBold,
+                // The person's own picture when they have one. A call screen is
+                // the one surface with nothing else on it, so the avatar is
+                // exactly what it should show; the lettered disc stays as the
+                // fallback for someone who never set one.
+                val peer = session?.contact(info.peerUin)
+                if (session != null && !peer?.avatarMediaId.isNullOrBlank()) {
+                    PersonAvatar(
+                        id = peer?.avatarMediaId,
+                        key = peer?.avatarMediaKey,
+                        status = peer?.presence ?: app.rcq.android.model.UserStatus.OFFLINE,
+                        session = session,
+                        size = 96.dp,
+                        host = peer?.host,
+                        animated = true,
+                        crossIsland = peer?.host != null,
                     )
+                } else {
+                    Box(
+                        Modifier.size(96.dp).clip(CircleShape).background(Color(0xFF2A2D34)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            info.peerNickname.firstOrNull()?.uppercase() ?: "?",
+                            color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }
