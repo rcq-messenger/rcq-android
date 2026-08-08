@@ -94,6 +94,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         )
         db.execSQL("CREATE INDEX idx_messages_peer ON messages(peer_uin, sent_at)")
         db.execSQL("CREATE INDEX idx_messages_group ON messages(group_id, sent_at)")
+        db.execSQL(DELETED_IDS_DDL)
     }
 
     private fun upgrade(db: SQLiteDatabase, oldVersion: Int) {
@@ -129,6 +130,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         if (oldVersion < 13) db.execSQL("ALTER TABLE messages ADD COLUMN album_id TEXT")
         if (oldVersion < 14) db.execSQL("ALTER TABLE messages ADD COLUMN reply_to_id TEXT")
         if (oldVersion < 15) db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER")
+        if (oldVersion < 16) db.execSQL(DELETED_IDS_DDL)
     }
 
     /** Delete every message whose disappearing-message TTL has elapsed and
@@ -144,8 +146,17 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         return ids
     }
 
-    /** Insert; returns true if it was new (false if the UUID already existed). */
-    fun insert(msg: ChatMessage): Boolean {
+    /** Insert; returns true if it was new (false if the UUID already existed,
+     *  or if this message was deleted here before — see [delete]).
+     *
+     *  [honourTombstones] exists for exactly one caller: restoring a backup.
+     *  A restore is the user asking for their history back, so a message they
+     *  once deleted and later chose to restore has to come back — the guard is
+     *  there to stop the offline queue resurrecting things behind their back,
+     *  not to overrule them. That path clears the tombstone instead. */
+    fun insert(msg: ChatMessage, honourTombstones: Boolean = true): Boolean {
+        if (honourTombstones && isDeleted(msg.id)) return false
+        if (!honourTombstones) db.delete("deleted_ids", "id = ?", arrayOf(msg.id))
         val values = ContentValues().apply {
             put("id", msg.id)
             put("peer_uin", msg.peerUin)
@@ -195,9 +206,30 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.execSQL("DELETE FROM messages")
     }
 
+    /** Delete one message AND remember that we did.
+     *
+     *  The tombstone is the point. Dedup on the way in was `INSERT OR IGNORE`
+     *  on the envelope uuid, which only works while the row still exists — so
+     *  deleting a message removed the very thing that was keeping its copies
+     *  out. The offline queue still held one, and the next launch ingested it
+     *  through the RECEIVE path: the note you deleted came back as an unread
+     *  incoming message, carrying its original text because the edit envelope
+     *  had been applied to a row that no longer existed. That is report #415,
+     *  all three of its symptoms from one cause.
+     *
+     *  Bulk clears (`clearPeerThread` / `clearGroupThread` / `deleteExpired`)
+     *  deliberately do NOT come through here: they erase whole conversations of
+     *  already-delivered history, where there is nothing left in the queue to
+     *  resurrect, and tombstoning them would grow this table by the size of the
+     *  history it just removed. */
     fun delete(id: String) {
         db.delete("messages", "id = ?", arrayOf(id))
+        db.execSQL("INSERT OR IGNORE INTO deleted_ids (id, at) VALUES (?, ?)", arrayOf<Any>(id, System.currentTimeMillis()))
     }
+
+    /** True if this envelope was deleted here before. */
+    fun isDeleted(id: String): Boolean =
+        db.rawQuery("SELECT 1 FROM deleted_ids WHERE id = ? LIMIT 1", arrayOf(id)).use { it.moveToFirst() }
 
     /** Erase one 1:1 conversation. `group_id IS NULL` matters: a peer's uin
      *  also appears as `peer_uin` on their messages inside a group, and
@@ -257,7 +289,13 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 15
+        const val VERSION = 16
+
+        /** Envelopes deleted on this device. Kept forever on purpose: a copy can
+         *  come back from the offline queue at any later launch, and one row per
+         *  deleted message is nothing next to the message itself. */
+        private const val DELETED_IDS_DDL =
+            "CREATE TABLE IF NOT EXISTS deleted_ids (id TEXT PRIMARY KEY, at INTEGER NOT NULL)"
         private const val LEGACY_NAME = "rcq-messages.db"
         private val SIDECARS = listOf("", "-wal", "-shm", "-journal")
 
