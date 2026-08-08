@@ -71,7 +71,14 @@ object SoundService {
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
     }
 
-    private fun play(id: Int) {
+    /** Shortest gap between two tones. Four messages landing together used to
+     *  play four overlapping copies of the same 300ms chime (SoundPool is built
+     *  with four streams), which reads as a stutter rather than as four
+     *  messages. One chime says "something arrived" just as well. */
+    private const val MIN_GAP_MS = 1_200L
+    private var lastPlayedAt = 0L
+
+    private fun play(id: Int, throttle: Boolean = true) {
         if (!LocalStores.soundMasterOn() || systemWantsSilence()) return
         // Presence chirps during a call are pure interruption: the person is
         // talking, and "someone came online" can wait.
@@ -81,12 +88,20 @@ object SoundService {
         // without quieter everything else had nothing to turn.
         val vol = LocalStores.soundVolumeLevel()
         if (vol <= 0f) return
+        if (throttle) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            synchronized(this) {
+                if (now - lastPlayedAt < MIN_GAP_MS) return
+                lastPlayedAt = now
+            }
+        }
         pool?.play(id, vol, vol, 1, 0, 1f)
     }
 
     /** Play the message tone regardless of the per-kind toggle, for the
-     *  settings slider preview. Still honours master + system silence. */
-    fun previewMessage() = play(msg)
+     *  settings slider preview. Still honours master + system silence.
+     *  Not throttled: the whole point is to answer every drag of the slider. */
+    fun previewMessage() = play(msg, throttle = false)
 
     /** Inbound message to a non-active, non-muted thread. */
     fun message() { if (LocalStores.soundMessagesOn()) play(msg) }
