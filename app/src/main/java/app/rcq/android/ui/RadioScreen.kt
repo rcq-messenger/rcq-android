@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -234,7 +235,10 @@ private fun RadioChatView(session: Session, onLeave: () -> Unit, onBack: () -> U
         else Toast.makeText(context, context.getString(R.string.radio_mic_needed), Toast.LENGTH_LONG).show()
     }
 
-    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+    // imePadding, same as ChatScreen: the composer is the last child of a
+    // fillMaxSize Column, so without it the keyboard sits on top of the field
+    // you are typing into (#414).
+    Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
         Row(
             Modifier.fillMaxWidth().background(c.bgSecondary.copy(alpha = 0.6f)).padding(horizontal = 8.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

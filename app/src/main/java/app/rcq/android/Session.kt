@@ -405,6 +405,12 @@ class Session(context: Context) {
     // switch (a peer may publish a bundle later; we re-probe next session).
     private val noV2Peers = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
+    // True once a LIVE contact refresh has established real presence for this
+    // profile. Until then any apparent online/offline transition is an artefact
+    // of the disk-cached roster (which forces everyone offline), not something
+    // that happened, and must stay silent. See refreshContacts() and #422.
+    private var presenceBaselineLive = false
+
     // v=2 (libsignal Double Ratchet) OUTBOUND is disabled: Android's libsignal
     // (0.86.5) and iOS's (0.93.1) don't interop on the v=2 wire yet, so a v=2
     // message sent to an iOS peer can't be decrypted there — it surfaces as a
@@ -788,7 +794,7 @@ class Session(context: Context) {
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
-        noV2Peers.clear()
+        noV2Peers.clear(); presenceBaselineLive = false
         ackedReads.clear()
         lastVisitAt.clear()
         _contacts.value = emptyList()
@@ -1659,7 +1665,7 @@ class Session(context: Context) {
             AccountManager.remove(acc.id)
         }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
-        peerIdentityCache.clear(); noV2Peers.clear(); ackedReads.clear()
+        peerIdentityCache.clear(); noV2Peers.clear(); presenceBaselineLive = false; ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _stories.value = emptyList(); _devices.value = null
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
@@ -2948,7 +2954,7 @@ class Session(context: Context) {
             app.rcq.android.data.VisitStore.wipe()
         }
         peerIdentityCache.clear()
-        noV2Peers.clear()
+        noV2Peers.clear(); presenceBaselineLive = false
         ackedReads.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -3160,7 +3166,7 @@ class Session(context: Context) {
         store.updateAccount(newUin, token)
         api.setToken(token)
         peerIdentityCache.clear()
-        noV2Peers.clear()
+        noV2Peers.clear(); presenceBaselineLive = false
         ackedReads.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -4171,8 +4177,20 @@ class Session(context: Context) {
 
     private suspend fun refreshContacts() {
         // Snapshot presence before the refresh so we can play a sound on
-        // online/offline transitions (iOS SoundService parity). Skipped on
-        // the first populate (empty snapshot) to avoid a launch-time burst.
+        // online/offline transitions (iOS SoundService parity).
+        //
+        // "Snapshot is empty" is NOT a good enough guard, and report #422 is
+        // what that costs: loadCachedRoster() seeds the roster from disk with
+        // everyone forced to `offline` (we cannot vouch for presence while
+        // disconnected), and rebindTo() empties it on an account switch. So the
+        // first live refresh after a cold start or a profile switch compares
+        // "everyone offline" against the truth and knocks once per contact who
+        // was already online — the user hears the whole roster arrive because
+        // THEY arrived.
+        //
+        // A transition is only real if the baseline came from a live refresh in
+        // this session, so that is what we track. Reset in rebindTo().
+        val armed = presenceBaselineLive
         val prevPresence = _contacts.value.associate { it.uin to it.presence }
         _contacts.value = api.contacts().map {
             Contact(
@@ -4190,7 +4208,8 @@ class Session(context: Context) {
                 avatarMediaKey = it.avatar_media_key,
             )
         }
-        if (prevPresence.isNotEmpty()) {
+        presenceBaselineLive = true
+        if (armed) {
             _contacts.value.forEach { ct ->
                 val before = prevPresence[ct.uin] ?: return@forEach
                 val wasOnline = before != UserStatus.OFFLINE
