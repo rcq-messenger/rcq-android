@@ -3115,6 +3115,11 @@ class Session(context: Context) {
     /** Everything this account holds, plus the number it answers as now. */
     suspend fun myUins(): RcqApi.MyUinsResponse = api.myUins()
 
+    /** Give a held number back to the pool. Throws on failure so the screen can
+     *  say what went wrong; there is nothing local to roll back, the collection
+     *  is re-read from the server afterwards either way. */
+    suspend fun releaseUin(uin: Int) = api.releaseUin(uin)
+
     /** Answer as [uin], a number already in this account's collection. The
      *  number in use goes into the collection in its place, so this is
      *  reversible. Same migration handling as a purchase-with-switch. */

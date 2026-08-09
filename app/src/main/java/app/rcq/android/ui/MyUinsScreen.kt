@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -67,6 +69,8 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
     var error by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<Int?>(null) }
     var activating by remember { mutableStateOf<Int?>(null) }
+    var confirmRelease by remember { mutableStateOf<Int?>(null) }
+    var releasing by remember { mutableStateOf<Int?>(null) }
     val genericMsg = stringResource(R.string.uin_shop_error_generic)
 
     suspend fun reload() {
@@ -79,6 +83,18 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
     }
 
     LaunchedEffect(Unit) { reload() }
+
+    fun release(uin: Int) {
+        releasing = uin
+        scope.launch {
+            runCatching { session.releaseUin(uin) }
+                .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+            releasing = null
+            // Reload rather than dropping the row locally: the server is the
+            // one that knows whether the release actually happened.
+            reload()
+        }
+    }
 
     fun activate(uin: Int) {
         activating = uin
@@ -155,7 +171,13 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
                     textAlign = TextAlign.Center,
                 )
                 else -> owned.forEach { item ->
-                    HeldRow(c, item, busy = activating == item.uin, enabled = activating == null) { confirm = item.uin }
+                    HeldRow(
+                        c, item,
+                        busy = activating == item.uin || releasing == item.uin,
+                        enabled = activating == null && releasing == null,
+                        onTap = { confirm = item.uin },
+                        onRelease = { confirmRelease = item.uin },
+                    )
                 }
             }
 
@@ -204,10 +226,39 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
             },
         )
     }
+
+    confirmRelease?.let { target ->
+        AlertDialog(
+            onDismissRequest = { confirmRelease = null },
+            containerColor = c.bgSecondary,
+            title = { Text(stringResource(R.string.my_uins_release_title, target.toString()), color = c.textPrimary) },
+            // The warning lives here rather than on the row: the number goes
+            // back into the pool and somebody else can take it, so this is not
+            // undoable and should be read once, not glanced at.
+            text = { Text(stringResource(R.string.my_uins_release_body), color = c.textSecondary) },
+            confirmButton = {
+                TextButton(onClick = { confirmRelease = null; release(target) }) {
+                    Text(stringResource(R.string.my_uins_release_cta), color = Color(0xFFE5484D))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRelease = null }) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun HeldRow(c: RcqColors, item: RcqApi.OwnedUinItem, busy: Boolean, enabled: Boolean, onTap: () -> Unit) {
+private fun HeldRow(
+    c: RcqColors,
+    item: RcqApi.OwnedUinItem,
+    busy: Boolean,
+    enabled: Boolean,
+    onTap: () -> Unit,
+    onRelease: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
             .clickable(enabled = enabled, onClick = onTap)
@@ -225,6 +276,18 @@ private fun HeldRow(c: RcqColors, item: RcqApi.OwnedUinItem, busy: Boolean, enab
         if (busy) {
             CircularProgressIndicator(color = c.accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
         } else {
+            // Release before Use, quieter than it: the collection fills up with
+            // numbers nobody picked (every switch parks the previous one here),
+            // and there was no way to get rid of one. Deliberately a plain
+            // secondary label, not a red destructive button — this is tidying
+            // up, and the confirm dialog carries the warning.
+            Text(
+                stringResource(R.string.my_uins_release),
+                color = c.textSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable(enabled = enabled, onClick = onRelease).padding(horizontal = 6.dp, vertical = 8.dp),
+            )
+            Spacer(Modifier.width(4.dp))
             Text(stringResource(R.string.my_uins_use), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
     }
