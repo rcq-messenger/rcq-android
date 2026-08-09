@@ -730,6 +730,7 @@ private fun RcqApp(session: Session) {
                     onOpenBackupIsland = { settingsToBackupIsland = true; showSettings = true },
                     onOpenProfile = { showProfile = true },
                     onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
+                    onOpenPeerInfoHere = { peerInfoUin = it; peerInfoHost = session.currentServer },
                     onOpenNews = { showNews = true },
                     onOpenOutgoing = { showOutgoing = true },
                     onOpenSaved = { session.uin?.let { chatTarget = ChatTarget.Peer(it) } },

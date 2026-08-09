@@ -32,6 +32,7 @@ class AudioRoomController(
         val ownerUin: Int,
         val joinKey: String,
         val activeCount: Int,
+        val capacity: Int = 8,
     )
 
     data class Member(val uin: Int, val nickname: String, val speaking: Boolean = false)
@@ -65,20 +66,20 @@ class AudioRoomController(
     // ── REST ────────────────────────────────────────────────────────────
     suspend fun refresh() {
         runCatching { api().audioRooms() }.onSuccess { list ->
-            _rooms.value = list.map { Room(it.id, it.name, it.owner_uin, it.join_key, it.active_count) }
+            _rooms.value = list.map { Room(it.id, it.name, it.owner_uin, it.join_key, it.active_count, it.capacity) }
         }
     }
 
     suspend fun create(name: String): Boolean = runCatching {
         val r = api().createAudioRoom(name)
-        _rooms.value = listOf(Room(r.id, r.name, r.owner_uin, r.join_key, r.active_count)) + _rooms.value
+        _rooms.value = listOf(Room(r.id, r.name, r.owner_uin, r.join_key, r.active_count, r.capacity)) + _rooms.value
         true
     }.getOrDefault(false)
 
     suspend fun joinByKey(key: String): Boolean = runCatching {
         val r = api().joinAudioRoom(key.trim())
         if (_rooms.value.none { it.id == r.id }) {
-            _rooms.value = listOf(Room(r.id, r.name, r.owner_uin, r.join_key, r.active_count)) + _rooms.value
+            _rooms.value = listOf(Room(r.id, r.name, r.owner_uin, r.join_key, r.active_count, r.capacity)) + _rooms.value
         }
         true
     }.getOrDefault(false)

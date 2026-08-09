@@ -74,6 +74,7 @@
     <string name="outgoing_empty">Вы не отправляли заявок.</string>
 
     <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <string name="add_ci_number_clash">У вас уже есть контакт с номером #%1$d на другом острове. Переписка пока хранится по одному номеру, и второй #%1$d попал бы в ту же историю. Не добавлен.</string>
     <string name="share_to_title">Отправить в…</string>
     <string name="share_to_search">Поиск по чатам</string>
     <string name="share_to_empty">Пока некому отправить.</string>
@@ -367,7 +368,7 @@
     <string name="rooms_rename_title">Переименовать комнату</string>
     <string name="rooms_join_key">Ключ</string>
     <string name="rooms_empty">Пока нет комнат. Создайте новую или войдите по ключу.</string>
-    <string name="rooms_in_room">%1$d в комнате</string>
+    <string name="rooms_in_room">%1$d из %2$d в комнате</string>
     <string name="rooms_key_fmt">Ключ: %1$s</string>
     <string name="rooms_delete">Удалить</string>
     <string name="rooms_copy_key">Скопировать ключ</string>

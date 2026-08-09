@@ -79,7 +79,20 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val contacts by session.contacts.collectAsState()
-    val contact = contacts.firstOrNull { it.uin == uin }
+    // ⚠ A UIN alone does not name a person: #134 is a different account on
+    // every island. When the caller knows WHICH island it means, resolve on
+    // that island, otherwise a same-numbered contact from elsewhere answers
+    // instead — that is report #433 (the row said is2, the profile was api)
+    // and report #429 (the request went to the api account, and the one on
+    // is2 sat pending forever). [groupHost] naming OUR OWN island is the
+    // caller saying "the local one", which is why it can no longer fall back.
+    val here = groupHost != null && groupHost.equals(session.currentServer, true)
+    val contact = when {
+        here -> contacts.firstOrNull { it.uin == uin && it.host == null }
+        groupHost != null -> contacts.firstOrNull { it.uin == uin && groupHost.equals(it.host, true) }
+            ?: contacts.firstOrNull { it.uin == uin && it.host == null }
+        else -> contacts.firstOrNull { it.uin == uin }
+    }
 
     val thread = LocalStores.peerThread(uin)
     val favorites by LocalStores.favorites.collectAsState()
@@ -103,7 +116,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     // /users/{uin}/info 404s. crossIslandHost is the existing contact's host, OR
     // (when opened from a cross-island GROUP member who isn't a contact yet) the
     // group's host. In both cases we render from the open card, never our island.
-    val crossIslandHost = contact?.host ?: groupHost
+    val crossIslandHost = contact?.host ?: groupHost?.takeIf { !here }
     LaunchedEffect(uin) {
         if (crossIslandHost == null) {
             profile = session.loadPeerProfile(uin)
@@ -212,6 +225,13 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                         .background(if (requestSent) c.bgSecondary else c.accent)
                         .clickable(enabled = !requestSent) {
+                            // Our island's #134 while `134@somewhere.else` is
+                            // already in the roster: two people, one thread key.
+                            // Refuse rather than merge their histories.
+                            if (session.clashesWithKnownNumber(uin, null)) {
+                                Toast.makeText(context, context.getString(R.string.add_ci_number_clash, uin), Toast.LENGTH_LONG).show()
+                                return@clickable
+                            }
                             scope.launch { runCatching { session.addContact(uin) } }; requestSent = true
                             // The request is sent, so the search that led here
                             // has done its job — don't reopen it behind us on

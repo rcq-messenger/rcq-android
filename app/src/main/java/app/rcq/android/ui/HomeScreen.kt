@@ -183,6 +183,10 @@ internal fun HomeScreen(
     // Open ANOTHER user's profile (peer). Used by add-contact so a search
     // result opens the profile preview before you send the request.
     onOpenPeerInfo: (Int) -> Unit = {},
+    // Same, but pinned to OUR island. A bare number means "this island" and
+    // nothing else, so it must not resolve to a same-numbered contact from
+    // somewhere else — the whole of report #433.
+    onOpenPeerInfoHere: (Int) -> Unit = {},
     onOpenNews: () -> Unit = {},
     onOpenOutgoing: () -> Unit = {},
     onOpenSaved: () -> Unit = {},
@@ -651,6 +655,7 @@ internal fun HomeScreen(
             // closes when they actually leave for somewhere (a chat, a group)
             // or send the request from the profile.
             onOpenProfile = { u -> onOpenPeerInfo(u) },
+            onOpenProfileHere = { u -> onOpenPeerInfoHere(u) },
             onOpenGroup = { g -> AddSheet.close(); onOpenGroup(g) },
             onDismiss = { AddSheet.close() },
         )
@@ -1860,6 +1865,7 @@ private fun AddContactDialog(
     onAddUin: (Int) -> Unit,
     onOpenChat: (Int) -> Unit,
     onOpenProfile: (Int) -> Unit,
+    onOpenProfileHere: (Int) -> Unit,
     onOpenGroup: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1969,7 +1975,17 @@ private fun AddContactDialog(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                val digits = query.trim().toIntOrNull()
+                // A bare number, OR the full address of OUR OWN island written
+                // out. `134@is2.rcq.app` typed on is2 used to find nothing at
+                // all: the cross-island row deliberately skips our own host,
+                // and nothing picked the number back up (report #433, with a
+                // screenshot of the empty result). Spelling out where you
+                // already are is not an error, it is the same request as `134`.
+                val digits = remember(query, session.currentServer) {
+                    val t = query.trim()
+                    t.toIntOrNull() ?: runCatching { RcqFederation.parseAddress(t) }.getOrNull()
+                        ?.takeIf { it.host.equals(session.currentServer, true) }?.uin
+                }
                 // A pasted GROUP invite link (https://rcq.app/g/<id>@<host> or
                 // rcq://group/<id>) → JOIN it, including a group on ANOTHER island.
                 // This is the entry point for a user handed a link who isn't in any
@@ -2019,7 +2035,13 @@ private fun AddContactDialog(
                             AddResultRow("#$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
                                 // Open the profile first so you can preview before
                                 // sending the request (the profile has the button).
-                                onOpenProfile(digits)
+                                // ⚠ Pinned to our island: the row promises "on
+                                // is2.rcq.app", and it used to open a contact of
+                                // the same NUMBER from api instead, so the
+                                // request went to a different person on a
+                                // different island (#433, and #429 is the same
+                                // defect seen from the other end).
+                                onOpenProfileHere(digits)
                             }
                         }
                         // Federation (F2): an explicit `uin@host` whose host is NOT
@@ -2059,6 +2081,15 @@ private fun AddContactDialog(
                                                 android.widget.Toast.makeText(context, context.getString(R.string.access_token_bad), android.widget.Toast.LENGTH_LONG).show()
                                                 return@launch
                                             }
+                                        }
+                                        // Same number, different island, both in
+                                        // one roster: the conversation store still
+                                        // keys a thread by the bare number, so the
+                                        // two would share one history. Say so
+                                        // instead of adding.
+                                        if (session.clashesWithKnownNumber(ci.uin, ci.host)) {
+                                            android.widget.Toast.makeText(context, context.getString(R.string.add_ci_number_clash, ci.uin), android.widget.Toast.LENGTH_LONG).show()
+                                            return@launch
                                         }
                                         if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
                                     }

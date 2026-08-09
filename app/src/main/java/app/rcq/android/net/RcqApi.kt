@@ -1049,6 +1049,10 @@ class RcqApi(
         val join_key: String,
         val owner_only_speaking: Boolean = false,
         val active_count: Int = 0,
+        // How many the room holds. The server has always enforced a cap and
+        // never named it, so the app could only say "full" after a refused
+        // entry. Defaulted for islands still running an older build.
+        val capacity: Int = 8,
     )
 
     suspend fun audioRooms(): List<AudioRoomOut> = withContext(Dispatchers.IO) {
