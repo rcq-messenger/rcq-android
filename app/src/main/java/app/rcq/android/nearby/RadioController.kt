@@ -357,10 +357,35 @@ class RadioController(
     }
 
     // ── BLE discovery ─────────────────────────────────────────────────
+    /** Same person / same room seen under a NEW endpoint id.
+     *
+     *  `endpointId` is re-minted every time a device goes on air, so someone
+     *  who steps out of the air and back in arrives as a stranger and their
+     *  previous row sits there until it goes stale. The tester's screenshot
+     *  (0.95) had the same peer listed six times over. Rooms are identified by
+     *  their room id, which IS stable; people by their on-air label, whose
+     *  four-digit suffix makes a collision unlikely and harmless (two rows
+     *  collapse into one, which is what the user wanted anyway). */
+    private fun isSameParty(a: RadioPeer, b: RadioPeer): Boolean {
+        if (a.kind != b.kind) return false
+        return if (a.kind == RadioPeer.Kind.Room) {
+            val ra = a.room?.roomId; ra != null && ra == b.room?.roomId
+        } else {
+            a.displayName.isNotBlank() && a.displayName == b.displayName
+        }
+    }
+
     private fun onBlePeer(peer: RadioPeer) {
         lastSeen[peer.endpointId] = System.currentTimeMillis()
         val list = _discovered.value.toMutableList()
-        val idx = list.indexOfFirst { it.endpointId == peer.endpointId }
+        var idx = list.indexOfFirst { it.endpointId == peer.endpointId }
+        if (idx < 0) {
+            // No id match: fold onto the same party if they are already listed
+            // under a spent endpoint id, and forget that id so pruning does not
+            // keep resurrecting it.
+            idx = list.indexOfFirst { isSameParty(it, peer) }
+            if (idx >= 0) lastSeen.remove(list[idx].endpointId)
+        }
         if (idx >= 0) {
             // Preserve an in-flight connection state across re-discovery.
             val existing = list[idx]
@@ -378,10 +403,23 @@ class RadioController(
         pruneJob = scope.launch {
             while (isActive) {
                 delay(REFRESH_MS)
-                val cutoff = System.currentTimeMillis() - STALE_MS
+                val now = System.currentTimeMillis()
+                val active = _activeOneToOne.value?.endpointId
                 _discovered.value = _discovered.value.filter { peer ->
-                    if (peer.state != RadioPeer.ConnectionState.Discovered) return@filter true
-                    (lastSeen[peer.endpointId] ?: 0L) >= cutoff
+                    // The peer we are actually in session with stays regardless
+                    // of whether they are still advertising.
+                    if (peer.endpointId == active) return@filter true
+                    // Anything past Discovered gets a longer grace: a Wi-Fi
+                    // Direct connect can outlast one stale window, and dropping
+                    // the row mid-handshake would cancel it from under the user.
+                    // It is a grace, not immunity — the old code returned true
+                    // here unconditionally, so a peer who reached Connecting and
+                    // walked away was listed until the screen was left, which is
+                    // half of why the same person appeared six times over.
+                    val grace = if (peer.state == RadioPeer.ConnectionState.Discovered) {
+                        STALE_MS
+                    } else STALE_MS * 3
+                    (lastSeen[peer.endpointId] ?: 0L) >= now - grace
                 }
             }
         }

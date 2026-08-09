@@ -183,8 +183,18 @@ class RadioBleDiscovery(
         val roomId = if (isRoom) shortRoomIdBytes(local.room!!.roomId) else ByteArray(4)
         val fixed = 13 // magic2 + ver1 + flags1 + eid4 + roomId4 + nameLen1
         val nameBudget = (MAX_MFR_PAYLOAD - fixed).coerceAtLeast(0)
-        val nameBytes = local.displayName.toByteArray(Charsets.UTF_8).let {
-            if (it.size > nameBudget) truncateUtf8(local.displayName, nameBudget) else it
+        // A ROOM advertises the ROOM's name; a person advertises their on-air
+        // label. Both used to go out as `displayName`, so the name the host
+        // typed when creating a room never reached the wire at all and every
+        // room in a scanner's list was titled with its host's random label
+        // ("Mellow List" instead of the room name — tester report, 0.95).
+        // The host's own label still reaches joiners over the data channel
+        // with the roster, which is where the full untruncated names live.
+        val advertised = if (isRoom) {
+            local.room!!.name.ifBlank { local.displayName }
+        } else local.displayName
+        val nameBytes = advertised.toByteArray(Charsets.UTF_8).let {
+            if (it.size > nameBudget) truncateUtf8(advertised, nameBudget) else it
         }
 
         val buf = ByteBuffer.allocate(fixed + nameBytes.size)
@@ -219,8 +229,12 @@ class RadioBleDiscovery(
         ) else null
 
         return RadioPeer(
+            // For a room the advertised name IS the room name (see encode), so
+            // it must not double as the host's label — the row renders
+            // `room.name` and nothing should show a room's title where a
+            // person's is expected.
             endpointId = endpointId,
-            displayName = name.ifBlank { "" },
+            displayName = if (isRoom) "" else name,
             kind = if (isRoom) RadioPeer.Kind.Room else RadioPeer.Kind.OneToOne,
             room = room,
             wifiMac = null,
