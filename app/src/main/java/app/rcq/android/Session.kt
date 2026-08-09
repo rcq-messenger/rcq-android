@@ -4407,7 +4407,7 @@ class Session(context: Context) {
                     _typingFrom.value = null
                 }
             }
-            "call_offer", "call_answer", "call_ice", "call_end",
+            "call_offer", "call_answer", "call_ice", "call_end", "call_unreachable",
             "call_renegotiate", "call_renegotiate_answer", "call_renegotiate_decline",
             "call_ice_restart", "call_ice_restart_answer" ->
                 calls.onSignal(type, obj)

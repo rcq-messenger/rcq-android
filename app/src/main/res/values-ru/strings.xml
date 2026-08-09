@@ -307,6 +307,7 @@
     <string name="call_out_busy">Занято</string>
     <string name="call_out_no_answer">Нет ответа</string>
     <string name="call_out_failed">Сбой соединения</string>
+    <string name="call_out_unreachable">Не удалось дозвониться</string>
     <string name="call_out_disconnected">Связь прервалась</string>
     <string name="call_out_ended">Завершён</string>
     <!-- Audio rooms -->

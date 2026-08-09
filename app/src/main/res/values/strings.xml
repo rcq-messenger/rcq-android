@@ -308,6 +308,7 @@
     <string name="call_out_busy">Busy</string>
     <string name="call_out_no_answer">No answer</string>
     <string name="call_out_failed">Call failed</string>
+    <string name="call_out_unreachable">Could not be reached</string>
     <string name="call_out_disconnected">Disconnected</string>
     <string name="call_out_ended">Ended</string>
     <!-- Audio rooms -->
