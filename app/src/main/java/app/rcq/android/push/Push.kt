@@ -787,7 +787,15 @@ object Push {
         // second, louder chime from the system on top of it is the "о-оу
         // несколько раз, тихо и громко" report. The notification is still
         // posted — silently — so the shade holds it once the user leaves.
-        val foregroundQuiet = app.rcq.android.RcqApp.foreground
+        // …but only for the account that IS in front. A wake addressed to a
+        // SECOND local account has no screen and no in-app tone of its own, so
+        // suppressing the system sound left it entirely silent: the message
+        // arrived, the shade filled up, and nothing ever made a noise ("пуш без
+        // звука, так и должно быть, когда на одном устройстве оба?").
+        val forAnotherAccount = toUin != null && runCatching {
+            AccountManager.activeId.value?.let { SecureStore(ctx, it).uin } != toUin
+        }.getOrDefault(false)
+        val foregroundQuiet = app.rcq.android.RcqApp.foreground && !forAnotherAccount
         // Honour the app's own sound switches. The channel carries our tone, so
         // "App sounds: off" or "Message sounds: off" used to silence only half
         // of the paths and the phone kept chiming.

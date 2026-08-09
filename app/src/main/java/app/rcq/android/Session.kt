@@ -4114,7 +4114,19 @@ class Session(context: Context) {
         return RcqFederation.buildContactQr(a, sk) to RcqFederation.buildContactLink(a, sk)
     }
 
+    /** True when this account already knows a DIFFERENT person carrying the
+     *  same number: our own island's #134 and `134@api.rcq.app` are unrelated
+     *  accounts, and the local store still keys a conversation by the bare
+     *  number (`peer:134`). Until that key carries the island too, holding both
+     *  at once would merge two people's histories into one thread, so the
+     *  second one is refused rather than quietly welded to the first. */
+    fun clashesWithKnownNumber(uin: Int, host: String?): Boolean {
+        val here = host == null || host.equals(serverHost(), true)
+        return _contacts.value.any { it.uin == uin && (it.host == null) != here }
+    }
+
     suspend fun addCrossIslandContact(uin: Int, host: String): Boolean = withContext(Dispatchers.IO) {
+        if (clashesWithKnownNumber(uin, host)) return@withContext false
         val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext false
         CrossIslandStore.save(
             CrossIslandStore.Contact(
@@ -4418,6 +4430,11 @@ class Session(context: Context) {
             "hood_message", "hood_count", "hood_delete", "hood_reaction" ->
                 hood.onSignal(type, obj)
             "presence" -> scope.launch { runCatching { refreshContacts() } }
+            // A contact changed their name. Nothing announced this before, so
+            // the new name only appeared whenever the roster happened to be
+            // re-read next — "изменение произошло не сразу, в какой момент оно
+            // должно актуализироваться?" had no answer.
+            "contact_renamed" -> scope.launch { runCatching { refreshContacts() } }
             "story_posted", "story_deleted" -> scope.launch { runCatching { refreshStories() } }
             "random_match" -> {
                 val pairId = obj.get("pair_id")?.takeIf { !it.isJsonNull }?.asString

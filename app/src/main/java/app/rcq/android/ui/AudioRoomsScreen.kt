@@ -155,8 +155,11 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(room.name, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            // "2 of 8", not "2 in room": the ceiling is the
+                            // half people ask for, and it was only ever visible
+                            // as a refusal after walking into it (#439).
                             val sub = if (room.activeCount > 0)
-                                stringResource(R.string.rooms_in_room, room.activeCount) + " · " + stringResource(R.string.rooms_key_fmt, room.joinKey)
+                                stringResource(R.string.rooms_in_room, room.activeCount, room.capacity) + " · " + stringResource(R.string.rooms_key_fmt, room.joinKey)
                             else stringResource(R.string.rooms_key_fmt, room.joinKey)
                             Text(sub, color = c.textSecondary, fontSize = 12.sp)
                         }
@@ -264,13 +267,18 @@ private fun InRoomView(session: Session) {
     val joining by controller.joining.collectAsState()
     val ownUin = session.uin
     val members = roster.values.sortedBy { it.uin }
+    // The ceiling belongs on this screen too: it is the one place you can see
+    // the room filling up while it happens.
+    val activeRoomId by controller.activeRoomId.collectAsState()
+    val allRooms by controller.rooms.collectAsState()
+    val capacity = allRooms.firstOrNull { it.id == activeRoomId }?.capacity ?: 8
 
     Column(Modifier.fillMaxSize().background(Color(0xFF0E0F12))) {
         Spacer(Modifier.height(48.dp))
         Text(name ?: stringResource(R.string.rooms_title), color = Color.White, fontSize = 22.sp,
             fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().padding(16.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Text(
-            if (joining) stringResource(R.string.rooms_joining) else stringResource(R.string.rooms_in_room, members.size),
+            if (joining) stringResource(R.string.rooms_joining) else stringResource(R.string.rooms_in_room, members.size, capacity),
             color = Color(0xFFB8BCC4), fontSize = 14.sp,
             modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
