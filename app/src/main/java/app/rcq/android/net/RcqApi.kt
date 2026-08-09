@@ -216,7 +216,14 @@ class RcqApi(
     }
 
     /** Host authority of this session's island, for the record's home entry. */
-    fun islandHost(): String = runCatching { java.net.URI(baseUrl).host ?: DEFAULT_HOST }.getOrDefault(DEFAULT_HOST)
+    /** The host this client is TALKING to, which is not the same thing as the
+     *  island it belongs to: with the Cloudflare front engaged this is
+     *  `cdn.rcq.app`, and under a custom transport it is whatever carries the
+     *  traffic. ⚠ Never use it as an identity — that is `Session.serverHost()`.
+     *  Stamping this into a sealed envelope's `from_host` made every fronted
+     *  user look like they had moved to another island, so their messages were
+     *  quarantined as cross-island requests by anyone who had not added them. */
+    fun transportHost(): String = runCatching { java.net.URI(baseUrl).host ?: DEFAULT_HOST }.getOrDefault(DEFAULT_HOST)
 
     suspend fun register(req: RegisterRequest): RegisterResponse = withContext(Dispatchers.IO) {
         post("/auth/register", gson.toJson(req), authed = false, RegisterResponse::class.java)
