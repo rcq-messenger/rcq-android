@@ -945,6 +945,19 @@ class RcqApi(
         get("/uin/mine", authed = true, MyUinsResponse::class.java)
     }
 
+    /** DELETE /uin/mine/{uin} — give a held number back to the pool.
+     *
+     *  Collecting numbers nobody chose is a side effect of the vault: switching
+     *  to a number puts the previous one in the collection whether it was
+     *  wanted or not, and the long number handed out at signup is usually the
+     *  first one people stop wanting (user request). Irreversible — the number
+     *  goes back in the pool and somebody else may take it.
+     *
+     *  404 = not held by this account, 400 = it is the number you answer as. */
+    suspend fun releaseUin(uin: Int) = withContext(Dispatchers.IO) {
+        sendNoResult("DELETE", "/uin/mine/$uin", null, authed = true)
+    }
+
     /** POST /uin/activate — answer as a number already in the collection. The
      *  number being used goes into the collection in its place, so this is
      *  reversible and never loses one. Migrates, hence the {new_uin, token}.

@@ -77,13 +77,63 @@ class RadioBleDiscovery(
         val room: RadioRoomMetadata?,     // null for 1:1
     )
 
+    /// Watches the adapter so going on air before switching Bluetooth on is a
+    /// wait rather than a dead end. Without it the radios were started exactly
+    /// once: a user who went on air with Bluetooth off got a one-line warning,
+    /// nothing advertised, nothing scanned, and turning Bluetooth on afterwards
+    /// changed nothing — they had to leave the air and come back for anyone to
+    /// appear (tester, 0.95). Registered for as long as we are on air.
+    private var btStateReceiver: android.content.BroadcastReceiver? = null
+
     // ── lifecycle ─────────────────────────────────────────────────────
     fun start(local: LocalAdvertisement) {
-        if (!hasPermission()) { onError("ble_permission"); return }
-        if (adapter?.isEnabled != true) { onError("ble_off"); return }
+        // Remembered BEFORE the enabled check: this is what gets advertised if
+        // Bluetooth comes on later, and it used to be assigned only on the
+        // success path, so there was nothing to resume with.
         current = local
+        if (!hasPermission()) { onError("ble_permission"); return }
+        registerBtStateWatcher()
+        if (adapter?.isEnabled != true) { onError("ble_off"); return }
         startAdvertising(local)
         startScanning()
+    }
+
+    private fun registerBtStateWatcher() {
+        if (btStateReceiver != null) return
+        val r = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: android.content.Intent?) {
+                if (intent?.action != android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED) return
+                when (intent.getIntExtra(
+                    android.bluetooth.BluetoothAdapter.EXTRA_STATE,
+                    android.bluetooth.BluetoothAdapter.ERROR,
+                )) {
+                    android.bluetooth.BluetoothAdapter.STATE_ON -> {
+                        val local = current ?: return
+                        if (!hasPermission()) return
+                        // Both start* calls are no-ops when already running.
+                        startAdvertising(local)
+                        startScanning()
+                    }
+                    android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF,
+                    android.bluetooth.BluetoothAdapter.STATE_OFF -> {
+                        // Drop the callbacks but KEEP `current`: the session is
+                        // still on air, it just has no radio for a moment.
+                        stopAdvertising()
+                        stopScanning()
+                    }
+                }
+            }
+        }
+        val filter = android.content.IntentFilter(
+            android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED,
+        )
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appContext.registerReceiver(r, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                appContext.registerReceiver(r, filter)
+            }
+        }.onSuccess { btStateReceiver = r }
     }
 
     /** Swap the advertised payload (e.g. 1:1 ↔ room) without dropping the scan. */
@@ -95,6 +145,10 @@ class RadioBleDiscovery(
     }
 
     fun stop() {
+        btStateReceiver?.let { r ->
+            runCatching { appContext.unregisterReceiver(r) }
+            btStateReceiver = null
+        }
         stopAdvertising()
         stopScanning()
         current = null
@@ -103,6 +157,11 @@ class RadioBleDiscovery(
     // ── advertising ───────────────────────────────────────────────────
     @SuppressLint("MissingPermission")
     private fun startAdvertising(local: LocalAdvertisement) {
+        // Starting twice would overwrite `advCallback` and leave the first
+        // registration with nothing able to stop it — a leak that outlives the
+        // session. Cheap to make this a no-op instead, now that the adapter
+        // watcher can ask for a start that is already running.
+        if (advCallback != null) return
         val adv = adapter?.bluetoothLeAdvertiser ?: run { onError("ble_no_advertiser"); return }
         advertiser = adv
         val settings = AdvertiseSettings.Builder()
@@ -135,6 +194,7 @@ class RadioBleDiscovery(
     // ── scanning ──────────────────────────────────────────────────────
     @SuppressLint("MissingPermission")
     private fun startScanning() {
+        if (scanCallback != null) return   // same reason as startAdvertising
         val sc = adapter?.bluetoothLeScanner ?: run { onError("ble_no_scanner"); return }
         scanner = sc
         val filter = ScanFilter.Builder()

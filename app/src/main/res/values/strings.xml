@@ -461,6 +461,10 @@
     <string name="my_uins_held_caption">Held</string>
     <plurals name="uin_digits"><item quantity="one">%1$d digit</item><item quantity="other">%1$d digits</item></plurals>
     <string name="my_uins_use">Use</string>
+    <string name="my_uins_release">Release</string>
+    <string name="my_uins_release_title">Release %1$s?</string>
+    <string name="my_uins_release_body">The number goes back into the pool and someone else may take it. This cannot be undone.</string>
+    <string name="my_uins_release_cta">Release</string>
     <string name="my_uins_empty">Nothing here yet. Numbers you take without moving onto them show up here.</string>
     <string name="my_uins_confirm_title">Answer as %1$s?</string>
     <string name="my_uins_confirm_body">Contacts, groups, profile and history move onto it. Number %1$s stays yours and stays on this screen, so you can move back whenever you like.</string>
