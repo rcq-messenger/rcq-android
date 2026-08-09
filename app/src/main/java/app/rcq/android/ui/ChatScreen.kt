@@ -72,6 +72,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+// Direction arrows for the call log. Auto-mirrored on purpose: "outgoing" is
+// the direction you read in, so it has to flip with the layout.
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlternateEmail
@@ -1766,8 +1770,15 @@ private fun KeyboardScrollEffect(
     }
 }
 
-/** Centered call-summary line (kind == "call"): a phone glyph + the localized
- *  "Voice call · 1:23" / "Missed call" text logged by [CallController]. */
+/** Centered call-summary line (kind == "call"): a direction arrow, the
+ *  localized "Voice call · 1:23" / "Missed call" text logged by
+ *  [CallController], and when it started.
+ *
+ *  The glyph used to be a plain handset for every case, so the log could not
+ *  say who had called whom — the reporter had to open the call to find out.
+ *  An arrow in / arrow out is the universal idiom for exactly that and costs
+ *  no width. The time sits beside the duration because "1:53" alone does not
+ *  say when. */
 @Composable
 private fun CallHistoryRow(m: ChatMessage) {
     val c = RcqTheme.colors
@@ -1776,9 +1787,19 @@ private fun CallHistoryRow(m: ChatMessage) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Call, null, tint = c.textSecondary, modifier = Modifier.size(13.dp))
+        Icon(
+            if (m.fromMe) Icons.AutoMirrored.Filled.CallMade
+            else Icons.AutoMirrored.Filled.CallReceived,
+            null,
+            tint = c.textSecondary,
+            modifier = Modifier.size(13.dp),
+        )
         Spacer(Modifier.width(6.dp))
-        Text(m.body, color = c.textSecondary, fontSize = 12.sp)
+        Text(
+            "${m.body} · ${formatTime(m.sentAt)}",
+            color = c.textSecondary,
+            fontSize = 12.sp,
+        )
     }
 }
 

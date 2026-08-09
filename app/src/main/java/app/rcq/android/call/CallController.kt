@@ -31,7 +31,15 @@ class CallController(
     private val send: (JsonObject) -> Unit,
     private val turn: suspend () -> RcqApi.TurnCreds,
     private val nameFor: (Int) -> String,
-    private val appendHistory: (peerUin: Int, fromMe: Boolean, text: String) -> Unit,
+    private val appendHistory: (
+        peerUin: Int,
+        fromMe: Boolean,
+        text: String,
+        /** The call never connected, so it is still owed attention. */
+        missed: Boolean,
+        /** Epoch ms the call STARTED, which is what the history row shows. */
+        startedAt: Long,
+    ) -> Unit,
 ) {
     enum class Media(val wire: String) {
         AUDIO("audio"), VIDEO("video");
@@ -692,7 +700,8 @@ class CallController(
         val mediaLabel = appContext.getString(
             if (call.media == Media.VIDEO) R.string.call_hist_video else R.string.call_hist_voice,
         )
-        val tail = if (durationMs >= 1000) {
+        val connected = durationMs >= 1000
+        val tail = if (connected) {
             formatDuration(durationMs / 1000)
         } else {
             appContext.getString(
@@ -707,7 +716,18 @@ class CallController(
                 },
             )
         }
-        appendHistory(call.peerUin, call.outgoing, "$mediaLabel · $tail")
+        // "Missed" is narrower than "did not connect": a call I placed and
+        // cancelled, or one I declined myself, is not something waiting for me.
+        // Only an inbound call that never connected is.
+        val missed = !connected && !call.outgoing &&
+            reason !in setOf("declined", "declinedElsewhere", "busy")
+        appendHistory(
+            call.peerUin,
+            call.outgoing,
+            "$mediaLabel · $tail",
+            missed,
+            System.currentTimeMillis() - durationMs,
+        )
     }
 
     private fun formatDuration(secs: Long): String = "%d:%02d".format(secs / 60, secs % 60)

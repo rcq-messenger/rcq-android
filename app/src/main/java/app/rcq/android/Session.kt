@@ -152,7 +152,9 @@ class Session(context: Context) {
         send = { obj -> routeCallSignal(obj) },
         turn = { api.turnCredentials() },
         nameFor = { contactName(it) },
-        appendHistory = { peer, fromMe, text -> logCallHistory(peer, fromMe, text) },
+        appendHistory = { peer, fromMe, text, missed, startedAt ->
+            logCallHistory(peer, fromMe, text, missed, startedAt)
+        },
     )
 
     /** §5d: WS for same-island peers, sealed deposit for cross-island ones. */
@@ -3917,7 +3919,16 @@ class Session(context: Context) {
                         if (cs.data["media"] == "video") app.rcq.android.R.string.call_hist_video
                         else app.rcq.android.R.string.call_hist_voice,
                     )
-                    logCallHistory(dec.senderUin, fromMe = false, text = "$media · ${appCtx.getString(app.rcq.android.R.string.call_out_missed)}")
+                    // A cross-island offer we only learned about after it went
+                    // stale: genuinely missed, so it does count as unread. Its
+                    // start is the offer's own timestamp, not now.
+                    logCallHistory(
+                        dec.senderUin,
+                        fromMe = false,
+                        text = "$media · ${appCtx.getString(app.rcq.android.R.string.call_out_missed)}",
+                        missed = true,
+                        startedAt = cs.ts * 1000L,
+                    )
                     return@runCatching
                 }
                 val sigObj = com.google.gson.JsonObject().apply {
@@ -4295,7 +4306,20 @@ class Session(context: Context) {
     /** Append a call-summary line to the 1:1 thread (kind="call"), so a
      *  finished/missed call shows in the chat history. Called by
      *  [CallController] on every call end. */
-    private fun logCallHistory(peerUin: Int, fromMe: Boolean, text: String) {
+    private fun logCallHistory(
+        peerUin: Int,
+        fromMe: Boolean,
+        text: String,
+        /** Only a call that never connected is something the user still has to
+         *  deal with. A call that HAPPENED cannot be unread — both people were
+         *  on it — and counting it left a green "unread" divider above a
+         *  finished conversation (tester, 0.95). */
+        missed: Boolean,
+        /** When the call STARTED, not when this line was written. The row shows
+         *  the time beside the duration, and "10:10 · 1:53" only reads right if
+         *  the timestamp is the beginning of that 1:53. */
+        startedAt: Long,
+    ) {
         if (!::db.isInitialized) return
         store(
             ChatMessage(
@@ -4303,10 +4327,11 @@ class Session(context: Context) {
                 peerUin = peerUin,
                 fromMe = fromMe,
                 body = text,
-                sentAt = System.currentTimeMillis(),
+                sentAt = startedAt,
                 state = DeliveryState.DELIVERED,
                 kind = "call",
             ),
+            countsUnread = missed,
         )
     }
 
@@ -4458,13 +4483,16 @@ class Session(context: Context) {
         mergeCrossIslandContacts()
     }
 
-    private fun store(msg: ChatMessage) {
+    private fun store(msg: ChatMessage, countsUnread: Boolean = true) {
         // INSERT OR IGNORE dedups by envelope UUID (WS vs queue overlap).
         if (!db.insert(msg)) return
         val cur = _messages.value.toMutableMap()
         cur[msg.peerUin] = ((cur[msg.peerUin] ?: emptyList()) + msg).sortedBy { it.sentAt }
         _messages.value = cur
-        bumpUnreadIfInbound(msg, LocalStores.peerThread(msg.peerUin))
+        // Not everything that lands in a thread is something to catch up on.
+        // A finished call is a record of something both people were present
+        // for; only a missed one is still owed attention.
+        if (countsUnread) bumpUnreadIfInbound(msg, LocalStores.peerThread(msg.peerUin))
         // Arrived into the open thread → ack it immediately with a receipt.
         if (!msg.fromMe && LocalStores.peerThread(msg.peerUin) == activeThread) sendReadReceipts(msg.peerUin)
     }
