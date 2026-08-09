@@ -1,5 +1,8 @@
 package app.rcq.android.ui
 
+import android.content.Context
+import android.os.PowerManager
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -80,6 +84,37 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     val connected = state is CallController.State.Connected
     val incoming = state is CallController.State.Incoming
     val ended = state is CallController.State.Ended
+
+    // Keep the display awake for as long as this screen is up. Android has no
+    // CallKit, so nothing else does it: the system dimmed and locked mid-call
+    // on the way to its normal timeout, which read as "the screen does not come
+    // on during a call" (tester, Android 12). IncomingCallActivity already sets
+    // the same flag for the full-screen-intent path; the in-app surface never
+    // did.
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val window = (context.findFragmentActivity())?.window
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+
+    // Proximity blanking, but only when the earpiece is the output: on speaker,
+    // in video, or before the call connects, holding a phone near your face is
+    // not a reason to blank. The lock turns the panel AND the touchscreen off,
+    // which is the actual point — a cheek on an unblanked screen was hanging up
+    // calls and toggling the mic.
+    val wantProximity = connected && !isVideo && !speakerOn
+    DisposableEffect(wantProximity) {
+        var lock: PowerManager.WakeLock? = null
+        if (wantProximity) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm?.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK) == true) {
+                lock = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "rcq:call-proximity")
+                    .also { runCatching { it.acquire(60 * 60 * 1000L) } }
+            }
+        }
+        onDispose { lock?.let { if (it.isHeld) runCatching { it.release() } } }
+    }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF0E0F12))) {
         // Remote video fills the screen when present; else an avatar.
@@ -175,7 +210,18 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                     }
                 }
             } else if (!ended) {
-                Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Toggles on their own row, hang-up on the next one. All five
+                // used to share a single centred Row with fixed 20.dp gaps:
+                // 5 × 64.dp + 4 × 20.dp is 400.dp, wider than a 360.dp phone,
+                // so Hang up was pushed off the right edge and its label came
+                // out stacked one letter per line (tester screenshot, 0.95).
+                // fillMaxWidth + SpaceEvenly means the row now divides whatever
+                // width there is instead of demanding a fixed total.
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     RoundCallButton(
                         if (micMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
                         stringResource(R.string.call_mute),
@@ -195,8 +241,12 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                     } else if (connected) {
                         RoundCallButton(Icons.Filled.Videocam, stringResource(R.string.call_video_on), Color(0xFF2A2D34)) { controller.requestVideoUpgrade() }
                     }
-                    RoundCallButton(Icons.Filled.CallEnd, stringResource(R.string.call_hangup), Color(0xFFE5484D)) { controller.hangUp() }
                 }
+                Spacer(Modifier.height(24.dp))
+                RoundCallButton(
+                    Icons.Filled.CallEnd, stringResource(R.string.call_hangup),
+                    Color(0xFFE5484D), size = 76.dp,
+                ) { controller.hangUp() }
             }
         }
     }
@@ -227,17 +277,25 @@ private fun statusText(state: CallController.State, connectedAtMs: Long): String
 }
 
 @Composable
-private fun RoundCallButton(icon: ImageVector, label: String, bg: Color, onClick: () -> Unit) {
+private fun RoundCallButton(
+    icon: ImageVector,
+    label: String,
+    bg: Color,
+    size: Dp = 64.dp,
+    onClick: () -> Unit,
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(64.dp).clip(CircleShape).background(bg)
+            Modifier.size(size).clip(CircleShape).background(bg)
                 .clickable { onClick() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, label, tint = Color.White, modifier = Modifier.size(28.dp))
+            Icon(icon, label, tint = Color.White, modifier = Modifier.size(size * 0.44f))
         }
         Spacer(Modifier.height(6.dp))
-        Text(label, color = Color(0xFFB8BCC4), fontSize = 12.sp)
+        // One line, always. The label wrapped per-character once the row ran
+        // out of width, which is how "Завершить" ended up reading vertically.
+        Text(label, color = Color(0xFFB8BCC4), fontSize = 12.sp, maxLines = 1)
     }
 }
 
