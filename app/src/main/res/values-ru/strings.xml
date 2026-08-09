@@ -72,6 +72,13 @@
     <string name="home_menu_outgoing">Исходящие заявки</string>
     <string name="outgoing_title">Исходящие заявки</string>
     <string name="outgoing_empty">Вы не отправляли заявок.</string>
+
+    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <string name="share_to_title">Отправить в…</string>
+    <string name="share_to_search">Поиск по чатам</string>
+    <string name="share_to_empty">Пока некому отправить.</string>
+    <string name="share_to_unreadable">Не удалось прочитать то, чем поделились. Попробуйте отправить из того приложения ещё раз.</string>
+    <plurals name="share_to_files"><item quantity="one">%1$d файл</item><item quantity="few">%1$d файла</item><item quantity="many">%1$d файлов</item><item quantity="other">%1$d файла</item></plurals>
     <string name="outgoing_state_pending">Ожидает</string>
     <string name="outgoing_state_declined">Отклонена</string>
     <string name="outgoing_cancel">Отменить</string>

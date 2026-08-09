@@ -141,6 +141,30 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="rcq.app" android:pathPrefix="/g/" />
             </intent-filter>
+            <!-- System share sheet. Without these RCQ simply was not in the
+                 list of apps you can share a picture to, which also made
+                 moving one between two RCQ chats a save-then-reattach trip
+                 (reported). ACTION_SEND covers one item, SEND_MULTIPLE a
+                 selection; `*/*` is deliberate — a chat carries arbitrary
+                 files already, so narrowing the filter would only hide RCQ
+                 from the sheet for the exact cases the paperclip allows. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
         </activity>
 
         <!-- Full-screen incoming-call UI, shown over the lock screen when a

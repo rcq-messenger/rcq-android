@@ -200,6 +200,22 @@ private object ChatDrafts {
     val byThread = mutableMapOf<String, String>()
 }
 
+/** Put shared text into a thread's composer without sending it — the landing
+ *  spot for the text half of a system share (a link, a quote). Appends rather
+ *  than replaces: the picker can be reached with something already typed here,
+ *  and silently eating it would be worse than an extra line break.
+ *
+ *  Written BEFORE the chat is opened, because the composer reads its draft once
+ *  at first composition; a later write would not show until the next visit. */
+internal fun seedDraft(target: ChatTarget, text: String) {
+    val key = when (target) {
+        is ChatTarget.Peer -> "p:${target.uin}"
+        is ChatTarget.Group -> "g:${target.id}"
+    }
+    val existing = ChatDrafts.byThread[key].orEmpty()
+    ChatDrafts.byThread[key] = if (existing.isBlank()) text else "$existing\n$text"
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit, onOpenGroupInfo: (Int) -> Unit = {}, onOpenPeerInfo: (Int) -> Unit = {}, onOpenGroup: (Int) -> Unit = {}) {
@@ -303,6 +319,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // request on demand and then run the deferred save.
     val savedToast = stringResource(R.string.media_saved)
     val saveFailToast = stringResource(R.string.media_save_failed)
+    val shareFailToast = stringResource(R.string.share_to_unreadable)
     var pendingSave by remember { mutableStateOf<(() -> Unit)?>(null) }
     val storagePerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) pendingSave?.invoke()
@@ -427,6 +444,82 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         if (data != null) {
                             if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
                             else session.sendPhoto(peer!!, data, null, albumId = albumId)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Files handed over by another app's share sheet, after the "Send to…"
+    // picker chose this thread. Deliberately the same treatment a paperclip
+    // pick gets: one picture or video stops in the pre-send preview (so it can
+    // still be captioned or hidden behind a spoiler), several go as an album,
+    // and anything else goes as a file. ⚠ Runs once and clears the handoff —
+    // the URI permissions are scoped to the intent that brought us here.
+    //
+    // ⚠ Collected rather than keyed on `collectAsState`: clearing the handoff is
+    // the first thing this does, and with the cleared value as the effect's KEY
+    // that write restarts the effect and kills the very work it just started.
+    // The file then never arrives, silently, and only sometimes — it is a race
+    // against the first suspension point.
+    LaunchedEffect(Unit) {
+        app.rcq.android.ShareIntake.deliver.collect { req ->
+            req ?: return@collect
+            app.rcq.android.ShareIntake.deliver.value = null
+            val uris = req.uris
+            if (uris.isEmpty()) return@collect
+            val mimes = uris.map { withContext(Dispatchers.IO) { context.contentResolver.getType(it) } ?: "" }
+            val allMedia = mimes.all { it.startsWith("image/") || it.startsWith("video/") }
+            // A share that arrives unreadable (the sending app revoked the grant, or
+            // never held one) otherwise looks exactly like a share that worked: the
+            // chat just opens, empty. Name it in the log and say so on screen.
+            android.util.Log.i("RCQshare", "delivering ${uris.size} into $threadKey — ${mimes.joinToString()}")
+            if (uris.size == 1 && allMedia) {
+                val uri = uris[0]
+                val one = if (mimes[0].startsWith("video/")) {
+                    withContext(Dispatchers.IO) {
+                        runCatching { readPickedVideo(context, uri) }
+                            .onFailure { android.util.Log.w("RCQshare", "video read threw", it) }.getOrNull()
+                    }?.let { PendingSend.Video(it) }
+                } else {
+                    withContext(Dispatchers.IO) {
+                        runCatching { readImageForSend(context, uri) }
+                            .onFailure { android.util.Log.w("RCQshare", "image read threw", it) }.getOrNull()
+                    }?.let { PendingSend.Photo(it) }
+                }
+                if (one != null) pendingSend = one
+                else {
+                    android.util.Log.w("RCQshare", "could not read the shared item: $uri")
+                    android.widget.Toast.makeText(context, shareFailToast, android.widget.Toast.LENGTH_LONG).show()
+                }
+                return@collect
+            }
+            val albumId = if (uris.size > 1 && allMedia) java.util.UUID.randomUUID().toString().uppercase() else null
+            for ((i, uri) in uris.withIndex()) {
+                val mime = mimes[i]
+                runCatching {
+                    when {
+                        mime.startsWith("video/") -> {
+                            val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
+                            if (v != null) {
+                                if (isGroup) session.sendGroupVideo(groupId!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
+                                else session.sendVideo(peer!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
+                            }
+                        }
+                        mime.startsWith("image/") -> {
+                            val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
+                            if (data != null) {
+                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
+                                else session.sendPhoto(peer!!, data, null, albumId = albumId)
+                            }
+                        }
+                        else -> {
+                            val f = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
+                            if (f != null) {
+                                if (isGroup) session.sendGroupFile(groupId!!, f.bytes, f.name, f.mime)
+                                else session.sendFile(peer!!, f.bytes, f.name, f.mime)
+                            }
                         }
                     }
                 }
