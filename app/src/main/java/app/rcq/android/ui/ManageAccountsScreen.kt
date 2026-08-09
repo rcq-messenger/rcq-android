@@ -138,29 +138,7 @@ internal fun ManageAccountsScreen(
                         Text(host, color = c.textSecondary, fontSize = 12.sp)
                         uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                     }
-                    // Reorder: with several identities, creation order is rarely
-                    // the order you want to see them in (user request).
                     val index = sorted.indexOfFirst { it.id == account.id }
-                    // 22dp icons with no padding gave two 22dp targets touching
-                    // each other, which is under the 48dp minimum and reads as one
-                    // control (#409). Same stacked order, room to hit them.
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.KeyboardArrowUp, stringResource(R.string.manage_accounts_move_up),
-                            tint = if (index > 0) c.textSecondary else c.divider,
-                            modifier = Modifier.clip(CircleShape)
-                                .clickable(enabled = index > 0) { AccountManager.move(account.id, up = true) }
-                                .padding(6.dp).size(22.dp),
-                        )
-                        Icon(
-                            Icons.Filled.KeyboardArrowDown, stringResource(R.string.manage_accounts_move_down),
-                            tint = if (index < sorted.lastIndex) c.textSecondary else c.divider,
-                            modifier = Modifier.clip(CircleShape)
-                                .clickable(enabled = index < sorted.lastIndex) { AccountManager.move(account.id, up = false) }
-                                .padding(6.dp).size(22.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(6.dp))
                     // The active row used to end in a tick. It sat in the column
                     // where every other row has an action, did nothing when
                     // tapped, and duplicated the ACTIVE label two lines to the
@@ -177,6 +155,35 @@ internal fun ManageAccountsScreen(
                         TextButton(onClick = { pendingDelete = account }) {
                             Text(stringResource(R.string.manage_accounts_delete), color = Color(0xFFE5484D))
                         }
+                    }
+                    // Reorder: with several identities, creation order is rarely
+                    // the order you want to see them in (user request).
+                    //
+                    // These sat BETWEEN the name and the actions, so Switch and
+                    // Delete started at a different x on every row depending on
+                    // how many arrows that row had — one on the first and last
+                    // account, two in the middle. Ending the row with them
+                    // lines the text actions up (tester, 0.95).
+                    //
+                    // 22dp icons with no padding gave two 22dp targets touching
+                    // each other, which is under the 48dp minimum and reads as
+                    // one control (#409). Same stacked order, room to hit them.
+                    Spacer(Modifier.width(6.dp))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowUp, stringResource(R.string.manage_accounts_move_up),
+                            tint = if (index > 0) c.textSecondary else c.divider,
+                            modifier = Modifier.clip(CircleShape)
+                                .clickable(enabled = index > 0) { AccountManager.move(account.id, up = true) }
+                                .padding(6.dp).size(22.dp),
+                        )
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown, stringResource(R.string.manage_accounts_move_down),
+                            tint = if (index < sorted.lastIndex) c.textSecondary else c.divider,
+                            modifier = Modifier.clip(CircleShape)
+                                .clickable(enabled = index < sorted.lastIndex) { AccountManager.move(account.id, up = false) }
+                                .padding(6.dp).size(22.dp),
+                        )
                     }
                 }
             }
