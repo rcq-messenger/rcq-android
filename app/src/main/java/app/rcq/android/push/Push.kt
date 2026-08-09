@@ -458,15 +458,42 @@ object Push {
         }.getOrDefault(0L)
         val seenVersion = prefs.getLong(K_FSI_VERSION, -1L)
         val hadIt = prefs.getBoolean(K_FSI_GRANTED, false)
-        prefs.edit().putLong(K_FSI_VERSION, version).putBoolean(K_FSI_GRANTED, granted).apply()
-        // Same build as last time, or a first run we have no history for.
-        if (seenVersion < 0 || seenVersion == version) return false
-        return hadIt && !granted
+        // ⚠ This is a read that WRITES, and that used to be the whole bug. The
+        // detection needs the previous version to compare against, so it has to
+        // record the current one — after which asking a second time answers
+        // "same build, nothing happened". The home screen asks on every entry,
+        // so the banner survived exactly one visit: step into settings, come
+        // back, and it was gone without the user having answered it (tester,
+        // 0.95). Worse than a cosmetic flicker — the one warning that incoming
+        // calls had stopped popping full-screen erased itself.
+        //
+        // So the DETECTION result is latched into its own flag, and only the
+        // user clears it: by fixing the grant, or by dismissing.
+        val pending = prefs.getBoolean(K_FSI_PENDING, false) ||
+            (seenVersion >= 0 && seenVersion != version && hadIt && !granted)
+        prefs.edit()
+            .putLong(K_FSI_VERSION, version)
+            .putBoolean(K_FSI_GRANTED, granted)
+            // Getting the grant back answers the banner by itself; there is
+            // nothing left to tell the user about.
+            .putBoolean(K_FSI_PENDING, pending && !granted)
+            .apply()
+        return pending && !granted
+    }
+
+    /** The user answered the full-screen-intent banner (fixed it or dismissed
+     *  it). Until this is called the notice survives navigation, process death
+     *  and reboots — it is the only warning that incoming calls stopped popping
+     *  full-screen, and it is not worth losing to a stray recomposition. */
+    fun clearFullScreenIntentNotice(ctx: Context) {
+        ctx.applicationContext.getSharedPreferences(FSI_PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(K_FSI_PENDING, false).apply()
     }
 
     private const val FSI_PREFS = "rcq_fsi"
     private const val K_FSI_VERSION = "version"
     private const val K_FSI_GRANTED = "granted"
+    private const val K_FSI_PENDING = "pending"
 
     /** Open the system screen where the user grants full-screen-intent access, so
      *  incoming calls pop the full call UI instead of a heads-up. Falls back to

@@ -413,9 +413,16 @@ internal fun HomeScreen(
                         FullScreenIntentBanner(
                             onFix = {
                                 fsiLost = false
+                                // Not cleared here: the grant may or may not be
+                                // given on the screen we are about to open, and
+                                // the next read re-checks it. Sending the user
+                                // to settings is not the same as fixing it.
                                 app.rcq.android.push.Push.openFullScreenIntentSettings(context)
                             },
-                            onDismiss = { fsiLost = false },
+                            onDismiss = {
+                                fsiLost = false
+                                app.rcq.android.push.Push.clearFullScreenIntentNotice(context)
+                            },
                         )
                     }
                 }
