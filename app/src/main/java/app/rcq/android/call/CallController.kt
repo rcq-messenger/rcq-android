@@ -264,6 +264,12 @@ class CallController(
                 }
             }
             "call_end" -> handleRemoteEnd(callId, obj.get("reason")?.takeIf { !it.isJsonNull }?.asString ?: "ended")
+            // The island has no socket and no push endpoint for them, so
+            // nothing is going to ring on the other side at all. End it now
+            // instead of playing a ringback for thirty seconds and calling it
+            // "no answer" — the caller was being told they are being ignored
+            // when they were not being reached (user request).
+            "call_unreachable" -> handleRemoteEnd(callId, "unreachable")
             "call_renegotiate" -> handleRenegotiate(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_answer" -> handleRenegotiateAnswer(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_decline" -> handleRenegotiateDecline(callId)
@@ -710,6 +716,7 @@ class CallController(
                     "cancelled" -> if (call.outgoing) R.string.call_out_cancelled else R.string.call_out_missed
                     "busy" -> R.string.call_out_busy
                     "expired", "unanswered" -> if (call.outgoing) R.string.call_out_no_answer else R.string.call_out_missed
+                    "unreachable" -> R.string.call_out_unreachable
                     "setup_failed" -> R.string.call_out_failed
                     "peer_disconnected" -> R.string.call_out_disconnected
                     else -> R.string.call_out_ended
