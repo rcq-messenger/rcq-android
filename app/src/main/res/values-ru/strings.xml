@@ -836,9 +836,12 @@
     <string name="relay_share_group_warn">Relay увидят все участники группы. Делитесь дефицитными домашними relay только в проверенных группах.</string>
     <string name="relay_share_none">Пока нет relay, которыми можно поделиться.</string>
     <string name="relay_import_title">Добавить relay</string>
-    <string name="relay_import_body">Вставьте ссылку rcq-relay://, которую вы получили вне приложения.</string>
+    <string name="relay_import_body">Вставьте ссылку rcq-relay://, которую вам дали, либо ключ доступа из кабинета, если вы платите за приватные релеи.</string>
     <string name="relay_import_add">Добавить relay</string>
     <string name="relay_import_bad">Это не похоже на корректную ссылку relay.</string>
+    <string name="relay_import_hint">rcq-relay://… или ключ доступа</string>
+    <string name="relay_key_active">Ключ доступа введён</string>
+    <string name="relay_key_remove">Убрать</string>
     <string name="relay_import_ok">Relay добавлен</string>
     <string name="relay_shared_section">Полученные relay</string>
     <string name="relay_shared_empty">Полученных relay нет. Контакт может прислать relay в чате, или вставьте ссылку выше.</string>

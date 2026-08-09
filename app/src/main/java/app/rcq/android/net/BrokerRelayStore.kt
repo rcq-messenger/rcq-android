@@ -45,6 +45,10 @@ object BrokerRelayStore {
     // Region-scoped liveness: report which relays are reachable FROM THIS network
     // so the broker serves them where they actually work (POST /broker/reachability).
     private const val KEY_REPORT_TS = "reach_report_ts"
+    // The paid tenant key, if the user has one. Device-level like everything
+    // else here: it buys network access, not an identity, and a person with two
+    // accounts on one phone bought it once.
+    private const val KEY_TENANT = "tenant_key"
     private const val REPORT_INTERVAL_MS = 60 * 60 * 1000L  // at most hourly
     private const val PROBE_TIMEOUT_MS = 2500
     private const val MAX_PROBE = 20
@@ -57,6 +61,18 @@ object BrokerRelayStore {
     }
 
     private fun isReady() = ::prefs.isInitialized
+
+    /** The paid access key, or null. */
+    fun tenantKey(): String? =
+        if (!isReady()) null else prefs.getString(KEY_TENANT, null)?.takeIf { it.isNotBlank() }
+
+    /** Store (or clear, with null) the paid access key and pull the endpoints it
+     *  unlocks right away — a key that only takes effect at the next boot looks
+     *  broken to the person who just pasted it. */
+    fun setTenantKey(key: String?) {
+        if (!isReady()) return
+        prefs.edit().putString(KEY_TENANT, key?.trim()?.takeIf { it.isNotEmpty() }).apply()
+    }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
@@ -94,9 +110,15 @@ object BrokerRelayStore {
             // acceptable, since some bridges beats none. Unblocked: direct, per
             // the NO_PROXY base client.
             val fetchClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
-            val body = fetchClient.newCall(
-                Request.Builder().url("https://$BROKER_HOST/broker/bridges?n=$WANT").get().build(),
-            ).execute().use { resp -> if (resp.isSuccessful) resp.body?.string() else null } ?: return
+            // The paid key, when there is one, rides in Authorization — the
+            // broker adds that tenant's private endpoints to the ordinary
+            // answer. A header rather than a query parameter because proxies
+            // redact this one, and a relay key in an access log is the same
+            // mistake as a session token in one.
+            val req = Request.Builder().url("https://$BROKER_HOST/broker/bridges?n=$WANT").get()
+            tenantKey()?.let { req.header("Authorization", "Bearer $it") }
+            val body = fetchClient.newCall(req.build())
+                .execute().use { resp -> if (resp.isSuccessful) resp.body?.string() else null } ?: return
             val arr = JsonParser.parseString(body).asJsonObject.getAsJsonArray("relays") ?: return
             val out = ArrayList<SingBoxTransport.Relay>()
             val trusted = HashSet<String>()

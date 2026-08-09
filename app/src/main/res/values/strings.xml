@@ -840,9 +840,12 @@
     <string name="relay_share_group_warn">Every group member will see this relay. Only share scarce domestic relays in groups you trust.</string>
     <string name="relay_share_none">No relays available to share yet.</string>
     <string name="relay_import_title">Add a relay</string>
-    <string name="relay_import_body">Paste an rcq-relay:// link you received out of band.</string>
+    <string name="relay_import_body">Paste an rcq-relay:// link somebody gave you, or the access key from your cabinet if you pay for private relays.</string>
     <string name="relay_import_add">Add relay</string>
     <string name="relay_import_bad">That isn\'t a valid relay link.</string>
+    <string name="relay_import_hint">rcq-relay://… or an access key</string>
+    <string name="relay_key_active">Access key entered</string>
+    <string name="relay_key_remove">Remove</string>
     <string name="relay_import_ok">Relay added</string>
     <string name="relay_shared_section">Shared relays</string>
     <string name="relay_shared_empty">No shared relays. A contact can send you one in chat, or paste a link above.</string>

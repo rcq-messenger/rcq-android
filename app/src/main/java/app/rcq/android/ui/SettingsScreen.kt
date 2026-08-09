@@ -125,6 +125,7 @@ import app.rcq.android.security.BiometricGate
 import app.rcq.android.data.LanguageManager
 import app.rcq.android.data.LocalStores
 import app.rcq.android.net.MultihomeStore
+import app.rcq.android.net.BrokerRelayStore
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
@@ -1332,6 +1333,24 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     }
                 }
             }
+            // The paid key, when there is one. Shown as a state and a way out,
+            // never as the key itself: the cabinet is where it can be read, and
+            // a settings screen that prints it is a screenshot away from
+            // handing it to whoever is looking over a shoulder.
+            var tenantKeyOn by remember { mutableStateOf(BrokerRelayStore.tenantKey() != null) }
+            if (tenantKeyOn) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    Text(
+                        stringResource(R.string.relay_key_active),
+                        color = c.textPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        BrokerRelayStore.setTenantKey(null)
+                        tenantKeyOn = false
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) { BrokerRelayStore.refresh() }
+                    }) { Text(stringResource(R.string.relay_key_remove), color = c.accent, fontSize = 12.sp) }
+                }
+            }
             TextButton(onClick = { relayImportOpen = true }) {
                 Text(stringResource(R.string.relay_import_title), color = c.accent, fontSize = 13.sp)
             }
@@ -1349,7 +1368,7 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                             OutlinedTextField(
                                 value = token,
                                 onValueChange = { token = it; err = false },
-                                placeholder = { Text("rcq-relay://...", color = c.textSecondary) },
+                                placeholder = { Text(stringResource(R.string.relay_import_hint), color = c.textSecondary) },
                                 isError = err,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -1358,13 +1377,27 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     },
                     confirmButton = {
                         TextButton(onClick = {
-                            val r = ContactRelayStore.relayFromToken(token)
-                            if (r == null) {
-                                err = true
-                            } else {
-                                ContactRelayStore.add(r, 0, null)
-                                sharedRelays = ContactRelayStore.list()
-                                relayImportOpen = false
+                            // One field, two things people are handed; the
+                            // decision lives in RelayInput so it can be tested
+                            // instead of pasted by hand.
+                            when (val parsed = app.rcq.android.net.RelayInput.classify(token)) {
+                                is app.rcq.android.net.RelayInput.Link -> {
+                                    ContactRelayStore.add(parsed.relay, 0, null)
+                                    sharedRelays = ContactRelayStore.list()
+                                    relayImportOpen = false
+                                }
+                                is app.rcq.android.net.RelayInput.AccessKey -> {
+                                    // Only the broker can say whether the key is
+                                    // good, and asking it is this refresh — which
+                                    // also makes the endpoints appear now rather
+                                    // than at the next boot.
+                                    BrokerRelayStore.setTenantKey(parsed.key)
+                                    relayImportOpen = false
+                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        BrokerRelayStore.refresh()
+                                    }
+                                }
+                                app.rcq.android.net.RelayInput.Unusable -> err = true
                             }
                         }) { Text(stringResource(R.string.relay_import_add), color = c.accent) }
                     },
