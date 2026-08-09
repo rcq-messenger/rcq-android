@@ -1313,7 +1313,7 @@ class Session(context: Context) {
             val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
             val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
             val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val homes = listOf(RcqFederation.Home(api.islandHost(), uin)) +
+            val homes = listOf(RcqFederation.Home(serverHost(), uin)) +
                 MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
             val ts = (System.currentTimeMillis() / 1000).toInt()
             val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
@@ -1339,12 +1339,12 @@ class Session(context: Context) {
             val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
             val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
             val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val homes = listOf(RcqFederation.Home(api.islandHost(), uin)) +
+            val homes = listOf(RcqFederation.Home(serverHost(), uin)) +
                 MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
             val ts = (System.currentTimeMillis() / 1000).toInt()
             val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
             val env = Envelope.HomeRecord(doc)
-            val ownHost = api.islandHost()
+            val ownHost = serverHost()
             for (c in _contacts.value) {
                 if (c.blocked || c.uin == uin || c.identityKey.isEmpty()) continue
                 runCatching {
@@ -1384,7 +1384,7 @@ class Session(context: Context) {
         withContext(Dispatchers.IO) {
             Multihome.addBackupIsland(
                 ownUin = uin,
-                ownHost = api.islandHost(),
+                ownHost = serverHost(),
                 hostInput = hostInput,
                 identityPub = identityPub(),
                 signingPriv = signingPriv(),
@@ -1421,7 +1421,7 @@ class Session(context: Context) {
         val accountId = AccountManager.activeId.value ?: error("no session")
         val oldUin = store.uin ?: error("no session")
         val oldToken = store.token ?: error("no session")
-        val oldHost = api.islandHost()
+        val oldHost = serverHost()
         if (host == oldHost) throw IllegalArgumentException("primary_island")
         if (MultihomeStore.list(oldUin).none { it.host == host }) throw IllegalArgumentException("not_backup")
         val cred = withContext(Dispatchers.IO) {
@@ -1454,12 +1454,12 @@ class Session(context: Context) {
     suspend fun enableAutoBackup(): String {
         val uin = store.uin ?: error("no session")
         val host = withContext(Dispatchers.IO) {
-            Multihome.autoPickHost(api.islandHost(), MultihomeStore.list(uin).map { it.host }.toSet())
+            Multihome.autoPickHost(serverHost(), MultihomeStore.list(uin).map { it.host }.toSet())
         } ?: throw IllegalArgumentException("no_island")
         withContext(Dispatchers.IO) {
             Multihome.addBackupIsland(
                 ownUin = uin,
-                ownHost = api.islandHost(),
+                ownHost = serverHost(),
                 hostInput = host,
                 identityPub = identityPub(),
                 signingPriv = signingPriv(),
@@ -3585,7 +3585,7 @@ class Session(context: Context) {
         val me = store.uin ?: return 0
         val contact = _contacts.value.firstOrNull { it.uin == toUin } ?: return 0
         return Multihome.depositToExtraHomes(
-            ownHost = api.islandHost(),
+            ownHost = serverHost(),
             ownUin = me,
             peerUin = toUin,
             peerIdentityKeyB64 = contact.identityKey,
@@ -3958,9 +3958,20 @@ class Session(context: Context) {
             // QUARANTINED as a request instead of landing in the chat list.
             // Blocked → hold() drops it. We hold the raw payload so Accept can
             // re-ingest it (now an accepted contact → passes this gate).
+            //
+            // ⚠ A sender whose client is on the Cloudflare FRONT is on OUR
+            // island and only reaches it by a different road. Their build
+            // stamped the road (`cdn.rcq.app`) instead of the island, so their
+            // messages arrived here looking like they had emigrated, and every
+            // recipient who had not already added them quarantined the lot —
+            // "why did a friend request come from another island when that
+            // account is on this one?". Senders stamp the island now, but the
+            // ones still on the old build cannot be fixed from their end, so
+            // the front is accepted as local here too.
             val ciHost = dec.senderHost
             val meUin = store.uin ?: 0
-            if (ciHost != null && ciHost != serverHost() && dec.senderUin != meUin &&
+            val ownHosts = setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
+            if (ciHost != null && ciHost !in ownHosts && dec.senderUin != meUin &&
                 CrossIslandStore.get(dec.senderUin, ciHost) == null
             ) {
                 CrossIslandRequestsStore.hold(meUin, dec.senderUin, ciHost, payloadB64, ciPreview(dec.envelope))
