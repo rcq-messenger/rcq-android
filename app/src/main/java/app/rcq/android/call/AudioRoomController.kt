@@ -4,6 +4,7 @@ import android.content.Context
 import app.rcq.android.net.RcqApi
 import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +50,10 @@ class AudioRoomController(
     val joining: StateFlow<Boolean> = _joining.asStateFlow()
     private val _joinError = MutableStateFlow<String?>(null)
     val joinError: StateFlow<String?> = _joinError.asStateFlow()
+
+    /** In-flight entry (TURN fetch + mesh start). Cancelled on teardown so a
+     *  late arrival cannot revive a room the user already left. */
+    private var enterJob: Job? = null
 
     private val mesh = RoomMeshClient(
         appContext, scope,
@@ -110,8 +115,22 @@ class AudioRoomController(
         _roster.value = emptyMap()
         _localMuted.value = false
         _joining.value = true
-        scope.launch {
+        // Fetching TURN credentials is a network round trip; leaving is one
+        // tap. Entering and leaving a few times in a row left one of these in
+        // flight, and when it landed it started the mesh and announced
+        // `room_enter` for a room already left — after which `_activeRoomId`
+        // was null, every room signal was dropped by the guards below, and the
+        // next entry never connected (#418, "after several enters and exits it
+        // stops connecting"). The server, meanwhile, thought we were inside.
+        //
+        // Cancel is the first line of defence and the re-check is the load
+        // bearing one: `runCatching` swallows CancellationException like any
+        // other throwable, so a cancelled fetch would otherwise carry straight
+        // on into `mesh.start`.
+        enterJob?.cancel()
+        enterJob = scope.launch {
             val creds = runCatching { turn() }.getOrNull()
+            if (_activeRoomId.value != room.id) return@launch
             mesh.start(iceServers(creds))
             send(JsonObject().apply { addProperty("type", "room_enter"); addProperty("room_id", room.id) })
         }
@@ -215,6 +234,8 @@ class AudioRoomController(
 
     // ── helpers ───────────────────────────────────────────────────────────
     private fun tearDownLocal() {
+        enterJob?.cancel()
+        enterJob = null
         mesh.stop()
         _activeRoomId.value = null
         _activeRoomName.value = null
