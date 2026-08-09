@@ -84,6 +84,16 @@ class AudioRoomController(
         _rooms.value = _rooms.value.filterNot { it.id == roomId }
     }
 
+    /** Owner-only rename. The list is patched locally rather than refetched:
+     *  the server broadcasts `audio_room_renamed` to everyone else anyway, and
+     *  the person who typed the name should not wait a round trip to see it. */
+    suspend fun rename(roomId: Int, name: String): Boolean = runCatching {
+        val r = api().renameAudioRoom(roomId, name.trim())
+        _rooms.value = _rooms.value.map { if (it.id == r.id) it.copy(name = r.name) else it }
+        if (_activeRoomId.value == r.id) _activeRoomName.value = r.name
+        true
+    }.getOrDefault(false)
+
     suspend fun delete(roomId: Int) {
         runCatching { api().deleteAudioRoom(roomId) }
         _rooms.value = _rooms.value.filterNot { it.id == roomId }
@@ -180,6 +190,15 @@ class AudioRoomController(
             "room_deleted" -> {
                 _rooms.value = _rooms.value.filterNot { it.id == roomId }
                 if (_activeRoomId.value == roomId) tearDownLocal()
+            }
+            // The server has broadcast this to every subscriber since audio
+            // rooms shipped and nothing on Android listened, so a rename only
+            // ever showed up for the person who typed it — everyone else kept
+            // the old name until a manual refresh.
+            "audio_room_renamed" -> {
+                val name = obj.get("name")?.takeIf { !it.isJsonNull }?.asString ?: return
+                _rooms.value = _rooms.value.map { if (it.id == roomId) it.copy(name = name) else it }
+                if (_activeRoomId.value == roomId) _activeRoomName.value = name
             }
         }
     }

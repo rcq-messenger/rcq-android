@@ -355,7 +355,13 @@
     <string name="rooms_title">Audio rooms</string>
     <string name="rooms_create">Create room</string>
     <string name="rooms_name">Room name</string>
-    <string name="rooms_join">Join</string>
+    <!-- The key field ADDS a room to your list; entering it is a separate tap
+         on the row. Labelling it "Join" promised something it did not do and,
+         worse, implied you were already in a room you had not looked at. -->
+    <string name="rooms_join">Add</string>
+    <string name="rooms_forget">Remove from my list</string>
+    <string name="rooms_rename">Rename</string>
+    <string name="rooms_rename_title">Rename room</string>
     <string name="rooms_join_key">Join key</string>
     <string name="rooms_empty">No rooms yet. Create one or join with a key.</string>
     <string name="rooms_in_room">%1$d in room</string>

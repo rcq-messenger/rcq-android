@@ -4412,7 +4412,8 @@ class Session(context: Context) {
             "call_ice_restart", "call_ice_restart_answer" ->
                 calls.onSignal(type, obj)
             "room_roster", "room_member_entered", "room_member_left", "room_offer",
-            "room_answer", "room_ice", "room_speaking", "room_enter_rejected", "room_deleted" ->
+            "room_answer", "room_ice", "room_speaking", "room_enter_rejected", "room_deleted",
+            "audio_room_renamed" ->
                 audioRooms.onSignal(type, obj)
             "hood_message", "hood_count", "hood_delete", "hood_reaction" ->
                 hood.onSignal(type, obj)
