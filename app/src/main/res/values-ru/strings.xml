@@ -354,7 +354,10 @@
     <string name="rooms_title">Аудиокомнаты</string>
     <string name="rooms_create">Создать комнату</string>
     <string name="rooms_name">Название комнаты</string>
-    <string name="rooms_join">Войти</string>
+    <string name="rooms_join">Добавить</string>
+    <string name="rooms_forget">Убрать из моего списка</string>
+    <string name="rooms_rename">Переименовать</string>
+    <string name="rooms_rename_title">Переименовать комнату</string>
     <string name="rooms_join_key">Ключ</string>
     <string name="rooms_empty">Пока нет комнат. Создайте новую или войдите по ключу.</string>
     <string name="rooms_in_room">%1$d в комнате</string>

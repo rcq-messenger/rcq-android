@@ -1072,6 +1072,14 @@ class RcqApi(
         sendNoResult("DELETE", "/audio_rooms/$roomId", null, authed = true)
     }
 
+    /** Owner-only rename. The server fans `audio_room_renamed` to every
+     *  subscriber, so other people's lists follow without a refetch — the
+     *  endpoint has been there since audio rooms shipped and nothing on
+     *  Android ever called it. */
+    suspend fun renameAudioRoom(roomId: Int, name: String): AudioRoomOut = withContext(Dispatchers.IO) {
+        request("PATCH", "/audio_rooms/$roomId", gson.toJson(mapOf("name" to name)), authed = true, AudioRoomOut::class.java)
+    }
+
     // ── People Nearby (geohash check-in) ──────────────────────────────
     data class NearbyUser(
         val uin: Int,

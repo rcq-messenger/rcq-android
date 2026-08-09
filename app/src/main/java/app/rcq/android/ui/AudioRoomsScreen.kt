@@ -34,8 +34,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -92,6 +94,7 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
     var showCreate by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var joinKey by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<AudioRoomController.Room?>(null) }
     var pendingEnter by remember { mutableStateOf<AudioRoomController.Room?>(null) }
 
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -180,8 +183,21 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
                         )
                         if (room.ownerUin == ownUin) {
                             Spacer(Modifier.width(12.dp))
+                            Icon(Icons.Filled.Edit, stringResource(R.string.rooms_rename), tint = c.textSecondary,
+                                modifier = Modifier.size(20.dp).clip(CircleShape).clickable { renaming = room })
+                            Spacer(Modifier.width(12.dp))
                             Icon(Icons.Filled.Delete, stringResource(R.string.rooms_delete), tint = c.textSecondary,
                                 modifier = Modifier.size(20.dp).clip(CircleShape).clickable { scope.launch { controller.delete(room.id) } })
+                        } else {
+                            // Somebody who added a room by key had no way to get
+                            // rid of it: only the owner had an action here, so a
+                            // mistyped key or a room you were done with stayed in
+                            // the list forever. The server has always taken this
+                            // (DELETE .../membership) and it only drops YOUR
+                            // subscription, which is why it is not a bin.
+                            Spacer(Modifier.width(12.dp))
+                            Icon(Icons.Filled.RemoveCircleOutline, stringResource(R.string.rooms_forget), tint = c.textSecondary,
+                                modifier = Modifier.size(20.dp).clip(CircleShape).clickable { scope.launch { controller.leaveList(room.id) } })
                         }
                     }
                 }
@@ -206,6 +222,33 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
                 }) { Text(stringResource(R.string.rooms_create), color = c.accent) }
             },
             dismissButton = { TextButton(onClick = { showCreate = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+            containerColor = c.bgSecondary,
+        )
+    }
+
+    renaming?.let { room ->
+        // Seeded with the current name so the common case (fixing a typo) is an
+        // edit and not a retype.
+        var text by remember(room.id) { mutableStateOf(room.name) }
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text(stringResource(R.string.rooms_rename_title), color = c.textPrimary) },
+            text = {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it.take(64) },
+                    label = { Text(stringResource(R.string.rooms_name)) }, singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = text.trim()
+                    if (n.isNotEmpty() && n != room.name) {
+                        renaming = null
+                        scope.launch { controller.rename(room.id, n) }
+                    } else renaming = null
+                }) { Text(stringResource(R.string.rooms_rename), color = c.accent) }
+            },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
             containerColor = c.bgSecondary,
         )
     }
