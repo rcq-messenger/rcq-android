@@ -871,10 +871,31 @@ object Push {
         // can actually launch IncomingCallActivity (which rings via Ringer).
         val fsiOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
             (ctx.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true)
+        // ⚠ Having the permission is not the same as the activity launching. A
+        // full-screen intent only takes over the screen when the device is
+        // LOCKED or the display is off; with the screen on and unlocked Android
+        // shows a heads-up instead and IncomingCallActivity never starts — so
+        // the silent channel meant a silent incoming call. That is the tester's
+        // "backgrounded on Android 12: a push appears but it does not ring",
+        // and it was never about Android 12: their Android 15 rang only because
+        // that device is MISSING the permission, which flipped it to the
+        // audible channel. Every version was silent whenever the phone was in
+        // the user's hand.
+        //
+        // So pick the channel by whether the activity will actually run.
+        val km = ctx.getSystemService(android.app.KeyguardManager::class.java)
+        val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+        val screenOff = pm?.isInteractive == false
+        val locked = km?.isKeyguardLocked == true
+        // Racy by a hair (the screen can lock between this check and the post),
+        // and the cost of losing that race is a ringtone alongside the Ringer
+        // for a moment. The cost of the old behaviour was a call that never
+        // made a sound.
+        val activityWillRing = fsiOk && (screenOff || locked)
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
             android.util.Log.w("RCQpush", "incoming call: notifications disabled — call UI cannot be shown")
         }
-        val notif = NotificationCompat.Builder(ctx, if (fsiOk) CHANNEL_CALLS else CHANNEL_CALLS_RING)
+        val notif = NotificationCompat.Builder(ctx, if (activityWillRing) CHANNEL_CALLS else CHANNEL_CALLS_RING)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(nickname)
             .setContentText(ctx.getString(R.string.call_incoming))
