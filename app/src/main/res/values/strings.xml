@@ -73,6 +73,13 @@
     <string name="home_menu_outgoing">Sent requests</string>
     <string name="outgoing_title">Sent requests</string>
     <string name="outgoing_empty">You haven\'t sent any requests.</string>
+
+    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <string name="share_to_title">Send to…</string>
+    <string name="share_to_search">Search chats</string>
+    <string name="share_to_empty">No chats to send to yet.</string>
+    <string name="share_to_unreadable">Couldn\'t read what was shared. Try sending it from the other app again.</string>
+    <plurals name="share_to_files"><item quantity="one">%1$d file</item><item quantity="other">%1$d files</item></plurals>
     <string name="outgoing_state_pending">Pending</string>
     <string name="outgoing_state_declined">Declined</string>
     <string name="outgoing_cancel">Cancel</string>

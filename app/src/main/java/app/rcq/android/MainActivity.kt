@@ -1,5 +1,6 @@
 package app.rcq.android
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -145,6 +146,63 @@ object GroupJoinLink {
     }
 }
 
+/** Content another app handed us through the system share sheet
+ *  (ACTION_SEND / ACTION_SEND_MULTIPLE).
+ *
+ *  RCQ was missing from that sheet entirely, so "share this picture to RCQ"
+ *  did not exist and moving a picture between two RCQ chats meant saving it to
+ *  storage and re-attaching it with the paperclip (report #443).
+ *
+ *  Two hops, because a share has to choose a thread before it can be sent:
+ *  [pending] drives the "Send to…" picker, and once a chat is picked the same
+ *  payload moves to [deliver], which ChatScreen consumes on open and pushes
+ *  through the ordinary attachment paths.
+ *
+ *  ⚠ The URI grants that come with the intent live only as long as this task
+ *  holds it, so nothing here may be parked for later — the payload is read the
+ *  moment the chat opens, in the same session as the tap. */
+object ShareIntake {
+    data class Req(val text: String?, val uris: List<android.net.Uri>)
+    val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+    val deliver = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+
+    fun fromIntent(i: android.content.Intent?): Req? {
+        i ?: return null
+        val uris = when (i.action) {
+            android.content.Intent.ACTION_SEND ->
+                listOfNotNull(streamExtra(i))
+            android.content.Intent.ACTION_SEND_MULTIPLE ->
+                streamListExtra(i)
+            else -> return null
+        }
+        val text = i.getCharSequenceExtra(android.content.Intent.EXTRA_TEXT)
+            ?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        if (uris.isEmpty() && text == null) return null
+        // Consume, for the same reason NotificationOpen does: setIntent keeps
+        // the intent sticky, and any later recreate() (a language switch) would
+        // otherwise re-open the picker for something already sent.
+        i.removeExtra(android.content.Intent.EXTRA_STREAM)
+        i.removeExtra(android.content.Intent.EXTRA_TEXT)
+        return Req(text, uris)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun streamExtra(i: android.content.Intent): android.net.Uri? =
+        if (Build.VERSION.SDK_INT >= 33) {
+            i.getParcelableExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri::class.java)
+        } else {
+            i.getParcelableExtra(android.content.Intent.EXTRA_STREAM)
+        }
+
+    @Suppress("DEPRECATION")
+    private fun streamListExtra(i: android.content.Intent): List<android.net.Uri> =
+        if (Build.VERSION.SDK_INT >= 33) {
+            i.getParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri::class.java)
+        } else {
+            i.getParcelableArrayListExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)
+        }.orEmpty()
+}
+
 /** A pending open-this-thread request from a tapped message notification.
  *  [Push.showMessage] stamps the wake's group_id/to_uin — plus the decrypted
  *  sender, when the envelope could be opened — as intent extras; RcqApp
@@ -194,6 +252,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         ContactAddLink.fromUri(intent.data)?.let { ContactAddLink.pending.value = it }
         GroupJoinLink.fromUri(intent.data)?.let { GroupJoinLink.pending.value = it }
         NotificationOpen.fromIntent(intent)?.let { NotificationOpen.pending.value = it }
+        ShareIntake.fromIntent(intent)?.let { ShareIntake.pending.value = it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -212,6 +271,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         ContactAddLink.fromUri(intent?.data)?.let { ContactAddLink.pending.value = it }
         GroupJoinLink.fromUri(intent?.data)?.let { GroupJoinLink.pending.value = it }
         NotificationOpen.fromIntent(intent)?.let { NotificationOpen.pending.value = it }
+        ShareIntake.fromIntent(intent)?.let { ShareIntake.pending.value = it }
         enableEdgeToEdge()
         app.rcq.android.data.LanguageManager.init(applicationContext)
         LocalStores.init(applicationContext)
@@ -444,6 +504,10 @@ private fun RcqApp(session: Session) {
     // effect re-fires when state/locked flip, so a tap while PIN-locked routes
     // correctly after the unlock.
     val notifOpen by NotificationOpen.pending.collectAsState()
+    // A share sheet handoff waits the same way a notification tap does: it sits
+    // pending until there IS an account and the PIN is off, rather than being
+    // dropped because the app happened to be launched cold and locked.
+    val sharePending by ShareIntake.pending.collectAsState()
     LaunchedEffect(state, locked, notifOpen) {
         val req = notifOpen ?: return@LaunchedEffect
         if (state !is UiState.Registered || locked) return@LaunchedEffect
@@ -488,16 +552,21 @@ private fun RcqApp(session: Session) {
         val target = chatTarget
         val infoId = groupInfoId
         val peerInfo = peerInfoUin
+        val shareReq = sharePending
         // Hardware/system Back pops the topmost in-app screen (same precedence
         // as the `when` below) instead of finishing the Activity. On Home with
         // nothing open it's disabled, so Back exits the app as usual.
         val backPopsOverlay = (s is UiState.Registered && !locked && (
-            groupInfoId != null || peerInfoUin != null || chatTarget != null ||
+            shareReq != null || groupInfoId != null || peerInfoUin != null || chatTarget != null ||
                 showManageAccounts || showNews || showOutgoing || showRandom ||
                 showAudioRooms || showNearby || showRadio || showProfile || showSettings || showRestore
             )) || (s is UiState.Onboarding && showRestore)
         BackHandler(enabled = backPopsOverlay) {
             when {
+                // The share picker renders above everything, so Back leaves it
+                // first — and leaving it means abandoning the share, not
+                // falling through to whatever was open underneath.
+                shareReq != null -> ShareIntake.pending.value = null
                 // peerInfo first to match the render precedence (a profile
                 // opened from group-info sits on top of it).
                 peerInfoUin != null -> peerInfoUin = null
@@ -536,6 +605,24 @@ private fun RcqApp(session: Session) {
                 session,
                 onBack = { showRestore = false },
                 onRestored = { uin -> resetNav(); state = UiState.Registered(uin) },
+            )
+            // Another app shared something into RCQ: pick the thread before
+            // anything else is drawn. It sits above the rest of the stack on
+            // purpose — the user came here from a different app to do exactly
+            // one thing, and whatever screen they had left open is not it.
+            s is UiState.Registered && !locked && shareReq != null -> app.rcq.android.ui.ShareTargetScreen(
+                session = session,
+                req = shareReq,
+                onPick = { picked ->
+                    ShareIntake.pending.value = null
+                    // Text goes in as a draft (the user may want to say
+                    // something around a shared link); files are handed to the
+                    // chat, which sends them the way the paperclip does.
+                    shareReq.text?.let { app.rcq.android.ui.seedDraft(picked, it) }
+                    if (shareReq.uris.isNotEmpty()) ShareIntake.deliver.value = shareReq
+                    chatTarget = picked
+                },
+                onCancel = { ShareIntake.pending.value = null },
             )
             // peerInfo is checked BEFORE groupInfo so that opening a member's
             // profile FROM the group-info screen (which leaves groupInfoId set)
