@@ -127,8 +127,13 @@ object SingBoxTransport {
      *  priority-sorted), persists it, and returns that. */
     private fun stickyEntry(pool: List<Relay>): Relay {
         val persisted = prefs()?.getString(KEY_ENTRY, null)
-        pool.firstOrNull { it.tag == persisted }?.let { return it }
-        val pick = pool.first()
+        // An account with its own nodes pins one of THOSE, even when a public
+        // relay was pinned first. The pin predates the purchase, and honouring it
+        // is precisely how a paid endpoint ends up carrying nothing.
+        val mine = privateVlessEntries().mapNotNull { p -> pool.firstOrNull { it.tag == p.tag } }
+        val field = mine.ifEmpty { pool }
+        field.firstOrNull { it.tag == persisted }?.let { return it }
+        val pick = field.first()
         prefs()?.edit()?.putString(KEY_ENTRY, pick.tag)?.apply()
         return pick
     }
@@ -140,11 +145,16 @@ object SingBoxTransport {
      *  to rebuild the chain. */
     fun rotateEntry(): Boolean {
         if (localProxyMode()) return false   // no onion entry to rotate under a user proxy
-        // Rotate only among TRUSTED entries — never onto a community/shared relay
-        // that would then see the client IP.
-        val candidates = trustedVlessEntries()
-        if (candidates.size < 2) return false
         val cur = prefs()?.getString(KEY_ENTRY, null)
+        // Rotate only among TRUSTED entries — never onto a community/shared relay
+        // that would then see the client IP. A paying account rotates within its
+        // OWN nodes while it still has a spare: leaving the paid entry on its
+        // first failure would hand it back to the pool it was bought to escape.
+        // With one paid node and that node confirmed blocked, the public trusted
+        // entries are next in line — connectivity outranks ownership.
+        val mine = privateVlessEntries()
+        val candidates = if (mine.size >= 2 && mine.any { it.tag == cur }) mine else trustedVlessEntries()
+        if (candidates.size < 2) return false
         val idx = candidates.indexOfFirst { it.tag == cur }
         val next = candidates[(idx + 1).mod(candidates.size)]
         if (next.tag == cur) return false
@@ -153,14 +163,31 @@ object SingBoxTransport {
         return true
     }
 
+    /** The account's own paid VLESS endpoints, which outrank every public
+     *  candidate for the onion guard.
+     *
+     *  The ENTRY is the only relay address the client's network operator ever
+     *  sees, so it is the only one worth owning. Every public entry is listed in
+     *  the signed config, which is a plain unauthenticated fetch — a blocklist
+     *  covering the whole pool costs one download. A private endpoint appears in
+     *  no such list (the broker never serves it outside its tenant), so it
+     *  outlives that blocklist. The EXIT deliberately stays public: it is
+     *  invisible from the client's side, so owning it buys nothing, and it is
+     *  where a paying customer's traffic mixes with everybody else's. */
+    private fun privateVlessEntries(): List<Relay> =
+        BrokerRelayStore.privateRelays().filter { it.proto == "vless" }
+
     /** VLESS relays eligible to be the onion ENTRY (hydra step 3). An entry sees
-     *  the client IP (never the destination), so it must be VETTED: the
-     *  signed-config relays ([RelayConfigStore], Ed25519-curated = trusted by
-     *  provenance) plus broker relays the operator promoted to tier=trusted
-     *  ([BrokerRelayStore.trustedRelays]). Social-shared relays ([ContactRelayStore])
-     *  are excluded — they only ever serve as exits / fallback. Dedup by server:port. */
+     *  the client IP (never the destination), so it must be VETTED — which reads
+     *  as "curated by us OR owned by you": the account's own paid endpoints
+     *  ([privateVlessEntries]) first, then the signed-config relays
+     *  ([RelayConfigStore], Ed25519-curated = trusted by provenance), then broker
+     *  relays the operator promoted to tier=trusted ([BrokerRelayStore.trustedRelays]).
+     *  Social-shared relays ([ContactRelayStore]) are excluded — they only ever
+     *  serve as exits / fallback. Dedup by server:port keeps the first occurrence,
+     *  so the paid ordering survives it. */
     private fun trustedVlessEntries(): List<Relay> =
-        (RelayConfigStore.currentRelays() + BrokerRelayStore.trustedRelays())
+        (privateVlessEntries() + RelayConfigStore.currentRelays() + BrokerRelayStore.trustedRelays())
             .filter { it.proto == "vless" }
             .distinctBy { "${it.server}:${it.port}" }
 
@@ -174,30 +201,11 @@ object SingBoxTransport {
         }
     }.getOrNull()
 
-    /** Hydra step 3: pick the onion ENTRY among TRUSTED VLESS relays by
-     *  reachability + NEAREST-with-SPREAD, persisted as the sticky guard. Run
-     *  once before building the onion config (in [start]). A no-op when a valid
-     *  trusted entry is already pinned — preserves the Tor-guard property (pick
-     *  once, keep; don't reshuffle every launch). Only the FIRST pick (or a pick
-     *  after the pinned entry leaves the trusted set) probes; confirmed-block
-     *  rotation is handled separately by [rotateEntry]. With a single trusted
-     *  entry this degrades to today's behaviour; it spreads only once >1 trusted
-     *  entry exists (e.g. гидра promotes more domestic relays to trusted).
-     *  Blocking — called from [start] which already runs off-main. */
-    private fun selectEntryIfNeeded() {
-        onionEntryReachable = false
-        if (!onionMode() || localProxyMode()) return
-        val candidates = trustedVlessEntries()
-        if (candidates.isEmpty()) return   // no trusted entry -> onion can't form -> single-hop fallback
-        val p = prefs()
-        val cur = p?.getString(KEY_ENTRY, null)
-        candidates.firstOrNull { it.tag == cur }?.let { pinned ->
-            // Keep the pinned guard (Tor-guard property), but confirm it's reachable —
-            // the verdict gates onion-vs-single-hop. A blocked guard => single-hop.
-            onionEntryReachable = probeLatencyMs(pinned.server, pinned.port) != null
-            return
-        }
-        // (Re)select: probe reachability + latency in parallel.
+    /** Probe [candidates] in parallel and choose a guard among them. Returns the
+     *  chosen tag plus whether that candidate actually answered: an
+     *  all-probes-failed pick is a spread guess, not a live entry, and the caller
+     *  needs to tell the two apart. Blocking. */
+    private fun probeAndPick(candidates: List<Relay>): Pair<String, Boolean> {
         val exec = java.util.concurrent.Executors.newFixedThreadPool(minOf(candidates.size, 6))
         val measured: List<Pair<String, Long>> = try {
             candidates.map { c ->
@@ -207,23 +215,59 @@ object SingBoxTransport {
         } finally {
             exec.shutdownNow()
         }
-        val pickTag = if (measured.isEmpty()) {
-            // Every probe failed (the relay port may itself be filtered): still
-            // SPREAD — a random trusted candidate beats always camping pool.first().
-            candidates.random().tag
-        } else {
-            // NEAREST with SPREAD: random among entries within `tolerance` of the
-            // fastest, so near-equals share load while a clearly-closer (e.g.
-            // domestic) entry still wins.
-            val best = measured.minOf { it.second }
-            val tolerance = 50L   // ms — mirrors the urltest tolerance
-            measured.filter { it.second <= best + tolerance }.random().first
+        // Every probe failed (the relay port may itself be filtered): still
+        // SPREAD — a random candidate beats always camping on first().
+        if (measured.isEmpty()) return candidates.random().tag to false
+        // NEAREST with SPREAD: random among entries within `tolerance` of the
+        // fastest, so near-equals share load while a clearly-closer (e.g.
+        // domestic) entry still wins.
+        val best = measured.minOf { it.second }
+        val tolerance = 50L   // ms — mirrors the urltest tolerance
+        return measured.filter { it.second <= best + tolerance }.random().first to true
+    }
+
+    /** Hydra step 3: pick the onion ENTRY among TRUSTED VLESS relays by
+     *  reachability + NEAREST-with-SPREAD, persisted as the sticky guard. Run
+     *  once before building the onion config (in [start]). A no-op when a valid
+     *  trusted entry is already pinned — preserves the Tor-guard property (pick
+     *  once, keep; don't reshuffle every launch). Only the FIRST pick (or a pick
+     *  after the pinned entry leaves the eligible set) probes; confirmed-block
+     *  rotation is handled separately by [rotateEntry]. With a single trusted
+     *  entry this degrades to today's behaviour; it spreads only once >1 trusted
+     *  entry exists (e.g. гидра promotes more domestic relays to trusted).
+     *
+     *  An account with its own paid endpoints draws the guard from THOSE, and
+     *  only falls back to the public pool when none of them answer — the paid
+     *  entry is the product, but a formed chain outranks owning it.
+     *  Blocking — called from [start] which already runs off-main. */
+    private fun selectEntryIfNeeded() {
+        onionEntryReachable = false
+        if (!onionMode() || localProxyMode()) return
+        val all = trustedVlessEntries()
+        if (all.isEmpty()) return   // no trusted entry -> onion can't form -> single-hop fallback
+        val mine = privateVlessEntries()
+        val field = mine.ifEmpty { all }
+        val p = prefs()
+        val cur = p?.getString(KEY_ENTRY, null)
+        field.firstOrNull { it.tag == cur }?.let { pinned ->
+            // Keep the pinned guard (Tor-guard property), but confirm it's reachable —
+            // the verdict gates onion-vs-single-hop. A blocked guard => single-hop.
+            onionEntryReachable = probeLatencyMs(pinned.server, pinned.port) != null
+            // A pinned PAID node that went silent falls through to re-selection
+            // (its siblings, then the public pool) instead of collapsing the whole
+            // chain onto one dead address. Note a public pin under a paying account
+            // never matches `field` at all, so the purchase re-pins on its own.
+            if (onionEntryReachable || mine.isEmpty()) return
+        }
+        var (pickTag, reachable) = probeAndPick(field)
+        if (!reachable && mine.isNotEmpty()) {
+            probeAndPick(all).let { pickTag = it.first; reachable = it.second }
         }
         p?.edit()?.putString(KEY_ENTRY, pickTag)?.apply()
-        // The chosen entry carries traffic only if it was among the reachable probes;
-        // an all-probes-failed random pick is NOT reachable -> single-hop fallback.
-        onionEntryReachable = measured.any { it.first == pickTag }
-        android.util.Log.i("RCQsingbox", "onion entry selected -> $pickTag (trusted=${candidates.size}, reachable=${measured.size})")
+        // The chosen entry carries traffic only if it answered a probe; an
+        // all-probes-failed pick is NOT reachable -> single-hop fallback.
+        onionEntryReachable = reachable
+        android.util.Log.i("RCQsingbox", "onion entry selected -> $pickTag (trusted=${all.size}, paid=${mine.size}, reachable=$reachable)")
     }
 
     private var box: rcqbox.BoxService? = null
@@ -418,7 +462,16 @@ object SingBoxTransport {
             })
         } else if (onionMode() && vless.size >= 2 && onionEntryReachable) {
             val entry = stickyEntry(vless)          // O4: persisted guard, not just vless.first()
-            val exits = vless.filter { it.tag != entry.tag }
+            // The EXITS stay public even for an account that owns nodes. Nothing
+            // on the client's side of the wire ever sees an exit address, so a
+            // private one buys no reachability; what it costs is the mixing —
+            // a private exit would carry one tenant's traffic and nobody else's,
+            // which is the opposite of what the second hop is for. It also keeps
+            // the chain buildable with no change to the public relays: the paid
+            // ENTRY is the only machine that must be allowed to forward onward.
+            val mineTags = BrokerRelayStore.privateTags()
+            val exits = vless.filter { it.tag != entry.tag && it.tag !in mineTags }
+                .ifEmpty { vless.filter { it.tag != entry.tag } }
             outbounds.put(JSONObject().apply {
                 put("type", "urltest")
                 put("tag", "out")
@@ -442,7 +495,14 @@ object SingBoxTransport {
             // onion user through a relay they didn't vouch for would expose their IP +
             // destination island. The domestic bundled entry keeps this reachable for a
             // blocked user even when the foreign trusted relays are down.
-            val trusted = RelayConfigStore.currentRelays()
+            //
+            // The account's OWN endpoints lead this race. Without them a paying
+            // customer whose chain failed to form would single-hop over exactly
+            // the signed-config addresses a censor downloads in one request — the
+            // pool they bought their way out of — while the nodes nobody can
+            // enumerate sat unused at the one moment they were needed.
+            val trusted = (BrokerRelayStore.privateRelays() + RelayConfigStore.currentRelays())
+                .distinctBy { "${it.proto}:${it.server}:${it.port}" }
             outbounds.put(JSONObject().apply {
                 put("type", "urltest")
                 put("tag", "out")
