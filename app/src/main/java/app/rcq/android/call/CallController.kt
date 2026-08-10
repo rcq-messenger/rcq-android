@@ -130,6 +130,54 @@ class CallController(
         // live call that ICE could have recovered.
         rtc.onDisconnected = { scope.launch { onIceDisconnected() } }
         rtc.onFailed = { scope.launch { onIceFailed() } }
+
+        // Give a live call a control surface that does not depend on an Activity.
+        // Android has no CallKit, so hanging up meant reaching the in-app
+        // CallScreen, and any path that leaves a connected call without
+        // MainActivity in front leaves the user talking with no way to stop
+        // (reported on 0.100 after accepting from the lock screen). Driven off
+        // the state flow rather than from each transition, so a state this file
+        // grows later cannot forget to raise it.
+        scope.launch {
+            _state.collect { s ->
+                val call = s.info
+                when {
+                    call == null || s is State.Ended ->
+                        app.rcq.android.push.Push.cancelOngoingCall(appContext)
+                    // An unanswered incoming call is the RINGING notification's
+                    // job, not this one; showing both would offer End twice for
+                    // one call and race the decline path.
+                    s is State.Incoming -> Unit
+                    else -> app.rcq.android.push.Push.showOngoingCall(
+                        appContext, call.id, call.peerNickname, connected = s is State.Connected,
+                    )
+                }
+            }
+        }
+        registerHangUpReceiver()
+    }
+
+    /** The End button on the ongoing-call notification. Registered at runtime
+     *  rather than in the manifest: the only object that can end a call is this
+     *  controller, and a manifest receiver would have to find its way back to a
+     *  live instance that may not exist. Explicit + NOT_EXPORTED, and it checks
+     *  the call id, so a stale PendingIntent cannot end a later call. */
+    private fun registerHangUpReceiver() {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, intent: android.content.Intent?) {
+                val id = intent?.getStringExtra(app.rcq.android.push.Push.EXTRA_CALL_ID) ?: return
+                if (_state.value.info?.id == id) hangUp()
+            }
+        }
+        val filter = android.content.IntentFilter(app.rcq.android.push.Push.ACTION_HANG_UP)
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                appContext.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                appContext.registerReceiver(receiver, filter)
+            }
+        }
     }
 
     // ── public API ──────────────────────────────────────────────────────

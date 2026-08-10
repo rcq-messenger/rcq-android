@@ -49,6 +49,12 @@ object Push {
     const val CHANNEL_CALLS = "rcq_calls"
     const val CHANNEL_CALLS_RING = "rcq_calls_ring"
     private const val CALL_NOTIF_ID = 0x2C01
+    private const val ONGOING_CALL_NOTIF_ID = 0x2C02
+    /** Broadcast the ongoing-call notification's End button sends; handled by a
+     *  receiver the live CallController registers (no manifest component, since
+     *  the only thing that can end a call is the controller that owns it). */
+    const val ACTION_HANG_UP = "app.rcq.android.CALL_HANG_UP"
+    const val EXTRA_CALL_ID = "call_id"
 
     /** Intent extras a message notification tap carries into [MainActivity]
      *  so it can open the right thread (and switch to the right account). */
@@ -919,6 +925,52 @@ object Push {
 
     fun cancelCallNotification(ctx: Context) {
         runCatching { NotificationManagerCompat.from(ctx).cancel(CALL_NOTIF_ID) }
+    }
+
+    /** The control surface for a call that is already up.
+     *
+     *  Android has no CallKit: the only place to hang up is the in-app
+     *  CallScreen overlay, which exists only while MainActivity is in front. Any
+     *  path that leaves a live call without that Activity leaves the user
+     *  connected with no way out — reported on 0.100 after accepting from the
+     *  lock screen, where the hand-off back to MainActivity did not land. Rather
+     *  than chase each such path, give the call a surface that does not depend on
+     *  an Activity at all: tapping returns to the call, and End works from the
+     *  shade even if the UI never appears.
+     *
+     *  Separate id from the incoming-call notification so dismissing the ring
+     *  never takes the live call's controls with it. */
+    fun showOngoingCall(ctx: Context, callId: String, peer: String, connected: Boolean) {
+        ensureChannels(ctx)
+        val open = PendingIntent.getActivity(
+            ctx, 2,
+            Intent(ctx, app.rcq.android.MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val end = PendingIntent.getBroadcast(
+            ctx, 3,
+            Intent(ACTION_HANG_UP).setPackage(ctx.packageName).putExtra(EXTRA_CALL_ID, callId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notif = NotificationCompat.Builder(ctx, CHANNEL_CALLS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(peer)
+            .setContentText(ctx.getString(if (connected) R.string.call_ongoing else R.string.call_connecting))
+            .setSubText(ctx.getString(R.string.call_return))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setShowWhen(false)
+            .setContentIntent(open)
+            .addAction(0, ctx.getString(R.string.call_hangup), end)
+            .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(ONGOING_CALL_NOTIF_ID, notif) }
+    }
+
+    fun cancelOngoingCall(ctx: Context) {
+        runCatching { NotificationManagerCompat.from(ctx).cancel(ONGOING_CALL_NOTIF_ID) }
     }
 
     /** Caller cancelled before pickup ({kind:"end"}): drop the offer, remove the

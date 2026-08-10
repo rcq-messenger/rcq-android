@@ -1639,11 +1639,33 @@ private fun Composer(
     // The draft lives HERE (not in ChatScreen) so a keystroke recomposes only
     // the composer, not the header + message list. Seeded from / persisted to
     // the process-lifetime ChatDrafts map, keyed by thread.
-    var draft by remember(threadKey) { mutableStateOf(ChatDrafts.byThread[threadKey] ?: "") }
-    val setDraft: (String) -> Unit = { v ->
-        draft = v
+    // TextFieldValue, not String: the caret position has to be readable, or
+    // anything inserted from outside the keyboard lands at the end of the draft
+    // instead of where the user is typing (reported on 0.100 for the emoticon
+    // panel). Everything downstream still reads the plain text through `draft`.
+    var field by remember(threadKey) {
+        mutableStateOf((ChatDrafts.byThread[threadKey] ?: "").let { TextFieldValue(it, TextRange(it.length)) })
+    }
+    val draft = field.text
+    val persistDraft: (String) -> Unit = { v ->
         if (v.isBlank()) ChatDrafts.byThread.remove(threadKey) else ChatDrafts.byThread[threadKey] = v
         onTyping(v.isNotBlank())
+    }
+    // Replace the whole draft and park the caret at its end. Used where the new
+    // text IS the whole draft (mention autocomplete, clearing after send).
+    val setDraft: (String) -> Unit = { v ->
+        field = TextFieldValue(v, TextRange(v.length))
+        persistDraft(v)
+    }
+    // Insert AT the caret, replacing any selection, and leave the caret after
+    // what was inserted so a second pick continues where the first left off.
+    val insertAtCaret: (String) -> Unit = { s ->
+        val text = field.text
+        val start = minOf(field.selection.start, field.selection.end).coerceIn(0, text.length)
+        val end = maxOf(field.selection.start, field.selection.end).coerceIn(start, text.length)
+        val next = text.substring(0, start) + s + text.substring(end)
+        field = TextFieldValue(next, TextRange(start + s.length))
+        persistDraft(next)
     }
     // Hold-to-record: holding the mic records, releasing sends, sliding up past
     // the threshold cancels (WhatsApp/Telegram-style). The trailing button
@@ -1696,7 +1718,7 @@ private fun Composer(
                 }
             }
         }
-        if (showEmoji && !recording) EmoticonPanel(onPick = { setDraft(draft + it) })
+        if (showEmoji && !recording) EmoticonPanel(onPick = insertAtCaret)
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
@@ -1741,8 +1763,12 @@ private fun Composer(
                     // Codes now show as ":code:" text in the composer and still
                     // render as GIFs once the message is sent/received.
                     BasicTextField(
-                        value = draft,
-                        onValueChange = setDraft,
+                        value = field,
+                        onValueChange = { v ->
+                            val changed = v.text != field.text
+                            field = v
+                            if (changed) persistDraft(v.text)
+                        },
                         textStyle = androidx.compose.ui.text.TextStyle(color = c.textPrimary, fontSize = 15.sp),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
                         keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
@@ -1763,8 +1789,12 @@ private fun Composer(
                         if (canSend) {
                             Modifier.clickable {
                                 val body = draft.trim()
-                                draft = ""
+                                field = TextFieldValue("")
                                 ChatDrafts.byThread.remove(threadKey)
+                                // The emoticon panel stayed up after sending, so
+                                // the next message was composed against a keyboard
+                                // that wasn't there (reported on 0.100).
+                                showEmoji = false
                                 onSend(body)
                             }
                         } else {

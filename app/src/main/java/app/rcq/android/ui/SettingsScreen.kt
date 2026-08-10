@@ -560,6 +560,8 @@ private fun SettingsRoot(
                                         bugError = context.getString(R.string.bug_report_too_many)
                                     Session.BugReportResult.CLOSED ->
                                         bugError = context.getString(R.string.bug_report_closed)
+                                    Session.BugReportResult.TOO_LONG ->
+                                        bugError = context.getString(R.string.bug_report_too_long)
                                     Session.BugReportResult.FAILED ->
                                         bugError = context.getString(R.string.bug_report_failed)
                                 }
@@ -580,7 +582,7 @@ private fun SettingsRoot(
                         bugError?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
                         OutlinedTextField(
                             value = bugText,
-                            onValueChange = { if (it.length <= 1000) bugText = it },
+                            onValueChange = { if (it.length <= session.bugReportTextLimit) bugText = it },
                             modifier = Modifier.fillMaxWidth(),
                             minLines = 3,
                             placeholder = { Text(stringResource(R.string.bug_report_placeholder), color = c.textSecondary) },

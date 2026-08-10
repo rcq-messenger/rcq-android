@@ -425,10 +425,17 @@ private fun RcqApp(session: Session) {
     // nothing else changed; bound to that exact call id + an age bound so a late
     // unlock/connect doesn't answer a different or already-dead call.
     val wsConnected by session.connected.collectAsState()
-    val acceptedCallId by app.rcq.android.call.IncomingCallStore.acceptedCallId.collectAsState()
-    LaunchedEffect(state, locked, wsConnected, acceptedCallId) {
-        if (state is UiState.Registered && !locked && wsConnected) {
-            val cid = acceptedCallId ?: return@LaunchedEffect
+    // ⚠ The accepted id is COLLECTED here, not used as an effect key. Keying on
+    // it would make this effect cancel itself: the first thing the body does is
+    // clear() the very value it is keyed on, so Compose tears the coroutine down
+    // mid-handoff and whether the call gets answered comes down to where the
+    // suspension points happen to fall. Same shape as the Compose key race noted
+    // for the transport toggle. Collecting inside an effect keyed only on the
+    // gates means clear() merely delivers a null we ignore.
+    LaunchedEffect(state, locked, wsConnected) {
+        if (!(state is UiState.Registered && !locked && wsConnected)) return@LaunchedEffect
+        app.rcq.android.call.IncomingCallStore.acceptedCallId.collect { cid ->
+            if (cid == null) return@collect
             val p = app.rcq.android.call.IncomingCallStore.pending
             if (p != null && p.callId == cid) {
                 app.rcq.android.call.IncomingCallStore.clear()

@@ -304,6 +304,8 @@
     <string name="call_video_on">Video</string>
     <string name="call_flip">Flip</string>
     <string name="call_hangup">End</string>
+    <string name="call_ongoing">Call in progress</string>
+    <string name="call_return">Tap to return to the call</string>
     <string name="call_upgrade_prompt">%1$s wants to turn on video</string>
     <string name="call_upgrade_accept">Turn on</string>
     <string name="call_upgrade_decline">Not now</string>
@@ -432,6 +434,7 @@
     <string name="bug_report_too_many">You have sent a lot of reports in the last hour. Give it a little while and this will go through.</string>
     <string name="bug_report_closed">This island is not accepting reports right now.</string>
     <string name="bug_report_failed">Could not send. Check the connection and try again.</string>
+    <string name="bug_report_too_long">The text is longer than this island accepts. Shorten it a little and it will go through.</string>
     <string name="bug_report_sent">Thanks. Your report was sent.</string>
     <string name="settings_row_move_uin">Move to a new UIN</string>
     <string name="settings_row_burn">Burn account</string>

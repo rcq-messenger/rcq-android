@@ -303,6 +303,8 @@
     <string name="call_video_on">Видео</string>
     <string name="call_flip">Сменить</string>
     <string name="call_hangup">Завершить</string>
+    <string name="call_ongoing">Идёт звонок</string>
+    <string name="call_return">Нажмите, чтобы вернуться к звонку</string>
     <string name="call_upgrade_prompt">%1$s хочет включить видео</string>
     <string name="call_upgrade_accept">Включить</string>
     <string name="call_upgrade_decline">Не сейчас</string>
@@ -428,6 +430,7 @@
     <string name="bug_report_too_many">За последний час вы отправили много обращений. Подождите немного, и это уйдёт.</string>
     <string name="bug_report_closed">Этот остров сейчас не принимает обращения.</string>
     <string name="bug_report_failed">Не удалось отправить. Проверьте связь и попробуйте ещё раз.</string>
+    <string name="bug_report_too_long">Текст длиннее, чем принимает остров. Немного сократите, и он уйдёт.</string>
     <string name="bug_report_sent">Спасибо. Репорт отправлен.</string>
     <string name="settings_row_move_uin">Сменить UIN</string>
     <string name="settings_row_burn">Сжечь аккаунт</string>
