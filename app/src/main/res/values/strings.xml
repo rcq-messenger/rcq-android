@@ -994,6 +994,8 @@
     <string name="push_nudge_dismiss">Dismiss</string>
     <string name="push_channel_calls">Calls</string>
     <string name="push_channel_calls_desc">Incoming call notifications</string>
+    <string name="push_channel_call_ongoing">Call in progress</string>
+    <string name="push_channel_call_ongoing_desc">Controls for a call that is already up</string>
     <string name="notif_delivery">Push delivery</string>
     <string name="notif_categories">Categories</string>
     <string name="notif_push_on">Push is on</string>

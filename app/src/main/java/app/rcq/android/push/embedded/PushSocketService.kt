@@ -48,6 +48,11 @@ class PushSocketService : Service() {
     companion object {
         private const val TAG = "RCQpushsock"
         const val CHANNEL_ID = "rcq_push_service"
+        /** ⚠ Notification ids are app-global. This one belongs to a FOREGROUND
+         *  SERVICE, so anything else posting on it does not merely draw over this
+         *  notice — it takes over a service's lifecycle handle. 0.101 shipped the
+         *  live-call controls on this exact id; see ONGOING_CALL_NOTIF_ID in
+         *  [app.rcq.android.push.Push]. */
         private const val NOTIF_ID = 0x2C02
 
         /** Backoff bounds for reconnects. The ceiling is deliberately low: a

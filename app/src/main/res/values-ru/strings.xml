@@ -986,6 +986,8 @@
     <string name="push_nudge_dismiss">Скрыть</string>
     <string name="push_channel_calls">Звонки</string>
     <string name="push_channel_calls_desc">Уведомления о входящих звонках</string>
+    <string name="push_channel_call_ongoing">Идёт звонок</string>
+    <string name="push_channel_call_ongoing_desc">Управление уже идущим звонком</string>
     <string name="notif_delivery">Доставка push</string>
     <string name="notif_categories">Категории</string>
     <string name="notif_push_on">Push включён</string>

@@ -157,19 +157,26 @@ class CallController(
         registerHangUpReceiver()
     }
 
-    /** The End button on the ongoing-call notification. Registered at runtime
-     *  rather than in the manifest: the only object that can end a call is this
-     *  controller, and a manifest receiver would have to find its way back to a
-     *  live instance that may not exist. Explicit + NOT_EXPORTED, and it checks
-     *  the call id, so a stale PendingIntent cannot end a later call. */
+    /** The End button on the ongoing-call notification, and Decline on the ringing
+     *  one. Registered at runtime rather than in the manifest: the only object that
+     *  can end a call is this controller, and a manifest receiver would have to find
+     *  its way back to a live instance that may not exist. Explicit + NOT_EXPORTED,
+     *  and it checks the call id, so a stale PendingIntent cannot end a later call.
+     *
+     *  Declining is not the same as hanging up: the caller should be told they were
+     *  turned down, not that the call was cancelled, so route by state rather than
+     *  by which button was pressed. */
     private fun registerHangUpReceiver() {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context?, intent: android.content.Intent?) {
                 val id = intent?.getStringExtra(app.rcq.android.push.Push.EXTRA_CALL_ID) ?: return
-                if (_state.value.info?.id == id) hangUp()
+                if (_state.value.info?.id != id) return
+                if (_state.value is State.Incoming) decline() else hangUp()
             }
         }
-        val filter = android.content.IntentFilter(app.rcq.android.push.Push.ACTION_HANG_UP)
+        val filter = android.content.IntentFilter(app.rcq.android.push.Push.ACTION_HANG_UP).apply {
+            addAction(app.rcq.android.push.Push.ACTION_DECLINE_CALL)
+        }
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 appContext.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
