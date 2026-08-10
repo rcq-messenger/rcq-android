@@ -179,6 +179,17 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.RCQ" />
 
+        <!-- Decline on the ringing notification when no CallController is alive
+             (app killed, offer arrived over push). exported=false; the broadcast
+             is sent with an explicit package from our own PendingIntent. -->
+        <receiver
+            android:name=".call.CallActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.rcq.android.CALL_DECLINE" />
+            </intent-filter>
+        </receiver>
+
         <!-- UnifiedPush: the distributor (ntfy, …) delivers the server's POSTed
              wake payload here. exported=false; the distributor binds by action. -->
         <service

@@ -48,12 +48,32 @@ object Push {
     private const val CHANNEL_MESSAGES_LEGACY = "rcq_messages"
     const val CHANNEL_CALLS = "rcq_calls"
     const val CHANNEL_CALLS_RING = "rcq_calls_ring"
+    /** The live call's controls. Deliberately NOT the ringing channels: those are
+     *  IMPORTANCE_HIGH so a full-screen intent can fire, and a high-importance
+     *  channel pops a heads-up — which meant the "tap to return" notice slid over
+     *  the call screen the user was already looking at. Low importance keeps it in
+     *  the shade, which is the only place it is needed. */
+    const val CHANNEL_CALL_ONGOING = "rcq_call_ongoing"
     private const val CALL_NOTIF_ID = 0x2C01
-    private const val ONGOING_CALL_NOTIF_ID = 0x2C02
+    /** ⚠ NOT 0x2C02: that is [app.rcq.android.push.embedded.PushSocketService]'s
+     *  foreground-service notification. Shipping the live-call controls on that id
+     *  in 0.101 made the two overwrite each other — starting a call replaced the
+     *  push socket's notice, ending one cancelled a foreground service's
+     *  notification, and the socket re-posting its own wiped the End button back
+     *  off the shade. That is why End "немного помогает": it was there only until
+     *  the push socket next touched its notice. A notification id is global to the
+     *  app; every new one has to be checked against the whole app, not against its
+     *  own file. */
+    private const val ONGOING_CALL_NOTIF_ID = 0x2C03
     /** Broadcast the ongoing-call notification's End button sends; handled by a
      *  receiver the live CallController registers (no manifest component, since
      *  the only thing that can end a call is the controller that owns it). */
     const val ACTION_HANG_UP = "app.rcq.android.CALL_HANG_UP"
+    /** Broadcast the RINGING notification's Decline button sends. Two handlers on
+     *  purpose: the live CallController (which can tell the caller they were
+     *  declined) and a manifest receiver (which still tears the ring down when the
+     *  app was killed and the offer arrived over push, where no controller exists). */
+    const val ACTION_DECLINE_CALL = "app.rcq.android.CALL_DECLINE"
     const val EXTRA_CALL_ID = "call_id"
 
     /** Intent extras a message notification tap carries into [MainActivity]
@@ -221,6 +241,24 @@ object Push {
                         .build()
                     setSound(ring, attrs)
                     enableVibration(true)
+                },
+            )
+        }
+        if (nm.getNotificationChannel(CHANNEL_CALL_ONGOING) == null) {
+            nm.createNotificationChannel(
+                // A call that is already up. LOW so it sits in the shade instead of
+                // sliding a heads-up over the call screen every time the state
+                // changes (connecting → in progress) — reported as "беда с экранами
+                // вызова и самого звонка".
+                NotificationChannel(
+                    CHANNEL_CALL_ONGOING,
+                    ctx.getString(R.string.push_channel_call_ongoing),
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = ctx.getString(R.string.push_channel_call_ongoing_desc)
+                    setSound(null, null)
+                    enableVibration(false)
+                    setShowBadge(false)
                 },
             )
         }
@@ -862,12 +900,14 @@ object Push {
         val fromUin = json.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
         ensureChannels(ctx)
         val nickname = str("nickname") ?: "#$fromUin"
+        val media = str("media") ?: "video"
+        val video = media == "video"
         IncomingCallStore.offer(
             IncomingCallStore.Pending(
                 callId = callId,
                 fromUin = fromUin,
                 nickname = nickname,
-                media = str("media") ?: "video",
+                media = media,
                 sdp = sdp,
             ),
         )
@@ -876,6 +916,26 @@ object Push {
         }
         val pi = PendingIntent.getActivity(
             ctx, 1, full,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        // Answer/Decline ON THE NOTIFICATION. With the screen on and unlocked a
+        // full-screen intent is only ever a heads-up (see below), and that heads-up
+        // used to carry no buttons at all: the phone rang, nothing offered to pick
+        // up, and the notice slid away into the shade — "пропадает сам экран вызова,
+        // только мелодия играет". Answer goes through IncomingCallActivity because
+        // accepting has to bring an Activity forward anyway; Decline is a broadcast
+        // so declining never flashes a UI.
+        val answerPi = PendingIntent.getActivity(
+            ctx, 4,
+            Intent(ctx, IncomingCallActivity::class.java)
+                .setAction(IncomingCallActivity.ACTION_ANSWER)
+                .putExtra(IncomingCallActivity.EXTRA_CALL_ID, callId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val declinePi = PendingIntent.getBroadcast(
+            ctx, 5,
+            Intent(ACTION_DECLINE_CALL).setPackage(ctx.packageName).putExtra(EXTRA_CALL_ID, callId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         // On Android 14+ USE_FULL_SCREEN_INTENT is special-access and may be
@@ -909,16 +969,21 @@ object Push {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
             android.util.Log.w("RCQpush", "incoming call: notifications disabled — call UI cannot be shown")
         }
+        val caller = androidx.core.app.Person.Builder().setName(nickname).setImportant(true).build()
         val notif = NotificationCompat.Builder(ctx, if (activityWillRing) CHANNEL_CALLS else CHANNEL_CALLS_RING)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(nickname)
-            .setContentText(ctx.getString(R.string.call_incoming))
+            .setContentText(ctx.getString(if (video) R.string.call_incoming_video else R.string.call_incoming))
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setOngoing(true)
             .setAutoCancel(false)
             .setFullScreenIntent(pi, true)
             .setContentIntent(pi)
+            // CallStyle draws the system's own incoming-call layout (big Answer /
+            // Decline, caller's name) from API 31, and on older releases the compat
+            // shim falls back to the same two actions on an ordinary notification.
+            .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, answerPi))
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(CALL_NOTIF_ID, notif) }
     }
@@ -953,7 +1018,10 @@ object Push {
             Intent(ACTION_HANG_UP).setPackage(ctx.packageName).putExtra(EXTRA_CALL_ID, callId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notif = NotificationCompat.Builder(ctx, CHANNEL_CALLS)
+        // The LOW-importance channel, not the ringing one: on the ringing channel
+        // this popped a heads-up across the call screen the user was already
+        // looking at, and did it again on every state change.
+        val notif = NotificationCompat.Builder(ctx, CHANNEL_CALL_ONGOING)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(peer)
             .setContentText(ctx.getString(if (connected) R.string.call_ongoing else R.string.call_connecting))

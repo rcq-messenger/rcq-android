@@ -64,6 +64,7 @@ class IncomingCallActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (answerFromNotification(intent)) return
         showOverLockscreen()
         if (bind(IncomingCallStore.pending) == null) { finish(); return }
         ringer = Ringer(this).also { it.startIncoming() }
@@ -89,10 +90,31 @@ class IncomingCallActivity : ComponentActivity() {
         }
     }
 
+    /** Answer tapped on the notification rather than on this screen. There is no UI
+     *  to draw: take the call and hand straight off to MainActivity. Returns true
+     *  when the intent was that, so onCreate stops (this Activity is finishing).
+     *
+     *  Bound to the call id the button was built for, so a button left over from an
+     *  earlier ring cannot answer the call that replaced it. */
+    private fun answerFromNotification(i: Intent?): Boolean {
+        if (i?.action != ACTION_ANSWER) return false
+        val wanted = i.getStringExtra(EXTRA_CALL_ID)
+        val p = IncomingCallStore.pending
+        if (p == null || (wanted != null && p.callId != wanted)) {
+            Push.cancelCallNotification(this)
+            finish()
+            return true
+        }
+        bind(p)
+        onAccept()
+        return true
+    }
+
     /** A second call replaced the parked offer while this was showing (singleTask
      *  re-delivery) — resync the UI + cancel-match + ring to the new call. */
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        if (answerFromNotification(intent)) return
         if (bind(IncomingCallStore.pending) == null) { dismiss(); return }
         ringer?.stop()
         ringer = Ringer(this).also { it.startIncoming() }
@@ -137,8 +159,21 @@ class IncomingCallActivity : ComponentActivity() {
         finish()
     }
 
+    /** Declining goes through the same broadcast the notification's Decline button
+     *  sends, so the two buttons cannot behave differently: a live CallController
+     *  tells the caller they were declined (rather than leaving them on "Calling…"
+     *  until their own 60s timeout), and the manifest receiver tears the ring down
+     *  even when no controller exists. [dismiss] still runs locally because this
+     *  screen must close whether or not anything answered the broadcast. */
     private fun onDecline() {
-        IncomingCallStore.clearIf(callId)
+        val id = callId
+        runCatching {
+            sendBroadcast(
+                Intent(Push.ACTION_DECLINE_CALL)
+                    .setPackage(packageName)
+                    .putExtra(Push.EXTRA_CALL_ID, id),
+            )
+        }
         dismiss()
     }
 
@@ -160,6 +195,9 @@ class IncomingCallActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_CANCEL = "app.rcq.android.CALL_CANCELLED"
+        /** Answer pressed on the ringing notification (as opposed to on this
+         *  screen, which may never have been shown at all). */
+        const val ACTION_ANSWER = "app.rcq.android.CALL_ANSWER"
         const val EXTRA_CALL_ID = "call_id"
     }
 }
