@@ -453,14 +453,50 @@ object SingBoxTransport {
             })
             trusted.forEach { outbounds.put(if (it.proto == "hysteria2") hysteria2Outbound(it) else vlessOutbound(it)) }
         } else {
-            outbounds.put(JSONObject().apply {
-                put("type", "urltest")
-                put("tag", "out")
-                put("outbounds", JSONArray(rs.map { it.tag }))
-                put("url", RelayConfigStore.probeUrl)
-                put("interval", "5m")
-                put("tolerance", 50)
-            })
+            // PAID NODES FIRST. Somebody who buys private endpoints was getting
+            // them thrown into one latency race against the fourteen everybody
+            // has, and losing it about as often as winning: the thing they paid
+            // for was carrying a minority of their traffic. What is sold is a
+            // route nobody else is on, so it IS the route.
+            //
+            // The shared pool stays in the config underneath rather than being
+            // dropped: a private node that dies or gets blocked must not leave
+            // a paying customer worse off than a free one. sing-box picks the
+            // best live member of a urltest, so `out` racing only the paid
+            // nodes with the public urltest as its last member gives exactly
+            // that: theirs while any of theirs answers, everyone's when none do.
+            val mine = BrokerRelayStore.privateRelays()
+            val shared = rs.filter { r -> mine.none { it.tag == r.tag } }
+            if (mine.isNotEmpty() && shared.isNotEmpty()) {
+                outbounds.put(JSONObject().apply {
+                    put("type", "urltest")
+                    put("tag", "shared")
+                    put("outbounds", JSONArray(shared.map { it.tag }))
+                    put("url", RelayConfigStore.probeUrl)
+                    put("interval", "5m")
+                    put("tolerance", 50)
+                })
+                outbounds.put(JSONObject().apply {
+                    put("type", "urltest")
+                    put("tag", "out")
+                    put("outbounds", JSONArray(mine.map { it.tag } + "shared"))
+                    put("url", RelayConfigStore.probeUrl)
+                    // Wide tolerance so a shared node being a few tens of
+                    // milliseconds quicker does not pull a paying customer off
+                    // their own node; only a real failure should.
+                    put("interval", "5m")
+                    put("tolerance", 3000)
+                })
+            } else {
+                outbounds.put(JSONObject().apply {
+                    put("type", "urltest")
+                    put("tag", "out")
+                    put("outbounds", JSONArray(rs.map { it.tag }))
+                    put("url", RelayConfigStore.probeUrl)
+                    put("interval", "5m")
+                    put("tolerance", 50)
+                })
+            }
             rs.forEach { outbounds.put(if (it.proto == "hysteria2") hysteria2Outbound(it) else vlessOutbound(it)) }
         }
 

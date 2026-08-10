@@ -118,6 +118,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
@@ -1310,6 +1311,10 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             // In-chat bridge sharing: relays a contact shared / you imported,
             // augmenting the transport pool. See RCQ/docs/bridge-sharing-design.md.
             var relayImportOpen by remember { mutableStateOf(false) }
+            // Survives the dialog closing: the whole point is to say the key
+            // landed, and a message inside a dialog that just disappeared says
+            // nothing. Null = nothing to report.
+            var keyResult by remember { mutableStateOf<Int?>(null) }
             var sharedRelays by remember { mutableStateOf(ContactRelayStore.list()) }
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.relay_shared_section), color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -1355,9 +1360,30 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 Text(stringResource(R.string.relay_import_title), color = c.accent, fontSize = 13.sp)
             }
 
+            keyResult?.let { n ->
+                AlertDialog(
+                    onDismissRequest = { keyResult = null },
+                    containerColor = c.bgSecondary,
+                    title = { Text(stringResource(R.string.relay_key_ok_title), color = c.textPrimary) },
+                    text = {
+                        Text(
+                            pluralStringResource(R.plurals.relay_key_ok_body, n, n),
+                            color = c.textSecondary, fontSize = 13.sp,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { keyResult = null }) {
+                            Text(stringResource(R.string.common_ok), color = c.accent)
+                        }
+                    },
+                )
+            }
+
             if (relayImportOpen) {
                 var token by remember { mutableStateOf("") }
                 var err by remember { mutableStateOf(false) }
+                var keyChecking by remember { mutableStateOf(false) }
+                var keyError by remember { mutableStateOf<String?>(null) }
                 AlertDialog(
                     onDismissRequest = { relayImportOpen = false },
                     containerColor = c.bgSecondary,
@@ -1373,6 +1399,12 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             if (err) Text(stringResource(R.string.relay_import_bad), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                            keyError?.let { reason ->
+                                Text(
+                                    stringResource(if (reason == "expired") R.string.relay_key_expired else R.string.relay_key_unknown),
+                                    color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp),
+                                )
+                            }
                         }
                     },
                     confirmButton = {
@@ -1391,15 +1423,41 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                                     // good, and asking it is this refresh — which
                                     // also makes the endpoints appear now rather
                                     // than at the next boot.
+                                    //
+                                    // ⚠ And the answer is now WAITED FOR. The
+                                    // dialog used to close on the spot and report
+                                    // success, so a mistyped key looked exactly
+                                    // like a working one: reported from the
+                                    // outside on the first day a key existed.
                                     BrokerRelayStore.setTenantKey(parsed.key)
-                                    relayImportOpen = false
+                                    keyChecking = true
                                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                         BrokerRelayStore.refresh()
+                                        val verdict = BrokerRelayStore.keyVerdict()
+                                        val mine = BrokerRelayStore.privateRelays().size
+                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            keyChecking = false
+                                            if (verdict == "ok") {
+                                                relayImportOpen = false
+                                                keyResult = mine
+                                            } else {
+                                                // Not ours: drop it rather than
+                                                // leave a dead key in place
+                                                // quietly failing forever.
+                                                BrokerRelayStore.setTenantKey(null)
+                                                keyError = verdict ?: "unknown"
+                                            }
+                                        }
                                     }
                                 }
                                 app.rcq.android.net.RelayInput.Unusable -> err = true
                             }
-                        }) { Text(stringResource(R.string.relay_import_add), color = c.accent) }
+                        }) {
+                            Text(
+                                stringResource(if (keyChecking) R.string.relay_key_checking else R.string.relay_import_add),
+                                color = if (keyChecking) c.textSecondary else c.accent,
+                            )
+                        }
                     },
                     dismissButton = { TextButton(onClick = { relayImportOpen = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
                 )

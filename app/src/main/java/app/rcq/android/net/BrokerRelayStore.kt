@@ -49,6 +49,8 @@ object BrokerRelayStore {
     // else here: it buys network access, not an identity, and a person with two
     // accounts on one phone bought it once.
     private const val KEY_TENANT = "tenant_key"
+    private const val KEY_PRIVATE = "private_tags"
+    private const val KEY_VERDICT = "key_verdict"
     private const val REPORT_INTERVAL_MS = 60 * 60 * 1000L  // at most hourly
     private const val PROBE_TIMEOUT_MS = 2500
     private const val MAX_PROBE = 20
@@ -82,6 +84,18 @@ object BrokerRelayStore {
         .build()
 
     /** Relays for the transport pool (cached from the last successful fetch). */
+    /** What the broker made of the key we last sent: null (none sent, or never
+     *  asked), "ok", "unknown", "expired". */
+    fun keyVerdict(): String? = if (!isReady()) null else prefs.getString(KEY_VERDICT, null)
+
+    /** Tags of the endpoints this account pays for. */
+    fun privateTags(): Set<String> =
+        if (!isReady()) emptySet() else prefs.getStringSet(KEY_PRIVATE, emptySet()) ?: emptySet()
+
+    /** The paid endpoints alone. */
+    fun privateRelays(): List<SingBoxTransport.Relay> =
+        privateTags().let { tags -> relays().filter { it.tag in tags } }
+
     fun relays(): List<SingBoxTransport.Relay> = if (!isReady()) emptyList() else runCatching {
         val raw = prefs.getString(KEY, null) ?: return emptyList()
         gson.fromJson<List<SingBoxTransport.Relay>>(raw, object : TypeToken<List<SingBoxTransport.Relay>>() {}.type) ?: emptyList()
@@ -119,9 +133,11 @@ object BrokerRelayStore {
             tenantKey()?.let { req.header("Authorization", "Bearer $it") }
             val body = fetchClient.newCall(req.build())
                 .execute().use { resp -> if (resp.isSuccessful) resp.body?.string() else null } ?: return
-            val arr = JsonParser.parseString(body).asJsonObject.getAsJsonArray("relays") ?: return
+            val root = JsonParser.parseString(body).asJsonObject
+            val arr = root.getAsJsonArray("relays") ?: return
             val out = ArrayList<SingBoxTransport.Relay>()
             val trusted = HashSet<String>()
+            val private = HashSet<String>()
             for (el in arr) {
                 val obj = el.asJsonObject
                 val r = ContactRelayStore.relayFromJson(obj) ?: continue
@@ -129,11 +145,23 @@ object BrokerRelayStore {
                 val tag = "broker-${r.server.replace(Regex("[^A-Za-z0-9]"), "-")}-${r.port}"
                 out.add(r.copy(tag = tag))
                 if (runCatching { obj.get("tier")?.asString }.getOrNull() == "trusted") trusted.add(tag)
+                // Nodes this account PAID for. The broker started saying which
+                // ones they are because without it a bought node was just
+                // another entry in the same latency race as the fourteen
+                // everybody gets, and lost it about as often as it won.
+                if (runCatching { obj.get("private")?.asBoolean }.getOrNull() == true) private.add(tag)
             }
+            // Whether the key was understood at all: null when we sent none,
+            // else ok | unknown | expired. Before this existed a mistyped key
+            // and a working one produced the same answer, so the app reported
+            // both as accepted.
+            val verdict = runCatching { root.get("key")?.takeIf { !it.isJsonNull }?.asString }.getOrNull()
             // Replace the cache with the freshest set (empty list = broker had none).
             prefs.edit()
                 .putString(KEY, gson.toJson(out))
                 .putStringSet(KEY_TRUSTED, trusted)
+                .putStringSet(KEY_PRIVATE, private)
+                .putString(KEY_VERDICT, verdict)
                 .apply()
         }
     }

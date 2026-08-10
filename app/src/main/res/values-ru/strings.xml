@@ -848,6 +848,11 @@
     <string name="relay_import_add">Добавить relay</string>
     <string name="relay_import_bad">Это не похоже на корректную ссылку relay.</string>
     <string name="relay_import_hint">rcq-relay://… или ключ доступа</string>
+    <string name="relay_key_checking">Проверяем…</string>
+    <string name="relay_key_unknown">Такой ключ нам не знаком. Проверьте, что скопировали его целиком.</string>
+    <string name="relay_key_expired">Ключ от подписки, которая закончилась. Продлите её в кабинете, и он снова заработает.</string>
+    <string name="relay_key_ok_title">Ключ принят</string>
+    <plurals name="relay_key_ok_body"><item quantity="one">Ваш %1$d узел теперь в работе. Общий пул остаётся запасным.</item><item quantity="few">Ваших %1$d узла теперь в работе. Общий пул остаётся запасным.</item><item quantity="many">Ваших %1$d узлов теперь в работе. Общий пул остаётся запасным.</item><item quantity="other">Ваших %1$d узла теперь в работе. Общий пул остаётся запасным.</item></plurals>
     <string name="relay_key_active">Ключ доступа введён</string>
     <string name="relay_key_remove">Убрать</string>
     <string name="relay_import_ok">Relay добавлен</string>
