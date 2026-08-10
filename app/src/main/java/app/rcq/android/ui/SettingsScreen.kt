@@ -1405,7 +1405,11 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                             Text(stringResource(R.string.relay_import_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
                             OutlinedTextField(
                                 value = token,
-                                onValueChange = { token = it; err = false },
+                                // ⚠ keyError has to clear too. It did not, so a
+                                // corrected key sat under the refusal the typo
+                                // had earned, and the field looked wrong while
+                                // holding the right string.
+                                onValueChange = { token = it; err = false; keyError = null },
                                 placeholder = { Text(stringResource(R.string.relay_import_hint), color = c.textSecondary) },
                                 isError = err,
                                 modifier = Modifier.fillMaxWidth(),
