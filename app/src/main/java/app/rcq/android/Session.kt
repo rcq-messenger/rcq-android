@@ -1727,14 +1727,24 @@ class Session(context: Context) {
      *  Reported by user-9547, who hit "Отправить", watched it return to
      *  "Отправить", and retried for a quarter of an hour: the server was
      *  answering 429 the whole time and nothing on screen said so. */
-    enum class BugReportResult { SENT, RATE_LIMITED, CLOSED, FAILED }
+    enum class BugReportResult { SENT, RATE_LIMITED, CLOSED, TOO_LONG, FAILED }
+
+    /** The island caps a report's text at 1000 characters, and we spend some of
+     *  that on the client tag before the text is ever sent. The composer has to
+     *  budget for the tag too, or the last stretch of what it lets you type is
+     *  rejected — a report typed to one character under the on-screen limit came
+     *  back as "проблемы со связью", and splitting it in two "fixed" it. Exposed
+     *  from here so the cap and the thing being counted cannot drift apart. */
+    val bugReportTextLimit: Int get() = 1000 - bugReportTag.length - 1
+
+    private val bugReportTag: String get() = "[Android ${app.rcq.android.BuildConfig.VERSION_NAME}]"
 
     suspend fun submitBugReportResult(
         text: String,
         attachments: List<RcqApi.ReportAttachment> = emptyList(),
     ): BugReportResult {
         val me = store.uin ?: return BugReportResult.FAILED
-        val tag = "[Android ${app.rcq.android.BuildConfig.VERSION_NAME}]"
+        val tag = bugReportTag
         val body = "$tag $text"
         return runCatching { api.report(me, body, "bug_bounty", attachments) }.fold(
             onSuccess = { BugReportResult.SENT },
@@ -1743,6 +1753,11 @@ class Session(context: Context) {
                     e.message?.contains("429") == true -> BugReportResult.RATE_LIMITED
                     // The operator switched reports off on this island.
                     e.message?.contains("403") == true -> BugReportResult.CLOSED
+                    // The island refused the CONTENT. Saying "connection problem"
+                    // for this sends people to check their wifi over a report the
+                    // network delivered perfectly well.
+                    e.message?.contains("422") == true || e.message?.contains("400") == true ->
+                        BugReportResult.TOO_LONG
                     // No HTTP status means the ANSWER never came back, which is
                     // not the same as the request never arriving: reported as
                     // "не удалось отправить" while the report sat in the list on

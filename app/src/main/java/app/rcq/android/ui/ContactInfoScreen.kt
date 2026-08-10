@@ -449,18 +449,19 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     }
 
     if (confirmRemove) {
-        AlertDialog(
-            onDismissRequest = { confirmRemove = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.ci_remove_title, nickname), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.ci_remove_body), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmRemove = false
-                    scope.launch { runCatching { session.removeContact(uin) }; onRemoved() }
-                }) { Text(stringResource(R.string.common_remove), color = DANGER) }
+        // Same dialog as the home screen. This one used to skip the question
+        // entirely and keep the history by default, so where you tapped Remove
+        // decided what happened to your messages.
+        RemoveContactDialog(
+            nickname = nickname,
+            onDismiss = { confirmRemove = false },
+            onRemove = { alsoDelete ->
+                confirmRemove = false
+                scope.launch {
+                    runCatching { session.removeContact(uin, alsoDeleteMessages = alsoDelete) }
+                    onRemoved()
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
         )
     }
 

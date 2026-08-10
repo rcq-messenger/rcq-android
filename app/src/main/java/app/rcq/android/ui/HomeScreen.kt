@@ -764,24 +764,15 @@ internal fun HomeScreen(
         )
     }
     // Removing a contact asks what to do with the messages instead of guessing.
-    // Both answers are offered as buttons, so neither is the accidental one.
+    // Shared with the profile screen so the same action cannot ask two different
+    // questions depending on where it was started from.
     removeTarget?.let { ct ->
-        AlertDialog(
-            onDismissRequest = { removeTarget = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.home_remove_title, ct.nickname), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.home_remove_body), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch { session.removeContact(ct.uin, alsoDeleteMessages = true) }
-                    removeTarget = null
-                }) { Text(stringResource(R.string.home_remove_with_chat), color = Color(0xFFE5484D)) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    scope.launch { session.removeContact(ct.uin, alsoDeleteMessages = false) }
-                    removeTarget = null
-                }) { Text(stringResource(R.string.home_remove_keep_chat), color = c.accent) }
+        RemoveContactDialog(
+            nickname = ct.nickname,
+            onDismiss = { removeTarget = null },
+            onRemove = { alsoDelete ->
+                scope.launch { session.removeContact(ct.uin, alsoDeleteMessages = alsoDelete) }
+                removeTarget = null
             },
         )
     }

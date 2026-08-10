@@ -35,6 +35,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
+import app.rcq.android.R
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -326,4 +328,46 @@ internal fun CapsuleButton(label: String, enabled: Boolean = true, modifier: Mod
             .padding(horizontal = 40.dp, vertical = 14.dp),
         contentAlignment = Alignment.Center,
     ) { Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+/**
+ * The one dialog for removing a contact.
+ *
+ * There used to be two, and each was missing what the other had: the home-screen
+ * one asked what to do with the messages but had no way out, while the profile
+ * one had Cancel and silently kept the history without asking (reported with
+ * screenshots on 0.98). Same action, two answers to the same question, depending
+ * on where you started.
+ *
+ * Three stacked choices rather than a confirm/dismiss pair, because "delete the
+ * messages too" and "keep them" are different outcomes, not a confirmation:
+ * neither should be the one you hit by reflex, and backing out has to be
+ * possible from both.
+ */
+@Composable
+internal fun RemoveContactDialog(
+    nickname: String,
+    onDismiss: () -> Unit,
+    onRemove: (alsoDeleteMessages: Boolean) -> Unit,
+) {
+    val c = RcqTheme.colors
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        title = { Text(stringResource(R.string.home_remove_title, nickname), color = c.textPrimary) },
+        text = { Text(stringResource(R.string.home_remove_body), color = c.textSecondary) },
+        confirmButton = {
+            androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.End) {
+                androidx.compose.material3.TextButton(onClick = { onRemove(true) }) {
+                    Text(stringResource(R.string.home_remove_with_chat), color = Color(0xFFE5484D))
+                }
+                androidx.compose.material3.TextButton(onClick = { onRemove(false) }) {
+                    Text(stringResource(R.string.home_remove_keep_chat), color = c.accent)
+                }
+                androidx.compose.material3.TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            }
+        },
+    )
 }
