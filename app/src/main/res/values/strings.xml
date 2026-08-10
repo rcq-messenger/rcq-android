@@ -852,6 +852,11 @@
     <string name="relay_import_add">Add relay</string>
     <string name="relay_import_bad">That isn\'t a valid relay link.</string>
     <string name="relay_import_hint">rcq-relay://… or an access key</string>
+    <string name="relay_key_checking">Checking…</string>
+    <string name="relay_key_unknown">This key is not one of ours. Check that you copied all of it.</string>
+    <string name="relay_key_expired">This key belongs to a subscription that has run out. Renew it in the console and it starts working again.</string>
+    <string name="relay_key_ok_title">Key accepted</string>
+    <plurals name="relay_key_ok_body"><item quantity="one">%1$d node of your own is now in use. The shared pool stays as a fallback.</item><item quantity="other">%1$d nodes of your own are now in use. The shared pool stays as a fallback.</item></plurals>
     <string name="relay_key_active">Access key entered</string>
     <string name="relay_key_remove">Remove</string>
     <string name="relay_import_ok">Relay added</string>
