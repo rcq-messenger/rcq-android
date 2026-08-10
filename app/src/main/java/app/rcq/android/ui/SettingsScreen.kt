@@ -92,6 +92,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
@@ -1099,10 +1100,21 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             SettingsGroup {
                 val host = session.currentServer
+                // The island's own name, asked of the island. An operator could
+                // set one and nobody ever saw it, so a self-hosted island read
+                // as a bare hostname in the one place its users look for it.
+                val islandName by produceState<String?>(initialValue = null, host) {
+                    value = if (host == RcqApi.DEFAULT_HOST) null
+                    else app.rcq.android.net.RcqApi.serverInfoOf(host)?.name?.takeIf { it.isNotBlank() }
+                }
                 SettingsRow(
                     Icons.Filled.Dns,
                     stringResource(R.string.pv_custom_server),
-                    value = if (host == RcqApi.DEFAULT_HOST) stringResource(R.string.pv_default) else host,
+                    value = when {
+                        host == RcqApi.DEFAULT_HOST -> stringResource(R.string.pv_default)
+                        islandName != null -> "$islandName · $host"
+                        else -> host
+                    },
                     onClick = onOpenCustomServer,
                 )
                 SettingsRow(

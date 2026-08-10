@@ -35,6 +35,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -1029,13 +1030,34 @@ private fun WebLinkDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 @Composable
 private fun ServerJoinDialog(host: String, hasInvite: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
+    // The island's own name and house rules, asked of the island itself. Both
+    // have been served on /server/info since islands existed and no client read
+    // either, so the admin panel carried a note saying that whatever an operator
+    // typed there changed nothing. This is the moment they are for: the one
+    // screen where somebody decides whether to go somewhere.
+    val info by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(initialValue = null, host) {
+        value = app.rcq.android.net.RcqApi.serverInfoOf(host)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.join_server_title), color = c.textPrimary) },
+        title = {
+            Text(
+                info?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.join_server_title),
+                color = c.textPrimary,
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.join_server_body, host), color = c.textSecondary, fontSize = 14.sp)
+                info?.welcome?.takeIf { it.isNotBlank() }?.let { rules ->
+                    Text(
+                        rules, color = c.textPrimary, fontSize = 13.sp,
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
                 if (hasInvite) Text(stringResource(R.string.join_server_invite), color = c.accent, fontSize = 12.sp)
             }
         },

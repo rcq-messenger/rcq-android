@@ -988,7 +988,15 @@ class RcqApi(
         val stories: Boolean = true,
         val max_accounts_per_device: Int = 5,
     )
-    data class ServerInfoResponse(val name: String = "", val capabilities: ServerCapabilities = ServerCapabilities())
+    data class ServerInfoResponse(
+        val name: String = "",
+        // The operator's welcome / rules text. It has been served since islands
+        // existed and no client read it, so the admin panel carried a warning
+        // saying that whatever you type here changes nothing.
+        val welcome: String = "",
+        val capabilities: ServerCapabilities = ServerCapabilities(),
+    )
+
 
     /** Server metadata + optional-surface flags. api.rcq.app advertises
      *  uin_shop=true; self-host rcq-server-ref defaults to false so the shop
@@ -1312,6 +1320,17 @@ class RcqApi(
     }
 
     companion object {
+    /** `/server/info` for an island we are NOT on, by host. Used before joining
+     *  one: the name and rules belong on the confirm, which is the only moment
+     *  anybody reads them. Unauthenticated by design — this is the island's
+     *  public description. Null when the island does not answer. */
+    suspend fun serverInfoOf(host: String): ServerInfoResponse? = withContext(Dispatchers.IO) {
+        runCatching {
+            RcqApi("https://$host", isPrimary = false)
+                .get("/server/info", authed = false, ServerInfoResponse::class.java)
+        }.getOrNull()
+    }
+
         const val DEFAULT_HOST = "api.rcq.app"
         const val DEFAULT_BASE_URL = "https://$DEFAULT_HOST"
 
