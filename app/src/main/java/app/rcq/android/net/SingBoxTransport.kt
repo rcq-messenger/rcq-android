@@ -261,35 +261,56 @@ object SingBoxTransport {
     fun isEnabled(ctx: Context): Boolean =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
 
-    // Forces a direct connection (NO_PROXY) so the probe is never routed
-    // through an already-engaged transport. Short timeout — a DPI'd network
-    // often hangs rather than refusing, and we don't want to stall boot.
-    private val probeClient = OkHttpClient.Builder()
-        .callTimeout(5, TimeUnit.SECONDS)
-        .proxy(Proxy.NO_PROXY)
-        .build()
-
     /** Is the backend reachable DIRECTLY (no transport)? Drives boot-time
      *  auto-engage: a `false` here means the network is blocking RCQ, so we
      *  bring the tunnel up without the user touching anything (they couldn't
-     *  reach Settings to flip the toggle anyway). Blocking — call off-main. */
-    fun probeDirect(host: String): Boolean {
-        // Retry before concluding the network is BLOCKING RCQ. A cold first
-        // connection (emulator boot, first DNS+TLS handshake) can exceed the
-        // 5s budget without the network being censored — a single-shot probe
-        // misread that as "blocked" and auto-engaged the (slow) tunnel, which
-        // is exactly the "login is slow + bypass turns on when it shouldn't"
-        // report. A real DPI block keeps timing out across all attempts, so it
-        // still auto-engages; a slow-but-working network succeeds on a warm
-        // retry and stays direct. Returns as soon as one attempt succeeds.
-        repeat(3) {
-            val ok = runCatching {
-                probeClient.newCall(Request.Builder().url("https://$host/health").get().build())
-                    .execute().use { it.isSuccessful }
-            }.getOrElse { false }
-            if (ok) return true
+     *  reach Settings to flip the toggle anyway). Blocking — call off-main.
+     *
+     *  Asks the question the way the diagnostics screen asks it: open a socket,
+     *  finish a TLS handshake against our own name. DPI kills both, so nothing
+     *  is given away on sensitivity; what goes away is the false positive.
+     *
+     *  It used to be a full `GET /health` under one five second OkHttp
+     *  `callTimeout`, which covers DNS, connect, handshake, request AND
+     *  response. On mobile Rostelecom, open and merely slow, that budget ran
+     *  out three times in a row and the app told the user their island was
+     *  blocked. Its own diagnostics on the same screen said `dir:ok` in the
+     *  same seconds, because the instrument allowed twelve seconds and stopped
+     *  at the handshake. Two questions, two budgets, one of them printed as the
+     *  verdict. What the user got for it: a tunnel nobody asked for, a banner
+     *  saying their island was down, and a move to the standby island where
+     *  they have a different number and can only receive.
+     *
+     *  Budgets grow instead of repeating: 4s, then 11s. A healthy network
+     *  answers well inside the first one; a slow one needs the second. The
+     *  total is 15s, the same wait a genuinely blocked user had before, so the
+     *  patience is paid for out of the retries rather than added on top. */
+    fun probeDirect(host: String): Boolean =
+        intArrayOf(4_000, 11_000).any { tlsReachable(host, 443, it) }
+
+    /** TCP connect plus a completed TLS handshake, both inside [budgetMs].
+     *  Certificate validation is left ON: an intercepting middlebox is not a
+     *  route to our island either. */
+    private fun tlsReachable(host: String, port: Int, budgetMs: Int): Boolean {
+        val deadline = System.currentTimeMillis() + budgetMs
+        val sock = java.net.Socket()
+        return try {
+            sock.connect(java.net.InetSocketAddress(host, port), budgetMs)
+            val left = (deadline - System.currentTimeMillis()).toInt()
+            if (left <= 0) return false
+            sock.soTimeout = left
+            val factory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+            val ssl = factory.createSocket(sock, host, port, true) as javax.net.ssl.SSLSocket
+            ssl.sslParameters = ssl.sslParameters.apply {
+                serverNames = listOf(javax.net.ssl.SNIHostName(host))
+            }
+            ssl.startHandshake()
+            runCatching { ssl.close() }
+            true
+        } catch (e: Exception) {
+            runCatching { sock.close() }
+            false
         }
-        return false
     }
 
     /** Reach the backend through whatever route is live RIGHT NOW — the tunnel
