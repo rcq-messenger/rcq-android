@@ -185,6 +185,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.layout.offset
 
 /** What a chat thread is pointed at — a 1:1 peer or a group. */
 sealed interface ChatTarget {
@@ -1008,6 +1015,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             SystemNoticeRow(m)
                         } else {
                             val senderPic = if (row.showSender) authorMember(m) else null
+                            SwipeToReply(onReply = { replyTarget = m }) {
                             MessageBubble(
                                 session, m,
                                 senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
@@ -1026,6 +1034,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 onSenderClick = if (isGroup && !m.fromMe) ({ m.senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                                 onShowReactors = { whoReactedMsg = it },
                             )
+                            }
                         }
                     }
                     is ChatRow.Album -> AlbumBubble(
@@ -2676,6 +2685,70 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
         if (bmp != null) Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else CircularProgressIndicator(color = c.accent, modifier = Modifier.size(16.dp))
         if (isVideo) Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
+    }
+}
+
+/// Telegram-style swipe-to-reply. Drag a message to the LEFT past the
+/// threshold and it becomes the reply target.
+///
+/// Reported by a user: "нажал на сообщение влево видешь, оно выделяется чтоб
+/// ответить, так ускоряет процесс, а то сейчас надо держать на него чтоб
+/// выбрать ответить". Long-press → Reply still works and is still the only way
+/// to reach the other actions; this is the shortcut for the one action people
+/// use constantly.
+///
+/// The gesture fires ONCE per drag (`fired`), on crossing the threshold rather
+/// than on release, so the haptic lands where the finger feels the catch. The
+/// row springs back either way — the reply composer opening is the feedback
+/// that it worked, not a message left sitting off-centre.
+@Composable
+private fun SwipeToReply(onReply: () -> Unit, content: @Composable () -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    val density = LocalDensity.current
+    val threshold = with(density) { 56.dp.toPx() }
+    val maxDrag = threshold * 1.4f
+    var fired by remember { mutableStateOf(false) }
+
+    Box(
+        Modifier.pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    fired = false
+                    scope.launch { offsetX.animateTo(0f) }
+                },
+                onDragCancel = {
+                    fired = false
+                    scope.launch { offsetX.animateTo(0f) }
+                },
+            ) { change, dragAmount ->
+                // Only leftward travel moves the row; a rightward drag on a
+                // row that has not moved is left alone so it can still reach
+                // whatever else wants horizontal gestures.
+                val next = (offsetX.value + dragAmount).coerceIn(-maxDrag, 0f)
+                if (next != offsetX.value) change.consume()
+                scope.launch { offsetX.snapTo(next) }
+                if (!fired && -next >= threshold) {
+                    fired = true
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onReply()
+                }
+            }
+        },
+    ) {
+        val progress = (-offsetX.value / threshold).coerceIn(0f, 1f)
+        // The arrow rides in from under the row's right edge, so the gesture
+        // says what it is doing before it happens.
+        if (progress > 0.02f) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = null,
+                tint = RcqTheme.colors.textSecondary.copy(alpha = progress),
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).size(20.dp),
+            )
+        }
+        Box(Modifier.offset { IntOffset(offsetX.value.roundToInt(), 0) }) { content() }
     }
 }
 
