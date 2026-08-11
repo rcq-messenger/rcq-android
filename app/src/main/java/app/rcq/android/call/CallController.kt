@@ -155,6 +155,45 @@ class CallController(
             }
         }
         registerHangUpReceiver()
+        // A ringing call has to survive the person leaving the app.
+        //
+        // An offer that arrives while the app is in front rings in-app, on the
+        // CallScreen. Put the app aside mid-ring and that screen goes away with
+        // it: no notification was ever posted for this call, so there was
+        // nothing left to answer from, and the call rang out. Reported as
+        // "звонят в открытое приложение, но я сворачиваю его — должен появиться
+        // пуш с кнопками принять и отклонить".
+        //
+        // So hand the ring over to the same full-screen-intent notification the
+        // backgrounded path uses, and take it back on return. Nothing is posted
+        // for a call that is already up: that one has its own ongoing surface.
+        app.rcq.android.RcqApp.onForegroundChange = { fg -> onAppForegroundChanged(fg) }
+    }
+
+    private fun onAppForegroundChanged(foreground: Boolean) {
+        val s = _state.value as? State.Incoming ?: return
+        val call = s.info
+        val offer = pendingRemoteOffer ?: return
+        if (foreground) {
+            if (!_incomingViaFsi.value) return
+            _incomingViaFsi.value = false
+            app.rcq.android.push.Push.cancelCallNotification(appContext)
+            ringer.startIncoming()
+        } else {
+            if (_incomingViaFsi.value) return
+            ringer.stop()
+            _incomingViaFsi.value = true
+            app.rcq.android.push.Push.showIncomingCall(
+                appContext,
+                JsonObject().apply {
+                    addProperty("call_id", call.id)
+                    addProperty("from_uin", call.peerUin)
+                    addProperty("sdp", offer)
+                    addProperty("media", call.media.wire)
+                    addProperty("nickname", call.peerNickname)
+                },
+            )
+        }
     }
 
     /** The End button on the ongoing-call notification, and Decline on the ringing
@@ -296,7 +335,19 @@ class CallController(
     fun toggleMic() = rtc.toggleMicMute()
     fun toggleCamera() = rtc.toggleCameraOff()
     fun flipCamera() = rtc.flipCamera()
-    fun toggleSpeaker() = rtc.toggleSpeaker()
+    /** The speaker button has to work before the call connects too.
+     *
+     *  The ringback tone is a ToneGenerator, and one picks its output when it is
+     *  constructed: flipping the AudioManager under a playing generator leaves
+     *  the tone where it started, so pressing Speaker during the ringing kept
+     *  the tone in the earpiece and looked like the button did nothing
+     *  ("если во время гудков включить кнопку динамик, звук продолжает идти для
+     *  уха"). The route change is real, it just cannot reach a tone that is
+     *  already playing — so the tone is restarted onto the new one. */
+    fun toggleSpeaker() {
+        rtc.toggleSpeaker()
+        if (_state.value is State.Outgoing) ringer.startRingback()
+    }
 
     // ── WS signalling in ──────────────────────────────────────────────────
     /** Routed from Session.handleEvent for the call_* event types. */
@@ -497,6 +548,22 @@ class CallController(
         if (_state.value is State.Ended) return
         val duration = if (connectedSince > 0) System.currentTimeMillis() - connectedSince else 0L
         logHistory(call, reason, duration)
+        // An incoming call that rang out leaves a row in the chat and, until
+        // this, nothing anywhere else: the ringing notification is cancelled as
+        // the ring ends, so someone who was away from the phone learned they
+        // had been called only by opening the app.
+        //
+        // Same test [logHistory] uses to mark the row missed, deliberately: two
+        // definitions of "missed" would drift, and the notification saying one
+        // thing while the chat says another is worse than neither.
+        if (isMissed(call, duration, reason)) {
+            app.rcq.android.push.Push.showMissedCall(
+                appContext,
+                peerUin = call.peerUin,
+                nickname = call.peerNickname,
+                video = call.media == Media.VIDEO,
+            )
+        }
         _state.value = State.Ended(call, reason)
         rtc.close()
         ringer.stop()
@@ -783,11 +850,7 @@ class CallController(
                 },
             )
         }
-        // "Missed" is narrower than "did not connect": a call I placed and
-        // cancelled, or one I declined myself, is not something waiting for me.
-        // Only an inbound call that never connected is.
-        val missed = !connected && !call.outgoing &&
-            reason !in setOf("declined", "declinedElsewhere", "busy")
+        val missed = isMissed(call, durationMs, reason)
         appendHistory(
             call.peerUin,
             call.outgoing,
@@ -796,6 +859,13 @@ class CallController(
             System.currentTimeMillis() - durationMs,
         )
     }
+
+    /** "Missed" is narrower than "did not connect": a call I placed and
+     *  cancelled, or one I declined myself, is not something waiting for me.
+     *  Only an inbound call that never connected is. */
+    private fun isMissed(call: CallInfo, durationMs: Long, reason: String): Boolean =
+        durationMs < 1000 && !call.outgoing &&
+            reason !in setOf("declined", "declinedElsewhere", "busy")
 
     private fun formatDuration(secs: Long): String = "%d:%02d".format(secs / 60, secs % 60)
 

@@ -315,6 +315,8 @@
     <string name="call_out_declined">Declined</string>
     <string name="call_out_cancelled">Cancelled</string>
     <string name="call_out_missed">Missed call</string>
+    <string name="call_missed_push">Missed call</string>
+    <string name="call_missed_video_push">Missed video call</string>
     <string name="call_out_busy">Busy</string>
     <string name="call_out_no_answer">No answer</string>
     <string name="call_out_failed">Call failed</string>
