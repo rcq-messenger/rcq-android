@@ -269,12 +269,33 @@ class WebRtcClient(private val appContext: Context) {
         servers.addAll(STUN)
         servers.addAll(turnServers)
         candHost = 0; candSrflx = 0; candRelay = 0
-        android.util.Log.i("RCQcall", "peerConnection: ${turnServers.size} TURN server(s) configured")
+        // ⚠ Calls used to run with the default policy, which gathers host and
+        // srflx candidates and puts them in the SDP. That hands the other side
+        // your LAN addresses and your real public IP, before a word is spoken
+        // and regardless of whether the messenger itself is riding a relay —
+        // WebRTC opens its own UDP sockets and does not go through sing-box.
+        // For an app whose pitch is that it does not know where you are, that
+        // was the largest hole we had, and no privacy setting could close it.
+        //
+        // RELAY forces every candidate through our TURN server: the peer sees
+        // the TURN address and nothing else. The cost is real (all media now
+        // transits our box, so bandwidth and a little latency) and accepted.
+        //
+        // The fallback matters: with RELAY and no TURN server there are no
+        // candidates at all, i.e. the call silently never connects. When creds
+        // are missing (fetch failed, offline island) keep the old behaviour
+        // rather than shipping a phone that cannot ring.
+        val relayOnly = turnServers.isNotEmpty()
+        android.util.Log.i(
+            "RCQcall",
+            "peerConnection: ${turnServers.size} TURN server(s), relayOnly=$relayOnly",
+        )
         val cfg = PeerConnection.RTCConfiguration(servers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            if (relayOnly) iceTransportsType = PeerConnection.IceTransportsType.RELAY
         }
         return factory().createPeerConnection(cfg, pcObserver)
             ?: error("could not create peer connection")
