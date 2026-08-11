@@ -142,11 +142,18 @@ class RoomMeshClient(
     private fun makePeerConnection(remoteUin: Int): PeerConnection {
         val servers = ArrayList(WebRtcClient.stunServers())
         servers.addAll(turn)
+        // Same reasoning as WebRtcClient.makePeerConnection: without RELAY every
+        // participant learns every other participant's real IP. In a room that
+        // matters MORE than in a 1:1 call, because the people in it are not
+        // necessarily each other's contacts. Falls back to the default policy
+        // when no TURN creds arrived, otherwise the room silently never
+        // connects.
         val cfg = PeerConnection.RTCConfiguration(servers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            if (turn.isNotEmpty()) iceTransportsType = PeerConnection.IceTransportsType.RELAY
         }
         return WebRtcClient.peerConnectionFactory().createPeerConnection(cfg, observerFor(remoteUin))
             ?: error("could not create room peer connection")
