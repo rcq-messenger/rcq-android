@@ -1728,10 +1728,19 @@ private fun BackupScreen(session: Session, onBack: () -> Unit) {
                     }
                 } ?: error("cannot read that file")
             }.onSuccess { r ->
-                result = if (r.unreadable > 0) {
-                    context.getString(R.string.backup_restored_unreadable, r.added, r.skipped, r.unreadable)
-                } else {
-                    context.getString(R.string.backup_restored, r.added, r.skipped)
+                // Built up rather than picked from four fixed sentences: a
+                // restore can hit any combination of these, and the two that
+                // are usually zero should not cost a phrase when they are.
+                result = buildString {
+                    append(context.getString(R.string.backup_restored, r.added, r.skipped))
+                    if (r.deletedHere > 0) {
+                        append(' ')
+                        append(context.getString(R.string.backup_restored_deleted, r.deletedHere))
+                    }
+                    if (r.unreadable > 0) {
+                        append(' ')
+                        append(context.getString(R.string.backup_restored_unreadable, r.unreadable))
+                    }
                 }
             }.onFailure { error = it.message }
             busy = null

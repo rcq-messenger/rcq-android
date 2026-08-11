@@ -3102,9 +3102,14 @@ class Session(context: Context) {
     fun allMessagesForBackup(): List<ChatMessage> =
         if (::db.isInitialized) db.all().filter { it.expiresAt == null } else emptyList()
 
-    /** Add one restored message. Returns false when it was already here: a
-     *  restore only ever ADDS, so an old archive can never eat newer history. */
-    fun insertRestoredMessage(msg: ChatMessage): Boolean =
+    /** What became of one restored message. A restore only ever ADDS, so an old
+     *  archive can never eat newer history — but "not added" has two different
+     *  meanings and the screen used to report both as "already here", which is
+     *  a lie in the second case: the message is not here and will not be. */
+    enum class RestoreInsert { ADDED, ALREADY_HERE, DELETED_HERE }
+
+    fun insertRestoredMessage(msg: ChatMessage): RestoreInsert {
+        if (!::db.isInitialized) return RestoreInsert.ALREADY_HERE
         // ⚠ honourTombstones is TRUE since 0.105. It was false, on the reading
         // that a restore is the user asking for their history back — but the
         // effect people actually hit was the opposite of what they asked for:
@@ -3113,7 +3118,25 @@ class Session(context: Context) {
         // Reported as "удаление сообщений работает фиктивно ... возможность
         // получения доступа к удалённой переписке". A delete is the clearer
         // instruction of the two, so it wins.
-        if (::db.isInitialized) runCatching { db.insert(msg, honourTombstones = true) }.getOrDefault(false) else false
+        if (runCatching { db.isDeleted(msg.id) }.getOrDefault(false)) return RestoreInsert.DELETED_HERE
+        val added = runCatching { db.insert(msg, honourTombstones = true) }.getOrDefault(false)
+        return if (added) RestoreInsert.ADDED else RestoreInsert.ALREADY_HERE
+    }
+
+    /** Re-seed the in-memory threads from the database.
+     *
+     *  ⚠ The chat screens do not read the database, they read the flows below,
+     *  and those were filled exactly once — at launch, before anything else
+     *  could write. A restore therefore landed every message in SQLite and left
+     *  every screen showing what it showed a moment earlier, so the person read
+     *  "411 added" over an empty chat list and only saw their history after
+     *  restarting the app. Reported by #100200300 as "пишет, что что-то
+     *  добавлено, но история не импортируется, чаты пусты" — followed later by
+     *  "появилось через некоторое время", which is the restart. */
+    suspend fun reloadHistoryFromDb() = withContext(Dispatchers.IO) {
+        if (::db.isInitialized) runCatching { loadMessagesFromDb() }
+        Unit
+    }
 
     /** Tombstones for the archive, so a restore cannot resurrect deletions. */
     fun deletedIdsForBackup(): List<Pair<String, Long>> =

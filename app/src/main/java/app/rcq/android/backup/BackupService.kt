@@ -40,8 +40,18 @@ object BackupService {
      *  [unreadable] is counted separately and on purpose: a line this build
      *  cannot turn into a message is neither added nor already here, and
      *  folding it into either number is how a restore reports success while
-     *  quietly handing back a shorter history. */
-    data class RestoreResult(val added: Int, val skipped: Int, val media: Int, val unreadable: Int)
+     *  quietly handing back a shorter history.
+     *
+     *  [deletedHere] is the same argument applied to deletions. A message the
+     *  person deleted on this device is not restored, by design — but counting
+     *  it as "already here" tells them it is in the chat, and it is not. */
+    data class RestoreResult(
+        val added: Int,
+        val skipped: Int,
+        val deletedHere: Int,
+        val media: Int,
+        val unreadable: Int,
+    )
 
     /** What an export actually managed to put in the file.
      *
@@ -266,6 +276,7 @@ object BackupService {
 
         var added = 0
         var skipped = 0
+        var deletedHere = 0
         var media = 0
         var unreadable = 0
         // media/<id> entries carry the decrypted bytes but not the key that
@@ -287,8 +298,11 @@ object BackupService {
                             ?.takeIf { it.expiresAt == null || it.expiresAt!! > System.currentTimeMillis() }
                         when {
                             msg == null -> unreadable++
-                            session.insertRestoredMessage(msg) -> added++
-                            else -> skipped++
+                            else -> when (session.insertRestoredMessage(msg)) {
+                                Session.RestoreInsert.ADDED -> added++
+                                Session.RestoreInsert.ALREADY_HERE -> skipped++
+                                Session.RestoreInsert.DELETED_HERE -> deletedHere++
+                            }
                         }
                         if (msg != null && !msg.mediaId.isNullOrEmpty() && !msg.mediaKey.isNullOrEmpty()) {
                             mediaKeys[msg.mediaId!!] = msg.mediaKey!!
@@ -348,6 +362,18 @@ object BackupService {
                 }
             }
         }
-        RestoreResult(added = added, skipped = skipped, media = media, unreadable = unreadable)
+        // The screens read Session's flows, not the database, and those are
+        // seeded once at launch — so without this the whole restore is invisible
+        // until the app is next started. Deliberately after every entry has been
+        // applied, tombstones included, so what appears is the end state rather
+        // than a version of the history that exists for one frame.
+        session.reloadHistoryFromDb()
+        RestoreResult(
+            added = added,
+            skipped = skipped,
+            deletedHere = deletedHere,
+            media = media,
+            unreadable = unreadable,
+        )
     }
 }
