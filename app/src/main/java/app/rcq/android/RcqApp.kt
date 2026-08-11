@@ -57,6 +57,7 @@ class RcqApp : Application() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {
                 foreground = false
+                runCatching { onForegroundChange?.invoke(false) }
                 val grace = LocalStores.lockGraceSeconds()
                 if (grace <= 0) PanicPinService.lock(applicationContext)
                 else backgroundedAt = SystemClock.elapsedRealtime()
@@ -68,6 +69,7 @@ class RcqApp : Application() {
 
             override fun onStart(owner: LifecycleOwner) {
                 foreground = true
+                runCatching { onForegroundChange?.invoke(true) }
                 val grace = LocalStores.lockGraceSeconds()
                 if (grace > 0 && backgroundedAt > 0L &&
                     SystemClock.elapsedRealtime() - backgroundedAt >= grace * 1000L
@@ -89,5 +91,14 @@ class RcqApp : Application() {
         @Volatile
         var foreground: Boolean = false
             private set
+
+        /** Notified on every whole-app foreground flip. Set by CallController,
+         *  which has to move a RINGING call between the in-app screen and the
+         *  full-screen-intent notification when the person leaves or returns:
+         *  polling [foreground] would only tell it the answer after something
+         *  else happened to ask. Single slot on purpose — one owner, and a
+         *  listener list here would outlive account switches. */
+        @Volatile
+        var onForegroundChange: ((Boolean) -> Unit)? = null
     }
 }

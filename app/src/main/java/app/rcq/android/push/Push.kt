@@ -1041,6 +1041,47 @@ object Push {
         runCatching { NotificationManagerCompat.from(ctx).cancel(ONGOING_CALL_NOTIF_ID) }
     }
 
+    /** A call that rang and was never answered.
+     *
+     *  Until this existed, an unanswered call left NOTHING behind: the ringing
+     *  notification is cancelled when the ring ends, so the only trace was a
+     *  row inside the chat, and the person found out they had been called by
+     *  opening the app. Reported as "если я пропустил аудио или видео звонок,
+     *  то должен быть пуш о пропущенном звонке".
+     *
+     *  On the messages channel deliberately — the ringing channels either ring
+     *  or are silent, and neither is right for something that already stopped
+     *  happening. Tapping opens the caller's chat, where the missed-call row is.
+     */
+    fun showMissedCall(ctx: Context, peerUin: Int, nickname: String, video: Boolean) {
+        ensureChannels(ctx)
+        val tap = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            data = android.net.Uri.parse("rcq://notif/missed/$peerUin")
+            putExtra(EXTRA_OPEN_PEER_UIN, peerUin)
+        }
+        val pi = PendingIntent.getActivity(
+            ctx, "missed:$peerUin".hashCode(), tap,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notif = NotificationCompat.Builder(ctx, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(nickname)
+            .setContentText(
+                ctx.getString(
+                    if (video) R.string.call_missed_video_push else R.string.call_missed_push,
+                ),
+            )
+            .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(ctx).notify("missed:$peerUin".hashCode(), notif)
+        }
+    }
+
     /** Caller cancelled before pickup ({kind:"end"}): drop the offer, remove the
      *  notification, and tell a showing IncomingCallActivity to finish. */
     fun dismissIncomingCall(ctx: Context, callId: String) {

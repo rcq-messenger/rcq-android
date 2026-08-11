@@ -67,7 +67,22 @@ class IncomingCallActivity : ComponentActivity() {
         if (answerFromNotification(intent)) return
         showOverLockscreen()
         if (bind(IncomingCallStore.pending) == null) { finish(); return }
-        ringer = Ringer(this).also { it.startIncoming() }
+        // ⚠ Take the notification down BEFORE ringing, or the phone rings twice.
+        //
+        // The ring notification goes out on the audible channel whenever the
+        // full-screen intent cannot take over the screen (phone unlocked and in
+        // hand), and Android loops a CallStyle ringtone for as long as that
+        // notification is posted. Tapping it opens this Activity, which rings on
+        // its own — so from the tap onwards the system ringtone and ours played
+        // over each other, reported as "два рингтона накладываются друг на друга
+        // и играют вместе". Cancelling stops the system one; this screen is now
+        // the single thing making noise, and [onStop] puts the notification back
+        // if the person leaves without answering.
+        Push.cancelCallNotification(this)
+        // The ring itself starts in onStart, which runs right after this and
+        // again on every return to the screen — one place, so coming back from
+        // the home button cannot leave a silent incoming call.
+        ringer = Ringer(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(cancelReceiver, IntentFilter(ACTION_CANCEL), Context.RECEIVER_NOT_EXPORTED)
@@ -184,6 +199,44 @@ class IncomingCallActivity : ComponentActivity() {
         Push.cancelCallNotification(this)
         ringer?.stop()
         finish()
+    }
+
+    /** Left without answering — home button, another app, the screen locking
+     *  again. The ringing has to follow the person rather than stay on a screen
+     *  they are no longer looking at, so the notification goes back up and this
+     *  screen goes quiet. Reported as a call that could not be answered after
+     *  putting the app aside mid-ring.
+     *
+     *  Only while the offer is still parked: accept and decline both clear it,
+     *  and either of those reaching onStop first would otherwise re-post a
+     *  notification for a call that is already over. */
+    override fun onStop() {
+        super.onStop()
+        if (isFinishing) return
+        val p = IncomingCallStore.pending ?: return
+        if (p.callId != callId) return
+        ringer?.stop()
+        Push.showIncomingCall(
+            this,
+            com.google.gson.JsonObject().apply {
+                addProperty("call_id", p.callId)
+                addProperty("from_uin", p.fromUin)
+                addProperty("sdp", p.sdp)
+                addProperty("media", p.media)
+                addProperty("nickname", p.nickname)
+            },
+        )
+    }
+
+    /** Coming back to the screen takes the notification down again, so the two
+     *  never ring together. */
+    override fun onStart() {
+        super.onStart()
+        val p = IncomingCallStore.pending ?: return
+        if (p.callId != callId || isFinishing) return
+        Push.cancelCallNotification(this)
+        if (ringer == null) ringer = Ringer(this)
+        ringer?.startIncoming()
     }
 
     override fun onDestroy() {
