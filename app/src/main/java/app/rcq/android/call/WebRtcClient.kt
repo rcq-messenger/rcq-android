@@ -7,6 +7,10 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -98,6 +102,7 @@ class WebRtcClient(private val appContext: Context) {
         // are no srflx candidates at all, so a call between two NATs has nothing
         // to try until TURN allocates. Ours first, Google kept as a fallback for
         // everyone whose network is fine.
+        relayUsable = null
         ownStun = urls.firstNotNullOfOrNull { url ->
             Regex("^turns?:([^:/?]+)(?::(\\d+))?").find(url)?.let { m ->
                 val host = m.groupValues[1]
@@ -109,6 +114,96 @@ class WebRtcClient(private val appContext: Context) {
 
     /** STUN on the island's own TURN host; null until credentials arrive. */
     private var ownStun: PeerConnection.IceServer? = null
+
+    /** Did a throwaway allocation actually produce a relay candidate?
+     *
+     *  null = not measured yet. Calls started before the probe finishes do NOT
+     *  force RELAY: a call that cannot connect is a worse failure than a call
+     *  that leaks an address, and this is exactly the state a user hits when
+     *  they place a call two seconds after opening the app.
+     */
+    @Volatile private var relayUsable: Boolean? = null
+
+    /** Probe whether this network can reach TURN at all, in the background.
+     *
+     *  ⚠ Why this exists: 0.103 forced iceTransportsType=RELAY whenever TURN
+     *  credentials existed. Credentials existing says nothing about the TURN
+     *  server being REACHABLE from the user's network — and where it is not,
+     *  RELAY leaves the connection with no candidates whatsoever, so the call
+     *  rings and then dies on the connect timeout. Three reports on 0.104 said
+     *  exactly that ("ждёт некоторое время и закрывается вызов"), from networks
+     *  where the pre-0.103 build called fine.
+     *
+     *  So: measure, once per credential set, on a throwaway PeerConnection that
+     *  carries no media. If a relay candidate turns up, calls are relay-only and
+     *  the address stays private. If none does, calls fall back to the old
+     *  behaviour and still connect.
+     */
+    suspend fun probeRelay() {
+        val servers = turnServers
+        if (servers.isEmpty()) {
+            relayUsable = false
+            return
+        }
+        val ok = runCatching { measureRelayReachable(servers) }.getOrDefault(false)
+        relayUsable = ok
+        android.util.Log.i("RCQcall", "relay probe: reachable=$ok")
+    }
+
+    /** Long enough for an allocation on a slow mobile link, short enough that a
+     *  call placed right after it is not left waiting. */
+    private val RELAY_PROBE_TIMEOUT_MS = 4000L
+
+    private suspend fun measureRelayReachable(
+        servers: List<PeerConnection.IceServer>,
+    ): Boolean = withContext(Dispatchers.IO) {
+        ensureInitialised(appContext)
+        val cfg = PeerConnection.RTCConfiguration(servers).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            iceTransportsType = PeerConnection.IceTransportsType.RELAY
+        }
+        val seen = CompletableDeferred<Boolean>()
+        val observer = object : PeerConnection.Observer {
+            override fun onIceCandidate(candidate: IceCandidate?) {
+                if (candidate?.sdp?.contains(" typ relay") == true) seen.complete(true)
+            }
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+                // Gathering finished without a relay candidate: there is none to be had.
+                if (state == PeerConnection.IceGatheringState.COMPLETE) seen.complete(false)
+            }
+            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+            override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
+            override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+            override fun onAddStream(stream: MediaStream?) {}
+            override fun onRemoveStream(stream: MediaStream?) {}
+            override fun onDataChannel(channel: org.webrtc.DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
+        }
+        val probe = factory().createPeerConnection(cfg, observer) ?: return@withContext false
+        try {
+            // A data channel is the cheapest way to give ICE something to gather for.
+            probe.createDataChannel("relay-probe", org.webrtc.DataChannel.Init())
+            val offer = suspendCancellableCoroutine<SessionDescription?> { cont ->
+                probe.createOffer(object : SdpObserver {
+                    override fun onCreateSuccess(sdp: SessionDescription?) { cont.resume(sdp) {} }
+                    override fun onCreateFailure(err: String?) { cont.resume(null) {} }
+                    override fun onSetSuccess() {}
+                    override fun onSetFailure(err: String?) {}
+                }, MediaConstraints())
+            } ?: return@withContext false
+            probe.setLocalDescription(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription?) {}
+                override fun onCreateFailure(err: String?) {}
+                override fun onSetSuccess() {}
+                override fun onSetFailure(err: String?) {}
+            }, offer)
+            withTimeoutOrNull(RELAY_PROBE_TIMEOUT_MS) { seen.await() } ?: false
+        } finally {
+            runCatching { probe.close() }
+        }
+    }
 
     // ── call lifecycle ──────────────────────────────────────────────────
     suspend fun createOffer(media: Media): String {
@@ -285,10 +380,15 @@ class WebRtcClient(private val appContext: Context) {
         // candidates at all, i.e. the call silently never connects. When creds
         // are missing (fetch failed, offline island) keep the old behaviour
         // rather than shipping a phone that cannot ring.
-        val relayOnly = turnServers.isNotEmpty()
+        // ⚠ Relay-only ONLY when a relay candidate was actually obtainable on this
+        // network (see probeRelay). 0.103 keyed this on "credentials exist",
+        // which is not the same thing, and on networks that cannot reach TURN it
+        // left the connection with no candidates at all — the call rang and then
+        // died on the connect timeout. Reported three times on 0.104.
+        val relayOnly = turnServers.isNotEmpty() && relayUsable == true
         android.util.Log.i(
             "RCQcall",
-            "peerConnection: ${turnServers.size} TURN server(s), relayOnly=$relayOnly",
+            "peerConnection: ${turnServers.size} TURN server(s), relayOnly=$relayOnly (probe=$relayUsable)",
         )
         val cfg = PeerConnection.RTCConfiguration(servers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN

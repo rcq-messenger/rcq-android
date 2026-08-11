@@ -1033,6 +1033,7 @@
     <string name="myreports_title">Мои обращения</string>
     <string name="myreports_empty">Вы ещё не отправляли обращений. Если отправите, ответ появится здесь.</string>
     <string name="myreports_answer">Ответ</string>
+    <string name="myreports_copied">Скопировано</string>
     <string name="myreports_status_open">Ждёт ответа</string>
     <string name="myreports_status_answered">Есть ответ</string>
     <string name="myreports_status_resolved">Решено</string>

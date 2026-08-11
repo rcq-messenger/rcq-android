@@ -3105,7 +3105,31 @@ class Session(context: Context) {
     /** Add one restored message. Returns false when it was already here: a
      *  restore only ever ADDS, so an old archive can never eat newer history. */
     fun insertRestoredMessage(msg: ChatMessage): Boolean =
-        if (::db.isInitialized) runCatching { db.insert(msg, honourTombstones = false) }.getOrDefault(false) else false
+        // ⚠ honourTombstones is TRUE since 0.105. It was false, on the reading
+        // that a restore is the user asking for their history back — but the
+        // effect people actually hit was the opposite of what they asked for:
+        // delete a message, restore any archive, and it returns, either from
+        // the archive or from the island's queue once the tombstone is gone.
+        // Reported as "удаление сообщений работает фиктивно ... возможность
+        // получения доступа к удалённой переписке". A delete is the clearer
+        // instruction of the two, so it wins.
+        if (::db.isInitialized) runCatching { db.insert(msg, honourTombstones = true) }.getOrDefault(false) else false
+
+    /** Tombstones for the archive, so a restore cannot resurrect deletions. */
+    fun deletedIdsForBackup(): List<Pair<String, Long>> =
+        if (::db.isInitialized) runCatching { db.allDeletedIds() }.getOrDefault(emptyList()) else emptyList()
+
+    /** Re-arm a tombstone that travelled in an archive. */
+    fun restoreDeletedId(id: String, at: Long) {
+        if (::db.isInitialized) runCatching { db.markDeleted(id, at) }
+    }
+
+    /** Drop a message the archive says was deleted. Needed because the archive
+     *  lists messages before tombstones, so one restored a moment ago has to be
+     *  taken back out. */
+    fun deleteRestoredMessage(id: String) {
+        if (::db.isInitialized) runCatching { db.delete(id) }
+    }
 
     /** Put a restored attachment back where [fetchImage] will find it, so the
      *  picture shows even when the blob has long aged off the island.
