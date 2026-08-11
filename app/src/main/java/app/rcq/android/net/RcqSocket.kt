@@ -38,6 +38,10 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private var ws: WebSocket? = null
     private var shouldStayConnected = false
     private var attempt = 0
+
+    /** When the current socket opened, or null if none is up. A socket that
+     *  lived past [STABLE_CONNECTION_MS] is what clears the backoff. */
+    private var connectedAt: Long? = null
     private var pingTimer: java.util.Timer? = null
 
     // Silent-death watchdog. The server answers every app-level ping with a
@@ -110,7 +114,16 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         ws = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (gen != generation) return
-                attempt = 0
+                // ⚠ NOT `attempt = 0`. Connecting is not the same as staying
+                // connected, and resetting here is what kept the reconnect
+                // storm at one second forever: a socket that opens and dies a
+                // second later cleared the backoff on the way in, so the
+                // exponential curve never got past its first step. Measured on
+                // prod 11.08 — 5317 sockets an hour, one account opening 1097
+                // of them, ~18 a minute for hours. The reset now happens in
+                // [scheduleReconnect], and only for a socket that actually
+                // lived a while.
+                connectedAt = System.currentTimeMillis()
                 lastInboundAt = System.currentTimeMillis()
                 believedConnected = true
                 startPing()
@@ -169,6 +182,16 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
      *  winner goes away for good. */
     private fun scheduleReconnect(superseded: Boolean = false) {
         if (!shouldStayConnected) return
+        // A session that held for a while earns a clean slate; one that died on
+        // arrival does not, so repeated short-lived sockets climb the backoff
+        // instead of hammering once a second. Covers every cause at once —
+        // eviction whose close code never reached us (it arrives as a failure
+        // through a relay or the CDN front, not as a 4000), a network that cuts
+        // long connections, a second install of the same account fighting for
+        // the same device slot.
+        val lived = connectedAt?.let { System.currentTimeMillis() - it } ?: 0L
+        if (lived >= STABLE_CONNECTION_MS) attempt = 0
+        connectedAt = null
         attempt += 1
         val gen = generation
         val delayMs = if (superseded) {
@@ -208,6 +231,11 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
 
         // Long and jittered on purpose: two evicted peers must not come back
         // in step, or they simply resume evicting each other in lockstep.
+        // How long a socket has to hold before the backoff is forgiven. Longer
+        // than the 25s heartbeat, so "opened, pinged once, died" does not count
+        // as a healthy session.
+        private const val STABLE_CONNECTION_MS = 60_000L
+
         private const val SUPERSEDED_BACKOFF_MS = 30_000L
         private const val SUPERSEDED_JITTER_MS = 30_000L
     }
