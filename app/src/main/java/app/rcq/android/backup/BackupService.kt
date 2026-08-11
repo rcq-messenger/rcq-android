@@ -194,6 +194,22 @@ object BackupService {
         messages.forEach { sb.append(gson.toJson(it.toRecord())).append('\n') }
         writer.entry("messages.ndjson", sb.toString().toByteArray())
 
+        // Tombstones travel with the history. Without them a restore begins with
+        // no record of what was deleted, and anything still queued on the island
+        // returns on the next drain — the "delete does not really delete"
+        // report. Ids and timestamps only, no content.
+        val tombstones = session.deletedIdsForBackup()
+        if (tombstones.isNotEmpty()) {
+            val td = StringBuilder()
+            tombstones.forEach { (id, at) ->
+                td.append(JsonObject().apply {
+                    addProperty("id", id)
+                    addProperty("at", at)
+                }.toString()).append('\n')
+            }
+            writer.entry("deleted.ndjson", td.toString().toByteArray())
+        }
+
         val local = JsonObject().apply {
             add("aliases", gson.toJsonTree(LocalStores.aliases.value))
             add("favorites", gson.toJsonTree(LocalStores.favorites.value))
@@ -276,6 +292,21 @@ object BackupService {
                         }
                         if (msg != null && !msg.mediaId.isNullOrEmpty() && !msg.mediaKey.isNullOrEmpty()) {
                             mediaKeys[msg.mediaId!!] = msg.mediaKey!!
+                        }
+                    }
+                }
+                name == "deleted.ndjson" -> {
+                    // Re-arm every tombstone the archive carries. The writer
+                    // emits this after messages.ndjson, so entries restored
+                    // earlier in this same pass are re-deleted here rather than
+                    // being kept — same end state, one extra step.
+                    String(bytes).split('\n').filter { it.isNotBlank() }.forEach { line ->
+                        runCatching {
+                            val o = JsonParser.parseString(line).asJsonObject
+                            val id = o.get("id").asString
+                            val at = o.get("at")?.asLong ?: System.currentTimeMillis()
+                            session.restoreDeletedId(id, at)
+                            session.deleteRestoredMessage(id)
                         }
                     }
                 }

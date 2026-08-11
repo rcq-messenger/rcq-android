@@ -227,6 +227,26 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.execSQL("INSERT OR IGNORE INTO deleted_ids (id, at) VALUES (?, ?)", arrayOf<Any>(id, System.currentTimeMillis()))
     }
 
+    /** Every tombstone, for the backup archive.
+     *
+     *  ⚠ These belong in a backup as much as the messages do. Without them a
+     *  restore starts with a clean slate, and anything the user had deleted
+     *  that is still sitting in the island's offline queue walks straight back
+     *  in — reported as "удаление сообщений работает фиктивно". The rows are
+     *  ids and timestamps, no content. */
+    fun allDeletedIds(): List<Pair<String, Long>> {
+        val out = ArrayList<Pair<String, Long>>()
+        db.rawQuery("SELECT id, at FROM deleted_ids", null).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getLong(1))
+        }
+        return out
+    }
+
+    /** Re-arm a tombstone carried in from a backup. */
+    fun markDeleted(id: String, at: Long) {
+        db.execSQL("INSERT OR IGNORE INTO deleted_ids (id, at) VALUES (?, ?)", arrayOf<Any>(id, at))
+    }
+
     /** True if this envelope was deleted here before. */
     fun isDeleted(id: String): Boolean =
         db.rawQuery("SELECT 1 FROM deleted_ids WHERE id = ? LIMIT 1", arrayOf(id)).use { it.moveToFirst() }

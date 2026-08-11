@@ -1,5 +1,12 @@
 package app.rcq.android.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -121,6 +128,7 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ReportCard(report: RcqApi.MyReport, onDelete: () -> Unit) {
     val c = RcqTheme.colors
@@ -154,8 +162,27 @@ private fun ReportCard(report: RcqApi.MyReport, onDelete: () -> Unit) {
             }
         }
 
+        // Long-press copies the text. Asked for in a report ("предлагаю добавить
+        // функцию скопировать в буфер обмена текст обращения аналогично как
+        // сделаны новости"): people re-send their own wording when following up,
+        // and re-typing it off a screen is the kind of small tax that stops
+        // somebody bothering.
         if (!report.reason.isNullOrBlank()) {
-            Text(report.reason, color = c.textPrimary, fontSize = 15.sp)
+            val context = LocalContext.current
+            val copied = stringResource(R.string.myreports_copied)
+            Text(
+                report.reason,
+                color = c.textPrimary,
+                fontSize = 15.sp,
+                modifier = Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("RCQ", report.reason))
+                        Toast.makeText(context, copied, Toast.LENGTH_SHORT).show()
+                    },
+                ),
+            )
         }
 
         // The answer is the whole reason this screen exists, so it gets its own
@@ -171,7 +198,21 @@ private fun ReportCard(report: RcqApi.MyReport, onDelete: () -> Unit) {
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(report.reply, color = c.textPrimary, fontSize = 14.sp)
+                val ctx = LocalContext.current
+                val copiedReply = stringResource(R.string.myreports_copied)
+                Text(
+                    report.reply,
+                    color = c.textPrimary,
+                    fontSize = 14.sp,
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("RCQ", report.reply))
+                            Toast.makeText(ctx, copiedReply, Toast.LENGTH_SHORT).show()
+                        },
+                    ),
+                )
             }
         }
     }

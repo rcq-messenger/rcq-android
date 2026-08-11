@@ -734,6 +734,11 @@ class CallController(
             val creds = withContext(Dispatchers.IO) { runCatching { turn() } }.getOrNull()
             if (creds != null) {
                 rtc.setTurn(creds.urls, creds.username, creds.credential)
+                // Measure whether this network can actually reach TURN before a
+                // call decides to be relay-only. Costs a few seconds once per
+                // credential fetch and saves the call that would otherwise ring
+                // into a timeout on a network where TURN is blocked.
+                rtc.probeRelay()
                 if (creds.urls.isEmpty()) {
                     android.util.Log.w("RCQcall", "TURN endpoint returned no servers — STUN-only call")
                 }

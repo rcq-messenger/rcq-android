@@ -1041,6 +1041,7 @@
     <string name="myreports_title">My reports</string>
     <string name="myreports_empty">You have not sent any reports. If you do, the answer appears here.</string>
     <string name="myreports_answer">Answer</string>
+    <string name="myreports_copied">Copied</string>
     <string name="myreports_status_open">Waiting</string>
     <string name="myreports_status_answered">Answered</string>
     <string name="myreports_status_resolved">Resolved</string>
