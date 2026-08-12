@@ -109,6 +109,23 @@ class CallController(
     private val _incomingViaFsi = MutableStateFlow(false)
     val incomingViaFsi: StateFlow<Boolean> = _incomingViaFsi.asStateFlow()
 
+    /** The call is running but the user has put it aside to use the app.
+     *
+     *  ⚠ Only a CONNECTED call may be minimised. A ringing one must stay in
+     *  front: the whole screen is the answer/decline surface, and a call you
+     *  can dismiss without answering is a call you will miss. Reported as
+     *  "во время звонка нельзя вернуться в список контактов" (#478) — the call
+     *  screen was drawn over everything for as long as the call existed, with
+     *  no way past it. */
+    private val _minimized = MutableStateFlow(false)
+    val minimized: StateFlow<Boolean> = _minimized.asStateFlow()
+
+    fun minimize() {
+        if (_state.value is State.Connected) _minimized.value = true
+    }
+
+    fun restoreFromMinimized() { _minimized.value = false }
+
     private var pendingRemoteOffer: String? = null
     private val pendingRemoteIce = mutableListOf<String>()
     private var pendingRenegotiationOffer: String? = null
@@ -705,6 +722,7 @@ class CallController(
         _incomingViaFsi.value = false
         _peerOffline.value = false
         _relayDead.value = false
+        _minimized.value = false
         connectTimeoutJob?.cancel()
         rtc.clearRelayWaiver()
         accepting = false
@@ -949,6 +967,7 @@ class CallController(
         _incomingViaFsi.value = false
         _peerOffline.value = false
         _relayDead.value = false
+        _minimized.value = false
         connectTimeoutJob?.cancel()
         rtc.clearRelayWaiver()
         accepting = false

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
@@ -87,6 +88,10 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     val incoming = state is CallController.State.Incoming
     val ended = state is CallController.State.Ended
 
+    // Back puts a live call aside instead of doing nothing. Only once it is
+    // connected: while it is still ringing this screen IS the answer surface.
+    androidx.activity.compose.BackHandler(enabled = connected) { controller.minimize() }
+
     KeepScreenOn()
     // Proximity blanking, but only when the earpiece is the output: on speaker,
     // in video, or before the call connects, holding a phone near your face is
@@ -151,6 +156,21 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                     .padding(top = 56.dp, end = 16.dp)
                     .size(96.dp, 140.dp)
                     .clip(RoundedCornerShape(12.dp)),
+            )
+        }
+
+        // Put the call aside and use the app. Only on a connected call, and
+        // deliberately in the corner rather than near End: the two must not be
+        // easy to confuse.
+        if (connected) {
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = stringResource(R.string.call_minimize),
+                tint = Color(0xFFB8BCC4),
+                modifier = Modifier.align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = 60.dp)
+                    .size(34.dp)
+                    .clickable { controller.minimize() },
             )
         }
 
@@ -393,3 +413,43 @@ private fun VideoRenderer(track: VideoTrack?, mirror: Boolean, modifier: Modifie
     }
     AndroidView(factory = { renderer }, modifier = modifier)
 }
+
+/** The slim bar that stands in for a call the user put aside.
+ *
+ *  Shows who and for how long, and takes one tap to go back. Deliberately the
+ *  only thing it does: hanging up from here would put End a thumb's width from
+ *  every other control on whatever screen is underneath, and the ongoing-call
+ *  notification already carries that.
+ */
+@Composable
+fun MinimizedCallBar(controller: CallController, modifier: Modifier = Modifier) {
+    val connectedAt by controller.connectedAtMs.collectAsState()
+    val info = controller.state.collectAsState().value.info ?: return
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(connectedAt) {
+        while (true) { now = System.currentTimeMillis(); delay(1000) }
+    }
+    val secs = if (connectedAt > 0) ((now - connectedAt) / 1000).coerceAtLeast(0) else 0
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(MINIMIZED_CALL_BAR_HEIGHT)
+            .background(Color(0xFF1F7A3D))
+            .clickable { controller.restoreFromMinimized() }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(Icons.Filled.Call, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Text(
+            "%s · %d:%02d".format(info.peerNickname, secs / 60, secs % 60),
+            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.width(2.dp))
+        Text(stringResource(R.string.call_return), color = Color(0xFFCDEBD7), fontSize = 12.sp)
+    }
+}
+
+/** Height of [MinimizedCallBar]; the app content is padded by the same amount
+ *  so the bar sits above it instead of over it. */
+val MINIMIZED_CALL_BAR_HEIGHT: Dp = 34.dp

@@ -320,6 +320,7 @@
     <string name="call_missed_video_push">Пропущенный видеозвонок</string>
     <string name="call_out_busy">Занято</string>
     <string name="call_out_no_answer">Нет ответа</string>
+    <string name="call_minimize">Свернуть звонок</string>
     <string name="call_relay_dead">Ретранслятор не отвечает</string>
     <string name="call_relay_dead_hint">Звонки идут через наш ретранслятор, чтобы собеседник не узнал ваш адрес. Сейчас до него не достучаться. Напрямую связь получится, но собеседник увидит ваш IP-адрес.</string>
     <string name="call_relay_dead_direct">Соединиться напрямую</string>
