@@ -321,6 +321,7 @@
     <string name="call_missed_video_push">Missed video call</string>
     <string name="call_out_busy">Busy</string>
     <string name="call_out_no_answer">No answer</string>
+    <string name="call_minimize">Put the call aside</string>
     <string name="call_relay_dead">Relay is not answering</string>
     <string name="call_relay_dead_hint">Calls go through our relay so the other side never learns your address. This one is not reachable right now. Connecting directly will work, but it shows them your IP address.</string>
     <string name="call_relay_dead_direct">Connect directly</string>

@@ -599,7 +599,17 @@ private fun RcqApp(session: Session) {
         // lets re-entry restore where the user was. (NB: the composition still
         // rebuilds on return, so the slow re-sort #9 is a separate keep-composed
         // change; this fixes the scroll-position #2.)
+        val callMinimizedNow by session.calls.minimized.collectAsState()
         val stateHolder = rememberSaveableStateHolder()
+        // Everything below the minimised-call bar moves down by exactly its
+        // height, so the bar never covers a screen's own header — which on the
+        // chat is where Back lives.
+        Box(
+            Modifier.fillMaxSize().padding(
+                top = if (callMinimizedNow) app.rcq.android.ui.MINIMIZED_CALL_BAR_HEIGHT else 0.dp,
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
         when {
             s is UiState.Registered && locked -> app.rcq.android.ui.PinLockScreen(
                 session,
@@ -755,13 +765,26 @@ private fun RcqApp(session: Session) {
             s is UiState.Registering -> Registering()
             s is UiState.Failed -> Failed(s.message, onRetry = { retryRegister() })
         }
+        }
 
         // Active 1:1 call overlay, drawn above everything while registered +
         // unlocked. Incoming calls only ring here while the app is alive (no
         // FCM/VoIP push yet).
         val callState by session.calls.state.collectAsState()
-        if (s is UiState.Registered && !locked && callState !is app.rcq.android.call.CallController.State.Idle) {
+        val callMinimized = callMinimizedNow
+        val callVisible = s is UiState.Registered && !locked &&
+            callState !is app.rcq.android.call.CallController.State.Idle
+        if (callVisible && !callMinimized) {
             app.rcq.android.ui.CallScreen(session.calls, session)
+        }
+        // The way back to a call that was put aside. Pinned to the top so it
+        // is in the same place on every screen; the content below is padded
+        // by the same height so it covers nothing (see `topInset`).
+        if (callVisible && callMinimized) {
+            app.rcq.android.ui.MinimizedCallBar(
+                controller = session.calls,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
 
         // In-app update prompt: the APK ships from the website, so we self-check
@@ -775,7 +798,14 @@ private fun RcqApp(session: Session) {
             }
         }
         update?.let { up ->
-            if (s is UiState.Registered && !locked) UpdateDialog(
+            // ⚠ Never over a call. The check runs once per launch, and a call
+            // arriving in that window put this dialog on top of the ringing
+            // screen — squarely over Accept, so the call could not be answered
+            // at all and rang out as missed. Seen while testing #478; an update
+            // notice can wait, a ringing phone cannot.
+            if (s is UiState.Registered && !locked &&
+                callState is app.rcq.android.call.CallController.State.Idle
+            ) UpdateDialog(
                 update = up,
                 downloadState = updateDownload,
                 onUpdate = { app.rcq.android.net.UpdateChecker.startDownload(context, up) },
