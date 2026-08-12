@@ -314,6 +314,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var confirmClearThread by remember { mutableStateOf(false) }
     // A picked photo/video waiting in the pre-send preview (tap to blur).
     var pendingSend by remember { mutableStateOf<PendingSend?>(null) }
+    val mediaSending by session.mediaSending.collectAsState()
+    val mediaFailed by session.mediaSendFailed.collectAsState()
     var showGroupPicker by remember { mutableStateOf(false) }
     var showRelayPicker by remember { mutableStateOf(false) }
     // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
@@ -327,6 +329,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val savedToast = stringResource(R.string.media_saved)
     val saveFailToast = stringResource(R.string.media_save_failed)
     val shareFailToast = stringResource(R.string.share_to_unreadable)
+    val mediaFailToast = stringResource(R.string.chat_media_send_failed)
     var pendingSave by remember { mutableStateOf<(() -> Unit)?>(null) }
     val storagePerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) pendingSave?.invoke()
@@ -1186,6 +1189,28 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             }
         } else {
+            // A photo produces no row until its upload finishes, so without this
+            // the screen is blank for the whole upload and the user cannot tell
+            // a slow send from one that never started (#473). Sits directly above
+            // the composer, where the message they just sent would appear.
+            if (mediaSending > 0) {
+                Row(
+                    Modifier.fillMaxWidth().background(c.bgSecondary)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = c.accent,
+                    )
+                    Text(
+                        pluralStringResource(R.plurals.chat_media_sending, mediaSending, mediaSending),
+                        color = c.textSecondary, fontSize = 13.sp,
+                    )
+                }
+            }
             Composer(
                 threadKey = threadKey,
                 isGroup = isGroup,
@@ -1433,22 +1458,31 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     // Pre-send preview: tap the media to mark it a spoiler, then Send.
+    // A failed upload used to be indistinguishable from a successful one:
+    // the dialog closed and nothing happened. Say it out loud, once.
+    LaunchedEffect(mediaFailed) {
+        if (mediaFailed > 0) {
+            android.widget.Toast.makeText(context, mediaFailToast, android.widget.Toast.LENGTH_LONG).show()
+            session.clearMediaSendFailed()
+        }
+    }
+
     pendingSend?.let { ps ->
         MediaPreviewDialog(
             pending = ps,
             onCancel = { pendingSend = null },
             onSend = { spoiler, caption ->
                 pendingSend = null
-                scope.launch {
-                    runCatching {
-                        when (ps) {
-                            is PendingSend.Photo ->
-                                if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler)
-                                else session.sendPhoto(peer!!, ps.bytes, caption, spoiler)
-                            is PendingSend.Video ->
-                                if (isGroup) session.sendGroupVideo(groupId!!, ps.v.bytes, ps.v.thumbB64, ps.v.durationSec, caption, spoiler)
-                                else session.sendVideo(peer!!, ps.v.bytes, ps.v.thumbB64, ps.v.durationSec, caption, spoiler)
-                        }
+                // NOT on this screen's scope: leaving the chat used to cancel the
+                // upload and lose the picture without a word (#473).
+                session.sendMediaDetached(if (ps is PendingSend.Video) "video" else "photo") {
+                    when (ps) {
+                        is PendingSend.Photo ->
+                            if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler)
+                            else session.sendPhoto(peer!!, ps.bytes, caption, spoiler)
+                        is PendingSend.Video ->
+                            if (isGroup) session.sendGroupVideo(groupId!!, ps.v.bytes, ps.v.thumbB64, ps.v.durationSec, caption, spoiler)
+                            else session.sendVideo(peer!!, ps.v.bytes, ps.v.thumbB64, ps.v.durationSec, caption, spoiler)
                     }
                 }
             },
