@@ -87,6 +87,19 @@ object NetworkAudit {
         BLOCKED,
     }
 
+    /** TCP reachability THROUGH a proxy — used when the obfuscated connection
+     *  is up, because that is the path calls take then. A plain connect would
+     *  measure a road nothing drives on. */
+    private fun probeVia(proxy: java.net.Proxy?, host: String, port: Int, timeoutMs: Int = 8000): Boolean {
+        if (proxy == null) return false
+        return runCatching {
+            java.net.Socket(proxy).use { s ->
+                s.connect(InetSocketAddress(host, port), timeoutMs)
+                true
+            }
+        }.getOrDefault(false)
+    }
+
     private fun probe(host: String, port: Int, sni: String?, timeoutMs: Int = 6000): Pair<Reach, String> {
         val sock = Socket()
         try {
@@ -238,23 +251,40 @@ object NetworkAudit {
         // that cannot see the thing that is broken is worse than no verdict.
         var turnOk: Boolean? = null
         app.rcq.android.call.CallDiagnostics.turnHost?.let { th ->
-            // 443 first: it is the port most likely to survive a filter, and the
-            // one the island advertises for TURN-over-TLS.
-            val tls = probe(th, 443, th, timeoutMs = 5000)
-            val plain = probe(th, 3478, null, timeoutMs = 4000)
-            turnOk = tls.first != Reach.BLOCKED || plain.first != Reach.BLOCKED
-            lines += Line(
-                "релей звонков",
-                turnOk,
-                if (turnOk == true) "доступен (443 ${short(tls.first)}, 3478 ${short(plain.first)})"
-                else "НЕДОСТУПЕН — звонки не пройдут",
-            )
-            if (turnOk != true) {
+            // ⚠ Measure the road the call will actually take. With the tunnel up
+            // the media is forwarded through it (TurnTunnel), so testing the
+            // direct path would condemn a set-up that works; with the tunnel
+            // down the media does go straight out, so the direct path is the
+            // truth. Same reason either way: report what calls will do, not what
+            // some other configuration would have done.
+            val tunnelled = SingBoxTransport.isActive
+            if (tunnelled) {
+                val viaTunnel = probeVia(SingBoxTransport.proxy(), th, 3478)
+                turnOk = viaTunnel
                 lines += Line(
-                    "почему",
-                    false,
-                    "обход не покрывает звонки: голос идёт мимо него, напрямую",
+                    "релей звонков",
+                    turnOk,
+                    if (viaTunnel) "доступен через обход" else "НЕДОСТУПЕН даже через обход",
                 )
+            } else {
+                // 443 first: it is the port most likely to survive a filter, and
+                // the one the island advertises for TURN-over-TLS.
+                val tls = probe(th, 443, th, timeoutMs = 5000)
+                val plain = probe(th, 3478, null, timeoutMs = 4000)
+                turnOk = tls.first != Reach.BLOCKED || plain.first != Reach.BLOCKED
+                lines += Line(
+                    "релей звонков",
+                    turnOk,
+                    if (turnOk == true) "доступен напрямую (443 ${short(tls.first)}, 3478 ${short(plain.first)})"
+                    else "НЕДОСТУПЕН напрямую",
+                )
+                if (turnOk != true) {
+                    lines += Line(
+                        "что делать",
+                        null,
+                        "включить обход блокировок: тогда звонки пойдут через него",
+                    )
+                }
             }
         }
 
@@ -312,7 +342,7 @@ object NetworkAudit {
             append("relay:$relaysOpen/${relays.size} ")
             append("xname:${crossName?.first?.let { short(it) } ?: "-"} ")
             append("xaddr:${crossAddr?.first?.let { short(it) } ?: "-"} ")
-            turnOk?.let { append("turn:${if (it) "ok" else "BLOCKED"} ") }
+            turnOk?.let { append("turn:${if (it) (if (SingBoxTransport.isActive) "tunnel" else "ok") else "BLOCKED"} ") }
             // What the last call on this device actually managed. Absent until
             // one has been made — the audit is also run by people whose problem
             // has nothing to do with calls.

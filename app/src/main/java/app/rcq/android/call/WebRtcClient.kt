@@ -89,8 +89,25 @@ class WebRtcClient(private val appContext: Context) {
 
     // ── TURN ───────────────────────────────────────────────────────────
     fun setTurn(urls: List<String>, username: String, credential: String) {
-        turnServers = if (urls.isEmpty()) emptyList() else listOf(
-            PeerConnection.IceServer.builder(urls)
+        CallDiagnostics.turnHost = urls.firstNotNullOfOrNull { url ->
+            Regex("^turns?:([^:/?]+)").find(url)?.groupValues?.get(1)
+        }
+        // With the obfuscated connection up, reach the relay THROUGH it. The
+        // credentials are unchanged: TURN authenticates the username, not the
+        // address the connection came from, so the island still recognises this
+        // as the same user arriving by a different road.
+        TurnTunnel.ensureRunning(CallDiagnostics.turnHost)
+        // ⚠ ADDED to the island's URLs, never substituted for them. ICE tries
+        // every server it is given and uses whichever answers, so offering both
+        // roads can only help: on a censored network the direct one is dead and
+        // the tunnel carries the call, on an open network the direct one wins on
+        // latency and the tunnel costs nothing. Replacing them would mean that
+        // any fault in the tunnel took calls away from people whose direct path
+        // was fine — trading one outage for another.
+        val tunnelled = TurnTunnel.activeUrl()
+        val effective = if (tunnelled != null && urls.isNotEmpty()) listOf(tunnelled) + urls else urls
+        turnServers = if (effective.isEmpty()) emptyList() else listOf(
+            PeerConnection.IceServer.builder(effective)
                 .setUsername(username)
                 .setPassword(credential)
                 .createIceServer(),
@@ -107,13 +124,16 @@ class WebRtcClient(private val appContext: Context) {
         // the network, not of the credentials, which are re-minted before every
         // single call. Resetting it on every refresh meant re-probing (and so
         // waiting out its timeout) on every call, including while answering one.
-        if (urls != probedUrls) {
+        // Keyed on the EFFECTIVE set: switching the tunnel on or off changes
+        // the road to the relay, and a verdict measured on the other road is
+        // worth nothing.
+        if (effective != probedUrls) {
             relayUsable = null
-            probedUrls = urls
+            probedUrls = effective
         }
-        CallDiagnostics.turnHost = urls.firstNotNullOfOrNull { url ->
-            Regex("^turns?:([^:/?]+)").find(url)?.groupValues?.get(1)
-        }
+        // ⚠ STUN is derived from the ISLAND's url, never the tunnel's: the
+        // forwarder speaks TCP, STUN is UDP, and `stun:127.0.0.1:<tcp port>`
+        // is an address nothing answers on.
         ownStun = urls.firstNotNullOfOrNull { url ->
             Regex("^turns?:([^:/?]+)(?::(\\d+))?").find(url)?.let { m ->
                 val host = m.groupValues[1]
@@ -641,6 +661,18 @@ class WebRtcClient(private val appContext: Context) {
             sharedFactory = PeerConnectionFactory.builder()
                 .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
                 .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
+                // ⚠ libwebrtc ignores the loopback adapter when it enumerates
+                // networks, which means it cannot reach a TURN server on
+                // 127.0.0.1 — and that is exactly where [TurnTunnel] puts one
+                // so that call media can ride the obfuscated connection. Left
+                // at the default, the tunnel is built, listens, and is never
+                // dialled: the probe comes back "no relay" in half a second.
+                //
+                // Clearing the mask only makes loopback usable, it does not put
+                // loopback candidates anywhere they matter: the tunnelled path
+                // is relay-only, so the sole candidate gathered is the relay
+                // address the island allocated.
+                .setOptions(PeerConnectionFactory.Options().apply { networkIgnoreMask = 0 })
                 .createPeerConnectionFactory()
         }
 
