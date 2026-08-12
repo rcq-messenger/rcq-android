@@ -319,6 +319,9 @@
     <string name="call_missed_video_push">Пропущенный видеозвонок</string>
     <string name="call_out_busy">Занято</string>
     <string name="call_out_no_answer">Нет ответа</string>
+    <string name="call_relay_dead">Ретранслятор не отвечает</string>
+    <string name="call_relay_dead_hint">Звонки идут через наш ретранслятор, чтобы собеседник не узнал ваш адрес. Сейчас до него не достучаться. Напрямую связь получится, но собеседник увидит ваш IP-адрес.</string>
+    <string name="call_relay_dead_direct">Соединиться напрямую</string>
     <string name="call_out_failed">Сбой соединения</string>
     <string name="call_out_unreachable">Не удалось дозвониться</string>
     <string name="call_out_disconnected">Связь прервалась</string>
@@ -598,6 +601,8 @@
     <string name="pv_hof_image_too_large">Картинка слишком большая. Выберите поменьше (макс ~256 КБ).</string>
     <string name="pv_hof_image_error">Не удалось загрузить картинку. Попробуйте ещё раз.</string>
     <string name="pv_network">Сеть</string>
+    <string name="pv_relay_calls">Всегда ретранслировать звонки</string>
+    <string name="pv_relay_calls_desc">Пропускать звук и видео через наш ретранслятор, чтобы собеседник не узнал ваш IP-адрес. Если выключить, качество может вырасти, но собеседник увидит ваш адрес.</string>
     <string name="pv_obfuscated">Маскировка соединения</string>
     <string name="pv_obfuscated_desc">Проводит соединение через релей, когда сеть блокирует RCQ напрямую. Повышает стабильность на ограничивающих сетях. Применяется при следующем запуске.</string>
     <string name="pv_obf_auto_disable">Не включать автоматически</string>

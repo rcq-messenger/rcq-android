@@ -76,6 +76,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     val remoteVideo by controller.remoteVideo.collectAsState()
     val incomingUpgrade by controller.incomingVideoUpgrade.collectAsState()
     val peerOffline by controller.peerOffline.collectAsState()
+    val relayDead by controller.relayDead.collectAsState()
     val connectedAt by controller.connectedAtMs.collectAsState()
     // When the offer arrived while backgrounded, the full-screen IncomingCallActivity
     // owns accept/decline; don't also show in-app accept/decline for the same call.
@@ -96,7 +97,11 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         // Remote video fills the screen when present; else an avatar.
         if (isVideo && remoteVideo != null && connected) {
             VideoRenderer(remoteVideo, mirror = false, modifier = Modifier.fillMaxSize())
-        } else {
+        } else if (!relayDead) {
+            // The relay-dead prompt occupies this same middle band. Two things
+            // centred in one space overlap, and a call screen should be showing
+            // one thing at a time anyway: while the user is being asked to make
+            // a decision, the decision is the screen.
             // Centred in the space it actually has, not tucked under the name
             // (founder). The paddings are what the two overlays above and below
             // occupy — the name block and the control cluster — so the picture
@@ -156,7 +161,34 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         ) {
             Text(info.peerNickname, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Text(statusText(state, connectedAt, peerOffline), color = Color(0xFFB8BCC4), fontSize = 15.sp)
+            Text(
+                if (relayDead) stringResource(R.string.call_relay_dead)
+                else statusText(state, connectedAt, peerOffline),
+                color = if (relayDead) Color(0xFFE5A23D) else Color(0xFFB8BCC4),
+                fontSize = 15.sp,
+            )
+        }
+
+        // The relay could not carry this call, and we know it seconds in rather
+        // than at the connect timeout. Offer the only thing that can still work,
+        // and say plainly what it costs — connecting directly hands the other
+        // side this device's address, which is exactly what relaying prevents.
+        // Never taken automatically: that trade is the user's to make.
+        if (relayDead) {
+            Column(
+                Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    stringResource(R.string.call_relay_dead_hint),
+                    color = Color(0xFFB8BCC4), fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.height(12.dp))
+                CapsuleButton(stringResource(R.string.call_relay_dead_direct)) {
+                    controller.retryWithoutRelay()
+                }
+            }
         }
 
         // Video-upgrade prompt.

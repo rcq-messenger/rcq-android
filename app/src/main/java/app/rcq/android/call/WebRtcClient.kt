@@ -136,6 +136,22 @@ class WebRtcClient(private val appContext: Context) {
      *  credentials does not throw the measurement away. */
     private var probedUrls: List<String> = emptyList()
 
+    /** The user chose, for THIS call only, to connect without the relay after
+     *  being told it could not carry the call. Never persisted: the next call
+     *  starts private again. */
+    @Volatile private var relayWaived = false
+
+    fun waiveRelayOnce() { relayWaived = true }
+
+    fun clearRelayWaiver() { relayWaived = false }
+
+    /** Is this connection currently gathering nothing but relay candidates? */
+    fun relayOnlyActive(): Boolean = turnServers.isNotEmpty() && relayUsable == true &&
+        CallPrivacy.alwaysRelay(appContext) && !relayWaived
+
+    /** Candidates gathered so far on the live connection. */
+    fun candidateCount(): Int = candHost + candSrflx + candRelay
+
     /** Has this network already been measured for TURN reachability? */
     fun relayProbed(): Boolean = relayUsable != null
 
@@ -336,6 +352,31 @@ class WebRtcClient(private val appContext: Context) {
      *  arriving earlier has to be buffered by the caller of [addRemoteIce]. */
     fun canTakeRemoteIce(): Boolean = pc?.remoteDescription != null
 
+    /** Stop forcing relay-only on the LIVE connection and re-gather.
+     *
+     *  Each side can only fix its own missing candidates: the transport policy
+     *  filters which of MY candidates exist, not which of the peer's I may talk
+     *  to. So the side whose relay failed is the side that has to waive, and a
+     *  one-sided waiver is enough to give the pair something to connect on. */
+    fun reconfigureWithoutRelay(): Boolean {
+        val pc = pc ?: return false
+        relayWaived = true
+        val servers = ArrayList<PeerConnection.IceServer>()
+        ownStun?.let { servers.add(it) }
+        servers.addAll(STUN)
+        servers.addAll(turnServers)
+        val cfg = PeerConnection.RTCConfiguration(servers).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            iceTransportsType = PeerConnection.IceTransportsType.ALL
+        }
+        val ok = pc.setConfiguration(cfg)
+        android.util.Log.w("RCQcall", "relay waived for this call, re-gathering: setConfiguration=$ok")
+        return ok
+    }
+
     fun addRemoteIce(candidateJSON: String) {
         val pc = pc ?: return
         runCatching {
@@ -431,7 +472,11 @@ class WebRtcClient(private val appContext: Context) {
         // which is not the same thing, and on networks that cannot reach TURN it
         // left the connection with no candidates at all — the call rang and then
         // died on the connect timeout. Reported three times on 0.104.
-        val relayOnly = turnServers.isNotEmpty() && relayUsable == true
+        // ⚠ Three things must all hold, and the third is new: the user has to
+        // still want relay-only. Losing that check is how a relay problem turns
+        // into "calls do not work" with no way out from the handset.
+        val relayOnly = turnServers.isNotEmpty() && relayUsable == true &&
+            CallPrivacy.alwaysRelay(appContext) && !relayWaived
         android.util.Log.i(
             "RCQcall",
             "peerConnection: ${turnServers.size} TURN server(s), relayOnly=$relayOnly (probe=$relayUsable)",
