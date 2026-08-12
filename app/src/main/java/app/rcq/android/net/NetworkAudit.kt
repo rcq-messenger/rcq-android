@@ -87,15 +87,41 @@ object NetworkAudit {
         BLOCKED,
     }
 
-    /** TCP reachability THROUGH a proxy — used when the obfuscated connection
+    /** TURN reachability THROUGH a proxy — used when the obfuscated connection
      *  is up, because that is the path calls take then. A plain connect would
-     *  measure a road nothing drives on. */
+     *  measure a road nothing drives on.
+     *
+     *  ⚠⚠ Two things here are not optional, and this instrument was wrong about
+     *  both until 13.08.
+     *
+     *  UNRESOLVED, because every relay's routing table ends in `reject` and
+     *  passes a domain_suffix of rcq.app plus a short ip_cidr list that the TURN
+     *  host's address is not on. Resolved here, the destination reaches the
+     *  relay as an address it has no rule for and is dropped.
+     *
+     *  And the CONNECT IS NOT THE MEASUREMENT: sing-box answers a SOCKS request
+     *  before it has established the leg outwards, so `Socket.connect` through
+     *  it succeeds whether or not anything is there. This used to return true
+     *  unconditionally whenever the tunnel was up — a green line for a road
+     *  nothing could drive on. Only a byte coming back proves reachability, so
+     *  ask TURN for one: a STUN Binding Request, answered by a Binding Success. */
     private fun probeVia(proxy: java.net.Proxy?, host: String, port: Int, timeoutMs: Int = 8000): Boolean {
         if (proxy == null) return false
         return runCatching {
             java.net.Socket(proxy).use { s ->
-                s.connect(InetSocketAddress(host, port), timeoutMs)
-                true
+                s.connect(InetSocketAddress.createUnresolved(host, port), timeoutMs)
+                s.soTimeout = timeoutMs
+                val txid = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+                val req = java.nio.ByteBuffer.allocate(20)
+                    .putShort(0x0001)          // Binding Request
+                    .putShort(0)               // length
+                    .putInt(0x2112A442)        // magic cookie
+                    .put(txid)
+                    .array()
+                s.getOutputStream().apply { write(req); flush() }
+                val buf = ByteArray(64)
+                val n = s.getInputStream().read(buf)
+                n >= 2 && (((buf[0].toInt() and 0xff) shl 8) or (buf[1].toInt() and 0xff)) == 0x0101
             }
         }.getOrDefault(false)
     }
