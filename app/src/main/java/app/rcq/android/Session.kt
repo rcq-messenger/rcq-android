@@ -1201,12 +1201,25 @@ class Session(context: Context) {
                 // are not in failover any more.
                 if (up) _receivingViaBackup.value = false
                 if (up) {
-                    // The server replays messages missed while we were offline as
-                    // a burst right after connect. Those must NOT play the receive
-                    // sound (the sound is only for messages that arrive live while
-                    // the app is open, iOS parity). Mute the sound for a short
-                    // window covering the backfill burst.
-                    soundsSuppressedUntil = System.currentTimeMillis() + 5000L
+                    // ⚠⚠ There used to be a blanket five-second mute here, armed
+                    // on EVERY connect including the first one of a session, to
+                    // cover a burst of missed messages the server replayed over
+                    // the socket right after connect.
+                    //
+                    // The server stopped doing that: the offline queue is drained
+                    // exclusively over HTTP `/messages/queue` now (see the comment
+                    // where the WS post-connect drain used to be, in the backend's
+                    // ws.py), and that path is already marked as backlog by
+                    // `asBacklog`. So the window guarded against a burst that no
+                    // longer arrives, and all it still did was silence real
+                    // messages: open the app, have somebody write to you in the
+                    // next five seconds, hear nothing (#480). It muted the tone,
+                    // the in-app banner and the shade notification alike, because
+                    // the check sits above all three.
+                    //
+                    // The drain marker stays. It is the accurate answer to "was
+                    // this message already announced" and it does not depend on a
+                    // clock.
                     // A reconnect (after an offline gap) re-pulls the graph so
                     // a roster that failed to load earlier recovers without a
                     // cold start. The first connect is skipped — start() below
@@ -1507,8 +1520,9 @@ class Session(context: Context) {
                 !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())
         }
         withContext(Dispatchers.IO) {
-            asBacklog {
-                Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
+            // Marked per row, not around the whole sweep — see drainQueue.
+            Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
+                asBacklog {
                     // A group row in a BACKUP mailbox = that island also hosts a
                     // group we joined (§5c, same identity = same mailbox) — file it
                     // under the local alias like the visited-island drain does.
@@ -1529,8 +1543,8 @@ class Session(context: Context) {
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
         withContext(Dispatchers.IO) {
-            asBacklog {
-                Multihome.drainVisitedQueues(sp, pp) { payload, groupId, host ->
+            Multihome.drainVisitedQueues(sp, pp) { payload, groupId, host ->
+                asBacklog {
                     if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
                     else ingest(payload)
                 }
@@ -1934,6 +1948,15 @@ class Session(context: Context) {
      *  us to see; null on failure. Used by the 1:1 contact-info screen. */
     suspend fun loadPeerProfile(uin: Int): RcqApi.MeProfile? =
         runCatching { api.getMe(uin) }.getOrNull()
+
+    /** [loadPeerProfile] with "nobody holds this number" told apart from "the
+     *  island did not answer", for a screen that must not invent a person.
+     *  See [UinLookup] — same three answers, the fuller card. */
+    suspend fun loadPeerProfileDetailed(uin: Int): Pair<RcqApi.MeProfile?, Boolean> =
+        runCatching { api.getMe(uin) }.fold(
+            onSuccess = { it to false },
+            onFailure = { null to (it.message?.startsWith("HTTP 404") == true) },
+        )
 
     /** Fetch the admin-posted news feed (GET /news); null on failure. */
     suspend fun loadNews(): RcqApi.NewsFeed? = runCatching { api.news() }.getOrNull()
@@ -4194,8 +4217,16 @@ class Session(context: Context) {
         // row that turned out to be a duplicate is harmless.
         val directIds = ArrayList<Int>()
         val groupIds = ArrayList<Int>()
+        // ⚠ The fetch is deliberately OUTSIDE the backlog mark. The mark is a
+        // process-wide counter, and it used to be held across this HTTP call —
+        // up to a thirty second timeout, three times over — while live socket
+        // frames were being ingested concurrently on the reader thread. Every
+        // message that merely overlapped a drain was filed as backlog and lost
+        // its sound (#480). Marking only the ingest keeps the counter honest:
+        // it is raised exactly while backlog is being written.
+        val rows = api.drainQueue()
         asBacklog {
-            api.drainQueue().forEach { q ->
+            rows.forEach { q ->
                 val payload = q.payload ?: return@forEach
                 when {
                     q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id)
@@ -4344,6 +4375,33 @@ class Session(context: Context) {
      *  that number, which is a different answer from "no name matched". */
     suspend fun lookupUin(uin: Int): RcqApi.UserInfo? =
         runCatching { api.userInfo(uin) }.getOrNull()
+
+    /** What the island said about a number — three answers, not two.
+     *
+     *  [lookupUin] folds "nobody holds this number" and "the island did not
+     *  answer" into the same null, which is fine for a search box that shows
+     *  nothing either way. It is not fine for deciding whether to offer to add
+     *  somebody: hiding the offer on a null would take add-by-number away from
+     *  exactly the people on the worst networks, who are the ones typing a
+     *  number a friend read out to them.
+     *
+     *  ⚠ A private, unlisted account answers 200 here with its optional fields
+     *  stripped, not 404, so [Absent] really does mean the number is free. */
+    sealed class UinLookup {
+        data class Found(val info: RcqApi.UserInfo) : UinLookup()
+        /** The island said 404: nobody holds this number. */
+        object Absent : UinLookup()
+        /** No answer. Says nothing about the number. */
+        object Unknown : UinLookup()
+    }
+
+    suspend fun lookupUinDetailed(uin: Int): UinLookup =
+        runCatching { api.userInfo(uin) }.fold(
+            onSuccess = { UinLookup.Found(it) },
+            onFailure = {
+                if (it.message?.startsWith("HTTP 404") == true) UinLookup.Absent else UinLookup.Unknown
+            },
+        )
 
     suspend fun searchUsers(q: String): List<RcqApi.UserInfo> =
         runCatching { api.searchUsers(q) }.getOrNull() ?: emptyList()
@@ -4690,7 +4748,7 @@ class Session(context: Context) {
         // announcing it a second time is what "о-оу несколько раз" is. The
         // short post-connect window stays as a second net for the burst the
         // server replays over the socket itself.
-        val live = drainDepth.get() == 0 && System.currentTimeMillis() >= soundsSuppressedUntil
+        val live = drainDepth.get() == 0
         // Notify gate (#11): NONE = silent, MENTIONS = only when @mentioned,
         // ALL = always. One authoritative read of the mute state, so mute is
         // deterministic on both the socket and the push path.
@@ -4804,11 +4862,6 @@ class Session(context: Context) {
             _banner.value = InAppBanner(thread, name, null, msg.body, msg.kind, msg.peerUin, null)
         }
     }
-
-    /** Wall-clock until which inbound receive sounds are muted — set on every
-     *  WS connect to cover the offline-message backfill burst (see onState). */
-    @Volatile
-    private var soundsSuppressedUntil = 0L
 
     /** The thread the user currently has open (or null). Set by the UI so
      *  inbound messages to it don't raise a badge, and so a message that

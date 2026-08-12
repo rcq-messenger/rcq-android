@@ -2019,11 +2019,36 @@ private fun AddContactDialog(
                         // account #134 listed "#134 · send a request" (user report
                         // with a screenshot). Own number = the Favourites chat,
                         // which lives on the home screen already.
-                        if (digits != null && digits != session.uin && users.none { it.uin == digits }) {
+                        // ⚠⚠ Ask the island whether the number is held by anyone
+                        // before offering it. This row is drawn by the client, not
+                        // returned by a search, and its condition — "the search did
+                        // not find this number" — is true precisely when NOBODY has
+                        // it. So typing a free number produced a card that looked
+                        // like a person: it opened a profile, and it offered to send
+                        // a contact request that the island answered 404 (#483).
+                        //
+                        // The `#238` form next door already resolves through
+                        // lookupUin; only the bare-digits branch skipped it.
+                        //
+                        // ⚠ Absent ONLY on a definite 404. A network failure leaves
+                        // the row up, because taking add-by-number away from someone
+                        // whose island is unreachable would be a worse bug than the
+                        // one being fixed, and because a private account answers 200
+                        // here anyway — so the privacy-gated case this row exists for
+                        // survives untouched.
+                        val resolved by produceState<Session.UinLookup?>(null, digits) {
+                            val d = digits
+                            value = null
+                            if (d != null) value = session.lookupUinDetailed(d)
+                        }
+                        if (digits != null && digits != session.uin && users.none { it.uin == digits } &&
+                            resolved !is Session.UinLookup.Absent
+                        ) {
                             // Say WHICH island a bare number reaches — a user on
                             // is2 typing an api number must see the mismatch
                             // (beta report: the request "never arrived").
-                            AddResultRow("#$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
+                            val known = (resolved as? Session.UinLookup.Found)?.info
+                            AddResultRow(known?.nickname?.takeIf { it.isNotBlank() } ?: "#$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
                                 // Open the profile first so you can preview before
                                 // sending the request (the profile has the button).
                                 // ⚠ Pinned to our island: the row promises "on
