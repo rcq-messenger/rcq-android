@@ -126,6 +126,9 @@ class CallController(
      *  ever started flowing. An answered call is not a missed one — see
      *  [isMissed]. Cleared with the rest of the per-call state. */
     private var answered = false
+    /** Carry a relay waiver across the redial in [retryWithoutRelay]; the
+     *  per-connection flag cannot survive the teardown that redial needs. */
+    private var waiveRelayOnNextCall = false
 
     // ICE-recovery state. Touched from IO-pool timers + the rtc callbacks, so
     // the decision points are guarded by recoveryLock.
@@ -262,6 +265,14 @@ class CallController(
         scope.launch {
             try {
                 val turnOk = refreshTurn()
+                // Carried over from the call the user just gave up on, and
+                // applied here rather than there: the policy is baked into the
+                // peer connection when it is created, so the only reliable way
+                // to change it is to build a new one.
+                if (waiveRelayOnNextCall) {
+                    waiveRelayOnNextCall = false
+                    rtc.waiveRelayOnce()
+                }
                 android.util.Log.i("RCQcall", "call ${call.id.take(8)} outgoing media=${media.wire} turn=$turnOk")
                 val sdp = rtc.createOffer(media.toRtc())
                 send(signal("call_offer", peerUin, call.id, mapOf("media" to media.wire, "sdp" to sdp)))
@@ -626,7 +637,15 @@ class CallController(
     }
 
     // ── teardown ──────────────────────────────────────────────────────────
-    /** Local hangup/decline/cancel: signal the peer, then end. */
+    /** End the call and TELL SOMEONE. Use this for every locally-decided end.
+     *
+     *  ⚠⚠ The message is not only for the peer — the island clears its
+     *  active-call registration on `call_end`, and until it does, both parties
+     *  are "busy" and every further call either of them makes is refused
+     *  instantly. The setup-failure paths used to finish silently, so a call
+     *  that died during ICE poisoned both accounts: one failure, and calling
+     *  stopped working entirely. That turned the relay outage of 2026-08-12
+     *  from "this call failed" into "calls do not work". */
     private fun endLocally(call: CallInfo, reason: String) {
         send(signal("call_end", call.peerUin, call.id, mapOf("reason" to reason)))
         finishEnded(call, reason)
@@ -742,7 +761,7 @@ class CallController(
     private fun onIceFailed() {
         val call = _state.value.info ?: return
         if (_state.value !is State.Connected) return
-        if (connectedSince == 0L) { finishEnded(call, "peer_disconnected"); return }
+        if (connectedSince == 0L) { endLocally(call, "peer_disconnected"); return }
         cancelDisconnectGrace()
         attemptIceRestartOrEnd(call)
     }
@@ -755,7 +774,7 @@ class CallController(
         // An ICE restart reuses the offer/answer machinery; don't collide with
         // a video-upgrade renegotiation mid-handshake — just end if one's live.
         if (outgoingVideoUpgradePending || pendingRenegotiationOffer != null || _incomingVideoUpgrade.value) {
-            finishEnded(call, "peer_disconnected"); return
+            endLocally(call, "peer_disconnected"); return
         }
         if (!call.outgoing) { scheduleCalleeFailsafe(call); return }
         var doRestart = false
@@ -767,7 +786,7 @@ class CallController(
                 else -> { iceRestarting = true; iceRestartAttempts++; doRestart = true }
             }
         }
-        if (doEnd) { finishEnded(call, "peer_disconnected"); return }
+        if (doEnd) { endLocally(call, "peer_disconnected"); return }
         if (!doRestart) return
         scope.launch {
             try {
@@ -777,7 +796,7 @@ class CallController(
             } catch (e: Exception) {
                 android.util.Log.e("RCQcall", "ICE restart offer failed: ${e.message}")
                 synchronized(recoveryLock) { iceRestarting = false }
-                finishEnded(call, "peer_disconnected")
+                endLocally(call, "peer_disconnected")
             }
         }
     }
@@ -808,7 +827,7 @@ class CallController(
                 delay(CALLEE_FAILSAFE_MS)
                 synchronized(recoveryLock) { calleeFailsafeJob = null }
                 if (_state.value.info?.id == call.id && _state.value is State.Connected) {
-                    finishEnded(call, "peer_disconnected")
+                    endLocally(call, "peer_disconnected")
                 }
             }
         }
@@ -841,7 +860,7 @@ class CallController(
             if (_state.value.info?.id != call.id) return@launch
             when (_state.value) {
                 is State.Outgoing -> endLocally(call, "unanswered")
-                is State.Incoming -> finishEnded(call, "expired")
+                is State.Incoming -> endLocally(call, "expired")
                 else -> Unit
             }
         }
@@ -866,27 +885,32 @@ class CallController(
     }
 
     /** The user, having been told the relay cannot carry this call, chose to
-     *  connect anyway. Applies to THIS call only and is never remembered: the
-     *  address is theirs to give, once, deliberately. */
+     *  connect anyway. Applies to THIS attempt only and is never remembered:
+     *  the address is theirs to give, once, deliberately.
+     *
+     *  ⚠ Redials rather than salvaging the live connection. Lifting the RELAY
+     *  policy in place (setConfiguration + an ICE restart) looked neater and
+     *  does re-gather — measured, candidates go from nothing to host+srflx —
+     *  but the peer dropped to ICE FAILED within a hundred milliseconds of the
+     *  restart every time. A button that promises a call and delivers a failure
+     *  is worse than no button, so this hangs up and places a fresh one, where
+     *  the policy is set before the connection exists and nothing has to be
+     *  renegotiated. The peer's phone rings a second time; that is the price. */
     fun retryWithoutRelay() {
         val call = _state.value.info ?: return
         if (_state.value !is State.Connected || connectedSince != 0L) return
         _relayDead.value = false
-        if (!rtc.reconfigureWithoutRelay()) return
-        // Re-gathering produces new local candidates; the caller also hands the
-        // peer fresh ICE credentials so both sides re-check. The callee's new
-        // candidates ship on their own through the normal candidate path.
-        if (call.outgoing) {
-            scope.launch {
-                runCatching {
-                    val sdp = rtc.restartIce()
-                    send(signal("call_ice_restart", call.peerUin, call.id, mapOf("sdp" to sdp)))
-                }.onFailure { android.util.Log.e("RCQcall", "waiver restart failed: ${it.message}") }
-            }
+        waiveRelayOnNextCall = true
+        val peer = call.peerUin
+        val media = call.media
+        endLocally(call, "cancelled")
+        // finishEnded parks the state machine in Ended for a couple of seconds
+        // before Idle, and start() refuses while a call is active; wait it out
+        // rather than racing it.
+        scope.launch {
+            delay(2_600)
+            if (_state.value is State.Idle) start(peer, media)
         }
-        // The clock starts again: the user just chose a different path, and
-        // charging them the time already burnt on the dead one is wrong.
-        armConnectTimeout(call)
     }
 
     /** If ICE never completes within the window (dead TURN path / symmetric

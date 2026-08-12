@@ -352,31 +352,6 @@ class WebRtcClient(private val appContext: Context) {
      *  arriving earlier has to be buffered by the caller of [addRemoteIce]. */
     fun canTakeRemoteIce(): Boolean = pc?.remoteDescription != null
 
-    /** Stop forcing relay-only on the LIVE connection and re-gather.
-     *
-     *  Each side can only fix its own missing candidates: the transport policy
-     *  filters which of MY candidates exist, not which of the peer's I may talk
-     *  to. So the side whose relay failed is the side that has to waive, and a
-     *  one-sided waiver is enough to give the pair something to connect on. */
-    fun reconfigureWithoutRelay(): Boolean {
-        val pc = pc ?: return false
-        relayWaived = true
-        val servers = ArrayList<PeerConnection.IceServer>()
-        ownStun?.let { servers.add(it) }
-        servers.addAll(STUN)
-        servers.addAll(turnServers)
-        val cfg = PeerConnection.RTCConfiguration(servers).apply {
-            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
-            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
-            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-            iceTransportsType = PeerConnection.IceTransportsType.ALL
-        }
-        val ok = pc.setConfiguration(cfg)
-        android.util.Log.w("RCQcall", "relay waived for this call, re-gathering: setConfiguration=$ok")
-        return ok
-    }
-
     fun addRemoteIce(candidateJSON: String) {
         val pc = pc ?: return
         runCatching {
