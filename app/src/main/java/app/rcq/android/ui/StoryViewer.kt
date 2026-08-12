@@ -1,9 +1,7 @@
 package app.rcq.android.ui
 
 import android.graphics.BitmapFactory
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
+import android.os.SystemClock
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,10 +34,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -100,7 +100,9 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     LaunchedEffect(Unit) { delay(400); inputReady = true }
 
     val story = stories.getOrNull(index) ?: run { onClose(); return }
-    val progress = remember(index) { Animatable(0f) }
+    // 0f..1f through the current story. Plain state advanced from the wall clock
+    // below, deliberately NOT an Animatable — see the timer.
+    var progress by remember(index) { mutableFloatStateOf(0f) }
 
     // Download + decrypt the current story's media, then decode it OFF the main
     // thread. Decoding a full-size JPEG inside composition (which is what this
@@ -128,14 +130,38 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     // while a sheet/dialog is open so the user can read the viewers list, and
     // held entirely until the photo is on screen (or known unloadable) so the
     // story always gets its full time in front of the viewer.
+    //
+    // ★★ The clock is the WALL CLOCK, not an animation.
+    //
+    // This used to be `progress.animateTo(1f, tween(durationMillis = remaining))`,
+    // and Compose scales every animation's duration by MotionDurationScale, which
+    // it reads from Settings.Global.animator_duration_scale. Honor's MagicOS and
+    // vivo/iQOO's OriginOS zero that setting under power saving (so does the
+    // developer option "Animation off"), and at a scale of zero an animation is
+    // finished on its first frame: animateTo returned in about 16 ms, the bar
+    // jumped to the end and the story was gone — "пролетает за долю секунды", on
+    // those two phones and not on the Redmi, with nothing wrong with the story.
+    //
+    // withFrameNanos takes its beat from the MonotonicFrameClock, which that
+    // setting does not touch, and the fraction is computed from elapsedRealtime
+    // rather than accumulated per frame, so a dropped frame or a slow decode
+    // cannot make the story drift. It still does not start until the photo is on
+    // screen, and it still pauses for the sheets.
     LaunchedEffect(index, showViewers, confirmDelete, frame != null, loadFailed) {
         if (showViewers || confirmDelete) return@LaunchedEffect
         if (frame == null && !loadFailed) return@LaunchedEffect
         if (!isOwn) session.markStoryViewed(story.id)
-        progress.snapTo(progress.value)
         val durMs = ((story.duration_sec ?: 0) * 1000).coerceAtLeast(PHOTO_STORY_MS)
-        val remaining = (durMs * (1f - progress.value)).toInt().coerceAtLeast(1)
-        progress.animateTo(1f, tween(durationMillis = remaining, easing = LinearEasing))
+        // Resume where a pause left off rather than restarting the story.
+        val startedAt = SystemClock.elapsedRealtime()
+        val alreadyDone = progress.coerceIn(0f, 1f)
+        while (true) {
+            withFrameNanos { }
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            val frac = alreadyDone + elapsed.toFloat() / durMs
+            if (frac >= 1f) { progress = 1f; break }
+            progress = frac
+        }
         if (index < stories.lastIndex) index++ else onClose()
     }
 
@@ -170,7 +196,7 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
                     val frac = when {
                         i < index -> 1f
                         i > index -> 0f
-                        else -> progress.value
+                        else -> progress
                     }
                     Box(
                         Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp))
