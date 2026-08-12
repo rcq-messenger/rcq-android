@@ -286,6 +286,32 @@ private fun IncomingCallUi(
                 fontSize = 15.sp,
             )
         }
+        // The caller, in the middle of the screen, the way the in-app call
+        // surface shows them. This screen had a name at the top, two buttons at
+        // the bottom and nothing in between. The lettered disc only: this
+        // Activity is raised from a push on a locked phone, where the account's
+        // media store may not be open, so it must not depend on one.
+        // Same disc, same size, same height on the screen as the in-app call
+        // surface: this Activity and CallScreen are two renderings of one call,
+        // and the picture must not jump when the ring is answered. The bottom
+        // padding is what buys that — this screen's buttons are shorter than
+        // the in-call cluster, so an untouched centre would sit lower.
+        Box(
+            Modifier.fillMaxWidth().weight(1f).padding(bottom = 96.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier.size(96.dp).clip(CircleShape).background(Color(0xFF2A2D34)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = nickname.trim().firstOrNull()?.uppercase() ?: "?",
+                    color = Color.White,
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 48.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,

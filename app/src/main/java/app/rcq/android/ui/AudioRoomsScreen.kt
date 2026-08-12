@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -264,6 +266,7 @@ private fun InRoomView(session: Session) {
     val name by controller.activeRoomName.collectAsState()
     val roster by controller.roster.collectAsState()
     val muted by controller.localMuted.collectAsState()
+    val speakerOn by controller.speakerOn.collectAsState()
     val joining by controller.joining.collectAsState()
     val ownUin = session.uin
     val members = roster.values.sortedBy { it.uin }
@@ -272,6 +275,12 @@ private fun InRoomView(session: Session) {
     val activeRoomId by controller.activeRoomId.collectAsState()
     val allRooms by controller.rooms.collectAsState()
     val capacity = allRooms.firstOrNull { it.id == activeRoomId }?.capacity ?: 8
+
+    // A room is a call: hold the screen, and blank it against an ear once the
+    // loudspeaker is off. Neither was wired here — the room could only ever be
+    // held on speaker, and the panel stayed lit against a cheek (#457).
+    KeepScreenOn()
+    ProximityBlanking(!speakerOn && !joining)
 
     Column(Modifier.fillMaxSize().background(Color(0xFF0E0F12))) {
         Spacer(Modifier.height(48.dp))
@@ -303,6 +312,14 @@ private fun InRoomView(session: Session) {
         ) {
             RoomButton(if (muted) Icons.Filled.MicOff else Icons.Filled.Mic, stringResource(R.string.call_mute),
                 if (muted) Color(0xFF4A4D55) else Color(0xFF2A2D34)) { controller.toggleMute() }
+            Spacer(Modifier.width(28.dp))
+            // Lit while on the loudspeaker, same as the 1:1 call screen, so the
+            // current output is readable without pressing anything.
+            RoomButton(
+                if (speakerOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeDown,
+                stringResource(R.string.call_speaker),
+                if (speakerOn) Color(0xFF3B6FE0) else Color(0xFF2A2D34),
+            ) { controller.toggleSpeaker() }
             Spacer(Modifier.width(28.dp))
             RoomButton(Icons.Filled.CallEnd, stringResource(R.string.rooms_leave), Color(0xFFE5484D)) { controller.exit() }
         }

@@ -75,6 +75,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     val localVideo by controller.localVideo.collectAsState()
     val remoteVideo by controller.remoteVideo.collectAsState()
     val incomingUpgrade by controller.incomingVideoUpgrade.collectAsState()
+    val peerOffline by controller.peerOffline.collectAsState()
     val connectedAt by controller.connectedAtMs.collectAsState()
     // When the offer arrived while backgrounded, the full-screen IncomingCallActivity
     // owns accept/decline; don't also show in-app accept/decline for the same call.
@@ -85,45 +86,27 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     val incoming = state is CallController.State.Incoming
     val ended = state is CallController.State.Ended
 
-    // Keep the display awake for as long as this screen is up. Android has no
-    // CallKit, so nothing else does it: the system dimmed and locked mid-call
-    // on the way to its normal timeout, which read as "the screen does not come
-    // on during a call" (tester, Android 12). IncomingCallActivity already sets
-    // the same flag for the full-screen-intent path; the in-app surface never
-    // did.
-    val context = LocalContext.current
-    DisposableEffect(Unit) {
-        val window = (context.findFragmentActivity())?.window
-        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-    }
-
+    KeepScreenOn()
     // Proximity blanking, but only when the earpiece is the output: on speaker,
     // in video, or before the call connects, holding a phone near your face is
-    // not a reason to blank. The lock turns the panel AND the touchscreen off,
-    // which is the actual point — a cheek on an unblanked screen was hanging up
-    // calls and toggling the mic.
-    val wantProximity = connected && !isVideo && !speakerOn
-    DisposableEffect(wantProximity) {
-        var lock: PowerManager.WakeLock? = null
-        if (wantProximity) {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            if (pm?.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK) == true) {
-                lock = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "rcq:call-proximity")
-                    .also { runCatching { it.acquire(60 * 60 * 1000L) } }
-            }
-        }
-        onDispose { lock?.let { if (it.isHeld) runCatching { it.release() } } }
-    }
+    // not a reason to blank.
+    ProximityBlanking(connected && !isVideo && !speakerOn)
 
     Box(Modifier.fillMaxSize().background(Color(0xFF0E0F12))) {
         // Remote video fills the screen when present; else an avatar.
         if (isVideo && remoteVideo != null && connected) {
             VideoRenderer(remoteVideo, mirror = false, modifier = Modifier.fillMaxSize())
         } else {
+            // Centred in the space it actually has, not tucked under the name
+            // (founder). The paddings are what the two overlays above and below
+            // occupy — the name block and the control cluster — so the picture
+            // lands in the middle of the gap between them rather than in the
+            // middle of the screen, which reads as too low with the buttons
+            // sitting underneath.
             Column(
-                Modifier.fillMaxSize().padding(top = 120.dp),
+                Modifier.fillMaxSize().padding(top = 120.dp, bottom = 240.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
                 // The person's own picture when they have one. A call screen is
                 // the one surface with nothing else on it, so the avatar is
@@ -158,7 +141,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         // Local camera preview (PiP, top-end) once we have a local track.
         if (isVideo && localVideo != null && !cameraOff) {
             VideoRenderer(
-                localVideo, mirror = true,
+                localVideo, mirror = true, overlay = true,
                 modifier = Modifier.align(Alignment.TopEnd)
                     .padding(top = 56.dp, end = 16.dp)
                     .size(96.dp, 140.dp)
@@ -173,7 +156,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         ) {
             Text(info.peerNickname, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Text(statusText(state, connectedAt), color = Color(0xFFB8BCC4), fontSize = 15.sp)
+            Text(statusText(state, connectedAt, peerOffline), color = Color(0xFFB8BCC4), fontSize = 15.sp)
         }
 
         // Video-upgrade prompt.
@@ -252,9 +235,54 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     }
 }
 
+/** Keep the display awake for as long as the caller is on screen. Android has
+ *  no CallKit, so nothing else does it: the system dimmed and locked mid-call
+ *  on the way to its normal timeout, which read as "the screen does not come on
+ *  during a call" (tester, Android 12). IncomingCallActivity already sets the
+ *  same flag for the full-screen-intent path; the in-app surfaces never did. */
 @Composable
-private fun statusText(state: CallController.State, connectedAtMs: Long): String = when (state) {
-    is CallController.State.Outgoing -> stringResource(R.string.call_calling)
+internal fun KeepScreenOn() {
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val window = (context.findFragmentActivity())?.window
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+}
+
+/** Blank the panel while something is close to the earpiece, for as long as
+ *  [active]. The lock turns the display AND the touchscreen off, which is the
+ *  actual point — a cheek on an unblanked screen was hanging up calls and
+ *  toggling the mic. Shared by the 1:1 call and the audio room: both are a
+ *  conversation held against an ear whenever the loudspeaker is off. */
+@Composable
+internal fun ProximityBlanking(active: Boolean) {
+    val context = LocalContext.current
+    DisposableEffect(active) {
+        var lock: PowerManager.WakeLock? = null
+        if (active) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm?.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK) == true) {
+                lock = pm.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "rcq:call-proximity")
+                    .also { runCatching { it.acquire(60 * 60 * 1000L) } }
+            }
+        }
+        onDispose { lock?.let { if (it.isHeld) runCatching { it.release() } } }
+    }
+}
+
+@Composable
+private fun statusText(
+    state: CallController.State,
+    connectedAtMs: Long,
+    peerOffline: Boolean,
+): String = when (state) {
+    // "Calling…" next to silence reads as a broken app. When the island tells
+    // us the other side has no live connection and the offer left as a push,
+    // the line says that instead — the silence then has a reason (#463).
+    is CallController.State.Outgoing ->
+        if (peerOffline) stringResource(R.string.call_peer_offline)
+        else stringResource(R.string.call_calling)
     is CallController.State.Incoming ->
         if (state.info.media == CallController.Media.VIDEO) stringResource(R.string.call_incoming_video)
         else stringResource(R.string.call_incoming)
@@ -300,12 +328,23 @@ private fun RoundCallButton(
 }
 
 /** WebRTC video surface bound to [track]. Inits with the shared EGL context;
- *  removes its sink and releases on dispose. */
+ *  removes its sink and releases on dispose.
+ *
+ *  [overlay] marks the surface that has to sit ON TOP of another one. A
+ *  SurfaceView does not draw inside the window: it punches a hole and the
+ *  system composites its own surface there, and two of them are stacked in
+ *  CREATION order, not in layout order. The remote track always arrives after
+ *  the local camera, so the full-screen remote surface was composited over the
+ *  PiP: the preview appeared, then vanished the instant the other side's
+ *  picture came up (#456). Toggling the camera brought it back only because
+ *  that drops and rebuilds this view, making it the newest surface again. */
 @Composable
-private fun VideoRenderer(track: VideoTrack?, mirror: Boolean, modifier: Modifier) {
+private fun VideoRenderer(track: VideoTrack?, mirror: Boolean, modifier: Modifier, overlay: Boolean = false) {
     val context = LocalContext.current
     val renderer = remember {
         SurfaceViewRenderer(context).apply {
+            // Before init/attach: the flag is read when the surface is created.
+            if (overlay) setZOrderMediaOverlay(true)
             init(WebRtcClient.sharedEglContext(), null)
             setMirror(mirror)
             setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)

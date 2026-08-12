@@ -158,6 +158,13 @@ class AudioRoomController(
         _localMuted.value = next
     }
 
+    /** Loudspeaker/earpiece for the live room. Owned by the mesh client (it
+     *  holds the AudioManager); surfaced here because the screen talks to the
+     *  controller and nothing else. */
+    val speakerOn: StateFlow<Boolean> get() = mesh.speakerOn
+
+    fun toggleSpeaker() = mesh.setSpeaker(!mesh.speakerOn.value)
+
     fun acknowledgeJoinError() { _joinError.value = null }
 
     fun isInside(roomId: Int) = _activeRoomId.value == roomId
