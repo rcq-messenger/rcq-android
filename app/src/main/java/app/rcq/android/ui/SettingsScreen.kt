@@ -753,7 +753,22 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+    // ⚠⚠ The keyboard inset belongs to the SCREEN, not to whoever mounted it.
+    //
+    // This editor is opened from two places: the profile card in Settings, and a
+    // tap on the nickname in the home header (plus "укажите возраст" out of
+    // Random). Only the Settings host wrapped it in an imePadding()-ed Box, so
+    // the very same screen laid out correctly by one road and let its bottom
+    // fields — About, Interests, Website — sit under the keyboard by the other.
+    // That is the whole of "пару раз отображались нормально, намеренно повторить
+    // не удаётся": the behaviour was decided by the entry point, never by timing.
+    //
+    // The app draws edge to edge, so the system does not resize the window and
+    // adjustResize buys nothing; the inset is only published, and somebody has to
+    // consume it. Doing it here is idempotent — Compose subtracts the inset a
+    // parent already consumed, so the Settings road, which consumes it one level
+    // up, gets exactly zero from this one and is unchanged.
+    Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
         SettingsTopBar(stringResource(R.string.pe_title), onBack, trailing = {
             TextButton(enabled = !saving && nickname.isNotBlank(), onClick = {
                 saving = true
