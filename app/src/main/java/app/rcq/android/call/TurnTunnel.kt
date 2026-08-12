@@ -109,7 +109,22 @@ object TurnTunnel {
             upstream = Socket(proxy).apply {
                 soTimeout = 0
                 tcpNoDelay = true          // TURN carries latency-sensitive media
-                connect(InetSocketAddress(host, TURN_TCP_PORT), 12_000)
+                // ★★ UNRESOLVED, deliberately: the relay must be told the NAME.
+                //
+                // `InetSocketAddress(host, port)` resolves here, on the phone, and
+                // then SOCKS5 carries a bare IPv4 address. Every relay's routing
+                // table ends in `reject` and lets through a domain_suffix of
+                // rcq.app plus a short list of ip_cidr — the islands, the fleet,
+                // four resolvers. The relay's address is not on that list, so a
+                // locally-resolved destination arrived at the relay as an address
+                // it had no rule for and was dropped, silently and with no bytes
+                // back. Left unresolved, the hostname travels to the relay in the
+                // SOCKS request and matches the rule that was always there.
+                //
+                // Measured, not reasoned: a STUN Binding Request through a relay
+                // gets a Binding Success by name and a closed connection by
+                // address, over one and the same tunnel.
+                connect(InetSocketAddress.createUnresolved(host, TURN_TCP_PORT), 12_000)
             }
             client.tcpNoDelay = true
             android.util.Log.i("RCQturn", "upstream connected via tunnel")
