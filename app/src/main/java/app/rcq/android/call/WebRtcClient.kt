@@ -102,7 +102,15 @@ class WebRtcClient(private val appContext: Context) {
         // are no srflx candidates at all, so a call between two NATs has nothing
         // to try until TURN allocates. Ours first, Google kept as a fallback for
         // everyone whose network is fine.
-        relayUsable = null
+        // ⚠ Only forget the probe result when the SERVER SET changed. The probe
+        // measures whether this network can reach that TURN host — a property of
+        // the network, not of the credentials, which are re-minted before every
+        // single call. Resetting it on every refresh meant re-probing (and so
+        // waiting out its timeout) on every call, including while answering one.
+        if (urls != probedUrls) {
+            relayUsable = null
+            probedUrls = urls
+        }
         ownStun = urls.firstNotNullOfOrNull { url ->
             Regex("^turns?:([^:/?]+)(?::(\\d+))?").find(url)?.let { m ->
                 val host = m.groupValues[1]
@@ -123,6 +131,34 @@ class WebRtcClient(private val appContext: Context) {
      *  they place a call two seconds after opening the app.
      */
     @Volatile private var relayUsable: Boolean? = null
+
+    /** The URL set [relayUsable] was measured against, so a re-mint of the same
+     *  credentials does not throw the measurement away. */
+    private var probedUrls: List<String> = emptyList()
+
+    /** Has this network already been measured for TURN reachability? */
+    fun relayProbed(): Boolean = relayUsable != null
+
+    /** Throw the measurement away because the network underneath it changed.
+     *
+     *  ⚠ Caching the probe across credential refreshes is what makes answering
+     *  a call fast, and it is also what makes this necessary: a "relay
+     *  reachable" measured on Wi-Fi, carried onto a mobile link that blocks it,
+     *  forces relay-only on a connection that can gather no relay candidate —
+     *  zero candidates, and a call that connects to nothing. Cheaper to
+     *  re-measure on every link change than to be confidently wrong once. */
+    fun forgetRelayProbe() {
+        relayUsable = null
+        probedUrls = emptyList()
+    }
+
+    /** Last probe verdict; null when never measured. For diagnostics. */
+    fun relayReachable(): Boolean? = relayUsable
+
+    /** TURN servers currently configured, and whether the live connection is
+     *  forcing every candidate through one. For diagnostics. */
+    fun turnServerCount(): Int = turnServers.size
+    fun isRelayOnly(): Boolean = turnServers.isNotEmpty() && relayUsable == true
 
     /** Probe whether this network can reach TURN at all, in the background.
      *
@@ -295,6 +331,11 @@ class WebRtcClient(private val appContext: Context) {
         _cameraOff.value = false
     }
 
+    /** Can this connection accept a remote candidate right now? WebRTC throws
+     *  a candidate away unless a remote description is already set, so anything
+     *  arriving earlier has to be buffered by the caller of [addRemoteIce]. */
+    fun canTakeRemoteIce(): Boolean = pc?.remoteDescription != null
+
     fun addRemoteIce(candidateJSON: String) {
         val pc = pc ?: return
         runCatching {
@@ -302,7 +343,12 @@ class WebRtcClient(private val appContext: Context) {
             val sdp = o.get("sdp")?.asString ?: return
             val idx = o.get("sdpMLineIndex")?.asInt ?: 0
             val mid = o.get("sdpMid")?.takeIf { !it.isJsonNull }?.asString
-            pc.addIceCandidate(IceCandidate(mid, idx, sdp))
+            // The return value is the only signal that a candidate was rejected;
+            // dropping it on the floor is how the buffering bug above stayed
+            // invisible for as long as it did.
+            if (!pc.addIceCandidate(IceCandidate(mid, idx, sdp))) {
+                android.util.Log.w("RCQcall", "remote ICE candidate rejected: ${sdp.take(60)}")
+            }
         }
     }
 

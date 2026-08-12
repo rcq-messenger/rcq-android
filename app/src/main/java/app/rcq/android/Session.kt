@@ -1221,6 +1221,12 @@ class Session(context: Context) {
                     // content-free breadcrumb report is now submittable — do it
                     // here (the consent prompt can't show during a crash loop).
                     maybeAutoReportNativeCrash()
+                    // Measure TURN reachability on THIS network now, while nobody
+                    // is waiting. The measurement used to happen inside the call
+                    // itself, which spent its timeout before the offer (or, worse,
+                    // before the answer) went out. Runs once per network per URL
+                    // set; a reconnect on a new link re-measures.
+                    calls.prewarmRelayPath()
                 }
             },
         )

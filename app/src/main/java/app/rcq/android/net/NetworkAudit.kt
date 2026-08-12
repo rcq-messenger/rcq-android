@@ -227,6 +227,29 @@ object NetworkAudit {
             lines += Line("UDP наружу", udpOk, if (udpOk) "проходит" else "не проходит")
         }
 
+        // The last call, if there has been one. Shown to everybody rather than
+        // only on a bad network: the calls that fail most often are exactly the
+        // ones where every other check here comes back fine.
+        app.rcq.android.call.CallDiagnostics.last?.let { c ->
+            lines += Line(
+                "последний звонок",
+                c.connected,
+                if (c.connected) "соединился за ${c.seconds} с"
+                else "не соединился, ${c.seconds} с · ${c.ice}",
+            )
+            if (!c.connected) {
+                lines += Line(
+                    "путь для звонков",
+                    c.relayReachable,
+                    when (c.relayReachable) {
+                        true -> "ретранслятор доступен"
+                        false -> "ретранслятор недоступен с этой сети"
+                        null -> "не проверялся"
+                    },
+                )
+            }
+        }
+
         val verdict = when {
             !controlOk && direct.first == Reach.BLOCKED -> Verdict.NO_INTERNET
             direct.first == Reach.OPEN -> Verdict.ALL_FINE
@@ -242,10 +265,10 @@ object NetworkAudit {
 
         // One line, short enough to retype off a screen if it comes to that.
         val compact = buildString {
-            // Bumped to /2 when the carrier + udp fields were added: a line
-            // without them is from an older build, not from a network that
-            // lacked them.
-            append("RCQ-NET/2 ")
+            // Bumped to /2 when the carrier + udp fields were added, /3 when the
+            // last-call fields were: a line without them is from an older build,
+            // not from a network that lacked them.
+            append("RCQ-NET/3 ")
             append(if (controlOk) "ctl:ok " else "ctl:dead ")
             append("dns:${if (islandIp != null) "ok" else "fail"} ")
             append("dir:${short(direct.first)} ")
@@ -253,6 +276,10 @@ object NetworkAudit {
             append("relay:$relaysOpen/${relays.size} ")
             append("xname:${crossName?.first?.let { short(it) } ?: "-"} ")
             append("xaddr:${crossAddr?.first?.let { short(it) } ?: "-"} ")
+            // What the last call on this device actually managed. Absent until
+            // one has been made — the audit is also run by people whose problem
+            // has nothing to do with calls.
+            app.rcq.android.call.CallDiagnostics.compact()?.let { append("$it ") }
             // Only present when something was wrong, which is also the only
             // time they were measured. `carrier` names where a reachable
             // machine could stand; `udp` says whether Hysteria2 has any chance
