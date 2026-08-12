@@ -1229,11 +1229,10 @@ class RcqApi(
 
     data class UploadResponse(val media_id: String, val size: Int = 0)
 
-    /** Upload an encrypted blob. pay_jetons=0 (free tier ≤ 50 MB). */
+    /** Upload an encrypted blob. Free up to the island's size cap. */
     suspend fun uploadBlob(bytes: ByteArray): UploadResponse = withContext(Dispatchers.IO) {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("blob", "photo.bin", bytes.toRequestBody(OCTET))
-            .addFormDataPart("pay_jetons", "0")
             .build()
         val b = Request.Builder().url("$baseUrl/media/upload").post(body)
         token?.let { b.header("Authorization", "Bearer $it") }
