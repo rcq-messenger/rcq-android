@@ -293,6 +293,7 @@
     <string name="call_voice_cd">Voice call</string>
     <string name="call_video_cd">Video call</string>
     <string name="call_calling">Calling…</string>
+    <string name="call_peer_offline">Not connected. A notification was sent</string>
     <string name="call_incoming">Incoming call</string>
     <string name="call_incoming_video">Incoming video call</string>
     <string name="call_connecting">Connecting…</string>

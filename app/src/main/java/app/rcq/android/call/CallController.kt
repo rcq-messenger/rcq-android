@@ -84,6 +84,13 @@ class CallController(
     private val _connectedAtMs = MutableStateFlow(0L)
     val connectedAtMs: StateFlow<Long> = _connectedAtMs.asStateFlow()
 
+    /** The island had no live socket for the callee when our offer arrived, so
+     *  it went out as a wake-up push instead. Set on the OUTGOING side only,
+     *  and only until the call moves on. Drives both the silence and the line
+     *  under the name — see [handleCalleeOffline]. */
+    private val _peerOffline = MutableStateFlow(false)
+    val peerOffline: StateFlow<Boolean> = _peerOffline.asStateFlow()
+
     /** True while the current Incoming call's accept/decline surface is the
      *  full-screen IncomingCallActivity (raised because the offer arrived over the
      *  WS while the app was backgrounded). The in-app CallScreen suppresses its own
@@ -343,10 +350,13 @@ class CallController(
      *  the tone in the earpiece and looked like the button did nothing
      *  ("если во время гудков включить кнопку динамик, звук продолжает идти для
      *  уха"). The route change is real, it just cannot reach a tone that is
-     *  already playing — so the tone is restarted onto the new one. */
+     *  already playing — so the tone is restarted onto the new one.
+     *
+     *  ⚠ Not while the callee is offline: there is deliberately no tone then
+     *  ([handleCalleeOffline]), and restarting one here would put it back. */
     fun toggleSpeaker() {
         rtc.toggleSpeaker()
-        if (_state.value is State.Outgoing) ringer.startRingback()
+        if (_state.value is State.Outgoing && !_peerOffline.value) ringer.startRingback()
     }
 
     // ── WS signalling in ──────────────────────────────────────────────────
@@ -376,6 +386,11 @@ class CallController(
             // "no answer" — the caller was being told they are being ignored
             // when they were not being reached (user request).
             "call_unreachable" -> handleRemoteEnd(callId, "unreachable")
+            // Reachable, but not connected: the offer went out as a push, and
+            // until that push wakes their phone nothing is ringing anywhere.
+            // The tone was inventing an alerting phone on the other end, so it
+            // stops and the screen says what is really going on (#463).
+            "call_offline" -> handleCalleeOffline(callId)
             "call_renegotiate" -> handleRenegotiate(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_answer" -> handleRenegotiateAnswer(callId, obj.get("sdp")?.asString ?: "")
             "call_renegotiate_decline" -> handleRenegotiateDecline(callId)
@@ -481,6 +496,7 @@ class CallController(
             try {
                 rtc.handleAnswer(sdp)
                 _state.value = State.Connected(call)
+                _peerOffline.value = false
                 ringer.stop()
                 pendingRemoteIce.forEach { rtc.addRemoteIce(it) }
                 pendingRemoteIce.clear()
@@ -497,6 +513,17 @@ class CallController(
         // Stash ICE while still ringing inbound (no peer connection until accept).
         if (_state.value is State.Incoming) pendingRemoteIce.add(candidateJSON)
         else rtc.addRemoteIce(candidateJSON)
+    }
+
+    /** The callee has no live socket: our offer became a push. Stop the ringback
+     *  — a tone that means "their phone is ringing" must not play while nothing
+     *  is ringing — but do NOT end the call: the push may still wake them inside
+     *  the ring window, and answering has to keep working. */
+    private fun handleCalleeOffline(callId: String) {
+        val s = _state.value as? State.Outgoing ?: return
+        if (s.info.id != callId) return
+        _peerOffline.value = true
+        ringer.stop()
     }
 
     fun handleRemoteEnd(callId: String, reason: String) {
@@ -576,6 +603,7 @@ class CallController(
         pendingRenegotiationOffer = null
         _incomingVideoUpgrade.value = false
         _incomingViaFsi.value = false
+        _peerOffline.value = false
         accepting = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
@@ -762,6 +790,7 @@ class CallController(
         pendingRenegotiationOffer = null
         _incomingVideoUpgrade.value = false
         _incomingViaFsi.value = false
+        _peerOffline.value = false
         accepting = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L

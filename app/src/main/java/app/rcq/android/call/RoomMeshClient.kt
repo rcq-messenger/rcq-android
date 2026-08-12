@@ -5,6 +5,9 @@ import android.media.AudioManager
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.webrtc.AudioTrack
@@ -43,9 +46,21 @@ class RoomMeshClient(
 
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    /** Loudspeaker vs earpiece for the room. A room is a conference, so the
+     *  loudspeaker is still what you get on entry — but it was the ONLY thing
+     *  you could get, with no button and no way back to the earpiece, which is
+     *  what a tester asked for ("аудиокомнаты можно использовать не только по
+     *  громкой связи"). Kept here rather than in the controller because this is
+     *  the object that owns the AudioManager. */
+    private val _speakerOn = MutableStateFlow(true)
+    val speakerOn: StateFlow<Boolean> = _speakerOn.asStateFlow()
+
     fun start(turnServers: List<PeerConnection.IceServer>) {
         WebRtcClient.ensureInitialised(appContext)
         turn = turnServers
+        // Every entry starts on the loudspeaker: the choice belongs to this
+        // room, not to whatever the previous one was left on.
+        _speakerOn.value = true
         configureAudio()
         val factory = WebRtcClient.peerConnectionFactory()
         val audioSource = factory.createAudioSource(MediaConstraints())
@@ -67,6 +82,14 @@ class RoomMeshClient(
 
     fun setMicMuted(muted: Boolean) {
         localAudio?.setEnabled(!muted)
+    }
+
+    /** Move the room's audio between the loudspeaker and the earpiece. Unlike a
+     *  1:1 call there is no tone playing here, so flipping the AudioManager is
+     *  the whole job. */
+    fun setSpeaker(on: Boolean) {
+        _speakerOn.value = on
+        runCatching { audioManager.isSpeakerphoneOn = on }
     }
 
     /** Existing-member side: a newcomer entered, dial them. */
@@ -240,7 +263,7 @@ class RoomMeshClient(
     private fun configureAudio() {
         runCatching {
             audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            audioManager.isSpeakerphoneOn = true
+            audioManager.isSpeakerphoneOn = _speakerOn.value
         }
     }
 }
