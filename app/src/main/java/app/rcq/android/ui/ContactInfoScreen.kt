@@ -117,11 +117,21 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     // (when opened from a cross-island GROUP member who isn't a contact yet) the
     // group's host. In both cases we render from the open card, never our island.
     val crossIslandHost = contact?.host ?: groupHost?.takeIf { !here }
+    // ⚠ "The island answered 404" is a different fact from "the island did not
+    // answer", and this screen used to lose the difference: loadPeerProfile
+    // returned null for both, the card fell back to "#$uin", and a number nobody
+    // holds was drawn as a person with an avatar, a presence dot and a button
+    // offering to send them a contact request (#483).
+    var notFound by remember(uin) { mutableStateOf(false) }
     LaunchedEffect(uin) {
         if (crossIslandHost == null) {
-            profile = session.loadPeerProfile(uin)
-            identityChanged = session.peerIdentityChanged(uin)
-            runCatching { session.sendVisit(uin) }
+            val (p, absent) = session.loadPeerProfileDetailed(uin)
+            profile = p
+            notFound = absent
+            if (!absent) {
+                identityChanged = session.peerIdentityChanged(uin)
+                runCatching { session.sendVisit(uin) }
+            }
         } else if (contact == null && groupHost != null) {
             // Cross-island group member: fetch their open card from the GROUP'S
             // island instead of our own (which would 404 — the founder's report).
@@ -220,6 +230,16 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     Text(stringResource(R.string.ci_message), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(12.dp))
+            } else if (contact == null && crossIslandHost == null && notFound) {
+                // Nobody holds this number. Say so instead of offering to write
+                // to them: the island will refuse the request anyway, and the
+                // refusal used to be swallowed silently.
+                Text(
+                    stringResource(R.string.ci_no_such_number),
+                    color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+                Spacer(Modifier.height(12.dp))
             } else if (contact == null && crossIslandHost == null) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
@@ -232,10 +252,22 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                                 Toast.makeText(context, context.getString(R.string.add_ci_number_clash, uin), Toast.LENGTH_LONG).show()
                                 return@clickable
                             }
-                            scope.launch { runCatching { session.addContact(uin) } }; requestSent = true
-                            // The request is sent, so the search that led here
-                            // has done its job — don't reopen it behind us on
-                            // the way back to the home screen.
+                            // ⚠ The button used to flip to "request sent" on the
+                            // spot, outside the coroutine, so it said so whether
+                            // or not the island had taken the request — the 404
+                            // for a number nobody holds went straight into
+                            // runCatching and the user was told it had gone
+                            // through (#483, point 4: "не появляется в
+                            // исходящих"). Report what happened, not what was
+                            // attempted.
+                            scope.launch {
+                                val ok = runCatching { session.addContact(uin) }.isSuccess
+                                if (ok) requestSent = true
+                                else Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                            }
+                            // The request is on its way, so the search that led
+                            // here has done its job — don't reopen it behind us
+                            // on the way back to the home screen.
                             AddSheet.close()
                         }.padding(14.dp),
                     horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
