@@ -105,11 +105,18 @@ class CallController(
     private var pendingRenegotiationOffer: String? = null
     private var outgoingVideoUpgradePending = false
     private var connectedSince = 0L
+    /** When this call began (placed or started ringing), as opposed to when
+     *  media connected. The gap between the two is the diagnostic. */
+    private var startedAtMs = 0L
     /** Reentrancy guard: an accept() is mid-flight (TURN fetch + handleOffer).
      *  Blocks a second accept() — a fast double-tap, or the FSI-accept drain
      *  racing an in-app tap — from running handleOffer twice on one connection
      *  (which throws and kills the just-answered call). */
     private var accepting = false
+    /** The user answered this inbound call (tapped Accept), whether or not media
+     *  ever started flowing. An answered call is not a missed one — see
+     *  [isMissed]. Cleared with the rest of the per-call state. */
+    private var answered = false
 
     // ICE-recovery state. Touched from IO-pool timers + the rtc callbacks, so
     // the decision points are guarded by recoveryLock.
@@ -238,6 +245,7 @@ class CallController(
         if (_state.value.active) return
         WebRtcClient.ensureInitialised(appContext) // EGL ready before the screen composes
         val call = CallInfo(UUID.randomUUID().toString(), peerUin, nameFor(peerUin), media, outgoing = true)
+        startedAtMs = System.currentTimeMillis()
         _state.value = State.Outgoing(call)
         scope.launch {
             try {
@@ -254,23 +262,35 @@ class CallController(
         }
     }
 
+    /** Fetch TURN credentials and measure whether this network can reach the
+     *  relay, off the call path. Cheap when already measured; skipped entirely
+     *  while a call is up so it cannot disturb one. */
+    fun prewarmRelayPath() {
+        if (_state.value.active) return
+        // A (re)connect is the app's signal that the link may be a different one
+        // than the last measurement was taken on, so measure again rather than
+        // trust a verdict from a network we may have left.
+        rtc.forgetRelayProbe()
+        scope.launch { runCatching { refreshTurn() } }
+    }
+
     fun accept() {
         val s = _state.value as? State.Incoming ?: return
         val offer = pendingRemoteOffer ?: return
         if (accepting) return
         accepting = true
+        answered = true
         val call = s.info
         WebRtcClient.ensureInitialised(appContext)
         ringer.stop()
         scope.launch {
             try {
-                val turnOk = refreshTurn()
+                val turnOk = refreshTurn(waitForProbe = false)
                 android.util.Log.i("RCQcall", "call ${call.id.take(8)} answering media=${call.media.wire} turn=$turnOk")
                 val answerSdp = rtc.handleOffer(offer, call.media.toRtc())
                 _state.value = State.Connected(call)
                 send(signal("call_answer", call.peerUin, call.id, mapOf("sdp" to answerSdp)))
-                pendingRemoteIce.forEach { rtc.addRemoteIce(it) }
-                pendingRemoteIce.clear()
+                drainRemoteIce()
                 pendingRemoteOffer = null
                 armConnectTimeout(call)
             } catch (e: Exception) {
@@ -434,7 +454,8 @@ class CallController(
         val sdp = obj.get("sdp")?.asString ?: return
         val call = CallInfo(callId, from, nameFor(from), Media.fromWire(mediaWire), outgoing = false)
         pendingRemoteOffer = sdp
-        pendingRemoteIce.clear()
+        synchronized(pendingRemoteIce) { pendingRemoteIce.clear() }
+        startedAtMs = System.currentTimeMillis()
         _state.value = State.Incoming(call)
         // The push-accept path already rang on the lock screen and accepts
         // immediately, so skip the in-app ringer + ring watchdog there.
@@ -498,8 +519,7 @@ class CallController(
                 _state.value = State.Connected(call)
                 _peerOffline.value = false
                 ringer.stop()
-                pendingRemoteIce.forEach { rtc.addRemoteIce(it) }
-                pendingRemoteIce.clear()
+                drainRemoteIce()
                 armConnectTimeout(call)
             } catch (e: Exception) {
                 endLocally(call, "setup_failed")
@@ -510,9 +530,36 @@ class CallController(
     private fun handleIce(callId: String, candidateJSON: String) {
         val call = _state.value.info ?: return
         if (call.id != callId || candidateJSON.isEmpty()) return
-        // Stash ICE while still ringing inbound (no peer connection until accept).
-        if (_state.value is State.Incoming) pendingRemoteIce.add(candidateJSON)
-        else rtc.addRemoteIce(candidateJSON)
+        // ⚠ The test is "can this connection take a candidate yet", NOT "what
+        // screen are we on". WebRTC discards addIceCandidate until a REMOTE
+        // description is set, and on the OUTGOING side that only happens when
+        // call_answer lands — so every candidate the callee shipped before its
+        // answer (its host candidates, which need no network round trip and
+        // therefore almost always win that race) was dropped on the floor,
+        // silently, leaving the caller to connect on the slower candidates
+        // alone or not at all. State.Incoming was the only case being buffered.
+        // The web client has always keyed this on `pc.remoteDescription`; this
+        // is Android catching up.
+        // Locked against drainRemoteIce: handleIce runs on the socket thread and
+        // the drains run on call coroutines, so an unlocked check-then-buffer can
+        // park a candidate in a list that was emptied a microsecond earlier.
+        val takeNow = synchronized(pendingRemoteIce) {
+            val ready = rtc.canTakeRemoteIce()
+            if (!ready) pendingRemoteIce.add(candidateJSON)
+            ready
+        }
+        if (takeNow) rtc.addRemoteIce(candidateJSON)
+    }
+
+    /** Hand the peer connection everything that arrived before it had a remote
+     *  description. Call right after any setRemote on a fresh connection. */
+    private fun drainRemoteIce() {
+        val queued = synchronized(pendingRemoteIce) {
+            val copy = pendingRemoteIce.toList()
+            pendingRemoteIce.clear()
+            copy
+        }
+        queued.forEach { rtc.addRemoteIce(it) }
     }
 
     /** The callee has no live socket: our offer became a push. Stop the ringback
@@ -574,6 +621,26 @@ class CallController(
     private fun finishEnded(call: CallInfo, reason: String) {
         if (_state.value is State.Ended) return
         val duration = if (connectedSince > 0) System.currentTimeMillis() - connectedSince else 0L
+        // Keep what this call managed to do, so a user who says "calls do not
+        // work" can hand us the answer instead of a description. Recorded for
+        // every ending, including the good ones — a working call is the baseline
+        // the failing one has to be read against.
+        CallDiagnostics.record(
+            CallDiagnostics.Last(
+                outgoing = call.outgoing,
+                video = call.media == Media.VIDEO,
+                connected = connectedSince > 0L,
+                reason = reason,
+                seconds = (
+                    ((if (connectedSince > 0L) connectedSince else System.currentTimeMillis()) - startedAtMs)
+                        .coerceAtLeast(0L)
+                    ) / 1000,
+                ice = rtc.iceDiag(),
+                relayOnly = rtc.isRelayOnly(),
+                relayReachable = rtc.relayReachable(),
+                turnServers = rtc.turnServerCount(),
+            ),
+        )
         logHistory(call, reason, duration)
         // An incoming call that rang out leaves a row in the chat and, until
         // this, nothing anywhere else: the ringing notification is cancelled as
@@ -599,12 +666,13 @@ class CallController(
         // — remote hangup, local decline, and the unanswered/connect timeouts.
         app.rcq.android.push.Push.dismissIncomingCall(appContext, call.id)
         pendingRemoteOffer = null
-        pendingRemoteIce.clear()
+        synchronized(pendingRemoteIce) { pendingRemoteIce.clear() }
         pendingRenegotiationOffer = null
         _incomingVideoUpgrade.value = false
         _incomingViaFsi.value = false
         _peerOffline.value = false
         accepting = false
+        answered = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
@@ -786,12 +854,13 @@ class CallController(
         // Also drop any full-screen incoming UI raised for a backgrounded offer.
         _state.value.info?.let { app.rcq.android.push.Push.dismissIncomingCall(appContext, it.id) }
         pendingRemoteOffer = null
-        pendingRemoteIce.clear()
+        synchronized(pendingRemoteIce) { pendingRemoteIce.clear() }
         pendingRenegotiationOffer = null
         _incomingVideoUpgrade.value = false
         _incomingViaFsi.value = false
         _peerOffline.value = false
         accepting = false
+        answered = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
@@ -825,16 +894,24 @@ class CallController(
      *  timeout; we retry it away. If TURN is genuinely unreachable we proceed
      *  STUN-only (better than refusing the call) but log loudly so it's
      *  diagnosable. @return true if real TURN servers were configured. */
-    private suspend fun refreshTurn(): Boolean {
+    private suspend fun refreshTurn(waitForProbe: Boolean = true): Boolean {
         repeat(TURN_FETCH_ATTEMPTS) { attempt ->
             val creds = withContext(Dispatchers.IO) { runCatching { turn() } }.getOrNull()
             if (creds != null) {
                 rtc.setTurn(creds.urls, creds.username, creds.credential)
                 // Measure whether this network can actually reach TURN before a
-                // call decides to be relay-only. Costs a few seconds once per
-                // credential fetch and saves the call that would otherwise ring
-                // into a timeout on a network where TURN is blocked.
-                rtc.probeRelay()
+                // call decides to be relay-only, so a network that cannot reach it
+                // is not left with no candidates at all.
+                //
+                // ⚠ Never make ANSWERING wait for this. The probe costs up to its
+                // own timeout, and on the answer path that time is spent before
+                // call_answer goes out — the caller sits on a ringing screen while
+                // we measure the network. The documented fallback for "not measured
+                // yet" is already the safe one (gather everything, do not force
+                // RELAY), so the answer goes out now and the probe informs the
+                // NEXT call.
+                if (waitForProbe && !rtc.relayProbed()) rtc.probeRelay()
+                else if (!rtc.relayProbed()) scope.launch { rtc.probeRelay() }
                 if (creds.urls.isEmpty()) {
                     android.util.Log.w("RCQcall", "TURN endpoint returned no servers — STUN-only call")
                 }
@@ -867,15 +944,27 @@ class CallController(
             formatDuration(durationMs / 1000)
         } else {
             appContext.getString(
-                when (reason) {
-                    "declined", "declinedElsewhere" -> R.string.call_out_declined
-                    "cancelled" -> if (call.outgoing) R.string.call_out_cancelled else R.string.call_out_missed
-                    "busy" -> R.string.call_out_busy
-                    "expired", "unanswered" -> if (call.outgoing) R.string.call_out_no_answer else R.string.call_out_missed
-                    "unreachable" -> R.string.call_out_unreachable
-                    "setup_failed" -> R.string.call_out_failed
-                    "peer_disconnected" -> R.string.call_out_disconnected
-                    else -> R.string.call_out_ended
+                when {
+                    // A call the user answered that never carried media is a
+                    // failed connection, whatever word the far end put on it.
+                    // ⚠ Without this an answered call ended by the peer's own
+                    // connect timeout ("failed" from the desktop client, which
+                    // gives up at 30s) fell through to the generic "call ended"
+                    // — while the notification called the same call missed.
+                    // Report #472 is that pair of contradictory labels.
+                    answered -> R.string.call_out_failed
+                    else -> when (reason) {
+                        "declined", "declinedElsewhere" -> R.string.call_out_declined
+                        "cancelled" -> if (call.outgoing) R.string.call_out_cancelled else R.string.call_out_missed
+                        "busy" -> R.string.call_out_busy
+                        "expired", "unanswered" -> if (call.outgoing) R.string.call_out_no_answer else R.string.call_out_missed
+                        "unreachable" -> R.string.call_out_unreachable
+                        // "failed" is the web/desktop client's connect-timeout
+                        // reason; "setup_failed" is ours. Same thing to a reader.
+                        "setup_failed", "failed" -> R.string.call_out_failed
+                        "peer_disconnected" -> R.string.call_out_disconnected
+                        else -> R.string.call_out_ended
+                    }
                 },
             )
         }
@@ -891,9 +980,17 @@ class CallController(
 
     /** "Missed" is narrower than "did not connect": a call I placed and
      *  cancelled, or one I declined myself, is not something waiting for me.
-     *  Only an inbound call that never connected is. */
+     *  Only an inbound call I never picked up is.
+     *
+     *  ⚠ [answered] is the point of this test, not a detail. A call the user
+     *  ANSWERED and which then failed to establish media used to land here as
+     *  "missed": duration stays 0 until ICE connects, and none of the excluded
+     *  reasons apply when the far end gives up on its own connect timeout. The
+     *  user tapped Accept, watched "Connecting…" for half a minute and was then
+     *  told by a notification that they had missed the call — report #472,
+     *  where it reads as "calls do not work" (video attached to the report). */
     private fun isMissed(call: CallInfo, durationMs: Long, reason: String): Boolean =
-        durationMs < 1000 && !call.outgoing &&
+        durationMs < 1000 && !call.outgoing && !answered &&
             reason !in setOf("declined", "declinedElsewhere", "busy")
 
     private fun formatDuration(secs: Long): String = "%d:%02d".format(secs / 60, secs % 60)
