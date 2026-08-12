@@ -111,6 +111,9 @@ class WebRtcClient(private val appContext: Context) {
             relayUsable = null
             probedUrls = urls
         }
+        CallDiagnostics.turnHost = urls.firstNotNullOfOrNull { url ->
+            Regex("^turns?:([^:/?]+)").find(url)?.groupValues?.get(1)
+        }
         ownStun = urls.firstNotNullOfOrNull { url ->
             Regex("^turns?:([^:/?]+)(?::(\\d+))?").find(url)?.let { m ->
                 val host = m.groupValues[1]

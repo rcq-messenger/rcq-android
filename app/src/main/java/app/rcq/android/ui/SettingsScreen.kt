@@ -1596,6 +1596,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                     stringResource(
                         when (a.verdict) {
                             app.rcq.android.net.NetworkAudit.Verdict.ALL_FINE -> R.string.diag_audit_fine
+                            app.rcq.android.net.NetworkAudit.Verdict.CALLS_BLOCKED -> R.string.diag_audit_calls_blocked
                             app.rcq.android.net.NetworkAudit.Verdict.NO_INTERNET -> R.string.diag_audit_no_net
                             app.rcq.android.net.NetworkAudit.Verdict.BY_NAME -> R.string.diag_audit_by_name
                             app.rcq.android.net.NetworkAudit.Verdict.BY_ADDRESS -> R.string.diag_audit_by_addr

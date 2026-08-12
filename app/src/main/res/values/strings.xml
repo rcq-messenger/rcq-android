@@ -1077,6 +1077,7 @@
     <string name="onboard_cta_netcheck">RCQ not connecting? Check the network</string>
     <string name="onboard_netcheck_send">Copy this line and send it to us</string>
     <string name="diag_audit_hint">Opens plain sockets to this island, the front, the relays and two well-known control hosts, to work out what this network filters. Nothing is sent anywhere; copy the result out yourself.</string>
+    <string name="diag_audit_calls_blocked">Messages get through, calls will not. The relay that carries call audio is unreachable from this network, and the obfuscated connection does not cover calls: voice goes out directly, past it.</string>
     <string name="diag_audit_fine">The island answers directly. Nothing is being filtered here.</string>
     <string name="diag_audit_no_net">Even the control hosts are unreachable: this device has no working internet, so nothing below is about RCQ.</string>
     <string name="diag_audit_by_name">Our address answers under another name. The filter goes by NAME, so a different name in front of the same server should get through.</string>

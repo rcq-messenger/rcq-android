@@ -74,7 +74,7 @@ object NetworkAudit {
 
     data class Report(val lines: List<Line>, val verdict: Verdict, val compact: String)
 
-    enum class Verdict { ALL_FINE, NO_INTERNET, BY_NAME, BY_ADDRESS, UNCLEAR }
+    enum class Verdict { ALL_FINE, CALLS_BLOCKED, NO_INTERNET, BY_NAME, BY_ADDRESS, UNCLEAR }
 
     /** Outcome of a single connection attempt, kept coarse on purpose. */
     private enum class Reach {
@@ -227,6 +227,37 @@ object NetworkAudit {
             lines += Line("UDP наружу", udpOk, if (udpOk) "проходит" else "не проходит")
         }
 
+        // ⚠⚠ The relay that carries call MEDIA, tested the way calls reach it:
+        // straight out, with no transport in front. That is not a detail — the
+        // obfuscated connection covers this app's own sockets, and WebRTC does
+        // not use them. It opens its own, so on a network that blocks RCQ the
+        // messages ride the tunnel and the audio has nowhere to go.
+        //
+        // Nothing above tests this host, which is why a phone that could not
+        // place a single call still reported ALL_FINE (report #468). A verdict
+        // that cannot see the thing that is broken is worse than no verdict.
+        var turnOk: Boolean? = null
+        app.rcq.android.call.CallDiagnostics.turnHost?.let { th ->
+            // 443 first: it is the port most likely to survive a filter, and the
+            // one the island advertises for TURN-over-TLS.
+            val tls = probe(th, 443, th, timeoutMs = 5000)
+            val plain = probe(th, 3478, null, timeoutMs = 4000)
+            turnOk = tls.first != Reach.BLOCKED || plain.first != Reach.BLOCKED
+            lines += Line(
+                "релей звонков",
+                turnOk,
+                if (turnOk == true) "доступен (443 ${short(tls.first)}, 3478 ${short(plain.first)})"
+                else "НЕДОСТУПЕН — звонки не пройдут",
+            )
+            if (turnOk != true) {
+                lines += Line(
+                    "почему",
+                    false,
+                    "обход не покрывает звонки: голос идёт мимо него, напрямую",
+                )
+            }
+        }
+
         // The last call, if there has been one. Shown to everybody rather than
         // only on a bad network: the calls that fail most often are exactly the
         // ones where every other check here comes back fine.
@@ -252,6 +283,11 @@ object NetworkAudit {
 
         val verdict = when {
             !controlOk && direct.first == Reach.BLOCKED -> Verdict.NO_INTERNET
+            // ⚠ Everything can be reachable and calls still impossible: the
+            // media relay is a separate host on separate ports, and no other
+            // check here touches it. Saying ALL_FINE to someone whose calls
+            // cannot connect is how #468 came in reading ALL_FINE.
+            direct.first == Reach.OPEN && turnOk == false -> Verdict.CALLS_BLOCKED
             direct.first == Reach.OPEN -> Verdict.ALL_FINE
             // Our address answers when we ask under another name → the address
             // is permitted and the name is what gets cut.
@@ -276,6 +312,7 @@ object NetworkAudit {
             append("relay:$relaysOpen/${relays.size} ")
             append("xname:${crossName?.first?.let { short(it) } ?: "-"} ")
             append("xaddr:${crossAddr?.first?.let { short(it) } ?: "-"} ")
+            turnOk?.let { append("turn:${if (it) "ok" else "BLOCKED"} ") }
             // What the last call on this device actually managed. Absent until
             // one has been made — the audit is also run by people whose problem
             // has nothing to do with calls.

@@ -47,6 +47,12 @@ object CallDiagnostics {
     var last: Last? = null
         private set
 
+    /** Host the island last handed out for TURN, so the network audit can
+     *  test the one address calls actually depend on. */
+    @Volatile
+    var turnHost: String? = null
+
+
     fun record(l: Last) {
         last = l
     }
