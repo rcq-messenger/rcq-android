@@ -1090,6 +1090,7 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
     // the user is right to call that broken.
     val stealthActive by session.stealthActive.collectAsState()
     var obfuscated by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isEnabled(context)) }
+    var relayCalls by remember { mutableStateOf(app.rcq.android.call.CallPrivacy.alwaysRelay(context)) }
     var autoDisabled by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.autoEngageDisabled(context)) }
     var localProxy by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyMode()) }
     var lpHost by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.localProxyHost()) }
@@ -1123,6 +1124,27 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     Icons.Filled.NetworkCheck,
                     stringResource(R.string.diag_title),
                     onClick = onOpenDiagnostics,
+                )
+            }
+
+            // Calls through the relay. ON by default, which is the opposite of
+            // most messengers: WebRTC opens its own sockets outside our
+            // transport, so a direct call hands the peer your real address
+            // before a word is spoken. Turning it off buys quality and costs
+            // exactly that. Kept next to the other routing switches because it
+            // is one, even though it only governs calls.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_relay_calls), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_relay_calls_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = relayCalls,
+                    onCheckedChange = {
+                        relayCalls = it
+                        app.rcq.android.call.CallPrivacy.setAlwaysRelay(context, it)
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
                 )
             }
 

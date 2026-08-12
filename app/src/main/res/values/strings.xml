@@ -320,6 +320,9 @@
     <string name="call_missed_video_push">Missed video call</string>
     <string name="call_out_busy">Busy</string>
     <string name="call_out_no_answer">No answer</string>
+    <string name="call_relay_dead">Relay is not answering</string>
+    <string name="call_relay_dead_hint">Calls go through our relay so the other side never learns your address. This one is not reachable right now. Connecting directly will work, but it shows them your IP address.</string>
+    <string name="call_relay_dead_direct">Connect directly</string>
     <string name="call_out_failed">Call failed</string>
     <string name="call_out_unreachable">Could not be reached</string>
     <string name="call_out_disconnected">Disconnected</string>
@@ -602,6 +605,8 @@
     <string name="pv_hof_image_too_large">Image is too large. Pick a smaller one (max ~256 KB).</string>
     <string name="pv_hof_image_error">Could not upload the image. Try again.</string>
     <string name="pv_network">Network</string>
+    <string name="pv_relay_calls">Always relay calls</string>
+    <string name="pv_relay_calls_desc">Send call audio and video through our relay so the other side never learns your IP address. Turning this off can improve call quality and shows them your address.</string>
     <string name="pv_obfuscated">Obfuscated connection</string>
     <string name="pv_obfuscated_desc">Routes the connection through a relay when the network blocks RCQ directly. Improves reliability on restrictive networks. Takes effect on next launch.</string>
     <string name="pv_obf_auto_disable">Don\'t engage automatically</string>

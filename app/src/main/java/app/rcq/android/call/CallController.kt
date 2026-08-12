@@ -91,6 +91,15 @@ class CallController(
     private val _peerOffline = MutableStateFlow(false)
     val peerOffline: StateFlow<Boolean> = _peerOffline.asStateFlow()
 
+    /** This call is relay-only and has gathered NOTHING, so it cannot possibly
+     *  connect — there is no candidate to try. Raised early on purpose: the old
+     *  behaviour was to keep saying "Connecting…" for the full connect timeout
+     *  and then report a failure, which is 35 seconds of a lie. The user is told
+     *  now, and offered the one thing that can still work (see
+     *  [retryWithoutRelay]) rather than having it done behind their back. */
+    private val _relayDead = MutableStateFlow(false)
+    val relayDead: StateFlow<Boolean> = _relayDead.asStateFlow()
+
     /** True while the current Incoming call's accept/decline surface is the
      *  full-screen IncomingCallActivity (raised because the offer arrived over the
      *  WS while the app was backgrounded). The in-app CallScreen suppresses its own
@@ -122,6 +131,9 @@ class CallController(
     // the decision points are guarded by recoveryLock.
     private val recoveryLock = Any()
     private var disconnectGraceJob: Job? = null
+    /** The live connect-timeout countdown, so re-arming replaces it instead
+     *  of racing it. */
+    private var connectTimeoutJob: Job? = null
     private var calleeFailsafeJob: Job? = null
     private var iceRestarting = false
     private var iceRestartAttempts = 0
@@ -293,6 +305,7 @@ class CallController(
                 drainRemoteIce()
                 pendingRemoteOffer = null
                 armConnectTimeout(call)
+                armRelayWatchdog(call)
             } catch (e: Exception) {
                 android.util.Log.e("RCQcall", "handleOffer failed: ${e.message}")
                 endLocally(call, "setup_failed")
@@ -521,6 +534,7 @@ class CallController(
                 ringer.stop()
                 drainRemoteIce()
                 armConnectTimeout(call)
+                armRelayWatchdog(call)
             } catch (e: Exception) {
                 endLocally(call, "setup_failed")
             }
@@ -671,6 +685,9 @@ class CallController(
         _incomingVideoUpgrade.value = false
         _incomingViaFsi.value = false
         _peerOffline.value = false
+        _relayDead.value = false
+        connectTimeoutJob?.cancel()
+        rtc.clearRelayWaiver()
         accepting = false
         answered = false
         outgoingVideoUpgradePending = false
@@ -687,6 +704,7 @@ class CallController(
      *  "Connecting…" status flips to the running duration) and clear any
      *  in-flight recovery — we are healthy again. */
     private fun onRtcConnected() {
+        connectTimeoutJob?.cancel()
         // Media is flowing now — a connected call must never still be ringing.
         // accept()/handleAnswer() already stop the ringer, but guarantee it here
         // too so no path or race (duplicate offer, push+WS double-deliver) can
@@ -829,11 +847,58 @@ class CallController(
         }
     }
 
+    /** Relay-only calls that gathered no candidate at all cannot connect, and we
+     *  know it long before the connect timeout does. Say so while the user is
+     *  still looking at the screen.
+     *
+     *  ⚠ Only fires for relay-only: with normal gathering, zero candidates this
+     *  early just means a slow link, and host candidates always turn up. */
+    private fun armRelayWatchdog(call: CallInfo) {
+        if (!rtc.relayOnlyActive()) return
+        scope.launch {
+            delay(RELAY_DEAD_AFTER_MS)
+            if (_state.value.info?.id != call.id) return@launch
+            if (_state.value !is State.Connected || connectedSince != 0L) return@launch
+            if (rtc.candidateCount() > 0) return@launch
+            android.util.Log.w("RCQcall", "relay-only call ${call.id.take(8)} gathered nothing — offering direct")
+            _relayDead.value = true
+        }
+    }
+
+    /** The user, having been told the relay cannot carry this call, chose to
+     *  connect anyway. Applies to THIS call only and is never remembered: the
+     *  address is theirs to give, once, deliberately. */
+    fun retryWithoutRelay() {
+        val call = _state.value.info ?: return
+        if (_state.value !is State.Connected || connectedSince != 0L) return
+        _relayDead.value = false
+        if (!rtc.reconfigureWithoutRelay()) return
+        // Re-gathering produces new local candidates; the caller also hands the
+        // peer fresh ICE credentials so both sides re-check. The callee's new
+        // candidates ship on their own through the normal candidate path.
+        if (call.outgoing) {
+            scope.launch {
+                runCatching {
+                    val sdp = rtc.restartIce()
+                    send(signal("call_ice_restart", call.peerUin, call.id, mapOf("sdp" to sdp)))
+                }.onFailure { android.util.Log.e("RCQcall", "waiver restart failed: ${it.message}") }
+            }
+        }
+        // The clock starts again: the user just chose a different path, and
+        // charging them the time already burnt on the dead one is wrong.
+        armConnectTimeout(call)
+    }
+
     /** If ICE never completes within the window (dead TURN path / symmetric
      *  NAT on both ends), end the call cleanly instead of leaving the user on a
      *  silent "Connecting…" forever. No-op once media has connected. */
     private fun armConnectTimeout(call: CallInfo) {
-        scope.launch {
+        // ⚠ Replaces any timer already running for this call. Re-arming used to
+        // ADD a second one, so a user who waived the relay had their new attempt
+        // killed a few seconds later by the countdown the dead relay had started
+        // — the fallback appeared to do nothing.
+        connectTimeoutJob?.cancel()
+        connectTimeoutJob = scope.launch {
             delay(35_000)
             if (_state.value.info?.id == call.id &&
                 _state.value is State.Connected && connectedSince == 0L
@@ -859,6 +924,9 @@ class CallController(
         _incomingVideoUpgrade.value = false
         _incomingViaFsi.value = false
         _peerOffline.value = false
+        _relayDead.value = false
+        connectTimeoutJob?.cancel()
+        rtc.clearRelayWaiver()
         accepting = false
         answered = false
         outgoingVideoUpgradePending = false
@@ -999,6 +1067,10 @@ class CallController(
 
     companion object {
         private const val TURN_FETCH_ATTEMPTS = 3
+        // Long enough for a TURN allocation on a slow mobile link, far short
+        // of the connect timeout: the point is to speak up while the user is
+        // still watching, not to confirm what they already worked out.
+        private const val RELAY_DEAD_AFTER_MS = 7_000L
         private const val TURN_RETRY_DELAY_MS = 800L
         // ICE recovery tuning. A transient drop self-heals within the grace
         // window most of the time; otherwise the caller re-offers (up to MAX),
