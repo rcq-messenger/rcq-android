@@ -1070,15 +1070,33 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             LaunchedEffect(showJumpDown) { if (!showJumpDown) replyReturnIndex = null }
             // #15: badge on the arrow counting unread messages BELOW the fold.
             // We track a high-water mark — the deepest row the user has actually
-            // scrolled into view — and count messages below THAT, not below the
-            // current viewport. So the count only decreases as you scroll down,
-            // never re-counts rows you already passed, and never grows when you
+            // READ — and count messages below THAT, not below the current
+            // viewport. So the count only decreases as you scroll down, never
+            // re-counts rows you already passed, and never grows when you
             // scroll back up. Only genuinely-new messages arriving below the
             // mark push it up again. (Matches the iOS unreadBelow behavior; fixes
             // the count re-counting after reaching bottom / inflating on scroll-up.)
+            //
+            // ★ Read means the whole row is on screen, not one pixel of it.
+            // `visibleItemsInfo` lists every row that INTERSECTS the viewport, so
+            // `lastOrNull()` is whichever row's top edge has just crossed the
+            // bottom of the screen. On a long message that meant the badge dropped
+            // while not one line of the text had appeared — "текст даже не начал
+            // виднеться, а сообщение уже считается прочитанным".
+            //
+            // ⚠ `afterContentPadding` is not optional: the list carries 8.dp of
+            // bottom padding, and without subtracting it the very last message can
+            // never be fully visible, leaving the badge stuck at one forever.
             var deepestSeen by remember(threadKey) { mutableStateOf(-1) }
             LaunchedEffect(threadKey) {
-                snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+                snapshotFlow {
+                    val info = listState.layoutInfo
+                    val floor = info.viewportEndOffset - info.afterContentPadding
+                    info.visibleItemsInfo.lastOrNull { it.offset + it.size <= floor }?.index ?: -1
+                }
+                    // A row taller than the screen is never fully visible, so this
+                    // yields -1 and the mark simply waits where it was until the
+                    // bottom edge arrives, which is the asked-for behaviour.
                     .collect { last -> if (last > deepestSeen) deepestSeen = last }
             }
             val belowCount by remember(rows) {
