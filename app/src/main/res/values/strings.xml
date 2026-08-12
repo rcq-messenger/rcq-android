@@ -79,6 +79,7 @@
     <string name="share_to_title">Send to…</string>
     <string name="share_to_search">Search chats</string>
     <string name="share_to_empty">No chats to send to yet.</string>
+    <string name="chat_media_send_failed">Could not send. Check the connection and try again.</string>
     <string name="share_to_unreadable">Couldn\'t read what was shared. Try sending it from the other app again.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d file</item><item quantity="other">%1$d files</item></plurals>
     <string name="outgoing_state_pending">Pending</string>
@@ -1120,4 +1121,8 @@
     <string name="common_real_name">Name</string>
     <string name="chat_empty_title">No messages yet</string>
     <string name="chat_empty_body">Say hi — your first message starts the thread.</string>
+    <plurals name="chat_media_sending">
+        <item quantity="one">Sending %d file…</item>
+        <item quantity="other">Sending %d files…</item>
+    </plurals>
 </resources>

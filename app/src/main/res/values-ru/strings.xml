@@ -78,6 +78,7 @@
     <string name="share_to_title">Отправить в…</string>
     <string name="share_to_search">Поиск по чатам</string>
     <string name="share_to_empty">Пока некому отправить.</string>
+    <string name="chat_media_send_failed">Не удалось отправить. Проверьте связь и попробуйте ещё раз.</string>
     <string name="share_to_unreadable">Не удалось прочитать то, чем поделились. Попробуйте отправить из того приложения ещё раз.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d файл</item><item quantity="few">%1$d файла</item><item quantity="many">%1$d файлов</item><item quantity="other">%1$d файла</item></plurals>
     <string name="outgoing_state_pending">Ожидает</string>
@@ -1114,4 +1115,10 @@
     <string name="common_real_name">Имя</string>
     <string name="chat_empty_title">Сообщений пока нет</string>
     <string name="chat_empty_body">Поздоровайтесь: первое сообщение и начнёт разговор.</string>
+    <plurals name="chat_media_sending">
+        <item quantity="one">Отправляется %d файл…</item>
+        <item quantity="few">Отправляются %d файла…</item>
+        <item quantity="many">Отправляются %d файлов…</item>
+        <item quantity="other">Отправляется %d файла…</item>
+    </plurals>
 </resources>

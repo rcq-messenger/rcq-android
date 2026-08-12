@@ -3379,6 +3379,49 @@ class Session(context: Context) {
     /** Encrypt+upload an already-compressed JPEG, then send a photo
      *  envelope carrying the media id + per-blob key (rcq-spec 9). The
      *  local bubble appears once the blob is uploaded. */
+    /** Media uploads in flight, so the chat can say something is happening.
+     *
+     *  ⚠ A photo produces NO row until its upload finishes — the row is built
+     *  from the media id the server hands back — so for the whole upload the
+     *  screen shows nothing at all. Reported as "не очевиден процесс отправки,
+     *  не хватает индикатора" (#473), which is exactly right, and the same
+     *  silence is what made the two failures underneath it unreadable. */
+    private val _mediaSending = MutableStateFlow(0)
+    val mediaSending: StateFlow<Int> = _mediaSending.asStateFlow()
+
+    /** Last media send that failed, for the chat to surface once. */
+    private val _mediaSendFailed = MutableStateFlow(0)
+    val mediaSendFailed: StateFlow<Int> = _mediaSendFailed.asStateFlow()
+
+    fun clearMediaSendFailed() { _mediaSendFailed.value = 0 }
+
+    /** Send media without tying it to the screen that started it.
+     *
+     *  ⚠⚠ Two bugs in one line, both silent. The caller used to launch this on
+     *  the composable's `rememberCoroutineScope()`, so backing out of the chat
+     *  CANCELLED the upload mid-flight and the picture was simply gone — which
+     *  is why sharing into RCQ "usually" failed while the paperclip was "50/50":
+     *  after a share you are far more likely to leave the screen. And the
+     *  failure was wrapped in a bare `runCatching`, so a genuinely failed upload
+     *  looked identical to a successful one: dialog closes, nothing appears,
+     *  nothing said. This runs on the session's own scope and reports what
+     *  happened. */
+    fun sendMediaDetached(what: String, block: suspend () -> Unit) {
+        _mediaSending.value += 1
+        scope.launch {
+            try {
+                block()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("RCQmedia", "$what failed to send", e)
+                _mediaSendFailed.value += 1
+            } finally {
+                _mediaSending.value = (_mediaSending.value - 1).coerceAtLeast(0)
+            }
+        }
+    }
+
     suspend fun sendPhoto(toUin: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
