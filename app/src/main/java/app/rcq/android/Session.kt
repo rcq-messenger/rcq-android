@@ -3790,18 +3790,23 @@ class Session(context: Context) {
         // remove on the wire + on the peer). Otherwise set/replace yours.
         val newAsset: String? = if (target.reactions[me] == emoji) null else emoji
         val env = Envelope.reaction(target.id, newAsset)
-        if (target.groupId != null) {
-            addGroupReaction(target.groupId, target.id, me, newAsset)
-            fanOutControl(target.groupId, env)
-        } else {
-            addPeerReaction(target.peerUin, target.id, me, newAsset)
-            sendControl(target.peerUin, env)
+        val gid = target.groupId
+        if (gid != null) addGroupReaction(gid, target.id, me, newAsset)
+        else addPeerReaction(target.peerUin, target.id, me, newAsset)
+        // On OUR scope, not the caller's — the caller is rememberCoroutineScope()
+        // in ChatScreen, and the reaction is already drawn. Backing out of the
+        // chat right after tapping used to cancel the send, leaving a reaction
+        // that existed on this device and nowhere else (#521 is the same bug
+        // one menu item down, where it cost a delete instead of a heart).
+        scope.launch {
+            if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
+            // Echo to your OWN other devices (linked web / second phone) so a
+            // reaction made here also shows there. Sealed to your own identity;
+            // the receiver resolves the target message by id across all
+            // threads. The origin device re-receives it but applies
+            // idempotently (no-op).
+            sendControl(me, env)
         }
-        // Echo to your OWN other devices (linked web / second phone) so a
-        // reaction made here also shows there. Sealed to your own identity; the
-        // receiver resolves the target message by id across all threads. The
-        // origin device re-receives it but applies idempotently (no-op).
-        sendControl(me, env)
     }
 
     /** Retract [target] for everyone (iOS delete-for-everyone). Allowed for the
@@ -3809,20 +3814,69 @@ class Session(context: Context) {
      *  granted the `delete` cap. Recipients re-check the same rule on receipt. */
     suspend fun sendDeleteForEveryone(target: ChatMessage) {
         val gid = target.groupId
-        // My own cap lives in the roster, so ask for it before deciding: a
-        // moderator whose roster has not arrived would silently fail to
-        // retract someone else's message.
-        if (gid != null) ensureRoster(gid)
-        val canModerate = gid != null && run {
+        if (!target.fromMe) {
+            // Someone else's message: only a moderator may retract it, and my
+            // own cap lives in the roster, so ask for it before deciding — a
+            // moderator whose roster has not arrived would silently fail.
+            // Author deletes skip this entirely; there is nothing to look up
+            // about my own message, and in a 1981-member group this fetch is
+            // seconds of it.
+            if (gid == null) return
+            ensureRoster(gid)
             val g = group(gid)
             val me = store.uin
-            g != null && me != null && (g.members.firstOrNull { it.uin == me }?.canDelete(g.ownerUin) == true)
+            val canModerate = g != null && me != null &&
+                (g.members.firstOrNull { it.uin == me }?.canDelete(g.ownerUin) == true)
+            if (!canModerate) return
         }
-        if (!target.fromMe && !canModerate) return
         val env = Envelope.delete(target.id)
-        if (gid != null) fanOutControl(gid, env)
-        else sendControl(target.peerUin, env)
+        // Locally FIRST, and the fan-out on OUR scope, not the caller's (#521,
+        // "в группе rcq beta пытаюсь удалить своё сообщение у всех — не
+        // удаляет"). Both halves of that report come from the same ordering:
+        //
+        //  * The message stayed on screen until the fan-out returned. In RCQ
+        //    Beta that is 1184 X25519 seals and a ~1.3 MB upload — the ten to
+        //    fifteen seconds measured in #465 — so "delete" looked like it had
+        //    done nothing, and the only thing that visibly worked was the
+        //    delete-for-me below it.
+        //  * The caller is `rememberCoroutineScope()` in ChatScreen. Leaving
+        //    the chat inside that window cancelled the coroutine, so nothing
+        //    was ever sent AND the message came back. Nothing in the retraction
+        //    belongs to a screen that is already gone.
         deleteLocal(target)
+        scope.launch {
+            val sent = runCatching {
+                if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
+            }.getOrDefault(false)
+            if (!sent) {
+                // Nothing left the device after the retries, so the message is
+                // still on everyone else's screen and only gone from mine. Put
+                // it back rather than leave the two out of step: seeing it
+                // return says "that did not work, try again", which is the
+                // truth, where a silent success would have been a lie.
+                android.util.Log.w("RCQgroup", "delete-for-everyone did not reach the island for ${target.id}; restoring")
+                restoreAfterFailedDelete(target)
+            }
+        }
+    }
+
+    /** Undo the optimistic half of a retraction that never made it out.
+     *  `honourTombstones = false` because [deleteLocal] wrote one moments ago
+     *  and this is the same action being reversed — not the offline queue
+     *  resurrecting something behind the user's back, which is what the guard
+     *  exists to stop. */
+    private fun restoreAfterFailedDelete(msg: ChatMessage) {
+        if (!db.insert(msg, honourTombstones = false)) return
+        val gid = msg.groupId
+        if (gid != null) {
+            val cur = _groupMessages.value.toMutableMap()
+            cur[gid] = ((cur[gid] ?: emptyList()) + msg).sortedBy { it.sentAt }
+            _groupMessages.value = cur
+        } else {
+            val cur = _messages.value.toMutableMap()
+            cur[msg.peerUin] = ((cur[msg.peerUin] ?: emptyList()) + msg).sortedBy { it.sentAt }
+            _messages.value = cur
+        }
     }
 
     /** Replace the body of [target] (text only, author only) and tell the
@@ -3830,12 +3884,14 @@ class Session(context: Context) {
     suspend fun sendEdit(target: ChatMessage, newText: String) {
         if (!target.fromMe || target.kind != "text" || newText.isBlank()) return
         val env = Envelope.edit(target.id, newText)
-        if (target.groupId != null) {
-            editInFlow(_groupMessages, target.groupId, target.id, newText)
-            fanOutControl(target.groupId, env)
-        } else {
-            editInFlow(_messages, target.peerUin, target.id, newText)
-            sendControl(target.peerUin, env)
+        val gid = target.groupId
+        if (gid != null) editInFlow(_groupMessages, gid, target.id, newText)
+        else editInFlow(_messages, target.peerUin, target.id, newText)
+        // Same reasoning as sendReaction above: the new text is already in the
+        // bubble and in the database, so the send must not die with the screen
+        // that started it.
+        scope.launch {
+            if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
         }
     }
 
@@ -3897,12 +3953,14 @@ class Session(context: Context) {
 
     /** Encrypt + send a control envelope (e.g. a reaction) to one peer.
      *  Reuses the send-retry but tracks no delivery state. */
-    private suspend fun sendControl(toUin: Int, env: Envelope) {
+    /** @return true when the island took it. Callers that only fire and forget
+     *  can ignore it; a retraction cannot — it has already removed the message
+     *  from this device and needs to know whether anyone else heard. */
+    private suspend fun sendControl(toUin: Int, env: Envelope): Boolean =
         runCatching {
             val payload = encryptFor(toUin, env)
             withRetry { api.sendSealed(toUin, payload, envelopeType = envelopeTypeFor(env)) }
-        }
-    }
+        }.isSuccess
 
     /** Message kinds we mirror to the user's other devices via a carbon.
      *  Reactions sync through their own self-echo; control/poll don't sync. */
@@ -3940,11 +3998,11 @@ class Session(context: Context) {
      *  since sender keys landed, on all three clients. Also routes through
      *  groupCtx so a FOREIGN group's control lands on ITS island with guest
      *  creds instead of misrouting to ours. */
-    private suspend fun fanOutControl(groupId: Int, env: Envelope) = withContext(Dispatchers.IO) {
+    private suspend fun fanOutControl(groupId: Int, env: Envelope): Boolean = withContext(Dispatchers.IO) {
         ensureRoster(groupId)
         val ctx = groupCtx(groupId)
-        val me = ctx.myUin.takeIf { it != 0 } ?: return@withContext
-        val group = group(groupId) ?: return@withContext
+        val me = ctx.myUin.takeIf { it != 0 } ?: return@withContext false
+        val group = group(groupId) ?: return@withContext false
         runCatching {
             val sendable = group.members.filter { it.uin != me && it.identityKey.isNotEmpty() }
             val capable = if (ctx.host == null) sendable.filter { it.senderKeys } else emptyList()
@@ -3968,16 +4026,43 @@ class Session(context: Context) {
             }
             // Legacy members (or a foreign group / no capable cohort) keep the
             // per-member sealed copy. Same one-bad-key isolation as fanOutGroup.
-            val rest = if (capable.isNotEmpty()) sendable.filter { !it.senderKeys } else sendable
-            if (rest.isNotEmpty()) {
-                val payloads = rest.mapNotNull { m ->
+            val broadcast = capable.isNotEmpty()
+            val rest = if (broadcast) sendable.filter { !it.senderKeys } else sendable
+            val sealPayloads = {
+                rest.mapNotNull { m ->
                     runCatching {
                         RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
                     }.getOrNull()
                 }
-                if (payloads.isNotEmpty()) withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, envelopeType = envelopeTypeFor(env)) }
             }
-        }
+            if (rest.isNotEmpty()) {
+                if (broadcast) {
+                    // The broadcast above has already reached every client that
+                    // can read one; this tail is the old clients, and as of
+                    // #465 it does NOT ride the caller's clock. Reactions,
+                    // edits and deletes pay the same price an ordinary message
+                    // did — 1184 seals and ~1.3 MB in RCQ Beta, of which the
+                    // island keeps 51 — and nothing looks at the answer. What
+                    // the wait bought was a window in which leaving the chat
+                    // cancelled a change already on screen.
+                    scope.launch {
+                        val payloads = sealPayloads()
+                        if (payloads.isNotEmpty()) {
+                            runCatching { withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, envelopeType = envelopeTypeFor(env)) } }
+                                .onFailure { android.util.Log.w("RCQgroup", "group $groupId: legacy control fan-out failed for ${payloads.size} member(s)", it) }
+                        }
+                    }
+                } else {
+                    // No broadcast happened (a small group where nobody has
+                    // advertised sender keys, or a foreign group): this IS the
+                    // send, so it stays on the caller's clock and its outcome
+                    // is the outcome. Detaching it here would have told a
+                    // retraction "sent" when nothing had left the device.
+                    val payloads = sealPayloads()
+                    if (payloads.isNotEmpty()) withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, envelopeType = envelopeTypeFor(env)) }
+                }
+            }
+        }.isSuccess
     }
 
     // On-disk cache of ENCRYPTED media blobs (the exact bytes the server

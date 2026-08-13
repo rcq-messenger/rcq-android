@@ -422,7 +422,21 @@ private fun SettingsRoot(
                     app.rcq.android.net.UpdateChecker.shareApk(context)
                 }
                 Divider()
-                SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) { bugText = ""; bugSent = false; showBugReport = true }
+                // Open on an EMPTY form, every field of it. The reset used to
+                // clear the text and the sent flag and stop there, so the
+                // pictures attached to the last report were still in state and
+                // came back attached to the next one (#519: "следующий вызов
+                // сообщения о баге показывает ранее приложенный опять
+                // прикрепленный файл"). The error line and the in-flight flag
+                // are stale for the same reason.
+                SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) {
+                    bugText = ""
+                    bugSent = false
+                    bugSending = false
+                    bugError = null
+                    bugAttachments = emptyList()
+                    showBugReport = true
+                }
                 Divider()
                 // Directly under "Report a bug": this is where someone who just
                 // filed one looks for the answer. It sat in the privacy block

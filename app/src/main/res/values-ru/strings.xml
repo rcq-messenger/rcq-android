@@ -460,7 +460,7 @@
     <string name="uin_shop_info_what_title">Что такое UIN</string>
     <string name="uin_shop_info_what_body">UIN это ваш ник в RCQ. Номер не привязан к телефону или почте, по нему вас находят другие. Чем короче, тем он реже, поэтому стоит дороже.</string>
     <string name="uin_shop_info_migrate_title">Взять номер это не сменить себя</string>
-    <string name="uin_shop_info_migrate_body">Номер попадает в вашу коллекцию, а отвечаете вы по-прежнему как сейчас. Перейти на него это отдельное действие на экране «Мои номера», и оно обратимо: номер, с которого вы уходите, тоже остаётся вашим, занять его никто не сможет.</string>
+    <string name="uin_shop_info_migrate_body">Номер попадает в вашу коллекцию, а отвечаете вы по-прежнему как сейчас. Перейти на него это отдельное действие на экране «Мои UIN\'ы», и оно обратимо: номер, с которого вы уходите, тоже остаётся вашим, занять его никто не сможет.</string>
     <string name="uin_shop_info_current">Ваш сейчас · %1$s</string>
     <string name="uin_shop_buy_cta">Купить за %1$s</string>
     <string name="uin_shop_buy_processing">Покупаем…</string>
@@ -471,13 +471,13 @@
     <string name="uin_shop_error_taken">Кто-то перехватил. Попробуйте другой UIN.</string>
     <string name="uin_shop_error_generic">Не удалось купить. Попробуйте ещё раз.</string>
     <string name="uin_shop_held_title">Номер %1$s теперь ваш</string>
-    <string name="uin_shop_held_body">Он в вашей коллекции, а отвечаете вы по-прежнему как %1$s. Перейти на него можно сейчас или позже, на экране «Мои номера».</string>
+    <string name="uin_shop_held_body">Он в вашей коллекции, а отвечаете вы по-прежнему как %1$s. Перейти на него можно сейчас или позже, на экране «Мои UIN\'ы».</string>
     <string name="uin_shop_held_now">Перейти на него</string>
     <string name="uin_shop_held_later">Позже</string>
-    <string name="uin_shop_my_numbers">Мои номера</string>
+    <string name="uin_shop_my_numbers">Мои UIN\'ы</string>
     <string name="settings_foot_my_uins">Номера, закреплённые за аккаунтом, и тот, которым вы отвечаете.</string>
-    <string name="settings_row_my_uins">Мои номера</string>
-    <string name="my_uins_title">Мои номера</string>
+    <string name="settings_row_my_uins">Мои UIN\'ы</string>
+    <string name="my_uins_title">Мои UIN\'ы</string>
     <string name="my_uins_active_caption">Вы отвечаете как</string>
     <string name="my_uins_active_sub">По этому номеру вас находят собеседники.</string>
     <string name="my_uins_held_caption">В коллекции</string>
@@ -1113,7 +1113,7 @@
     <string name="backup_warning">Этот файл вместе с вашей фразой это вся ваша переписка. Берегите его так же, как фразу. Ключей в нём нет, войти по нему нельзя.</string>
     <string name="recovery_reveal">Показать фразу</string>
     <string name="settings_anim_avatars_title">Живые аватарки</string>
-    <string name="settings_anim_avatars_desc">Проигрывать аватарки, которые являются анимированными картинками. Если выключить, будет показан первый кадр, и батарея проживёт дольше.</string>
+    <string name="settings_anim_avatars_desc">Выключено — только первый кадр, батарея живёт дольше.</string>
     <string name="common_interests">Интересы</string>
     <string name="common_homepage">Сайт</string>
     <string name="common_real_name">Имя</string>
