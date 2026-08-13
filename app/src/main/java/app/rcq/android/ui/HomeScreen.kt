@@ -127,6 +127,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** One row's worth of long-press action, mirrors iOS ContextAction. */
 internal data class ContextAction(
@@ -1913,7 +1914,12 @@ private fun AddContactDialog(
     // link is handled separately (below), so don't waste a search on it.
     LaunchedEffect(query) {
         val q = query.trim()
-        if (q.length < 2 || GroupLinkParser.parse(q) != null) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
+        // One character is a real query: "а если у потенциального друга имя из
+        // одной буквы?" (#518). The island takes min_length=1 and caps the
+        // result set, and the 300 ms debounce below is what actually protects
+        // it — the two-character floor only protected us from names we told
+        // people they could have.
+        if (q.isEmpty() || GroupLinkParser.parse(q) != null) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
         // `#911` means THAT number and nothing else. Plain `911` still runs the
         // fuzzy search, which is what you want when you half-remember a number
         // or are looking for a name — the two intents needed separate syntax
@@ -2036,13 +2042,36 @@ private fun AddContactDialog(
                         // one being fixed, and because a private account answers 200
                         // here anyway — so the privacy-gated case this row exists for
                         // survives untouched.
+                        // ⚠ Bounded, not "however long OkHttp waits". Making the
+                        // row wait for an answer (below) is what stops it
+                        // flashing for a free number, but on an unreachable
+                        // island that answer is a 30-second connect timeout,
+                        // and add-by-number would simply be missing for half a
+                        // minute. Half a second is far longer than the island
+                        // ever takes to say 404 and far shorter than anyone
+                        // waits before deciding a screen is broken; past it we
+                        // know nothing, which is exactly `Unknown`, and Unknown
+                        // still draws the row.
                         val resolved by produceState<Session.UinLookup?>(null, digits) {
                             val d = digits
                             value = null
-                            if (d != null) value = session.lookupUinDetailed(d)
+                            if (d != null) {
+                                value = withTimeoutOrNull(500) { session.lookupUinDetailed(d) }
+                                    ?: Session.UinLookup.Unknown
+                            }
                         }
+                        // ⚠ `resolved != null` — wait for the island's answer
+                        // before drawing anything. While the lookup was in
+                        // flight the state is null, which is neither Found nor
+                        // Absent, so a free number got its row for the fraction
+                        // of a second the request took and then lost it: "если
+                        // номер свободный, он там отображается на доли секунды
+                        // и исчезает, всё дёргается из-за этого" (#518). The
+                        // row is worth appearing a beat late; it is not worth
+                        // appearing wrong. Unknown (no answer) still shows it,
+                        // per the note above.
                         if (digits != null && digits != session.uin && users.none { it.uin == digits } &&
-                            resolved !is Session.UinLookup.Absent
+                            resolved != null && resolved !is Session.UinLookup.Absent
                         ) {
                             // Say WHICH island a bare number reaches — a user on
                             // is2 typing an api number must see the mismatch

@@ -464,7 +464,7 @@
     <string name="uin_shop_info_what_title">What is a UIN</string>
     <string name="uin_shop_info_what_body">Your UIN is your handle in RCQ, a number tied to no phone or email. Other users find you by it; shorter UINs are scarcer, so they cost more.</string>
     <string name="uin_shop_info_migrate_title">Taking a number does not change who you are</string>
-    <string name="uin_shop_info_migrate_body">The number joins your collection and you keep answering as you do now. Moving onto it is a separate step on My numbers, and it is reversible: the number you leave stays yours too, so nobody else can take it.</string>
+    <string name="uin_shop_info_migrate_body">The number joins your collection and you keep answering as you do now. Moving onto it is a separate step on My UINs, and it is reversible: the number you leave stays yours too, so nobody else can take it.</string>
     <string name="uin_shop_info_current">Your current UIN · %1$s</string>
     <string name="uin_shop_buy_cta">Buy for %1$s</string>
     <string name="uin_shop_buy_processing">Processing…</string>
@@ -475,13 +475,13 @@
     <string name="uin_shop_error_taken">Someone grabbed it first. Try a different UIN.</string>
     <string name="uin_shop_error_generic">Purchase failed. Try again.</string>
     <string name="uin_shop_held_title">Number %1$s is yours</string>
-    <string name="uin_shop_held_body">It is in your collection and you still answer as %1$s. Move onto it now, or later from My numbers.</string>
+    <string name="uin_shop_held_body">It is in your collection and you still answer as %1$s. Move onto it now, or later from My UINs.</string>
     <string name="uin_shop_held_now">Move onto it</string>
     <string name="uin_shop_held_later">Later</string>
-    <string name="uin_shop_my_numbers">My numbers</string>
+    <string name="uin_shop_my_numbers">My UINs</string>
     <string name="settings_foot_my_uins">The numbers this account holds, and which one it answers as.</string>
-    <string name="settings_row_my_uins">My numbers</string>
-    <string name="my_uins_title">My numbers</string>
+    <string name="settings_row_my_uins">My UINs</string>
+    <string name="my_uins_title">My UINs</string>
     <string name="my_uins_active_caption">You answer as</string>
     <string name="my_uins_active_sub">This is the number people reach you at.</string>
     <string name="my_uins_held_caption">Held</string>
@@ -1119,7 +1119,7 @@
     <string name="backup_warning">This file plus your recovery phrase is your whole history. Keep it as carefully as the phrase itself. It does not contain your keys and cannot be used to sign in.</string>
     <string name="recovery_reveal">Show the phrase</string>
     <string name="settings_anim_avatars_title">Animated avatars</string>
-    <string name="settings_anim_avatars_desc">Play avatars that are animated pictures. Turning this off shows their first frame instead, which is easier on the battery.</string>
+    <string name="settings_anim_avatars_desc">Off shows just the first frame, which is easier on the battery.</string>
     <string name="common_interests">Interests</string>
     <string name="common_homepage">Website</string>
     <string name="common_real_name">Name</string>
