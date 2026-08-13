@@ -2793,15 +2793,32 @@ class Session(context: Context) {
                 // Ratchet + mark distributed only after the broadcast lands.
                 SenderKeyStore.markDistributed(me, ctx.gid, skdmTargets.map { it.uin })
                 SenderKeyStore.advanceOwn(me, ctx.gid)
-                // Legacy members (not yet updated) still get their per-member copy.
+                // Legacy members (not yet updated) still get their per-member
+                // copy — but NOT on the sender's clock (#465).
+                //
+                // In RCQ Beta that tail is 1184 separate seals and a ~1.3 MB
+                // upload, ten to fifteen seconds of it, and the bubble's state
+                // never depended on it: `resp` above is the broadcast's, and
+                // this POST's answer is discarded. So the sender sat watching a
+                // clock icon spin for work that had already reached everyone
+                // whose client can read a broadcast.
+                //
+                // Detached from the send, not merely moved below the state
+                // flip: leaving the caller waiting inside fanOutGroup would
+                // still hold up the resend queue and the carbon behind it.
                 val legacy = sendable.filter { !it.senderKeys }
                 if (legacy.isNotEmpty()) {
-                    val legacyPayloads = legacy.mapNotNull { m ->
-                        runCatching {
-                            RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
-                        }.getOrElse { skipped++; null }
+                    scope.launch {
+                        val legacyPayloads = legacy.mapNotNull { m ->
+                            runCatching {
+                                RcqApi.GroupPayload(m.uin, SealedSender.encryptV1(env, Base64.decode(m.identityKey, Base64.NO_WRAP), me, signingPriv(), signingPub(), ctx.host ?: serverHost()))
+                            }.getOrNull()
+                        }
+                        if (legacyPayloads.isNotEmpty()) {
+                            runCatching { withRetry { ctx.api.sendGroupSealed(ctx.gid, legacyPayloads, authed = group.postPolicy == "owner_only") } }
+                                .onFailure { android.util.Log.w("RCQgroup", "group $groupId: legacy fan-out failed for ${legacyPayloads.size} member(s)", it) }
+                        }
                     }
-                    if (legacyPayloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, legacyPayloads, authed = group.postPolicy == "owner_only") }
                 }
             } else {
                 // No capable member (or a foreign group): original per-member fan-out.
