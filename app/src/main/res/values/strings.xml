@@ -1119,6 +1119,7 @@
     <string name="backup_warning">This file plus your recovery phrase is your whole history. Keep it as carefully as the phrase itself. It does not contain your keys and cannot be used to sign in.</string>
     <string name="recovery_reveal">Show the phrase</string>
     <string name="settings_anim_avatars_title">Animated avatars</string>
+    <string name="update_available_badge">Update to %1$s</string>
     <string name="settings_anim_avatars_desc">Off shows just the first frame, which is easier on the battery.</string>
     <string name="common_interests">Interests</string>
     <string name="common_homepage">Website</string>

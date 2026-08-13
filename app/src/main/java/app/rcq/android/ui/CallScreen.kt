@@ -123,7 +123,27 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                 // exactly what it should show; the lettered disc stays as the
                 // fallback for someone who never set one.
                 val peer = session?.contact(info.peerUin)
-                if (session != null && !peer?.avatarMediaId.isNullOrBlank()) {
+                // The lettered disc is the BASE layer, always drawn; the
+                // picture covers it once the blob has been fetched and
+                // decrypted. Drawn as an either/or, a peer whose picture was
+                // still loading (or whose island we cannot fetch from at all)
+                // got a 96dp hole where their face should be — PersonAvatar
+                // deliberately renders nothing while it has no image and no
+                // flower to fall back on.
+                // ⚠ One Box, so the two LAYER instead of stacking: in a Column
+                // they would sit one above the other and the screen would show
+                // a letter and a picture, not a picture over a letter.
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(96.dp).clip(CircleShape).background(Color(0xFF2A2D34)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            info.peerNickname.firstOrNull()?.uppercase() ?: "?",
+                            color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (session != null && !peer?.avatarMediaId.isNullOrBlank()) {
                     PersonAvatar(
                         id = peer?.avatarMediaId,
                         key = peer?.avatarMediaKey,
@@ -133,16 +153,10 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                         host = peer?.host,
                         animated = true,
                         crossIsland = peer?.host != null,
+                        // No flower in a call: it reports "online" to the one
+                        // person who can hear them.
+                        showStatus = false,
                     )
-                } else {
-                    Box(
-                        Modifier.size(96.dp).clip(CircleShape).background(Color(0xFF2A2D34)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            info.peerNickname.firstOrNull()?.uppercase() ?: "?",
-                            color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.SemiBold,
-                        )
                     }
                 }
             }

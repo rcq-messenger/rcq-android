@@ -1113,6 +1113,7 @@
     <string name="backup_warning">Этот файл вместе с вашей фразой это вся ваша переписка. Берегите его так же, как фразу. Ключей в нём нет, войти по нему нельзя.</string>
     <string name="recovery_reveal">Показать фразу</string>
     <string name="settings_anim_avatars_title">Живые аватарки</string>
+    <string name="update_available_badge">Обновить до %1$s</string>
     <string name="settings_anim_avatars_desc">Выключено — только первый кадр, батарея живёт дольше.</string>
     <string name="common_interests">Интересы</string>
     <string name="common_homepage">Сайт</string>

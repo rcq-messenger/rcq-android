@@ -9,10 +9,12 @@ import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -22,6 +24,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import app.rcq.android.Session
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -62,10 +67,18 @@ private fun qrBitmap(content: String, size: Int = 512): Bitmap? = runCatching {
  *  advisory key ride query params; flagship degrades to the legacy bare uin)
  *  plus the UIN. Matches the iOS QRSheet. */
 @Composable
-fun QrDialog(uin: Int, qrPayload: String, shareLink: String, onDismiss: () -> Unit) {
+fun QrDialog(
+    uin: Int,
+    qrPayload: String,
+    shareLink: String,
+    session: Session,
+    onDismiss: () -> Unit,
+) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val bmp = remember(qrPayload) { qrBitmap(qrPayload) }
+    val ownAvatar by session.ownAvatar.collectAsState()
+    val ownStatus by session.status.collectAsState()
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
@@ -74,16 +87,46 @@ fun QrDialog(uin: Int, qrPayload: String, shareLink: String, onDismiss: () -> Un
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (bmp != null) {
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = stringResource(R.string.qr_title),
-                        filterQuality = FilterQuality.None,
-                        modifier = Modifier
-                            .size(220.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White)
-                            .padding(10.dp),
-                    )
+                    // Your face in the middle of your own code (iOS parity).
+                    // The code is held up to a stranger, so the middle of it is
+                    // worth the person holding it. PersonAvatar draws the plain
+                    // status flower when no picture is set, which is what the
+                    // phones showed here before — nothing changes for anyone
+                    // who has not set one.
+                    //
+                    // ⚠ 40dp over 220dp is ~3.3% of the code's AREA. Error
+                    // correction is level M, which tolerates about 15%, so the
+                    // badge must not grow much past this.
+                    Box(contentAlignment = Alignment.Center) {
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = stringResource(R.string.qr_title),
+                            filterQuality = FilterQuality.None,
+                            modifier = Modifier
+                                .size(220.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White)
+                                .padding(10.dp),
+                        )
+                        // A white ring so the picture reads as ON the code
+                        // rather than punched into it, and so the scanner sees
+                        // a clean edge.
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(Color.White),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PersonAvatar(
+                                id = ownAvatar?.first,
+                                key = ownAvatar?.second,
+                                status = ownStatus,
+                                session = session,
+                                size = 40.dp,
+                            )
+                        }
+                    }
                 }
                 Text(
                     "$uin",
