@@ -83,6 +83,10 @@ object CallDiagnostics {
                     null -> "/unmeasured"
                 },
             )
+            // Which echo canceller ran. An echo report is unanswerable without
+            // it: "hw" means the ROM's own effect, which is the one that can be
+            // declared and not work (#532).
+            append(" aec:${WebRtcClient.echoCancellerKind}")
         }
     }
 }

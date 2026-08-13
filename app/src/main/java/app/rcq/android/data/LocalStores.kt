@@ -160,8 +160,17 @@ object LocalStores {
     /// off entirely. Device-local: the island never sees it.
     private val _animateAvatars = MutableStateFlow(true)
 
+    /// Which way a message is dragged to quote it.
+    ///
+    /// There is no right answer: Telegram pulls the row LEFT, WhatsApp and
+    /// Signal pull it RIGHT, and people arrive here with the habit of whichever
+    /// they used before (#526). So it is a setting rather than a decision.
+    /// Device-local, like the rest of this block.
+    private val _swipeReplySide = MutableStateFlow(SwipeReplySide.LEFT)
+
     private val _soundMaster = MutableStateFlow(true)
     val animateAvatars: StateFlow<Boolean> = _animateAvatars.asStateFlow()
+    val swipeReplySide: StateFlow<SwipeReplySide> = _swipeReplySide.asStateFlow()
     val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
     // In-app tone volume, 0f..1f. Requested because the tones ride the MEDIA
     // stream: turning them down meant turning music down with them.
@@ -243,6 +252,9 @@ object LocalStores {
         _fontScale.value = prefs.getFloat(K_FONT_SCALE, 1.0f)
         _lockGrace.value = prefs.getInt(K_LOCK_GRACE, 0)
         _animateAvatars.value = prefs.getBoolean(K_ANIM_AVATARS, true)
+        _swipeReplySide.value = runCatching {
+            SwipeReplySide.valueOf(prefs.getString(K_SWIPE_SIDE, null) ?: "LEFT")
+        }.getOrDefault(SwipeReplySide.LEFT)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
         _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
@@ -344,6 +356,9 @@ object LocalStores {
 
     /** Group notify mode (#11): ALL rings always, MENTIONS rings only on an
      *  @mention, NONE is fully silent. The two sets stay mutually exclusive. */
+    /** Which way a message row is dragged to quote it (#526). */
+    enum class SwipeReplySide { LEFT, RIGHT }
+
     enum class NotifyMode { ALL, MENTIONS, NONE }
     fun notifyMode(thread: String): NotifyMode = when {
         thread in _muted.value -> NotifyMode.NONE
@@ -504,6 +519,11 @@ object LocalStores {
     fun setAnimateAvatars(on: Boolean) {
         _animateAvatars.value = on
         if (::prefs.isInitialized) prefs.edit().putBoolean(K_ANIM_AVATARS, on).apply()
+    }
+
+    fun setSwipeReplySide(side: SwipeReplySide) {
+        _swipeReplySide.value = side
+        if (::prefs.isInitialized) prefs.edit().putString(K_SWIPE_SIDE, side.name).apply()
     }
 
     // ── sound toggles ────────────────────────────────────────────────
@@ -768,6 +788,7 @@ object LocalStores {
     private const val K_MENTION_SEEN = "mention_seen_at"
     private const val K_ALIAS = "contact_aliases"
     private const val K_ANIM_AVATARS = "animate_avatars"
+    private const val K_SWIPE_SIDE = "swipe_reply_side"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"

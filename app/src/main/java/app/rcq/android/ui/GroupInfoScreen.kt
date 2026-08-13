@@ -594,7 +594,9 @@ internal fun compressImageFor(context: android.content.Context, uri: android.net
     if (isGif && raw.size <= 2 * 1024 * 1024) return raw
     // A GIF too big to keep raw is flattened to a static JPEG via the PURE-JAVA
     // decoder — the native GIF decoder SIGSEGVs on some OEM ROMs.
-    val src = (if (isGif) gifFirstFrame(raw) else android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)) ?: return null
+    // Same orientation rule as the chat photo path (#527): a selfie set as an
+    // avatar was rotated for exactly the same reason.
+    val src = (if (isGif) gifFirstFrame(raw) else decodeUpright(raw)) ?: return null
     val maxSide = 640
     val longest = maxOf(src.width, src.height)
     val scaled = if (longest > maxSide) {

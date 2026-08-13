@@ -1115,6 +1115,9 @@
     <string name="settings_anim_avatars_title">Живые аватарки</string>
     <string name="update_available_badge">Обновить до %1$s</string>
     <string name="settings_anim_avatars_desc">Выключено — только первый кадр, батарея живёт дольше.</string>
+    <string name="settings_swipe_reply">Сдвиг сообщения для цитаты</string>
+    <string name="settings_swipe_reply_left">Влево</string>
+    <string name="settings_swipe_reply_right">Вправо</string>
     <string name="common_interests">Интересы</string>
     <string name="common_homepage">Сайт</string>
     <string name="common_real_name">Имя</string>

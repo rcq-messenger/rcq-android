@@ -44,6 +44,9 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -67,14 +70,13 @@ import androidx.core.content.ContextCompat
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.call.AudioRoomController
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 fun AudioRoomsScreen(session: Session, onBack: () -> Unit) {
     val controller = session.audioRooms
     val activeId by controller.activeRoomId.collectAsState()
-
-    LaunchedEffect(Unit) { controller.refresh() }
 
     if (activeId != null) {
         InRoomView(session)
@@ -83,6 +85,7 @@ fun AudioRoomsScreen(session: Session, onBack: () -> Unit) {
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun RoomListView(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
@@ -109,6 +112,20 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
         } else {
             pendingEnter = room
             micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    // ⚠ The refresh lives HERE, not one level up in AudioRoomsScreen, and it is
+    // keyed on Unit: the list leaves the composition while you are inside a
+    // room, so coming back out re-reads the corridor. Keyed above, it ran once
+    // per screen visit and the head counts you came back to check were the ones
+    // you had left (#530). The poll keeps them honest while you sit and look at
+    // them: occupancy events only reach people INSIDE a room, so a corridor
+    // watcher has nothing to listen to.
+    LaunchedEffect(Unit) {
+        while (true) {
+            controller.refresh()
+            delay(15_000)
         }
     }
 
@@ -143,9 +160,29 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
             }
         }
 
+        // Pull to refresh, asked for by name (#530). The empty state is a list
+        // item rather than a Box so the gesture exists before the first room
+        // does — the pull needs a scrolling child to be born at all.
+        var refreshing by remember { mutableStateOf(false) }
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { scope.launch { refreshing = true; controller.refresh(); refreshing = false } },
+            modifier = Modifier.weight(1f),
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = rememberPullToRefreshState(), isRefreshing = refreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    containerColor = c.bgSecondary, color = c.accent,
+                )
+            },
+        ) {
         if (rooms.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.rooms_empty), color = c.textSecondary, fontSize = 14.sp)
+            LazyColumn(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                item {
+                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(R.string.rooms_empty), color = c.textSecondary, fontSize = 14.sp)
+                    }
+                }
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -207,6 +244,7 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
+        }
         }
     }
 

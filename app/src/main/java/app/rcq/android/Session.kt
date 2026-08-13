@@ -2625,6 +2625,14 @@ class Session(context: Context) {
         _ownAvatar.value = net.avatar_media_id
             ?.takeIf { it.isNotEmpty() }
             ?.let { id -> net.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { id to it } }
+        // Re-hydrate the CHOSEN status. The picker was writing to the island and
+        // then reading nothing back, so every relaunch quietly answered "Online"
+        // for someone who had chosen Invisible (#533). Offline is what the
+        // island reports for a viewer, never a choice, so it is not restored.
+        net.status?.let { wire ->
+            val chosen = UserStatus.from(wire)
+            if (chosen != UserStatus.OFFLINE) _status.value = chosen
+        }
         // Server is the source of truth, but a reply that omits the
         // owner-self visibility fields (auth/owner-self edge) must NOT
         // clobber a known cached choice — merge field-by-field.

@@ -2,6 +2,7 @@ package app.rcq.android.call
 
 import android.content.Context
 import android.media.AudioManager
+import android.media.MediaRecorder
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,7 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
+import org.webrtc.audio.JavaAudioDeviceModule
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -643,6 +645,13 @@ class WebRtcClient(private val appContext: Context) {
 
         @Volatile private var sharedFactory: PeerConnectionFactory? = null
         @Volatile private var sharedEgl: EglBase? = null
+        @Volatile private var sharedAdm: JavaAudioDeviceModule? = null
+
+        /** "sw" (libwebrtc AEC3) or "hw" (the ROM's own effect, the old
+         *  default). Read by the call diagnostics so the next echo report
+         *  arrives with the answer attached instead of a guess. */
+        @Volatile var echoCancellerKind: String = "hw"
+            private set
 
         private fun eglBase(): EglBase = sharedEgl ?: error("WebRtcClient not initialised")
         private fun factory(): PeerConnectionFactory = sharedFactory ?: error("WebRtcClient not initialised")
@@ -658,7 +667,34 @@ class WebRtcClient(private val appContext: Context) {
             )
             val egl = EglBase.create()
             sharedEgl = egl
+            // ⚠ Build our OWN audio device module so libwebrtc's software echo
+            // canceller (AEC3) stays ON.
+            //
+            // Left to itself, the library builds an ADM with
+            // useHardwareAcousticEchoCanceler = isBuiltInAcousticEchoCancelerSupported(),
+            // which only means "the ROM DECLARES an AEC effect". Once that flag
+            // is true, native disables AEC3 in its favour — and if the vendor
+            // effect then fails to create or enable, the failure is a log line
+            // and the call runs with no echo cancellation at all. That is a
+            // caller hearing their own voice come back through the other
+            // person's earpiece, which is exactly what was reported (#532): it
+            // stopped the moment the far side muted, because the far side was
+            // the one echoing.
+            //
+            // VOICE_COMMUNICATION is the source the AEC is designed around.
+            // A failure to build the module is not worth losing calls over, so
+            // we fall back to the library's own default.
+            val adm = runCatching {
+                JavaAudioDeviceModule.builder(context.applicationContext)
+                    .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+                    .setUseHardwareAcousticEchoCanceler(false)
+                    .setUseHardwareNoiseSuppressor(false)
+                    .createAudioDeviceModule()
+            }.getOrNull()
+            sharedAdm = adm
+            echoCancellerKind = if (adm != null) "sw" else "hw"
             sharedFactory = PeerConnectionFactory.builder()
+                .apply { if (adm != null) setAudioDeviceModule(adm) }
                 .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
                 .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
                 // ⚠ libwebrtc ignores the loopback adapter when it enumerates

@@ -365,6 +365,10 @@ private fun SettingsRoot(
                     animAvatars,
                 ) { LocalStores.setAnimateAvatars(it) }
             }
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.settings_swipe_reply), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+            val swipeSide by LocalStores.swipeReplySide.collectAsState()
+            SegmentedSwipeSide(swipeSide) { LocalStores.setSwipeReplySide(it) }
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_privacy))
@@ -2723,7 +2727,9 @@ private fun hofAvatarDataUri(context: android.content.Context, uri: android.net.
     fun encode(bytes: ByteArray, mime: String) =
         "data:$mime;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
     if (isGif && raw.size <= cap) return encode(raw, "image/gif")
-    val src = (if (isGif) gifFirstFrame(raw) else android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)) ?: return null
+    // Orientation applied here too (#527) — the Hall of Fame picture is picked
+    // the same way, from the same camera.
+    val src = (if (isGif) gifFirstFrame(raw) else decodeUpright(raw)) ?: return null
     val maxSide = 256
     val longest = maxOf(src.width, src.height)
     val scaled = if (longest > maxSide) {
@@ -3117,6 +3123,27 @@ private fun SegmentedTheme(mode: ThemeMode, onPick: (ThemeMode) -> Unit) {
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
                     .clickable { onPick(m) }.padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 14.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal) }
+        }
+    }
+}
+
+/** Which way a message is dragged to quote it (#526). Telegram pulls left,
+ *  WhatsApp and Signal pull right, and people arrive with the habit of whichever
+ *  they used before, so this is a choice rather than a decision. */
+@Composable
+private fun SegmentedSwipeSide(side: LocalStores.SwipeReplySide, onPick: (LocalStores.SwipeReplySide) -> Unit) {
+    val c = RcqTheme.colors
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgSecondary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        listOf(
+            LocalStores.SwipeReplySide.LEFT to stringResource(R.string.settings_swipe_reply_left),
+            LocalStores.SwipeReplySide.RIGHT to stringResource(R.string.settings_swipe_reply_right),
+        ).forEach { (v, label) ->
+            val sel = side == v
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
+                    .clickable { onPick(v) }.padding(vertical = 9.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 14.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal) }
         }
