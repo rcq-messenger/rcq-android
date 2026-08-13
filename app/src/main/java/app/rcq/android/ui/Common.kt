@@ -188,6 +188,12 @@ internal fun PersonAvatar(
     animated: Boolean = false,
     crossIsland: Boolean = false,
     onStatusClick: (() -> Unit)? = null,
+    /** Draw the person WITHOUT their presence. One screen asks for this: a
+     *  call, where the flower answers "are they around" to somebody who is
+     *  listening to them breathe. Off, the picture stands alone; with no
+     *  picture this draws nothing at all, so the caller supplies its own
+     *  fallback (the call screen already has its lettered disc). */
+    showStatus: Boolean = true,
 ) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -209,6 +215,7 @@ internal fun PersonAvatar(
     val animatableGif = bytes?.takeIf { animated && mayAnimate && it.isGif() }
     // No picture: nothing changes at all for the people who never set one.
     if (image == null && animatableGif == null) {
+        if (!showStatus) return
         StatusIcon(
             status,
             size = size,
@@ -232,7 +239,7 @@ internal fun PersonAvatar(
         // it, the way the site draws it in the Hall of Fame. Keeping it fully
         // inside the square put it in the corner the round image never reaches,
         // so it read as clipped and half-swallowed by the avatar.
-        Box(
+        if (showStatus) Box(
             Modifier.align(Alignment.BottomStart)
                 .offset(x = -(badge / 4), y = badge / 4)
                 .size(badge)

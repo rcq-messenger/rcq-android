@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Block
@@ -180,6 +181,9 @@ internal fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit = {},
     onOpenBackupIsland: () -> Unit = {},
+    /** Tapped the "new version" badge in the header. Defaults to nothing so a
+     *  preview or a test host does not have to care. */
+    onUpdateBadge: (app.rcq.android.net.UpdateChecker.Update) -> Unit = {},
     onOpenProfile: () -> Unit = {},
     // Open ANOTHER user's profile (peer). Used by add-contact so a search
     // result opens the profile preview before you send the request.
@@ -369,6 +373,7 @@ internal fun HomeScreen(
                 stealthActive = stealthActive,
                 routeVerified = routeVerified,
                 bypassManual = bypassManual,
+                onUpdateBadge = onUpdateBadge,
                 accounts = accountRows,
                 canAddAccount = accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
                 onPickStatus = { scope.launch { session.setStatus(it) } },
@@ -663,7 +668,7 @@ internal fun HomeScreen(
     }
     if (showQr) {
         val links = remember { session.contactLinks() }
-        QrDialog(uin = uin, qrPayload = links.first, shareLink = links.second, onDismiss = { showQr = false })
+        QrDialog(uin = uin, qrPayload = links.first, shareLink = links.second, session = session, onDismiss = { showQr = false })
     }
     if (showAddAccount) {
         AddAccountDialog(
@@ -987,6 +992,7 @@ private fun HomeHeader(
     stealthActive: Boolean,
     routeVerified: Boolean,
     bypassManual: Boolean,
+    onUpdateBadge: (app.rcq.android.net.UpdateChecker.Update) -> Unit,
     accounts: List<AccountRow>,
     canAddAccount: Boolean,
     onPickStatus: (UserStatus) -> Unit,
@@ -1177,7 +1183,31 @@ private fun HomeHeader(
             // shield when the censorship bypass is engaged (iOS StealthHeaderBadge
             // parity). The 30dp slot balances the leading status icon so the
             // nick/UIN stays dead-centred.
+            // Next to the flower and the shield, exactly where founder asked
+            // for it (#520): an update the app has already found, waiting for a
+            // moment that suits the user. It never interrupts — the dialog is
+            // still at most once per launch — and it disappears the moment the
+            // new build is installed, because the manifest stops offering it.
+            val pendingUpdate by app.rcq.android.net.UpdateChecker.pending.collectAsState()
+            // ⚠ Inside the SAME 30dp slot as the shield, not next to it: that
+            // slot exists to balance the status icon on the other side so the
+            // nick and UIN stay dead-centred, and a second one shifted the
+            // whole block 18dp off centre whenever an update was pending.
+            // Two marks in one slot is fine — the bypass shield and a pending
+            // update are rarely both true, and when they are the update yields.
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                val up = pendingUpdate
+                if (up != null && !stealthActive) {
+                    Icon(
+                        Icons.Filled.FileDownload,
+                        stringResource(R.string.update_available_badge, up.versionName),
+                        tint = c.accent,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .clickable { onUpdateBadge(up) },
+                    )
+                }
                 if (stealthActive) {
                     // Honest shield: solid accent only when the route is VERIFIED to
                     // reach the backend; amber when the bypass is engaged but not yet

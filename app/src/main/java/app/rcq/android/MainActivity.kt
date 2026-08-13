@@ -384,6 +384,10 @@ private fun RcqApp(session: Session) {
     // lock screen replaces the Registered UI (see the `when` below).
     val locked by app.rcq.android.security.PanicPinService.locked.collectAsState()
     var chatTarget by remember { mutableStateOf<ChatTarget?>(null) }
+    // The pending update. Declared up here with the other screen state because
+    // the home header's badge sits above the update dialog in the tree and
+    // hands the found version back to it.
+    var update by remember { mutableStateOf<app.rcq.android.net.UpdateChecker.Update?>(null) }
     // Thread the user just unlocked via the per-chat PIN gate; reset on leaving
     // the chat so a locked chat re-prompts every time it's opened.
     var unlockedChatThread by remember { mutableStateOf<String?>(null) }
@@ -746,6 +750,9 @@ private fun RcqApp(session: Session) {
                     onOpenSettings = { settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false; showSettings = true },
                     onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
                     onOpenBackupIsland = { settingsToBackupIsland = true; showSettings = true },
+                    // The header badge asks for the same dialog the launch
+                    // check raises, at a moment the user picked.
+                    onUpdateBadge = { update = it },
                     onOpenProfile = { showProfile = true },
                     onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
                     onOpenPeerInfoHere = { peerInfoUin = it; peerInfoHost = session.currentServer },
@@ -789,12 +796,20 @@ private fun RcqApp(session: Session) {
 
         // In-app update prompt: the APK ships from the website, so we self-check
         // a version manifest once per launch and offer a one-tap update.
-        var update by remember { mutableStateOf<app.rcq.android.net.UpdateChecker.Update?>(null) }
+
         val updateDownload by app.rcq.android.net.UpdateChecker.downloadState.collectAsState()
         LaunchedEffect(s is UiState.Registered) {
-            if (s is UiState.Registered) {
-                app.rcq.android.net.UpdateChecker.cleanupOldApks(context)
-                update = app.rcq.android.net.UpdateChecker.check()
+            if (s !is UiState.Registered) return@LaunchedEffect
+            app.rcq.android.net.UpdateChecker.cleanupOldApks(context)
+            // Keep asking. The first answer may raise the dialog; every later
+            // one only lights the header badge, which is the whole difference
+            // between "the app told me" and "I happened to restart it".
+            var first = true
+            while (true) {
+                val found = app.rcq.android.net.UpdateChecker.refresh(force = first)
+                if (first && found != null) update = found
+                first = false
+                kotlinx.coroutines.delay(6L * 60 * 60 * 1000)
             }
         }
         update?.let { up ->

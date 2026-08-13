@@ -82,6 +82,43 @@ object UpdateChecker {
         data object Failed : DownloadState
     }
 
+    // ── "there is a new version" as a fact the UI can watch ────────────────
+    //
+    // The app asked the manifest exactly once, at launch, and then sat in the
+    // background for days without asking again — so a release published on
+    // Tuesday was found whenever the user next cold-started, which for a
+    // messenger that lives in the background can be a week. Founder, in #520:
+    // "приложение само опрашивает сервер с какой-то периодичностью? Можно
+    // сделать, чтобы появление обновки было видно, значок рядом с цветком и
+    // щитом".
+    //
+    // So the check now repeats, and what it finds lights a badge in the home
+    // header. The DIALOG still appears at most once per launch — an update is
+    // not worth interrupting anyone for, and never over a ringing call.
+    private val _pending = MutableStateFlow<Update?>(null)
+    val pending: StateFlow<Update?> = _pending.asStateFlow()
+
+    /** Poll no more often than this, whoever asks. */
+    private const val MIN_CHECK_GAP_MS = 30L * 60 * 1000
+    private var lastCheckAt = 0L
+
+    /** Ask the manifest, remember the answer, tell nobody loudly.
+     *  @return the update when there is one, which the caller may use for a
+     *  one-per-launch prompt. */
+    suspend fun refresh(force: Boolean = false): Update? {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastCheckAt < MIN_CHECK_GAP_MS) return _pending.value
+        lastCheckAt = now
+        val found = check()
+        // ⚠ Only a POSITIVE answer moves the badge. `check()` returns null both
+        // for "nothing newer" and for "could not ask" — every manifest host
+        // unreachable looks exactly like being up to date. Clearing on that
+        // would let one flaky poll erase an update the user had already been
+        // told about, which is the opposite of the point.
+        if (found != null) _pending.value = found
+        return found
+    }
+
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var downloadJob: Job? = null
     @Volatile private var currentCall: Call? = null
