@@ -226,11 +226,33 @@ object NetworkAudit {
         val frontR = probe(front, 443, front)
         add("фронт $front", frontR)
         var relaysOpen = 0
+        var udpRelays = 0
+        var udpRelaysOpen = 0
         val relays = RelayConfigStore.currentRelays()
+        val deadTags = ArrayList<String>()
         for (r in relays) {
-            if (probe(r.server, r.port, null, timeoutMs = 4000).first == Reach.OPEN) relaysOpen++
+            // ⚠ This is a TCP connect, and half the pool is Hysteria2, which
+            // rides UDP. Both protocols answer on 443 of the same machine, so a
+            // TCP probe says "the machine is up", NOT "this entry can carry
+            // traffic here". On a network that eats QUIC every hy2 entry probes
+            // OPEN and works for nobody, which is what "the bypass works
+            // sometimes" looks like from the inside. Count them separately and
+            // read the number next to `udp:` below.
+            val hy2 = r.proto == "hysteria2"
+            if (hy2) udpRelays++
+            if (probe(r.server, r.port, null, timeoutMs = 4000).first == Reach.OPEN) {
+                relaysOpen++
+                if (hy2) udpRelaysOpen++
+            } else {
+                deadTags += r.tag
+            }
         }
-        lines += Line("релеи", relaysOpen > 0, "$relaysOpen из ${relays.size} принимают TCP")
+        lines += Line(
+            "релеи",
+            relaysOpen > 0,
+            "$relaysOpen из ${relays.size} принимают TCP" +
+                (if (deadTags.isEmpty()) "" else ", молчат: " + deadTags.joinToString(", ")),
+        )
 
         // 4. The crossed pair that names the filter.
         //    A: permitted address, our name.
@@ -246,7 +268,22 @@ object NetworkAudit {
         //    healthy network it would just be noise in the report.
         var carriersOpen = 0
         var carrierNames = ""
-        var udpOk: Boolean? = null
+        // ⚠ Measured on EVERY run, not only when the island is unreachable.
+        // Somebody whose island answers fine still turns the bypass on, and on
+        // a network that blocks UDP the Hysteria2 half of the pool cannot carry
+        // them — that is the difference between "the bypass is flaky" and "the
+        // bypass has half as many relays as it looks like it has". Skipping the
+        // measurement on a healthy direct path meant every such report arrived
+        // saying ALL_FINE with nothing to go on.
+        val udpOk: Boolean = udpWorks()
+        lines += Line("UDP наружу", udpOk, if (udpOk) "проходит" else "не проходит")
+        if (!udpOk && udpRelays > 0) {
+            lines += Line(
+                "релеи на UDP",
+                false,
+                "$udpRelays из ${relays.size} работают по UDP (Hysteria2), а UDP на этой сети не проходит",
+            )
+        }
         if (direct.first != Reach.OPEN) {
             val reachable = ArrayList<String>()
             for (c in CARRIERS) {
@@ -262,8 +299,6 @@ object NetworkAudit {
                 if (carriersOpen > 0) "$carriersOpen из ${CARRIERS.size} отвечают ($carrierNames)"
                 else "ни одно из ${CARRIERS.size} не отвечает",
             )
-            udpOk = udpWorks()
-            lines += Line("UDP наружу", udpOk, if (udpOk) "проходит" else "не проходит")
         }
 
         // ⚠⚠ The relay that carries call MEDIA, tested the way calls reach it:
@@ -365,7 +400,10 @@ object NetworkAudit {
             append("dns:${if (islandIp != null) "ok" else "fail"} ")
             append("dir:${short(direct.first)} ")
             append("front:${short(frontR.first)} ")
-            append("relay:$relaysOpen/${relays.size} ")
+            append("relay:$relaysOpen/${relays.size}")
+            // hy2 entries are UDP, so their TCP count is not what carries them.
+            if (udpRelays > 0) append("(hy2:$udpRelaysOpen/$udpRelays)")
+            append(" udp:${if (udpOk) "ok" else "block"} ")
             append("xname:${crossName?.first?.let { short(it) } ?: "-"} ")
             append("xaddr:${crossAddr?.first?.let { short(it) } ?: "-"} ")
             turnOk?.let { append("turn:${if (it) (if (SingBoxTransport.isActive) "tunnel" else "ok") else "BLOCKED"} ") }
@@ -380,7 +418,7 @@ object NetworkAudit {
             if (direct.first != Reach.OPEN) {
                 append("carrier:$carriersOpen/${CARRIERS.size}")
                 if (carrierNames.isNotEmpty()) append("($carrierNames)")
-                append(" udp:${if (udpOk == true) "ok" else "block"} ")
+                append(" ")
             }
             append("=> ${verdict.name}")
         }

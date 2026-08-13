@@ -5,6 +5,7 @@ import android.os.PowerManager
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -88,6 +90,24 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     val incoming = state is CallController.State.Incoming
     val ended = state is CallController.State.Ended
 
+    // ⚠ Chrome hides itself on a CONNECTED VIDEO call and comes back on a tap
+    // (#531): the control cluster and the name block cover about a third of the
+    // picture, and in a video call the picture is the point. Audio keeps its
+    // controls on screen always — there is nothing underneath them to reveal,
+    // and a hidden Hang up would be a cruelty.
+    val canAutoHide = connected && isVideo
+    var chromeVisible by remember { mutableStateOf(true) }
+    // Any change of footing (call connects, video starts or stops, the far side
+    // asks to turn video on) brings the controls back and restarts the clock.
+    LaunchedEffect(canAutoHide, incomingUpgrade, relayDead) { chromeVisible = true }
+    LaunchedEffect(chromeVisible, canAutoHide) {
+        if (canAutoHide && chromeVisible) {
+            delay(4_000)
+            chromeVisible = false
+        }
+    }
+    val showChrome = !canAutoHide || chromeVisible
+
     // Back puts a live call aside instead of doing nothing. Only once it is
     // connected: while it is still ringing this screen IS the answer surface.
     androidx.activity.compose.BackHandler(enabled = connected) { controller.minimize() }
@@ -98,7 +118,16 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     // not a reason to blank.
     ProximityBlanking(connected && !isVideo && !speakerOn)
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF0E0F12))) {
+    Box(
+        Modifier.fillMaxSize().background(Color(0xFF0E0F12)).let {
+            // A tap anywhere brings the chrome back (and puts it away again).
+            // No ripple and no indication: this is the video, not a button.
+            if (!canAutoHide) it else it.clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { chromeVisible = !chromeVisible }
+        },
+    ) {
         // Remote video fills the screen when present; else an avatar.
         if (isVideo && remoteVideo != null && connected) {
             VideoRenderer(remoteVideo, mirror = false, modifier = Modifier.fillMaxSize())
@@ -176,7 +205,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         // Put the call aside and use the app. Only on a connected call, and
         // deliberately in the corner rather than near End: the two must not be
         // easy to confuse.
-        if (connected) {
+        if (connected && showChrome) {
             Icon(
                 Icons.Filled.KeyboardArrowDown,
                 contentDescription = stringResource(R.string.call_minimize),
@@ -189,6 +218,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         }
 
         // Header: name + status.
+        if (showChrome) {
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = 64.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -201,6 +231,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                 color = if (relayDead) Color(0xFFE5A23D) else Color(0xFFB8BCC4),
                 fontSize = 15.sp,
             )
+        }
         }
 
         // The relay could not carry this call, and we know it seconds in rather
@@ -244,6 +275,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
         }
 
         // Bottom controls.
+        if (showChrome) {
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -297,6 +329,7 @@ fun CallScreen(controller: CallController, session: Session? = null) {
                     Color(0xFFE5484D), size = 76.dp,
                 ) { controller.hangUp() }
             }
+        }
         }
     }
 }
