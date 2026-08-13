@@ -72,6 +72,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 // Direction arrows for the call log. Auto-mirrored on purpose: "outgoing" is
 // the direction you read in, so it has to flip with the layout.
 import androidx.compose.material.icons.automirrored.filled.CallMade
@@ -122,11 +123,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -389,6 +392,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // The user's chosen quick reactions (≤6); defaults to the historical six
     // until customised in the emoji picker. Drives the long-press reaction row.
     val reactionSet by LocalStores.reactionEmojis.collectAsState()
+    // Which way a row is dragged to quote it (#526).
+    val swipeSide by LocalStores.swipeReplySide.collectAsState()
 
     val youLabel = stringResource(R.string.chat_you)
     fun authorName(m: ChatMessage): String = when {
@@ -1018,7 +1023,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             SystemNoticeRow(m)
                         } else {
                             val senderPic = if (row.showSender) authorMember(m) else null
-                            SwipeToReply(onReply = { replyTarget = m }) {
+                            SwipeToReply(side = swipeSide, onReply = { replyTarget = m }) {
                             MessageBubble(
                                 session, m,
                                 senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
@@ -2740,8 +2745,8 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
     }
 }
 
-/// Telegram-style swipe-to-reply. Drag a message to the LEFT past the
-/// threshold and it becomes the reply target.
+/// Swipe-to-reply. Drag a message past the threshold and RELEASE, and it
+/// becomes the reply target.
 ///
 /// Reported by a user: "нажал на сообщение влево видешь, оно выделяется чтоб
 /// ответить, так ускоряет процесс, а то сейчас надо держать на него чтоб
@@ -2749,55 +2754,87 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
 /// to reach the other actions; this is the shortcut for the one action people
 /// use constantly.
 ///
-/// The gesture fires ONCE per drag (`fired`), on crossing the threshold rather
-/// than on release, so the haptic lands where the finger feels the catch. The
-/// row springs back either way — the reply composer opening is the feedback
-/// that it worked, not a message left sitting off-centre.
+/// ⚠ It used to commit the moment the finger crossed the threshold, which made
+/// the gesture impossible to take back: you were quoting before you had decided
+/// to (#526). Now crossing the threshold only ARMS it — with the haptic where
+/// the finger feels the catch, and a second one if you drag back out of it —
+/// and the release is what commits. Drag back before lifting and nothing
+/// happens. The row springs back either way; the reply composer opening is the
+/// feedback that it worked, not a message left sitting off-centre.
+///
+/// [side] is the user's choice, because there is no right answer: Telegram
+/// pulls left, WhatsApp and Signal pull right.
 @Composable
-private fun SwipeToReply(onReply: () -> Unit, content: @Composable () -> Unit) {
+private fun SwipeToReply(
+    side: LocalStores.SwipeReplySide,
+    onReply: () -> Unit,
+    content: @Composable () -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val density = LocalDensity.current
     val threshold = with(density) { 56.dp.toPx() }
     val maxDrag = threshold * 1.4f
-    var fired by remember { mutableStateOf(false) }
+    // -1 pulls the row left, +1 right. Everything below is written in terms of
+    // travel TOWARDS the chosen side, so there is one code path, not two.
+    val dir = if (side == LocalStores.SwipeReplySide.LEFT) -1f else 1f
+    // The pointer node outlives a recomposition, so it must not capture the
+    // first `onReply` it ever saw (the target message changes per row).
+    val reply by rememberUpdatedState(onReply)
+    // The finger's own position. `offsetX` is an Animatable written from a
+    // launched coroutine, so it lags within a frame — fine to RENDER from,
+    // wrong to make decisions from.
+    var raw by remember { mutableFloatStateOf(0f) }
+    var armed by remember { mutableStateOf(false) }
 
     Box(
-        Modifier.pointerInput(Unit) {
+        Modifier.pointerInput(dir) {
             detectHorizontalDragGestures(
                 onDragEnd = {
-                    fired = false
+                    // The one commit point: past the threshold AT RELEASE.
+                    if (armed) reply()
+                    armed = false
+                    raw = 0f
                     scope.launch { offsetX.animateTo(0f) }
                 },
                 onDragCancel = {
-                    fired = false
+                    armed = false
+                    raw = 0f
                     scope.launch { offsetX.animateTo(0f) }
                 },
             ) { change, dragAmount ->
-                // Only leftward travel moves the row; a rightward drag on a
-                // row that has not moved is left alone so it can still reach
-                // whatever else wants horizontal gestures.
-                val next = (offsetX.value + dragAmount).coerceIn(-maxDrag, 0f)
-                if (next != offsetX.value) change.consume()
+                // Only travel towards the chosen side moves the row; a drag the
+                // other way on a row that has not moved is left alone so it can
+                // still reach whatever else wants horizontal gestures.
+                val next = (raw + dragAmount).let {
+                    if (dir < 0f) it.coerceIn(-maxDrag, 0f) else it.coerceIn(0f, maxDrag)
+                }
+                if (next != raw) change.consume()
+                raw = next
                 scope.launch { offsetX.snapTo(next) }
-                if (!fired && -next >= threshold) {
-                    fired = true
+                val past = next * dir >= threshold
+                if (past != armed) {
+                    armed = past
+                    // Haptic on catching it AND on letting it go, so the finger
+                    // knows the state without the eyes.
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onReply()
                 }
             }
         },
     ) {
-        val progress = (-offsetX.value / threshold).coerceIn(0f, 1f)
-        // The arrow rides in from under the row's right edge, so the gesture
-        // says what it is doing before it happens.
+        val progress = (offsetX.value * dir / threshold).coerceIn(0f, 1f)
+        // The arrow rides in from under the edge the row is heading towards, so
+        // the gesture says what it is doing before it happens.
         if (progress > 0.02f) {
             Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
+                if (dir < 0f) Icons.AutoMirrored.Filled.ArrowBack else Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
                 tint = RcqTheme.colors.textSecondary.copy(alpha = progress),
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp).size(20.dp),
+                modifier = Modifier
+                    .align(if (dir < 0f) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(horizontal = 12.dp)
+                    .size(20.dp),
             )
         }
         Box(Modifier.offset { IntOffset(offsetX.value.roundToInt(), 0) }) { content() }
@@ -3592,7 +3629,10 @@ private fun compressImage(context: Context, uri: Uri): ByteArray? {
         val frame = gifFirstFrame(raw) ?: return null
         return ByteArrayOutputStream().also { frame.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
     }
-    val src = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return null
+    // decodeUpright, not BitmapFactory: the camera's orientation tag has to be
+    // applied to the pixels here, because the JPEG we write below carries no
+    // tag for a viewer to apply later (#527).
+    val src = decodeUpright(raw) ?: return null
     val maxSide = 1200
     val longest = maxOf(src.width, src.height)
     val scaled = if (longest > maxSide) {

@@ -1121,6 +1121,10 @@
     <string name="settings_anim_avatars_title">Animated avatars</string>
     <string name="update_available_badge">Update to %1$s</string>
     <string name="settings_anim_avatars_desc">Off shows just the first frame, which is easier on the battery.</string>
+    <!-- Swipe-to-quote direction (#526). Telegram swipes left, WhatsApp and Signal swipe right. -->
+    <string name="settings_swipe_reply">Swipe a message to quote it</string>
+    <string name="settings_swipe_reply_left">To the left</string>
+    <string name="settings_swipe_reply_right">To the right</string>
     <string name="common_interests">Interests</string>
     <string name="common_homepage">Website</string>
     <string name="common_real_name">Name</string>

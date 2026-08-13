@@ -22,8 +22,8 @@ android {
         applicationId = "app.rcq.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 113
-        versionName = "0.113"
+        versionCode = 114
+        versionName = "0.114"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // libsignal ships native .so for 4 ABIs; keep the real-device ones
         // (arm64-v8a, armeabi-v7a) + x86_64 for the emulator, drop 32-bit x86.
@@ -132,6 +132,10 @@ dependencies {
     // In-app browser: web links tapped in a chat open in a Chrome Custom Tab
     // over the app instead of kicking the user out to the system browser.
     implementation(libs.androidx.browser)
+
+    // Reads the EXIF orientation tag a camera writes, which BitmapFactory does
+    // not — without it every recompressed camera photo shipped sideways (#527).
+    implementation(libs.androidx.exifinterface)
 
     // QR generation for the "my code" sheet (rcq://add/<uin>). Pure-Java
     // BitMatrix → Bitmap; no UI dependency.

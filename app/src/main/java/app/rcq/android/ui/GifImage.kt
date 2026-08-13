@@ -2,13 +2,16 @@ package app.rcq.android.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayInputStream
 
 /** GIF magic bytes — "GIF8" (both 87a and 89a start with this). Lets the photo
  *  bubble (and avatars) detect an animated blob in the same "photo" media path
@@ -27,6 +30,47 @@ internal fun ByteArray.isJpegOrPng(): Boolean =
     (size >= 3 && this[0] == 0xFF.toByte() && this[1] == 0xD8.toByte() && this[2] == 0xFF.toByte()) ||
         (size >= 4 && this[0] == 0x89.toByte() && this[1] == 0x50.toByte() &&
             this[2] == 0x4E.toByte() && this[3] == 0x47.toByte())
+
+/**
+ * Decode [raw] the way a viewer would SEE it: pixels rotated to match the JPEG
+ * orientation tag, which [BitmapFactory] ignores.
+ *
+ * ⚠ A camera sensor is mounted landscape, so a shot taken in portrait is written
+ * landscape plus an Orientation tag telling everyone to turn it. Every path that
+ * recompresses a picked image used to decode the raw grid and write a fresh JPEG
+ * with no tag at all, which turned "sideways, but labelled" into "sideways,
+ * full stop" for every recipient on every platform (report #527). Gallery
+ * pictures looked fine only because screenshots and re-encodes are already
+ * upright — a camera original picked from the gallery was rotated too.
+ *
+ * Returns null on a corrupt blob. Never call this on a GIF (see [decodeSampled]).
+ */
+internal fun decodeUpright(raw: ByteArray): Bitmap? {
+    val src = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return null
+    val orientation = runCatching {
+        ExifInterface(ByteArrayInputStream(raw))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    val m = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> m.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> m.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> m.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> m.postScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> m.postScale(1f, -1f)
+        // Mirrored diagonals: rare (some front cameras), cheap to cover.
+        ExifInterface.ORIENTATION_TRANSPOSE -> { m.postRotate(90f); m.postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_TRANSVERSE -> { m.postRotate(270f); m.postScale(-1f, 1f) }
+        else -> return src
+    }
+    // The rotated copy is written back out as a bare JPEG with no tag, so a
+    // viewer cannot turn it a second time.
+    val rotated = runCatching {
+        Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+    }.getOrNull() ?: return src
+    if (rotated !== src) src.recycle()
+    return rotated
+}
 
 /**
  * Decode [bytes] to a [Bitmap] downsampled so its longest side is about [maxPx]

@@ -1023,6 +1023,11 @@ class RcqApi(
         val about: String? = null,
         val interests: List<String> = emptyList(),
         val homepage: String? = null,
+        /** The status the user CHOSE (online/away/dnd/invisible). Self-view only:
+         *  for anyone else the island folds invisible down to offline. Without
+         *  reading it back, a relaunch showed "Online" to someone who had picked
+         *  Invisible, and their own app was the only place saying otherwise. */
+        val status: String? = null,
         val status_message: String? = null,
         val last_seen_visibility: String? = null,
         val gender_visibility: String? = null,

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
@@ -1976,17 +1977,24 @@ private fun AddContactDialog(
     // A sheet, not a centred dialog: Add is a search surface with a keyboard,
     // and a box floating in the middle of the screen fights the IME for space
     // (iOS has always had this as a sheet).
+    //
+    // ⚠ The content declares FULL height on purpose (#524). A ModalBottomSheet
+    // can only rise as high as its content measures, so wrap-height content with
+    // a capped result list left the sheet stuck two thirds down the screen no
+    // matter how hard you dragged it — the drag simply had nowhere to go. It
+    // still OPENS half-way (the default sheet state keeps its partial anchor);
+    // only the ceiling changed.
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 16.dp).padding(bottom = 20.dp)) {
             Text(
                 stringResource(R.string.add_title),
                 color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(bottom = 10.dp),
             )
-            Column(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().weight(1f)) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -2018,7 +2026,10 @@ private fun AddContactDialog(
                 // This is the entry point for a user handed a link who isn't in any
                 // shared chat (the only other joinable place was GroupLinkBubble).
                 val groupRef = remember(query) { GroupLinkParser.parse(query.trim()) }
-                Box(Modifier.heightIn(max = 320.dp).padding(top = 8.dp)) {
+                // weight, not a fixed cap: the results take whatever the sheet
+                // has left, which is what lets a long list drag the sheet to
+                // the top instead of scrolling inside a 320dp window.
+                Box(Modifier.weight(1f).padding(top = 8.dp)) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         if (groupRef != null) {
                             val foreignHost = groupRef.host?.takeIf { it != session.currentServer }
@@ -2173,12 +2184,18 @@ private fun AddContactDialog(
                         }
                         users.forEach { u ->
                             val already = contacts.any { it.uin == u.uin }
-                            val sub = when {
-                                already -> "#${u.uin} · " + stringResource(R.string.add_already_contact)
-                                u.uin in sentTo -> "#${u.uin} · " + stringResource(R.string.add_request_sent)
-                                else -> "#${u.uin}"
+                            // Number first, name under it (#525). You search this
+                            // window BY number far more often than by name, and the
+                            // thing you are checking against what you typed should be
+                            // the line your eye lands on.
+                            val name = u.nickname?.trim().orEmpty()
+                            val state = when {
+                                already -> stringResource(R.string.add_already_contact)
+                                u.uin in sentTo -> stringResource(R.string.add_request_sent)
+                                else -> ""
                             }
-                            AddResultRow(u.nickname ?: "#${u.uin}", sub) {
+                            val sub = listOf(name, state).filter { it.isNotEmpty() }.joinToString(" · ")
+                            AddResultRow("#${u.uin}", sub) {
                                 // Contact → open chat; not yet a contact → open the
                                 // profile preview where you can send the request.
                                 if (already) onOpenChat(u.uin) else onOpenProfile(u.uin)
@@ -2244,7 +2261,11 @@ private fun AddResultRow(
         }
         Column(Modifier.weight(1f)) {
             Text(title, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // A hit with no nickname has nothing for the second line; drawing it
+            // empty leaves the row taller than the text in it.
+            if (subtitle.isNotEmpty()) {
+                Text(subtitle, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
