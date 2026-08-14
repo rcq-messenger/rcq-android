@@ -50,7 +50,7 @@ object LanguageManager {
     /// missing translation.
     val available: List<Lang> get() = supported.filter { it.code in SHIPPED }
 
-    private val SHIPPED = setOf("en", "ru", "zh-Hans")
+    private val SHIPPED = setOf("en", "ru", "es", "pt", "tr", "uk", "zh-Hans")
 
     private const val PREFS = "rcq_lang"
     private const val KEY = "lang"
