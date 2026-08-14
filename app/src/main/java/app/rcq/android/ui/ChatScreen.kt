@@ -35,6 +35,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.widthIn
@@ -174,6 +175,7 @@ import app.rcq.android.data.LocalStores
 import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.crypto.Reply
+import app.rcq.android.media.AudioPlayer
 import app.rcq.android.media.MediaSaver
 import app.rcq.android.media.VoiceRecorder
 import app.rcq.android.model.ChatMessage
@@ -3145,12 +3147,74 @@ private fun ViewerAction(
     }
 }
 
+/// Audio the platform decoder actually handles. Anything outside this list
+/// keeps the old behaviour and opens in another app: a play button that
+/// produces silence is worse than no play button.
+///
+/// The extension check is not belt-and-braces, it is load-bearing: document
+/// pickers routinely hand back `application/octet-stream` for .opus and .flac,
+/// and audio-only .m4a often arrives labelled `video/mp4`.
+private val PLAYABLE_AUDIO_EXT = setOf(
+    "mp3", "m4a", "aac", "ogg", "oga", "opus", "flac", "wav", "amr", "3gp", "mka",
+)
+
+private fun isPlayableAudio(mime: String?, name: String?): Boolean {
+    val ext = name?.substringAfterLast('.', "")?.lowercase()
+    if (ext != null && ext in PLAYABLE_AUDIO_EXT) return true
+    val m = mime?.lowercase() ?: return false
+    if (!m.startsWith("audio/")) return false
+    // WMA and ALAC are `audio/*` and are NOT decodable on stock Android.
+    return !m.contains("x-ms-wma") && !m.contains("alac") && !m.contains("aiff")
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val playable = isPlayableAudio(m.fileMime, m.fileName)
+    // Keyed off the shared player, never off local state: a recycled row would
+    // otherwise draw someone else's pause glyph.
+    val isCurrent = AudioPlayer.playingId == m.id
+    val loading = AudioPlayer.loadingId == m.id
+
+    val openExternally = {
+        val mid = m.mediaId; val key = m.mediaKey
+        if (mid != null && key != null) scope.launch {
+            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+            if (bytes != null) openFile(context, bytes, m.fileName ?: "file", m.fileMime ?: "application/octet-stream")
+        }
+        Unit
+    }
+
+    val playTap = {
+        if (isCurrent) {
+            AudioPlayer.toggle(context, m.id, java.io.File(context.cacheDir, "files"))
+            Unit
+        } else {
+            val mid = m.mediaId; val key = m.mediaKey
+            if (mid != null && key != null) scope.launch {
+                AudioPlayer.setLoading(m.id)
+                val bytes = try {
+                    session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+                } finally {
+                    AudioPlayer.setLoading(null)
+                }
+                if (bytes != null) {
+                    val dir = java.io.File(context.cacheDir, "files").apply { mkdirs() }
+                    val ext = m.fileName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: "m4a"
+                    val f = java.io.File(dir, "audio-${m.id}.$ext")
+                    if (!f.exists() || f.length() == 0L) f.writeBytes(bytes)
+                    // A codec this device cannot decode falls back to whatever
+                    // app the person already uses for music.
+                    AudioPlayer.toggle(context, m.id, f, onError = { openExternally() })
+                }
+            }
+            Unit
+        }
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -3158,21 +3222,79 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
             .clip(RoundedCornerShape(14.dp))
             .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
             .combinedClickable(
-                onClick = {
-                    val mid = m.mediaId; val key = m.mediaKey
-                    if (mid != null && key != null) scope.launch {
-                        val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
-                        if (bytes != null) openFile(context, bytes, m.fileName ?: "file", m.fileMime ?: "application/octet-stream")
-                    }
-                },
+                // Tapping the row still opens the file elsewhere; only the
+                // round button plays it here.
+                onClick = { if (playable) playTap() else openExternally() },
                 onLongClick = onLongPress,
             )
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Icon(Icons.Filled.Description, null, tint = c.accent, modifier = Modifier.size(24.dp))
+        if (playable) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(c.accent.copy(alpha = 0.15f))
+                    .clickable { playTap() },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = c.accent, strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        if (isCurrent && AudioPlayer.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        stringResource(if (isCurrent && AudioPlayer.isPlaying) R.string.chat_pause_audio else R.string.chat_play_audio),
+                        tint = c.accent,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        } else {
+            Icon(Icons.Filled.Description, null, tint = c.accent, modifier = Modifier.size(24.dp))
+        }
         Column {
             Text(m.fileName ?: "file", color = c.textPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(formatFileSize(m.fileSize ?: 0L), color = c.textSecondary, fontSize = 11.sp)
+            if (playable && isCurrent && AudioPlayer.durationMs > 0) {
+                val dur = AudioPlayer.durationMs
+                val pos = AudioPlayer.positionMs
+                Column(modifier = Modifier.width(160.dp)) {
+                    // Tap anywhere on the track to jump there. A draggable
+                    // scrubber is the next step, not this one.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(14.dp)
+                            .pointerInput(m.id) {
+                                detectTapGestures { off ->
+                                    AudioPlayer.seekToFraction(off.x / size.width.toFloat())
+                                }
+                            },
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(c.textSecondary.copy(alpha = 0.3f)),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth((pos.toFloat() / dur).coerceIn(0f, 1f))
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(c.accent),
+                        )
+                    }
+                    Text(
+                        formatDuration(pos / 1000) + " / " + formatDuration(dur / 1000),
+                        color = c.textSecondary,
+                        fontSize = 11.sp,
+                    )
+                }
+            } else {
+                Text(formatFileSize(m.fileSize ?: 0L), color = c.textSecondary, fontSize = 11.sp)
+            }
         }
     }
 }
@@ -3183,9 +3305,11 @@ private fun VoiceBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var playing by remember { mutableStateOf(false) }
-    val player = remember { android.media.MediaPlayer() }
-    DisposableEffect(Unit) { onDispose { runCatching { player.release() } } }
+    // Same shared player as audio files. It used to be a MediaPlayer remembered
+    // by this composable, which meant scrolling the note off screen killed it
+    // and two notes could talk over each other.
+    val isCurrent = AudioPlayer.playingId == m.id
+    val playing = isCurrent && AudioPlayer.isPlaying
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3194,22 +3318,21 @@ private fun VoiceBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
             .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
             .combinedClickable(
                 onClick = {
-                    if (playing) {
-                        runCatching { player.pause() }
-                        playing = false
+                    if (isCurrent) {
+                        AudioPlayer.toggle(context, m.id, java.io.File(context.cacheDir, "voice-${m.id}.m4a"))
                     } else {
                         val mid = m.mediaId; val key = m.mediaKey
                         if (mid != null && key != null) scope.launch {
-                            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) }) ?: return@launch
-                            runCatching {
+                            AudioPlayer.setLoading(m.id)
+                            val bytes = try {
+                                session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+                            } finally {
+                                AudioPlayer.setLoading(null)
+                            }
+                            if (bytes != null) runCatching {
                                 val f = java.io.File(context.cacheDir, "voice-${m.id}.m4a")
                                 if (!f.exists() || f.length() == 0L) f.writeBytes(bytes)
-                                player.reset()
-                                player.setDataSource(f.absolutePath)
-                                player.setOnCompletionListener { playing = false }
-                                player.prepare()
-                                player.start()
-                                playing = true
+                                AudioPlayer.toggle(context, m.id, f)
                             }
                         }
                     }
@@ -3222,7 +3345,12 @@ private fun VoiceBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
             if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
             stringResource(R.string.chat_play_voice), tint = c.accent, modifier = Modifier.size(26.dp),
         )
-        Text(formatDuration(m.durationSec ?: 0), color = c.textPrimary, fontSize = 14.sp)
+        Text(
+            if (isCurrent && AudioPlayer.durationMs > 0) formatDuration(AudioPlayer.positionMs / 1000)
+            else formatDuration(m.durationSec ?: 0),
+            color = c.textPrimary,
+            fontSize = 14.sp,
+        )
     }
 }
 

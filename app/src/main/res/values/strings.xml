@@ -391,6 +391,7 @@
     <string name="rooms_share_text">Join my RCQ room “%1$s” with the key %2$s</string>
     <string name="rooms_joining">Joining…</string>
     <string name="rooms_you">You</string>
+    <string name="rooms_muted_by_owner">Muted by the owner</string>
     <string name="rooms_leave">Leave</string>
     <string name="rooms_err_in_call">Finish your call first.</string>
     <string name="rooms_err_busy">You\'re busy in another session.</string>
@@ -904,6 +905,8 @@
     <string name="chat_voice_release_cancel">Release to cancel</string>
     <string name="chat_input_hint">Message</string>
     <string name="chat_play_voice">Play voice</string>
+    <string name="chat_play_audio">Play audio</string>
+    <string name="chat_pause_audio">Pause</string>
     <string name="chat_play_video">Play video</string>
     <string name="chat_prev_photo">Photo</string>
     <string name="chat_prev_file">File</string>
