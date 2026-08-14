@@ -43,6 +43,15 @@ object LanguageManager {
         Lang("hi", "Hindi", "हिन्दी"),
     )
 
+    /// ⚠ What we actually ship resources for. `supported` is the full menu the
+    /// three clients agree on; a code only belongs here once `values-…` exists,
+    /// because picking a language with no strings behind it changes the label
+    /// and leaves the app in English, which reads as a bug rather than as a
+    /// missing translation.
+    val available: List<Lang> get() = supported.filter { it.code in SHIPPED }
+
+    private val SHIPPED = setOf("en", "ru", "zh-Hans")
+
     private const val PREFS = "rcq_lang"
     private const val KEY = "lang"
 
