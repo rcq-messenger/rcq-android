@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -75,11 +76,9 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Flag
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -500,7 +499,7 @@ private fun SettingsRoot(
     }
 
     if (confirmClear) {
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.cs_clear_title),
             body = stringResource(R.string.cs_clear_body),
             confirm = stringResource(R.string.common_clear), destructive = true,
@@ -509,7 +508,7 @@ private fun SettingsRoot(
         )
     }
     if (confirmMigrate) {
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.cs_move_title),
             body = stringResource(R.string.cs_move_body),
             confirm = stringResource(R.string.common_move), destructive = false,
@@ -531,7 +530,7 @@ private fun SettingsRoot(
         )
     }
     if (confirmBurn) {
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.cs_burn_title),
             body = stringResource(R.string.cs_burn_body),
             confirm = stringResource(R.string.cs_burn_cta), destructive = true,
@@ -540,176 +539,186 @@ private fun SettingsRoot(
         )
     }
     if (showBugReport) {
-        AlertDialog(
-            onDismissRequest = { showBugReport = false },
-            containerColor = c.bgSecondary,
-            confirmButton = {
-                if (bugSent) {
-                    TextButton(onClick = { showBugReport = false }) { Text(stringResource(R.string.common_done), color = c.accent) }
-                } else {
-                    TextButton(
-                        enabled = bugText.trim().length >= 5 && !bugSending,
-                        onClick = {
-                            bugSending = true
-                            scope.launch {
-                                // Seal + upload each picked attachment first
-                                // (images compressed, videos sent raw ≤ 50MB).
-                                val atts = withContext(Dispatchers.IO) {
-                                    bugAttachments.mapNotNull { uri ->
-                                        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                                        val bytes = if (mime.startsWith("image/")) {
-                                            compressImageFor(context, uri)
-                                        } else {
-                                            runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-                                        } ?: return@mapNotNull null
-                                        val outMime = if (mime.startsWith("image/")) "image/jpeg" else mime
-                                        session.uploadReportAttachment(bytes, outMime)
-                                    }
-                                }
-                                val result = session.submitBugReportResult(bugText.trim(), atts)
-                                bugSending = false
-                                bugError = null
-                                when (result) {
-                                    Session.BugReportResult.SENT -> bugSent = true
-                                    // Say WHY. Silently returning the button to
-                                    // its idle state read as "the app is broken"
-                                    // and produced a quarter of an hour of retries.
-                                    Session.BugReportResult.RATE_LIMITED ->
-                                        bugError = context.getString(R.string.bug_report_too_many)
-                                    Session.BugReportResult.CLOSED ->
-                                        bugError = context.getString(R.string.bug_report_closed)
-                                    Session.BugReportResult.TOO_LONG ->
-                                        bugError = context.getString(R.string.bug_report_too_long)
-                                    Session.BugReportResult.FAILED ->
-                                        bugError = context.getString(R.string.bug_report_failed)
-                                }
+        RcqSheet(onDismiss = { showBugReport = false }) {
+            // Title row rather than RcqSheet's plain title: the bug icon is what
+            // makes this sheet recognisable at a glance.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 12.dp),
+            ) {
+                Icon(Icons.Filled.BugReport, null, tint = c.accent)
+                Text(
+                    stringResource(R.string.settings_row_report_bug),
+                    color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
+            if (bugSent) {
+                Text(stringResource(R.string.bug_report_sent), color = c.textSecondary, fontSize = 14.sp)
+                SheetGap()
+                CapsuleButton(stringResource(R.string.common_done), modifier = Modifier.fillMaxWidth()) { showBugReport = false }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.bug_report_hint), color = c.textSecondary, fontSize = 12.sp)
+                    bugError?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
+                    RcqField(
+                        value = bugText,
+                        onValueChange = { if (it.length <= session.bugReportTextLimit) bugText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = false,
+                        minLines = 3,
+                        placeholder = stringResource(R.string.bug_report_placeholder),
+                    )
+                    // Attachments (#28): up to 3 photos/videos, thumbnails
+                    // with a remove (×); only uploaded on send.
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        bugAttachments.forEach { uri ->
+                            Box {
+                                AttachThumb(uri, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
+                                Icon(
+                                    Icons.Filled.Close, stringResource(R.string.common_cancel), tint = Color.White,
+                                    modifier = Modifier.align(Alignment.TopEnd).size(16.dp)
+                                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                        .clickable { bugAttachments = bugAttachments - uri },
+                                )
                             }
-                        },
-                    ) { Text(stringResource(if (bugSending) R.string.bug_report_sending else R.string.bug_report_send), color = c.accent) }
-                }
-            },
-            dismissButton = { if (!bugSent) TextButton(onClick = { showBugReport = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-            icon = { Icon(Icons.Filled.BugReport, null, tint = c.accent) },
-            title = { Text(stringResource(R.string.settings_row_report_bug), color = c.textPrimary) },
-            text = {
-                if (bugSent) {
-                    Text(stringResource(R.string.bug_report_sent), color = c.textSecondary, fontSize = 14.sp)
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.bug_report_hint), color = c.textSecondary, fontSize = 12.sp)
-                        bugError?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
-                        OutlinedTextField(
-                            value = bugText,
-                            onValueChange = { if (it.length <= session.bugReportTextLimit) bugText = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 3,
-                            placeholder = { Text(stringResource(R.string.bug_report_placeholder), color = c.textSecondary) },
-                        )
-                        // Attachments (#28): up to 3 photos/videos, thumbnails
-                        // with a remove (×); only uploaded on send.
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            bugAttachments.forEach { uri ->
-                                Box {
-                                    AttachThumb(uri, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
-                                    Icon(
-                                        Icons.Filled.Close, stringResource(R.string.common_cancel), tint = Color.White,
-                                        modifier = Modifier.align(Alignment.TopEnd).size(16.dp)
-                                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                                            .clickable { bugAttachments = bugAttachments - uri },
-                                    )
-                                }
-                            }
-                            if (bugAttachments.size < 3 && !bugSending) {
-                                Box(
-                                    Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(c.bgPrimary)
-                                        .clickable { bugPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-                                    contentAlignment = Alignment.Center,
-                                ) { Icon(Icons.Filled.Add, stringResource(R.string.bug_report_attach), tint = c.accent, modifier = Modifier.size(22.dp)) }
-                            }
+                        }
+                        if (bugAttachments.size < 3 && !bugSending) {
+                            Box(
+                                Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(c.bgPrimary)
+                                    .clickable { bugPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Filled.Add, stringResource(R.string.bug_report_attach), tint = c.accent, modifier = Modifier.size(22.dp)) }
                         }
                     }
                 }
-            },
-        )
+                SheetGap()
+                CapsuleButton(
+                    label = stringResource(if (bugSending) R.string.bug_report_sending else R.string.bug_report_send),
+                    enabled = bugText.trim().length >= 5 && !bugSending,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    bugSending = true
+                    scope.launch {
+                        // Seal + upload each picked attachment first
+                        // (images compressed, videos sent raw ≤ 50MB).
+                        val atts = withContext(Dispatchers.IO) {
+                            bugAttachments.mapNotNull { uri ->
+                                val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                                val bytes = if (mime.startsWith("image/")) {
+                                    compressImageFor(context, uri)
+                                } else {
+                                    runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+                                } ?: return@mapNotNull null
+                                val outMime = if (mime.startsWith("image/")) "image/jpeg" else mime
+                                session.uploadReportAttachment(bytes, outMime)
+                            }
+                        }
+                        val result = session.submitBugReportResult(bugText.trim(), atts)
+                        bugSending = false
+                        bugError = null
+                        when (result) {
+                            Session.BugReportResult.SENT -> bugSent = true
+                            // Say WHY. Silently returning the button to
+                            // its idle state read as "the app is broken"
+                            // and produced a quarter of an hour of retries.
+                            Session.BugReportResult.RATE_LIMITED ->
+                                bugError = context.getString(R.string.bug_report_too_many)
+                            Session.BugReportResult.CLOSED ->
+                                bugError = context.getString(R.string.bug_report_closed)
+                            Session.BugReportResult.TOO_LONG ->
+                                bugError = context.getString(R.string.bug_report_too_long)
+                            Session.BugReportResult.FAILED ->
+                                bugError = context.getString(R.string.bug_report_failed)
+                        }
+                    }
+                }
+                TextButton(onClick = { showBugReport = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+            }
+        }
     }
     if (showAbout) {
-        AlertDialog(
-            onDismissRequest = { showAbout = false },
-            containerColor = c.bgSecondary,
-            confirmButton = { TextButton(onClick = { showAbout = false }) { Text(stringResource(R.string.common_done), color = c.accent) } },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Image(painterResource(R.drawable.rcq_logo), null, modifier = Modifier.size(24.dp))
-                    Text("RCQ", color = c.textPrimary)
-                }
-            },
-            text = {
-                // Scrollable: the update notes can be a long bilingual
-                // paragraph that otherwise pushes the "Download and install"
-                // button below the (non-scrolling) AlertDialog viewport, so the
-                // user saw "update available" but never the install action.
-                val aboutScroll = rememberScrollState()
-                val downloading = downloadState is app.rcq.android.net.UpdateChecker.DownloadState.Active
-                // When a download starts, the progress bar + hint live BELOW the
-                // notes — scroll there so the user sees the status (beta report).
-                LaunchedEffect(downloading) {
-                    if (downloading) aboutScroll.animateScrollTo(aboutScroll.maxValue)
-                }
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .verticalScroll(aboutScroll)
-                        .simpleVerticalScrollbar(aboutScroll, c.textSecondary),
-                ) {
-                    Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp)
-                    Text(stringResource(R.string.cs_about_features), color = c.textSecondary, fontSize = 12.sp)
-                    Divider()
-                    val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
-                    when {
-                        active != null -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
-                            else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())
-                            Text(stringResource(R.string.update_downloading_pct, (active.progress.coerceAtLeast(0f) * 100).toInt()), color = c.textSecondary, fontSize = 13.sp)
-                            Text(stringResource(R.string.update_bg_hint), color = c.textSecondary, fontSize = 11.sp)
-                            // Cancel keeps the partial download for a later resume (tester #39).
-                            TextButton(onClick = { app.rcq.android.net.UpdateChecker.cancelDownload() }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                                Text(stringResource(R.string.update_cancel), color = c.accent, fontSize = 13.sp)
-                            }
+        RcqSheet(onDismiss = { showAbout = false }) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 12.dp),
+            ) {
+                Image(painterResource(R.drawable.rcq_logo), null, modifier = Modifier.size(24.dp))
+                Text("RCQ", color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            }
+            // Scrollable, and capped: the update notes can be a long
+            // bilingual paragraph that otherwise pushes the "Download and
+            // install" button (and Done) past the bottom of the sheet, so
+            // the user saw "update available" but never the install action.
+            val aboutScroll = rememberScrollState()
+            val downloading = downloadState is app.rcq.android.net.UpdateChecker.DownloadState.Active
+            // When a download starts, the progress bar + hint live BELOW the
+            // notes — scroll there so the user sees the status (beta report).
+            LaunchedEffect(downloading) {
+                if (downloading) aboutScroll.animateScrollTo(aboutScroll.maxValue)
+            }
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .heightIn(max = 380.dp)
+                    .verticalScroll(aboutScroll)
+                    .simpleVerticalScrollbar(aboutScroll, c.textSecondary),
+            ) {
+                Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp)
+                Text(stringResource(R.string.cs_about_features), color = c.textSecondary, fontSize = 12.sp)
+                Divider()
+                val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
+                when {
+                    active != null -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
+                        else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())
+                        Text(stringResource(R.string.update_downloading_pct, (active.progress.coerceAtLeast(0f) * 100).toInt()), color = c.textSecondary, fontSize = 13.sp)
+                        Text(stringResource(R.string.update_bg_hint), color = c.textSecondary, fontSize = 11.sp)
+                        // Cancel keeps the partial download for a later resume (tester #39).
+                        TextButton(onClick = { app.rcq.android.net.UpdateChecker.cancelDownload() }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                            Text(stringResource(R.string.update_cancel), color = c.accent, fontSize = 13.sp)
                         }
-                        downloadState is app.rcq.android.net.UpdateChecker.DownloadState.Failed -> Text(
-                            stringResource(R.string.update_failed),
-                            color = Color(0xFFE5484D), fontSize = 13.sp,
-                            modifier = updResult?.let { up -> Modifier.clickable { app.rcq.android.net.UpdateChecker.startDownload(context, up) } } ?: Modifier,
-                        )
-                        updResult != null -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(stringResource(R.string.update_available_short, updResult!!.versionName), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            if (updResult!!.notes.isNotBlank()) Text(updResult!!.notes, color = c.textSecondary, fontSize = 12.sp)
-                            // Prominent primary action (tester #28: "where do I download?").
-                            Box(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.accent)
-                                    .clickable { app.rcq.android.net.UpdateChecker.startDownload(context, updResult!!) }
-                                    .padding(vertical = 11.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(stringResource(R.string.update_install), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                        updChecking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            androidx.compose.material3.CircularProgressIndicator(color = c.accent, modifier = Modifier.size(16.dp))
-                            Text(stringResource(R.string.update_checking), color = c.textSecondary, fontSize = 13.sp)
-                        }
-                        updCheckedEmpty -> Text(stringResource(R.string.update_uptodate), color = c.textSecondary, fontSize = 13.sp)
-                        else -> TextButton(contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), onClick = {
-                            updChecking = true; updCheckedEmpty = false
-                            scope.launch {
-                                val u = app.rcq.android.net.UpdateChecker.check()
-                                updResult = u; updCheckedEmpty = (u == null); updChecking = false
-                            }
-                        }) { Text(stringResource(R.string.update_check), color = c.accent) }
                     }
+                    downloadState is app.rcq.android.net.UpdateChecker.DownloadState.Failed -> Text(
+                        stringResource(R.string.update_failed),
+                        color = Color(0xFFE5484D), fontSize = 13.sp,
+                        modifier = updResult?.let { up -> Modifier.clickable { app.rcq.android.net.UpdateChecker.startDownload(context, up) } } ?: Modifier,
+                    )
+                    updResult != null -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.update_available_short, updResult!!.versionName), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        if (updResult!!.notes.isNotBlank()) Text(updResult!!.notes, color = c.textSecondary, fontSize = 12.sp)
+                        // Prominent primary action (tester #28: "where do I download?").
+                        Box(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.accent)
+                                .clickable { app.rcq.android.net.UpdateChecker.startDownload(context, updResult!!) }
+                                .padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(stringResource(R.string.update_install), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    updChecking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.CircularProgressIndicator(color = c.accent, modifier = Modifier.size(16.dp))
+                        Text(stringResource(R.string.update_checking), color = c.textSecondary, fontSize = 13.sp)
+                    }
+                    updCheckedEmpty -> Text(stringResource(R.string.update_uptodate), color = c.textSecondary, fontSize = 13.sp)
+                    else -> TextButton(contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), onClick = {
+                        updChecking = true; updCheckedEmpty = false
+                        scope.launch {
+                            val u = app.rcq.android.net.UpdateChecker.check()
+                            updResult = u; updCheckedEmpty = (u == null); updChecking = false
+                        }
+                    }) { Text(stringResource(R.string.update_check), color = c.accent) }
                 }
-            },
-        )
+            }
+            SheetGap()
+            TextButton(onClick = { showAbout = false }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.common_done), color = c.accent)
+            }
+        }
     }
 }
 
@@ -1301,10 +1310,10 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     // two side-by-side fields don't fit in portrait (report: had to
                     // rotate the phone). Full-width, one per line.
                     Column {
-                        OutlinedTextField(
+                        RcqField(
                             value = lpHost,
                             onValueChange = { lpHost = it; persistProxy() },
-                            label = { Text(stringResource(R.string.pv_localproxy_host)) },
+                            placeholder = stringResource(R.string.pv_localproxy_host),
                             singleLine = true,
                             trailingIcon = {
                                 Icon(
@@ -1319,10 +1328,10 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
+                        RcqField(
                             value = lpPort,
                             onValueChange = { v -> lpPort = v.filter { it.isDigit() }.take(5); persistProxy() },
-                            label = { Text(stringResource(R.string.pv_localproxy_port)) },
+                            placeholder = stringResource(R.string.pv_localproxy_port),
                             singleLine = true,
                             trailingIcon = {
                                 Icon(
@@ -1430,21 +1439,14 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             }
 
             keyResult?.let { n ->
-                AlertDialog(
-                    onDismissRequest = { keyResult = null },
-                    containerColor = c.bgSecondary,
-                    title = { Text(stringResource(R.string.relay_key_ok_title), color = c.textPrimary) },
-                    text = {
-                        Text(
-                            pluralStringResource(R.plurals.relay_key_ok_body, n, n),
-                            color = c.textSecondary, fontSize = 13.sp,
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { keyResult = null }) {
-                            Text(stringResource(R.string.common_ok), color = c.accent)
-                        }
-                    },
+                // Nothing to decide, so there is no action row: the sheet's own
+                // last row is the acknowledgement, relabelled.
+                RcqAskSheet(
+                    onDismiss = { keyResult = null },
+                    title = stringResource(R.string.relay_key_ok_title),
+                    body = pluralStringResource(R.plurals.relay_key_ok_body, n, n),
+                    actions = emptyList(),
+                    cancelLabel = stringResource(R.string.common_ok),
                 )
             }
 
@@ -1453,87 +1455,82 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 var err by remember { mutableStateOf(false) }
                 var keyChecking by remember { mutableStateOf(false) }
                 var keyError by remember { mutableStateOf<String?>(null) }
-                AlertDialog(
-                    onDismissRequest = { relayImportOpen = false },
-                    containerColor = c.bgSecondary,
-                    title = { Text(stringResource(R.string.relay_import_title), color = c.textPrimary) },
-                    text = {
-                        Column {
-                            Text(stringResource(R.string.relay_import_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-                            OutlinedTextField(
-                                value = token,
-                                // ⚠ keyError has to clear too. It did not, so a
-                                // corrected key sat under the refusal the typo
-                                // had earned, and the field looked wrong while
-                                // holding the right string.
-                                onValueChange = { token = it; err = false; keyError = null },
-                                placeholder = { Text(stringResource(R.string.relay_import_hint), color = c.textSecondary) },
-                                isError = err,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            if (err) Text(stringResource(R.string.relay_import_bad), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
-                            keyError?.let { reason ->
-                                Text(
-                                    stringResource(if (reason == "expired") R.string.relay_key_expired else R.string.relay_key_unknown),
-                                    color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp),
-                                )
+                RcqSheet(
+                    onDismiss = { relayImportOpen = false },
+                    title = stringResource(R.string.relay_import_title),
+                ) {
+                    Text(stringResource(R.string.relay_import_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    RcqField(
+                        value = token,
+                        // ⚠ keyError has to clear too. It did not, so a
+                        // corrected key sat under the refusal the typo
+                        // had earned, and the field looked wrong while
+                        // holding the right string.
+                        onValueChange = { token = it; err = false; keyError = null },
+                        placeholder = stringResource(R.string.relay_import_hint),
+                        isError = err,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (err) Text(stringResource(R.string.relay_import_bad), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    keyError?.let { reason ->
+                        Text(
+                            stringResource(if (reason == "expired") R.string.relay_key_expired else R.string.relay_key_unknown),
+                            color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    SheetGap()
+                    CapsuleButton(
+                        label = stringResource(if (keyChecking) R.string.relay_key_checking else R.string.relay_import_add),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        // One field, two things people are handed; the
+                        // decision lives in RelayInput so it can be tested
+                        // instead of pasted by hand.
+                        when (val parsed = app.rcq.android.net.RelayInput.classify(token)) {
+                            is app.rcq.android.net.RelayInput.Link -> {
+                                ContactRelayStore.add(parsed.relay, 0, null)
+                                sharedRelays = ContactRelayStore.list()
+                                relayImportOpen = false
                             }
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            // One field, two things people are handed; the
-                            // decision lives in RelayInput so it can be tested
-                            // instead of pasted by hand.
-                            when (val parsed = app.rcq.android.net.RelayInput.classify(token)) {
-                                is app.rcq.android.net.RelayInput.Link -> {
-                                    ContactRelayStore.add(parsed.relay, 0, null)
-                                    sharedRelays = ContactRelayStore.list()
-                                    relayImportOpen = false
-                                }
-                                is app.rcq.android.net.RelayInput.AccessKey -> {
-                                    // Only the broker can say whether the key is
-                                    // good, and asking it is this refresh — which
-                                    // also makes the endpoints appear now rather
-                                    // than at the next boot.
-                                    //
-                                    // ⚠ And the answer is now WAITED FOR. The
-                                    // dialog used to close on the spot and report
-                                    // success, so a mistyped key looked exactly
-                                    // like a working one: reported from the
-                                    // outside on the first day a key existed.
-                                    BrokerRelayStore.setTenantKey(parsed.key)
-                                    keyChecking = true
-                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                        BrokerRelayStore.refresh()
-                                        val verdict = BrokerRelayStore.keyVerdict()
-                                        val mine = BrokerRelayStore.privateRelays().size
-                                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            keyChecking = false
-                                            if (verdict == "ok") {
-                                                relayImportOpen = false
-                                                keyResult = mine
-                                            } else {
-                                                // Not ours: drop it rather than
-                                                // leave a dead key in place
-                                                // quietly failing forever.
-                                                BrokerRelayStore.setTenantKey(null)
-                                                keyError = verdict ?: "unknown"
-                                            }
+                            is app.rcq.android.net.RelayInput.AccessKey -> {
+                                // Only the broker can say whether the key is
+                                // good, and asking it is this refresh — which
+                                // also makes the endpoints appear now rather
+                                // than at the next boot.
+                                //
+                                // ⚠ And the answer is now WAITED FOR. The
+                                // sheet used to close on the spot and report
+                                // success, so a mistyped key looked exactly
+                                // like a working one: reported from the
+                                // outside on the first day a key existed.
+                                BrokerRelayStore.setTenantKey(parsed.key)
+                                keyChecking = true
+                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    BrokerRelayStore.refresh()
+                                    val verdict = BrokerRelayStore.keyVerdict()
+                                    val mine = BrokerRelayStore.privateRelays().size
+                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                        keyChecking = false
+                                        if (verdict == "ok") {
+                                            relayImportOpen = false
+                                            keyResult = mine
+                                        } else {
+                                            // Not ours: drop it rather than
+                                            // leave a dead key in place
+                                            // quietly failing forever.
+                                            BrokerRelayStore.setTenantKey(null)
+                                            keyError = verdict ?: "unknown"
                                         }
                                     }
                                 }
-                                app.rcq.android.net.RelayInput.Unusable -> err = true
                             }
-                        }) {
-                            Text(
-                                stringResource(if (keyChecking) R.string.relay_key_checking else R.string.relay_import_add),
-                                color = if (keyChecking) c.textSecondary else c.accent,
-                            )
+                            app.rcq.android.net.RelayInput.Unusable -> err = true
                         }
-                    },
-                    dismissButton = { TextButton(onClick = { relayImportOpen = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-                )
+                    }
+                    TextButton(onClick = { relayImportOpen = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                    }
+                }
             }
         }
     }
@@ -2090,56 +2087,53 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
             if (showDistChooser) {
                 val dists = app.rcq.android.push.Push.availableDistributors(ctx)
                 val saved = app.rcq.android.push.Push.savedDistributor(ctx)
-                AlertDialog(
-                    onDismissRequest = { showDistChooser = false },
-                    confirmButton = {},
-                    dismissButton = {
-                        TextButton(onClick = { showDistChooser = false }) {
-                            Text(stringResource(R.string.common_cancel), color = c.accent)
+                // Each option carries a second line, so these stay hand-built
+                // rows rather than RcqAskSheet actions.
+                RcqSheet(
+                    onDismiss = { showDistChooser = false },
+                    title = stringResource(R.string.notif_push_choose_title),
+                ) {
+                    if (dists.isEmpty()) {
+                        Text(stringResource(R.string.notif_push_ntfy_hint), color = c.textSecondary, fontSize = 13.sp)
+                    }
+                    dists.forEach { pkg ->
+                        val current = pkg == saved
+                        Column(
+                            Modifier.fillMaxWidth().clickable {
+                                app.rcq.android.push.Push.chooseDistributor(ctx, pkg)
+                                showDistChooser = false
+                                pushState = app.rcq.android.push.Push.pushState(ctx)
+                            }.padding(vertical = 10.dp),
+                        ) {
+                            Text(
+                                app.rcq.android.push.Push.distributorLabel(ctx, pkg) + if (current) "  ✓" else "",
+                                color = if (current) c.accent else c.textPrimary, fontSize = 15.sp,
+                            )
+                            // Name each option's trade-off so "экономный
+                            // режим" is a visible choice, not a hidden one.
+                            Text(
+                                if (pkg == ctx.packageName) stringResource(R.string.notif_push_dist_hint_builtin)
+                                else stringResource(R.string.notif_push_dist_hint_other),
+                                color = c.textSecondary, fontSize = 11.sp,
+                            )
                         }
-                    },
-                    title = { Text(stringResource(R.string.notif_push_choose_title), color = c.textPrimary) },
-                    text = {
-                        Column {
-                            if (dists.isEmpty()) {
-                                Text(stringResource(R.string.notif_push_ntfy_hint), color = c.textSecondary, fontSize = 13.sp)
-                            }
-                            dists.forEach { pkg ->
-                                val current = pkg == saved
-                                Column(
-                                    Modifier.fillMaxWidth().clickable {
-                                        app.rcq.android.push.Push.chooseDistributor(ctx, pkg)
-                                        showDistChooser = false
-                                        pushState = app.rcq.android.push.Push.pushState(ctx)
-                                    }.padding(vertical = 10.dp),
-                                ) {
-                                    Text(
-                                        app.rcq.android.push.Push.distributorLabel(ctx, pkg) + if (current) "  ✓" else "",
-                                        color = if (current) c.accent else c.textPrimary, fontSize = 15.sp,
-                                    )
-                                    // Name each option's trade-off so "экономный
-                                    // режим" is a visible choice, not a hidden one.
-                                    Text(
-                                        if (pkg == ctx.packageName) stringResource(R.string.notif_push_dist_hint_builtin)
-                                        else stringResource(R.string.notif_push_dist_hint_other),
-                                        color = c.textSecondary, fontSize = 11.sp,
-                                    )
-                                }
-                            }
-                            Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp).background(c.divider))
-                            Column(
-                                Modifier.fillMaxWidth().clickable {
-                                    app.rcq.android.push.Push.resetDistributor(ctx)
-                                    showDistChooser = false
-                                    pushState = app.rcq.android.push.Push.pushState(ctx)
-                                }.padding(vertical = 10.dp),
-                            ) {
-                                Text(stringResource(R.string.notif_push_disable), color = c.statusBusy, fontSize = 15.sp)
-                                Text(stringResource(R.string.notif_push_disable_hint), color = c.textSecondary, fontSize = 11.sp)
-                            }
-                        }
-                    },
-                )
+                    }
+                    Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp).background(c.divider))
+                    Column(
+                        Modifier.fillMaxWidth().clickable {
+                            app.rcq.android.push.Push.resetDistributor(ctx)
+                            showDistChooser = false
+                            pushState = app.rcq.android.push.Push.pushState(ctx)
+                        }.padding(vertical = 10.dp),
+                    ) {
+                        Text(stringResource(R.string.notif_push_disable), color = c.statusBusy, fontSize = 15.sp)
+                        Text(stringResource(R.string.notif_push_disable_hint), color = c.textSecondary, fontSize = 11.sp)
+                    }
+                    SheetGap()
+                    TextButton(onClick = { showDistChooser = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.common_cancel), color = c.accent)
+                    }
+                }
             }
             // ── Categories (parity with the iOS Notifications screen) ──
             SectionLabel(stringResource(R.string.notif_categories))
@@ -2282,12 +2276,13 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
     LaunchedEffect(Unit) { reload() }
 
     if (showHow) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showHow = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.linked_devices_connect), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.linked_devices_connect_steps), color = c.textSecondary, fontSize = 14.sp) },
-            confirmButton = { TextButton(onClick = { showHow = false }) { Text(stringResource(R.string.common_close), color = c.accent) } },
+        // Instructions, nothing to choose: the sheet's own last row closes it.
+        RcqAskSheet(
+            onDismiss = { showHow = false },
+            title = stringResource(R.string.linked_devices_connect),
+            body = stringResource(R.string.linked_devices_connect_steps),
+            actions = emptyList(),
+            cancelLabel = stringResource(R.string.common_close),
         )
     }
 
@@ -2456,7 +2451,7 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
     }
 
     if (confirm) {
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.csrv_confirm_title, target),
             body = stringResource(R.string.csrv_confirm_body, target, current),
             confirm = stringResource(R.string.common_switch), destructive = true,
@@ -2465,7 +2460,7 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
         )
     }
     if (resetting) {
-        ConfirmDialog(
+        ConfirmSheet(
             title = stringResource(R.string.csrv_reset_title),
             body = stringResource(R.string.csrv_reset_body, RcqApi.DEFAULT_HOST, current),
             confirm = stringResource(R.string.common_reset), destructive = true,
@@ -2558,14 +2553,15 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
     // §5a.5 promote: confirm-first — the number and the connected island change.
     var promoteTarget by remember { mutableStateOf<MultihomeStore.Home?>(null) }
     promoteTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { if (!busy) promoteTarget = null },
-            title = { Text(stringResource(R.string.backup_island_promote_title)) },
-            text = { Text(stringResource(R.string.backup_island_promote_body, target.host)) },
-            confirmButton = {
-                TextButton(
-                    enabled = !busy,
-                    onClick = {
+        RcqAskSheet(
+            // Both rows stay inert while the promotion is in flight: that is
+            // the `enabled = !busy` the two buttons used to carry.
+            onDismiss = { if (!busy) promoteTarget = null },
+            title = stringResource(R.string.backup_island_promote_title),
+            body = stringResource(R.string.backup_island_promote_body, target.host),
+            actions = listOf(
+                SheetAction(stringResource(R.string.backup_island_promote_confirm)) {
+                    if (!busy) {
                         busy = true; error = null
                         scope.launch {
                             runCatching { session.promoteBackupToPrimary(target.host) }
@@ -2581,14 +2577,9 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                             busy = false
                             promoteTarget = null
                         }
-                    },
-                ) { Text(stringResource(R.string.backup_island_promote_confirm)) }
-            },
-            dismissButton = {
-                TextButton(enabled = !busy, onClick = { promoteTarget = null }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            },
+                    }
+                },
+            ),
         )
     }
 
@@ -2821,19 +2812,19 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (editing) {
-                OutlinedTextField(
+                RcqField(
                     value = pin,
                     onValueChange = { if (onlyDigits(it)) pin = it },
-                    label = { Text(stringResource(R.string.pin_new)) },
+                    placeholder = stringResource(R.string.pin_new),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                RcqField(
                     value = confirm,
                     onValueChange = { if (onlyDigits(it)) confirm = it },
-                    label = { Text(stringResource(R.string.pin_confirm)) },
+                    placeholder = stringResource(R.string.pin_confirm),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -2861,19 +2852,19 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                 }
             } else if (wipeEditing) {
                 Text(stringResource(R.string.pin_wipe_desc), color = c.textSecondary, fontSize = 13.sp)
-                OutlinedTextField(
+                RcqField(
                     value = wpin,
                     onValueChange = { if (onlyDigits(it)) wpin = it },
-                    label = { Text(stringResource(R.string.pin_wipe_new)) },
+                    placeholder = stringResource(R.string.pin_wipe_new),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                RcqField(
                     value = wconfirm,
                     onValueChange = { if (onlyDigits(it)) wconfirm = it },
-                    label = { Text(stringResource(R.string.pin_confirm)) },
+                    placeholder = stringResource(R.string.pin_confirm),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -2919,16 +2910,16 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                         }
                     }
                 }
-                OutlinedTextField(
+                RcqField(
                     value = dpin, onValueChange = { if (onlyDigits(it)) dpin = it },
-                    label = { Text(stringResource(R.string.pin_decoy_new)) },
+                    placeholder = stringResource(R.string.pin_decoy_new),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                RcqField(
                     value = dconfirm, onValueChange = { if (onlyDigits(it)) dconfirm = it },
-                    label = { Text(stringResource(R.string.pin_confirm)) },
+                    placeholder = stringResource(R.string.pin_confirm),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -3196,27 +3187,29 @@ private fun VisibilityPicker(label: String, value: String, options: List<String>
 
 @Composable
 private fun Field(label: String, value: String, keyboardDigits: Boolean = false, minLines: Int = 1, onChange: (String) -> Unit) {
-    val c = RcqTheme.colors
-    OutlinedTextField(
+    RcqField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label, color = c.textSecondary) },
+        placeholder = label,
         singleLine = minLines == 1,
         minLines = minLines,
+        keyboardOptions = if (keyboardDigits) {
+            KeyboardOptions(keyboardType = KeyboardType.Number)
+        } else {
+            KeyboardOptions.Default
+        },
         modifier = Modifier.fillMaxWidth(),
     )
 }
 
+/** Confirm/cancel prompt. Cancel comes from [RcqAskSheet] itself. */
 @Composable
-private fun ConfirmDialog(title: String, body: String, confirm: String, destructive: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    val c = RcqTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(title, color = c.textPrimary) },
-        text = { Text(body, color = c.textSecondary) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = if (destructive) Color(0xFFE5484D) else c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+private fun ConfirmSheet(title: String, body: String, confirm: String, destructive: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = title,
+        body = body,
+        actions = listOf(SheetAction(confirm, destructive = destructive, onClick = onConfirm)),
     )
 }
 

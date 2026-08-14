@@ -74,12 +74,10 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
@@ -271,7 +269,7 @@ internal fun HomeScreen(
     val randomEnabled by session.randomEnabled.collectAsState()
     val storiesEnabled by session.storiesEnabled.collectAsState()
 
-    // Stories: a compressed JPEG awaiting the caption/anonymous dialog before
+    // Stories: a compressed JPEG awaiting the caption/anonymous sheet before
     // posting, and the group currently open in the full-screen viewer.
     var pendingStory by remember { mutableStateOf<ByteArray?>(null) }
     var viewerGroup by remember { mutableStateOf<RcqApi.StoryGroupOut?>(null) }
@@ -289,7 +287,7 @@ internal fun HomeScreen(
     var showCreateGroup by remember { mutableStateOf(false) }
     var showAddAccount by remember { mutableStateOf(false) }
     // Label of a not-yet-built destination tapped from the header menu /
-    // bottom bar; drives a "coming soon" dialog until the real screen lands.
+    // bottom bar; drives a "coming soon" sheet until the real screen lands.
     var comingSoon by remember { mutableStateOf<String?>(null) }
     var previewContact by remember { mutableStateOf<Contact?>(null) }
     var previewGroup by remember { mutableStateOf<RcqGroup?>(null) }
@@ -714,7 +712,7 @@ internal fun HomeScreen(
     }
     // "Clear conversation": local, irreversible, says so.
     clearPeerTarget?.let { ct ->
-        // Saved messages reach this dialog too (the thread with your own uin),
+        // Saved messages reach this prompt too (the thread with your own uin),
         // and the 1:1 copy warns about a contact who is not involved. Same
         // three-way split as ChatScreen — see #413.
         //
@@ -724,50 +722,35 @@ internal fun HomeScreen(
         // conversation that "nothing here was sent to anyone else" — the exact
         // lie this fix exists to remove, just pointed the other way.
         val clearingSelf = ct.uin == session.uin && ct.host == null
-        AlertDialog(
-            onDismissRequest = { clearPeerTarget = null },
-            containerColor = c.bgSecondary,
-            title = {
-                Text(
-                    stringResource(if (clearingSelf) R.string.home_clear_chat_self else R.string.home_clear_chat),
-                    color = c.textPrimary,
-                )
+        RcqAskSheet(
+            onDismiss = { clearPeerTarget = null },
+            title = stringResource(if (clearingSelf) R.string.home_clear_chat_self else R.string.home_clear_chat),
+            body = if (clearingSelf) {
+                stringResource(R.string.home_clear_chat_body_self)
+            } else {
+                stringResource(R.string.home_clear_chat_body, ct.nickname)
             },
-            text = {
-                Text(
-                    if (clearingSelf) stringResource(R.string.home_clear_chat_body_self)
-                    else stringResource(R.string.home_clear_chat_body, ct.nickname),
-                    color = c.textSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { session.clearPeerThread(ct.uin); clearPeerTarget = null }) {
-                    Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { clearPeerTarget = null }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            },
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.home_clear_chat_confirm),
+                    destructive = true,
+                    onClick = { session.clearPeerThread(ct.uin); clearPeerTarget = null },
+                ),
+            ),
         )
     }
     clearGroupTarget?.let { g ->
-        AlertDialog(
-            onDismissRequest = { clearGroupTarget = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.home_clear_chat), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.home_clear_chat_body_group, g.name), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = { session.clearGroupThread(g.id); clearGroupTarget = null }) {
-                    Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { clearGroupTarget = null }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            },
+        RcqAskSheet(
+            onDismiss = { clearGroupTarget = null },
+            title = stringResource(R.string.home_clear_chat),
+            body = stringResource(R.string.home_clear_chat_body_group, g.name),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.home_clear_chat_confirm),
+                    destructive = true,
+                    onClick = { session.clearGroupThread(g.id); clearGroupTarget = null },
+                ),
+            ),
         )
     }
     // Removing a contact asks what to do with the messages instead of guessing.
@@ -784,41 +767,42 @@ internal fun HomeScreen(
         )
     }
     comingSoon?.let { feature ->
-        AlertDialog(
-            onDismissRequest = { comingSoon = null },
-            containerColor = c.bgSecondary,
-            title = { Text(feature, color = c.textPrimary) },
-            text = { Text(stringResource(R.string.home_coming_soon_body, feature), color = c.textSecondary) },
-            confirmButton = { TextButton(onClick = { comingSoon = null }) { Text(stringResource(R.string.common_ok), color = c.accent) } },
+        // Nothing to decide here, so OK IS the way out: it becomes the sheet's
+        // own dismissal row instead of a second row that closes the same thing.
+        RcqAskSheet(
+            onDismiss = { comingSoon = null },
+            title = feature,
+            body = stringResource(R.string.home_coming_soon_body, feature),
+            actions = emptyList(),
+            cancelLabel = stringResource(R.string.common_ok),
         )
     }
     // Confirm + caption/anonymous before posting a picked photo as a story.
     pendingStory?.let { jpeg ->
         var caption by remember { mutableStateOf("") }
         var anon by remember { mutableStateOf(false) }
-        AlertDialog(
-            onDismissRequest = { pendingStory = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.story_post_title), color = c.textPrimary) },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = caption,
-                        onValueChange = { caption = it.take(280) },
-                        placeholder = { Text(stringResource(R.string.story_caption_hint), color = c.textSecondary) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { anon = !anon },
-                    ) {
-                        Checkbox(checked = anon, onCheckedChange = { anon = it })
-                        Text(stringResource(R.string.story_anonymous_post), color = c.textPrimary, fontSize = 14.sp)
-                    }
+        RcqSheet(onDismiss = { pendingStory = null }, title = stringResource(R.string.story_post_title)) {
+            RcqField(
+                value = caption,
+                onValueChange = { caption = it.take(280) },
+                placeholder = stringResource(R.string.story_caption_hint),
+                // A caption wraps: it was never a single-line field.
+                singleLine = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SheetGap(8)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { anon = !anon },
+            ) {
+                Checkbox(checked = anon, onCheckedChange = { anon = it })
+                Text(stringResource(R.string.story_anonymous_post), color = c.textPrimary, fontSize = 14.sp)
+            }
+            SheetGap()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { pendingStory = null }) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
-            },
-            confirmButton = {
                 TextButton(onClick = {
                     val cap = caption.trim()
                     val a = anon
@@ -829,9 +813,8 @@ internal fun HomeScreen(
                             .onFailure { android.widget.Toast.makeText(context, context.getString(R.string.story_post_failed), android.widget.Toast.LENGTH_SHORT).show() }
                     }
                 }) { Text(stringResource(R.string.story_post), color = c.accent) }
-            },
-            dismissButton = { TextButton(onClick = { pendingStory = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+            }
+        }
     }
 }
 
@@ -981,7 +964,7 @@ private fun groupActions(
  *  centre = status picker + nick + UIN (no '#', no presence dot), right =
  *  overflow menu of the things you can do (add contact, search, story,
  *  news, saved). Items whose screens aren't built yet route to a
- *  "coming soon" dialog. */
+ *  "coming soon" sheet. */
 @Composable
 private fun HomeHeader(
     session: Session,
@@ -1024,53 +1007,49 @@ private fun HomeHeader(
     var showStealthInfo by remember { mutableStateOf(false) }
 
     if (showPresenceInfo) {
-        AlertDialog(
-            onDismissRequest = { showPresenceInfo = false },
-            confirmButton = {
-                TextButton(onClick = { showPresenceInfo = false }) {
-                    Text(stringResource(R.string.common_ok), color = c.accent)
-                }
-            },
-            title = { Text(stringResource(R.string.presence_info_title), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.presence_info_body), color = c.textSecondary) },
-            containerColor = c.bgSecondary,
+        // OK is the only way out of an explanation, so it is the sheet's own
+        // dismissal row rather than an extra one next to it.
+        RcqAskSheet(
+            onDismiss = { showPresenceInfo = false },
+            title = stringResource(R.string.presence_info_title),
+            body = stringResource(R.string.presence_info_body),
+            actions = emptyList(),
+            cancelLabel = stringResource(R.string.common_ok),
         )
     }
     if (showStealthInfo) {
-        AlertDialog(
-            onDismissRequest = { showStealthInfo = false },
-            confirmButton = {
+        // Two paragraphs with their own colours, so the bare sheet rather than
+        // the ask-sheet's single body line.
+        RcqSheet(onDismiss = { showStealthInfo = false }, title = stringResource(R.string.stealth_info_title)) {
+            // Two questions from vss, answered in the one place he taps to
+            // ask them. WHY it is on: the old text always said "the network
+            // looked blocked, it turns itself on", which reads as nonsense
+            // to somebody who just switched it on from the menu. And WHAT
+            // THE COLOUR MEANS: green vs amber is a real distinction (is
+            // traffic confirmed to arrive?) that nothing on screen stated.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(
+                        if (bypassManual) R.string.stealth_info_body_manual
+                        else R.string.stealth_info_body,
+                    ),
+                    color = c.textSecondary,
+                )
+                Text(
+                    stringResource(
+                        if (routeVerified) R.string.stealth_shield_green
+                        else R.string.stealth_shield_amber,
+                    ),
+                    color = if (routeVerified) c.accent else c.statusAway,
+                )
+            }
+            SheetGap()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = { showStealthInfo = false }) {
                     Text(stringResource(R.string.common_ok), color = c.accent)
                 }
-            },
-            title = { Text(stringResource(R.string.stealth_info_title), color = c.textPrimary) },
-            text = {
-                // Two questions from vss, answered in the one place he taps to
-                // ask them. WHY it is on: the old text always said "the network
-                // looked blocked, it turns itself on", which reads as nonsense
-                // to somebody who just switched it on from the menu. And WHAT
-                // THE COLOUR MEANS: green vs amber is a real distinction (is
-                // traffic confirmed to arrive?) that nothing on screen stated.
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        stringResource(
-                            if (bypassManual) R.string.stealth_info_body_manual
-                            else R.string.stealth_info_body,
-                        ),
-                        color = c.textSecondary,
-                    )
-                    Text(
-                        stringResource(
-                            if (routeVerified) R.string.stealth_shield_green
-                            else R.string.stealth_shield_amber,
-                        ),
-                        color = if (routeVerified) c.accent else c.statusAway,
-                    )
-                }
-            },
-            containerColor = c.bgSecondary,
-        )
+            }
+        }
     }
 
     Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp)) {
@@ -1852,11 +1831,11 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
     }
     Column(Modifier.fillMaxSize().background(c.bgPrimary).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
+            RcqField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Search contacts", color = c.textSecondary) },
+                placeholder = "Search contacts",
                 singleLine = true,
             )
             Text("Cancel", color = c.accent, modifier = Modifier.clickable(onClick = onClose).padding(12.dp))
@@ -1995,10 +1974,10 @@ private fun AddContactDialog(
                 modifier = Modifier.padding(bottom = 10.dp),
             )
             Column(Modifier.fillMaxWidth().weight(1f)) {
-                OutlinedTextField(
+                RcqField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text(stringResource(R.string.add_search_hint), color = c.textSecondary) },
+                    placeholder = stringResource(R.string.add_search_hint),
                     singleLine = true,
                     trailingIcon = {
                         Icon(
@@ -2147,10 +2126,10 @@ private fun AddContactDialog(
                                 AddResultRow("${ci.uin}@${ci.host}", stringResource(R.string.add_ci_self)) {}
                             } else {
                                 // Optional access token for a foreign PRIVATE island.
-                                OutlinedTextField(
+                                RcqField(
                                     value = ciToken,
                                     onValueChange = { ciToken = it.trim() },
-                                    label = { Text(stringResource(R.string.access_token_label), color = c.textSecondary) },
+                                    placeholder = stringResource(R.string.access_token_label),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                 )
@@ -2295,19 +2274,22 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
                 color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(stringResource(R.string.add_account_body), color = c.textSecondary, fontSize = 13.sp)
-            OutlinedTextField(
+            // Two hints, one slot: the field says what it is, and the default
+            // host moves under it so leaving it blank still tells you where the
+            // new account lands.
+            RcqField(
                 value = host,
                 onValueChange = { host = it.trim() },
-                label = { Text(stringResource(R.string.csrv_host), color = c.textSecondary) },
-                placeholder = { Text(app.rcq.android.net.RcqApi.DEFAULT_HOST, color = c.textSecondary) },
+                placeholder = stringResource(R.string.csrv_host),
+                supportingText = app.rcq.android.net.RcqApi.DEFAULT_HOST,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             // Optional access token for a private (closed/masquerade) island.
-            OutlinedTextField(
+            RcqField(
                 value = token,
                 onValueChange = { token = it.trim(); err = null },
-                label = { Text(stringResource(R.string.access_token_label), color = c.textSecondary) },
+                placeholder = stringResource(R.string.access_token_label),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -2365,10 +2347,10 @@ private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<I
                 stringResource(R.string.home_new_group),
                 color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
-            OutlinedTextField(
+            RcqField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text(stringResource(R.string.home_group_name), color = c.textSecondary) },
+                placeholder = stringResource(R.string.home_group_name),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -2407,8 +2389,8 @@ private fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: ()
     var reason by remember { mutableStateOf("") }
     // A sheet, not a centred box: this is a form with a keyboard, and a dialog
     // floating mid-screen fights the IME for room (same reasoning as the Add
-    // sheet). Confirmations elsewhere stay dialogs on purpose — a sheet is for
-    // choosing and composing, a dialog is for "are you sure".
+    // sheet). The "are you sure" prompts that used to stay centred are sheets
+    // too now, so nothing on this screen is a Material dialog any more.
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
@@ -2418,11 +2400,13 @@ private fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: ()
                 stringResource(R.string.home_report_title, name),
                 color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
-            OutlinedTextField(
+            RcqField(
                 value = reason,
                 onValueChange = { reason = it },
-                label = { Text(stringResource(R.string.home_report_reason), color = c.textSecondary) },
-                minLines = 2,
+                placeholder = stringResource(R.string.home_report_reason),
+                // A reason is prose, so the field grows with it (the old field
+                // simply started two lines tall).
+                singleLine = false,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

@@ -41,14 +41,11 @@ import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -148,9 +145,9 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
 
         // Join by key
         Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
+            RcqField(
                 value = joinKey, onValueChange = { joinKey = it.take(16) },
-                label = { Text(stringResource(R.string.rooms_join_key)) },
+                placeholder = stringResource(R.string.rooms_join_key),
                 singleLine = true, modifier = Modifier.weight(1f),
                 keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii),
             )
@@ -249,52 +246,53 @@ private fun RoomListView(session: Session, onBack: () -> Unit) {
     }
 
     if (showCreate) {
-        AlertDialog(
-            onDismissRequest = { showCreate = false },
-            title = { Text(stringResource(R.string.rooms_create), color = c.textPrimary) },
-            text = {
-                OutlinedTextField(
-                    value = newName, onValueChange = { newName = it.take(64) },
-                    label = { Text(stringResource(R.string.rooms_name)) }, singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val n = newName.trim()
-                    if (n.isNotEmpty()) { showCreate = false; scope.launch { controller.create(n) } }
-                }) { Text(stringResource(R.string.rooms_create), color = c.accent) }
-            },
-            dismissButton = { TextButton(onClick = { showCreate = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-            containerColor = c.bgSecondary,
-        )
+        RcqSheet(onDismiss = { showCreate = false }, title = stringResource(R.string.rooms_create)) {
+            RcqField(
+                value = newName, onValueChange = { newName = it.take(64) },
+                placeholder = stringResource(R.string.rooms_name), singleLine = true,
+            )
+            SheetGap()
+            CapsuleButton(stringResource(R.string.rooms_create), modifier = Modifier.fillMaxWidth()) {
+                val n = newName.trim()
+                if (n.isNotEmpty()) { showCreate = false; scope.launch { controller.create(n) } }
+            }
+            SheetCancelRow { showCreate = false }
+        }
     }
 
     renaming?.let { room ->
         // Seeded with the current name so the common case (fixing a typo) is an
         // edit and not a retype.
         var text by remember(room.id) { mutableStateOf(room.name) }
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text(stringResource(R.string.rooms_rename_title), color = c.textPrimary) },
-            text = {
-                OutlinedTextField(
-                    value = text, onValueChange = { text = it.take(64) },
-                    label = { Text(stringResource(R.string.rooms_name)) }, singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val n = text.trim()
-                    if (n.isNotEmpty() && n != room.name) {
-                        renaming = null
-                        scope.launch { controller.rename(room.id, n) }
-                    } else renaming = null
-                }) { Text(stringResource(R.string.rooms_rename), color = c.accent) }
-            },
-            dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-            containerColor = c.bgSecondary,
-        )
+        RcqSheet(onDismiss = { renaming = null }, title = stringResource(R.string.rooms_rename_title)) {
+            RcqField(
+                value = text, onValueChange = { text = it.take(64) },
+                placeholder = stringResource(R.string.rooms_name), singleLine = true,
+            )
+            SheetGap()
+            CapsuleButton(stringResource(R.string.rooms_rename), modifier = Modifier.fillMaxWidth()) {
+                val n = text.trim()
+                if (n.isNotEmpty() && n != room.name) {
+                    renaming = null
+                    scope.launch { controller.rename(room.id, n) }
+                } else renaming = null
+            }
+            SheetCancelRow { renaming = null }
+        }
     }
+}
+
+/** RcqAskSheet grows its own Cancel; a custom-body [RcqSheet] does not, so the
+ *  two room sheets above carry theirs by hand. */
+@Composable
+private fun SheetCancelRow(onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Text(
+        stringResource(R.string.common_cancel), color = c.textSecondary, fontSize = 16.sp,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick).padding(vertical = 14.dp),
+    )
 }
 
 @Composable

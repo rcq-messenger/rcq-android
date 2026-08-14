@@ -23,12 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -168,13 +165,12 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
         }
 
         if (confirmReissue) {
-            AlertDialog(
-                onDismissRequest = { confirmReissue = false },
-                containerColor = c.bgSecondary,
-                title = { Text(stringResource(R.string.reissue_confirm_title), color = c.textPrimary) },
-                text = { Text(stringResource(R.string.reissue_confirm_body), color = c.textSecondary) },
-                confirmButton = {
-                    TextButton(onClick = {
+            RcqAskSheet(
+                onDismiss = { confirmReissue = false },
+                title = stringResource(R.string.reissue_confirm_title),
+                body = stringResource(R.string.reissue_confirm_body),
+                actions = listOf(
+                    SheetAction(stringResource(R.string.reissue_cta), destructive = true) {
                         confirmReissue = false
                         rotating = true
                         scope.launch {
@@ -188,9 +184,8 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
                                 }
                             rotating = false
                         }
-                    }) { Text(stringResource(R.string.reissue_cta), color = Color(0xFFE5484D)) }
-                },
-                dismissButton = { TextButton(onClick = { confirmReissue = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+                    },
+                ),
             )
         }
     }
@@ -211,7 +206,7 @@ private fun PinGate(onVerified: () -> Unit) {
     ) {
         Spacer(Modifier.height(24.dp))
         Text(stringResource(R.string.recovery_pin_prompt), color = c.textPrimary, fontSize = 15.sp)
-        OutlinedTextField(
+        RcqField(
             value = pin,
             onValueChange = { v -> pin = v.filter { it.isDigit() }; error = false },
             singleLine = true,

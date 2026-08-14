@@ -39,13 +39,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,6 +70,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** A tap-row for a sheet that brings its own body: [RcqAskSheet] lays out its
+ *  actions and appends a cancel by itself, [RcqSheet] leaves both to the caller.
+ *  Same shape and weights as the rows inside [RcqAskSheet]. */
+@Composable
+private fun SheetActionRow(label: String, dimmed: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 14.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = if (dimmed || !enabled) c.textSecondary else c.accent,
+            fontSize = 16.sp,
+            fontWeight = if (dimmed) FontWeight.Normal else FontWeight.Medium,
+        )
+    }
+}
 
 /** A small toggle chip for one moderator capability (owner taps to grant/revoke). */
 @Composable
@@ -294,10 +311,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         Column(Modifier.fillMaxWidth()) {
             // Search field — only on a group big enough to warrant it.
             if (bigGroup) {
-                OutlinedTextField(
+                RcqField(
                     value = memberSearch,
                     onValueChange = { memberSearch = it },
-                    placeholder = { Text(stringResource(R.string.gi_member_search), color = c.textSecondary) },
+                    placeholder = stringResource(R.string.gi_member_search),
                     leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.textSecondary, modifier = Modifier.size(18.dp)) },
                     trailingIcon = {
                         if (memberSearch.isNotEmpty()) Icon(Icons.Filled.Close, stringResource(R.string.common_close), tint = c.textSecondary, modifier = Modifier.size(18.dp).clickable { memberSearch = "" })
@@ -426,145 +443,131 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     }
 
     if (confirmDestructive) {
-        AlertDialog(
-            onDismissRequest = { confirmDestructive = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(if (isOwner) R.string.gi_delete_q else R.string.gi_leave_q), color = c.textPrimary) },
-            text = { Text(stringResource(if (isOwner) R.string.gi_delete_body else R.string.gi_leave_body), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = {
+        RcqAskSheet(
+            onDismiss = { confirmDestructive = false },
+            title = stringResource(if (isOwner) R.string.gi_delete_q else R.string.gi_leave_q),
+            body = stringResource(if (isOwner) R.string.gi_delete_body else R.string.gi_leave_body),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(if (isOwner) R.string.common_delete else R.string.gi_leave_cta),
+                    destructive = true,
+                ) {
                     confirmDestructive = false
                     scope.launch {
                         runCatching { if (isOwner) session.deleteGroup(groupId) else session.leaveGroup(groupId) }
                         onLeft()
                     }
-                }) { Text(stringResource(if (isOwner) R.string.common_delete else R.string.gi_leave_cta), color = Color(0xFFE5484D)) }
-            },
-            dismissButton = { TextButton(onClick = { confirmDestructive = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+                },
+            ),
         )
     }
 
     memberToRemove?.let { target ->
-        AlertDialog(
-            onDismissRequest = { memberToRemove = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.gi_remove_member), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.gi_remove_member_q, target.nickname), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = {
+        RcqAskSheet(
+            onDismiss = { memberToRemove = null },
+            title = stringResource(R.string.gi_remove_member),
+            body = stringResource(R.string.gi_remove_member_q, target.nickname),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.gi_remove_member_cta),
+                    destructive = true,
+                ) {
                     val uin = target.uin
                     memberToRemove = null
                     scope.launch { runCatching { session.removeGroupMember(group.id, uin) } }
-                }) { Text(stringResource(R.string.gi_remove_member_cta), color = Color(0xFFE5484D)) }
-            },
-            dismissButton = { TextButton(onClick = { memberToRemove = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+                },
+            ),
         )
     }
 
     if (showAddMember) {
         val candidates = contacts.filter { ct -> group.members.none { it.uin == ct.uin } }
-        AlertDialog(
-            onDismissRequest = { showAddMember = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.gi_add_member), color = c.textPrimary) },
-            text = {
-                if (candidates.isEmpty()) {
-                    Text(stringResource(R.string.gi_all_in), color = c.textSecondary)
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                        items(candidates, key = { it.uin }) { ct ->
-                            Row(
-                                Modifier.fillMaxWidth().clickable {
-                                    scope.launch {
-                                        if (ct.host != null) {
-                                            // §5c: a contact on another island can't be added by their
-                                            // foreign uin (the group's island has no such account).
-                                            // Resolve/register them on the group's island + invite by link.
-                                            val ci = app.rcq.android.net.CrossIslandStore.get(ct.uin, ct.host)
-                                            val err = if (ci != null) session.addCrossIslandGroupMember(groupId, ci) else "no card"
-                                            if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
-                                        } else {
-                                            val err = session.addGroupMember(groupId, ct.uin)
-                                            if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                    showAddMember = false
-                                }.padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                StatusIcon(ct.presence, size = 24.dp, crossIsland = ct.host != null)
-                                Column {
-                                    Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
+        RcqSheet(onDismiss = { showAddMember = false }, title = stringResource(R.string.gi_add_member)) {
+            if (candidates.isEmpty()) {
+                Text(stringResource(R.string.gi_all_in), color = c.textSecondary)
+            } else {
+                LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                    items(candidates, key = { it.uin }) { ct ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                scope.launch {
                                     if (ct.host != null) {
-                                        Text(ct.host, color = c.textSecondary, fontSize = 11.sp)
+                                        // §5c: a contact on another island can't be added by their
+                                        // foreign uin (the group's island has no such account).
+                                        // Resolve/register them on the group's island + invite by link.
+                                        val ci = app.rcq.android.net.CrossIslandStore.get(ct.uin, ct.host)
+                                        val err = if (ci != null) session.addCrossIslandGroupMember(groupId, ci) else "no card"
+                                        if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+                                    } else {
+                                        val err = session.addGroupMember(groupId, ct.uin)
+                                        if (err != null) android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
                                     }
+                                }
+                                showAddMember = false
+                            }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            StatusIcon(ct.presence, size = 24.dp, crossIsland = ct.host != null)
+                            Column {
+                                Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
+                                if (ct.host != null) {
+                                    Text(ct.host, color = c.textSecondary, fontSize = 11.sp)
                                 }
                             }
                         }
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showAddMember = false }) { Text(stringResource(R.string.common_close), color = c.textSecondary) } },
-        )
+            }
+            SheetGap()
+            SheetActionRow(stringResource(R.string.common_close), dimmed = true) { showAddMember = false }
+        }
     }
 
     if (showRename) {
         var name by remember { mutableStateOf(group.name) }
         var desc by remember { mutableStateOf(group.description ?: "") }
-        AlertDialog(
-            onDismissRequest = { showRename = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.gi_edit), color = c.textPrimary) },
-            text = {
-                Column {
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(stringResource(R.string.gi_name), color = c.textSecondary) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.size(8.dp))
-                    OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text(stringResource(R.string.gi_description), color = c.textSecondary) }, modifier = Modifier.fillMaxWidth())
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = name.isNotBlank(), onClick = {
-                    val n = name.trim(); val d = desc.trim()
-                    showRename = false
-                    scope.launch {
-                        runCatching {
-                            session.patchGroup(
-                                groupId,
-                                name = if (n != group.name) n else null,
-                                description = if (d != (group.description ?: "")) d else null,
-                            )
-                        }
+        RcqSheet(onDismiss = { showRename = false }, title = stringResource(R.string.gi_edit)) {
+            RcqField(value = name, onValueChange = { name = it }, placeholder = stringResource(R.string.gi_name), singleLine = true, modifier = Modifier.fillMaxWidth())
+            SheetGap(8)
+            // RcqField is single-line by default; the description never was.
+            RcqField(value = desc, onValueChange = { desc = it }, placeholder = stringResource(R.string.gi_description), singleLine = false, modifier = Modifier.fillMaxWidth())
+            SheetGap()
+            SheetActionRow(stringResource(R.string.common_save), enabled = name.isNotBlank()) {
+                val n = name.trim(); val d = desc.trim()
+                showRename = false
+                scope.launch {
+                    runCatching {
+                        session.patchGroup(
+                            groupId,
+                            name = if (n != group.name) n else null,
+                            description = if (d != (group.description ?: "")) d else null,
+                        )
                     }
-                }) { Text(stringResource(R.string.common_save), color = if (name.isNotBlank()) c.accent else c.textSecondary) }
-            },
-            dismissButton = { TextButton(onClick = { showRename = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+                }
+            }
+            SheetActionRow(stringResource(R.string.common_cancel), dimmed = true) { showRename = false }
+        }
     }
 
     if (showPin) {
         var pinText by remember { mutableStateOf(group.pinnedText ?: "") }
-        AlertDialog(
-            onDismissRequest = { showPin = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
-            text = {
-                OutlinedTextField(
-                    value = pinText, onValueChange = { pinText = it },
-                    placeholder = { Text(stringResource(R.string.gi_pin_placeholder), color = c.textSecondary) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val t = pinText.trim()
-                    showPin = false
-                    scope.launch { runCatching { session.patchGroup(groupId, pinnedText = t) } }
-                }) { Text(stringResource(R.string.common_save), color = c.accent) }
-            },
-            dismissButton = { TextButton(onClick = { showPin = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+        RcqSheet(onDismiss = { showPin = false }, title = stringResource(R.string.gi_pinned)) {
+            // RcqField is single-line by default; a pin is a paragraph.
+            RcqField(
+                value = pinText, onValueChange = { pinText = it },
+                placeholder = stringResource(R.string.gi_pin_placeholder),
+                singleLine = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SheetGap()
+            SheetActionRow(stringResource(R.string.common_save)) {
+                val t = pinText.trim()
+                showPin = false
+                scope.launch { runCatching { session.patchGroup(groupId, pinnedText = t) } }
+            }
+            SheetActionRow(stringResource(R.string.common_cancel), dimmed = true) { showPin = false }
+        }
     }
 }
 

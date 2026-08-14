@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,11 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RemoveRedEye
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -261,38 +260,38 @@ internal fun StoryViewer(session: Session, group: RcqApi.StoryGroupOut, onClose:
     if (showViewers) {
         var viewers by remember { mutableStateOf<List<RcqApi.StoryViewer>?>(null) }
         LaunchedEffect(story.id) { viewers = session.storyViewers(story.id) }
-        AlertDialog(
-            onDismissRequest = { showViewers = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.story_viewers), color = c.textPrimary) },
-            text = {
-                val list = viewers
-                when {
-                    list == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = c.accent) }
-                    list.isEmpty() -> Text(stringResource(R.string.story_no_viewers), color = c.textSecondary)
-                    else -> LazyColumn { items(list, key = { it.viewer_uin }) { v ->
-                        Text(v.viewer_nickname ?: "#${v.viewer_uin}", color = c.textPrimary, fontSize = 15.sp, modifier = Modifier.padding(vertical = 8.dp))
-                    } }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showViewers = false }) { Text(stringResource(R.string.common_close), color = c.accent) } },
-        )
+        RcqSheet(onDismiss = { showViewers = false }, title = stringResource(R.string.story_viewers)) {
+            val list = viewers
+            when {
+                list == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = c.accent) }
+                list.isEmpty() -> Text(stringResource(R.string.story_no_viewers), color = c.textSecondary)
+                // Capped so a popular story cannot push Close off the screen —
+                // the list scrolls inside the sheet instead.
+                else -> LazyColumn(Modifier.heightIn(max = 360.dp)) { items(list, key = { it.viewer_uin }) { v ->
+                    Text(v.viewer_nickname ?: "#${v.viewer_uin}", color = c.textPrimary, fontSize = 15.sp, modifier = Modifier.padding(vertical = 8.dp))
+                } }
+            }
+            Text(
+                stringResource(R.string.common_close),
+                color = c.accent, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .clickable { showViewers = false }.padding(vertical = 14.dp),
+            )
+        }
     }
 
     if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.story_delete_q), color = c.textPrimary) },
-            confirmButton = {
-                TextButton(onClick = {
+        RcqAskSheet(
+            onDismiss = { confirmDelete = false },
+            title = stringResource(R.string.story_delete_q),
+            actions = listOf(
+                SheetAction(stringResource(R.string.story_delete), destructive = true) {
                     val id = story.id
                     confirmDelete = false
                     scope.launch { session.deleteStory(id) }
                     onClose()
-                }) { Text(stringResource(R.string.story_delete), color = Color(0xFFE5484D)) }
-            },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+                },
+            ),
         )
     }
 }

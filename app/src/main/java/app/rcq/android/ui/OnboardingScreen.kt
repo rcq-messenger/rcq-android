@@ -36,10 +36,8 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.VpnLock
 import androidx.compose.material.icons.filled.Tag
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -265,53 +263,51 @@ private fun serverHostLabel(server: String): String =
 private fun ServerPickerDialog(server: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     var draft by remember { mutableStateOf(server) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.onboard_server_label), color = c.textPrimary) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    if (draft.isEmpty()) Text("server host", color = c.textSecondary, fontSize = 14.sp)
-                    BasicTextField(
-                        value = draft, onValueChange = { draft = it }, singleLine = true,
-                        textStyle = TextStyle(color = c.textPrimary, fontSize = 14.sp),
-                        cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Text("Default is the public RCQ server. Point at an organisation's island or your own self-host.", color = c.textSecondary, fontSize = 11.sp)
-                Text("Reset to default", color = c.accent, fontSize = 13.sp, modifier = Modifier.clickable { draft = RcqApi.DEFAULT_HOST })
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.onboard_server_label)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                if (draft.isEmpty()) Text("server host", color = c.textSecondary, fontSize = 14.sp)
+                BasicTextField(
+                    value = draft, onValueChange = { draft = it }, singleLine = true,
+                    textStyle = TextStyle(color = c.textPrimary, fontSize = 14.sp),
+                    cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth(),
+                )
             }
-        },
-        confirmButton = { TextButton(onClick = { onPick(draft.trim()) }) { Text("Use", color = c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.textSecondary) } },
-    )
+            Text("Default is the public RCQ server. Point at an organisation's island or your own self-host.", color = c.textSecondary, fontSize = 11.sp)
+            Text("Reset to default", color = c.accent, fontSize = 13.sp, modifier = Modifier.clickable { draft = RcqApi.DEFAULT_HOST })
+        }
+        SheetGap(16)
+        CapsuleButton("Use", modifier = Modifier.fillMaxWidth()) { onPick(draft.trim()) }
+        Text(
+            "Cancel", color = c.textSecondary, fontSize = 15.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onDismiss).padding(vertical = 14.dp),
+        )
+    }
 }
 
 @Composable
 private fun LanguagePickerDialog(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.onboard_language), color = c.textPrimary) },
-        text = {
-            LazyColumn(Modifier.heightIn(max = 380.dp)) {
-                items(LanguageManager.supported, key = { it.code }) { lang ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onPick(lang.code) }.padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(lang.nativeName, color = c.textPrimary, fontSize = 15.sp)
-                            if (lang.englishName != lang.nativeName) Text(lang.englishName, color = c.textSecondary, fontSize = 12.sp)
-                        }
-                        if (lang.code == current) Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(20.dp))
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.onboard_language)) {
+        LazyColumn(Modifier.heightIn(max = 380.dp)) {
+            items(LanguageManager.supported, key = { it.code }) { lang ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(lang.code) }.padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(lang.nativeName, color = c.textPrimary, fontSize = 15.sp)
+                        if (lang.englishName != lang.nativeName) Text(lang.englishName, color = c.textSecondary, fontSize = 12.sp)
                     }
+                    if (lang.code == current) Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(20.dp))
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close", color = c.textSecondary) } },
-    )
+        }
+        Text(
+            "Close", color = c.textSecondary, fontSize = 15.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onDismiss).padding(vertical = 14.dp),
+        )
+    }
 }

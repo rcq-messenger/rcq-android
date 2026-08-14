@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -100,11 +99,11 @@ fun ShareTargetScreen(
             }
         }
 
-        OutlinedTextField(
+        RcqField(
             value = query,
             onValueChange = { query = it },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            placeholder = { Text(stringResource(R.string.share_to_search), color = c.textSecondary) },
+            placeholder = stringResource(R.string.share_to_search),
             singleLine = true,
         )
         Spacer(Modifier.height(8.dp))

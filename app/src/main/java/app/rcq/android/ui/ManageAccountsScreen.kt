@@ -20,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -193,17 +192,17 @@ internal fun ManageAccountsScreen(
 
     pendingDelete?.let { account ->
         val nick = SecureStore.peekNickname(context, account.id) ?: (account.serverHost ?: RcqApi.DEFAULT_HOST)
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.manage_accounts_delete_title, nick), color = c.textPrimary) },
-            text = { Text(stringResource(R.string.manage_accounts_delete_body), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = { session.deleteAccountLocal(account.id); pendingDelete = null }) {
-                    Text(stringResource(R.string.manage_accounts_delete), color = Color(0xFFE5484D))
-                }
-            },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+        RcqAskSheet(
+            onDismiss = { pendingDelete = null },
+            title = stringResource(R.string.manage_accounts_delete_title, nick),
+            body = stringResource(R.string.manage_accounts_delete_body),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.manage_accounts_delete),
+                    destructive = true,
+                    onClick = { session.deleteAccountLocal(account.id); pendingDelete = null },
+                ),
+            ),
         )
     }
 }

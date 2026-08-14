@@ -62,6 +62,10 @@ fun ChatLockGate(onBack: () -> Unit, onUnlocked: () -> Unit) {
         Spacer(Modifier.height(6.dp))
         Text(context.getString(R.string.chat_locked_hint), color = c.textSecondary, fontSize = 14.sp)
         Spacer(Modifier.height(24.dp))
+        // ⚠ Keeps the Material field: it is the only one with keyboardActions
+        // (Done submits the PIN), which RcqField does not carry. A lock screen
+        // where the keyboard's Done key stops working is worse than a lock
+        // screen with an outline.
         OutlinedTextField(
             value = pin,
             onValueChange = { pin = it.filter(Char::isDigit).take(12); error = false },

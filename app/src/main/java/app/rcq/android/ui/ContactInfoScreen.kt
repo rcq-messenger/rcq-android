@@ -31,11 +31,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -442,42 +439,31 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
 
     editAlias?.let { current ->
         var draft by remember(current) { mutableStateOf(current) }
-        AlertDialog(
-            onDismissRequest = { editAlias = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.ci_set_name), color = c.textPrimary) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.ci_name_hint), color = c.textSecondary, fontSize = 12.sp)
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = { if (it.length <= 48) draft = it },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text(theirNickname, color = c.textSecondary) },
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    app.rcq.android.data.LocalStores.setAlias(uin, draft)
+        RcqSheet(onDismiss = { editAlias = null }, title = stringResource(R.string.ci_set_name)) {
+            Text(stringResource(R.string.ci_name_hint), color = c.textSecondary, fontSize = 12.sp)
+            SheetGap(8)
+            RcqField(
+                value = draft,
+                onValueChange = { if (it.length <= 48) draft = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = theirNickname,
+            )
+            SheetGap()
+            SheetActionRow(stringResource(R.string.common_save)) {
+                app.rcq.android.data.LocalStores.setAlias(uin, draft)
+                editAlias = null
+            }
+            // Clearing the alias is not a cancel — it drops the name I gave them
+            // and only then closes, so it stays a row of its own.
+            if (alias != null) {
+                SheetActionRow(stringResource(R.string.ci_clear_name), dimmed = true) {
+                    app.rcq.android.data.LocalStores.setAlias(uin, null)
                     editAlias = null
-                }) { Text(stringResource(R.string.common_save), color = c.accent) }
-            },
-            dismissButton = {
-                Row {
-                    if (alias != null) {
-                        TextButton(onClick = {
-                            app.rcq.android.data.LocalStores.setAlias(uin, null)
-                            editAlias = null
-                        }) { Text(stringResource(R.string.ci_clear_name), color = c.textSecondary) }
-                    }
-                    TextButton(onClick = { editAlias = null }) {
-                        Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                    }
                 }
-            },
-        )
+            }
+            SheetActionRow(stringResource(R.string.common_cancel), dimmed = true) { editAlias = null }
+        }
     }
 
     if (confirmRemove) {
@@ -498,29 +484,43 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     }
 
     if (showSafety) {
-        AlertDialog(
-            onDismissRequest = { showSafety = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.ci_safety_title), color = c.textPrimary) },
-            text = {
-                Column {
-                    when {
-                        safetyLoading -> Text(stringResource(R.string.ci_safety_loading), color = c.textSecondary)
-                        safetyNumber == null -> Text(stringResource(R.string.ci_safety_unavailable), color = c.textSecondary)
-                        else -> {
-                            Text(
-                                safetyNumber!!,
-                                color = c.textPrimary,
-                                fontSize = 16.sp,
-                                lineHeight = 26.sp,
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Text(stringResource(R.string.ci_safety_body), color = c.textSecondary, fontSize = 13.sp)
-                        }
-                    }
+        RcqSheet(onDismiss = { showSafety = false }, title = stringResource(R.string.ci_safety_title)) {
+            when {
+                safetyLoading -> Text(stringResource(R.string.ci_safety_loading), color = c.textSecondary)
+                safetyNumber == null -> Text(stringResource(R.string.ci_safety_unavailable), color = c.textSecondary)
+                else -> {
+                    Text(
+                        safetyNumber!!,
+                        color = c.textPrimary,
+                        fontSize = 16.sp,
+                        lineHeight = 26.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(stringResource(R.string.ci_safety_body), color = c.textSecondary, fontSize = 13.sp)
                 }
-            },
-            confirmButton = { TextButton(onClick = { showSafety = false }) { Text(stringResource(R.string.common_close), color = c.accent) } },
+            }
+            SheetGap()
+            SheetActionRow(stringResource(R.string.common_close)) { showSafety = false }
+        }
+    }
+}
+
+/** A tap-row for a sheet that brings its own body: [RcqAskSheet] lays out its
+ *  actions and appends a cancel by itself, [RcqSheet] leaves both to the caller.
+ *  Same shape and weights as the rows inside [RcqAskSheet]. */
+@Composable
+private fun SheetActionRow(label: String, dimmed: Boolean = false, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)
+            .padding(vertical = 14.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = if (dimmed) c.textSecondary else c.accent,
+            fontSize = 16.sp,
+            fontWeight = if (dimmed) FontWeight.Normal else FontWeight.Medium,
         )
     }
 }
