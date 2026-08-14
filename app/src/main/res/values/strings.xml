@@ -392,6 +392,7 @@
     <string name="rooms_joining">Joining…</string>
     <string name="rooms_you">You</string>
     <string name="rooms_muted_by_owner">Muted by the owner</string>
+    <string name="rooms_owner_only_note">Only the owner can speak right now</string>
     <string name="rooms_leave">Leave</string>
     <string name="rooms_err_in_call">Finish your call first.</string>
     <string name="rooms_err_busy">You\'re busy in another session.</string>

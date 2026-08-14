@@ -388,6 +388,7 @@
     <string name="rooms_joining">Подключение…</string>
     <string name="rooms_you">Вы</string>
     <string name="rooms_muted_by_owner">Владелец выключил микрофон</string>
+    <string name="rooms_owner_only_note">Сейчас говорит только владелец</string>
     <string name="rooms_leave">Выйти</string>
     <string name="rooms_err_in_call">Сначала завершите звонок.</string>
     <string name="rooms_err_busy">Вы заняты в другой сессии.</string>

@@ -25,6 +25,9 @@ class AudioRoomController(
     private val turn: suspend () -> RcqApi.TurnCreds,
     private val api: () -> RcqApi,
     private val isInCall: () -> Boolean,
+    /// Who we are. Needed to tell an owner-mute aimed at us from one aimed at
+    /// somebody else, which is the difference between a badge and a real mute.
+    private val selfUin: () -> Int,
 ) {
     data class Room(
         val id: Int,
@@ -70,6 +73,10 @@ class AudioRoomController(
     val joining: StateFlow<Boolean> = _joining.asStateFlow()
     private val _joinError = MutableStateFlow<String?>(null)
     val joinError: StateFlow<String?> = _joinError.asStateFlow()
+    /// Owner has the room on "only I speak". Sent with the roster and changed
+    /// by `audio_room_owner_only_changed`.
+    private val _ownerOnlySpeaking = MutableStateFlow(false)
+    val ownerOnlySpeaking: StateFlow<Boolean> = _ownerOnlySpeaking.asStateFlow()
 
     /** In-flight entry (TURN fetch + mesh start). Cancelled on teardown so a
      *  late arrival cannot revive a room the user already left. */
@@ -207,6 +214,8 @@ class AudioRoomController(
                     fresh[uin] = memberOf(m, uin)
                 }
                 _roster.value = fresh
+                _ownerOnlySpeaking.value =
+                    obj.get("owner_only_speaking")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
                 updateActiveCount(roomId, fresh.size)
             }
             "room_member_entered" -> {
@@ -233,9 +242,37 @@ class AudioRoomController(
                 val speaking = obj.get("speaking")?.asBoolean ?: false
                 _roster.value[uin]?.let { _roster.value = _roster.value + (uin to it.copy(speaking = speaking)) }
             }
-            "room_deleted" -> {
+            // ⚠ The island calls this `audio_room_deleted`; Android listened
+            // for `room_deleted`, which nothing has ever sent, so an owner
+            // deleting a room left everyone else inside a room that no longer
+            // existed until they closed the screen by hand.
+            "audio_room_deleted", "audio_room_kicked", "audio_room_membership_revoked" -> {
                 _rooms.value = _rooms.value.filterNot { it.id == roomId }
                 if (_activeRoomId.value == roomId) tearDownLocal()
+            }
+            // The owner minted a new join key. Everyone keeps their membership,
+            // but the cached key in the list is now the one that stopped
+            // working, and sharing it would send people to a 404.
+            "audio_room_key_rotated" -> {
+                val fresh = obj.get("new_key")?.takeIf { !it.isJsonNull }?.asString ?: return
+                _rooms.value = _rooms.value.map { if (it.id == roomId) it.copy(joinKey = fresh) else it }
+            }
+            // Owner silenced someone. The badge is drawn from the roster, and
+            // the muted client honours it locally.
+            "audio_room_member_muted" -> {
+                val target = obj.get("uin")?.asInt ?: return
+                val muted = obj.get("muted_by_owner")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
+                if (_activeRoomId.value != roomId) return
+                _roster.value[target]?.let {
+                    _roster.value = _roster.value + (target to it.copy(mutedByOwner = muted))
+                }
+                // Being silenced by the owner mutes us for real, not just as a
+                // badge on someone else's screen.
+                if (muted && target == selfUin() && !_localMuted.value) toggleMute()
+            }
+            "audio_room_owner_only_changed" -> {
+                if (_activeRoomId.value != roomId) return
+                _ownerOnlySpeaking.value = obj.get("enabled")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
             }
             // The server has broadcast this to every subscriber since audio
             // rooms shipped and nothing on Android listened, so a rename only
