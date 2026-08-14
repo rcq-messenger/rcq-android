@@ -331,14 +331,42 @@ private fun InRoomView(session: Session) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(members, key = { it.uin }) { m ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).clip(CircleShape).background(Color(0xFF2A2D34)), contentAlignment = Alignment.Center) {
-                        Text(m.nickname.firstOrNull()?.uppercase() ?: "?", color = Color.White, fontSize = 18.sp)
+                    // ⚠ ONE Box, layered. The letter is the base and is always
+                    // drawn; the picture goes over it. A Column would stack a
+                    // disc and a face side by side, and an either/or branch
+                    // leaves a hole for as long as the blob is loading.
+                    Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.size(44.dp).clip(CircleShape).background(Color(0xFF2A2D34)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(m.nickname.firstOrNull()?.uppercase() ?: "?", color = Color.White, fontSize = 18.sp)
+                        }
+                        if (!m.avatarMediaId.isNullOrBlank() && !m.avatarMediaKey.isNullOrBlank()) {
+                            PersonAvatar(
+                                id = m.avatarMediaId,
+                                key = m.avatarMediaKey,
+                                status = app.rcq.android.model.UserStatus.OFFLINE,
+                                session = session,
+                                size = 44.dp,
+                                showStatus = false,
+                            )
+                        }
                     }
                     Spacer(Modifier.width(12.dp))
                     Text(
                         if (m.uin == ownUin) stringResource(R.string.rooms_you) else m.nickname,
                         color = Color.White, fontSize = 16.sp,
                     )
+                    if (m.mutedByOwner) {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            Icons.Filled.MicOff,
+                            stringResource(R.string.rooms_muted_by_owner),
+                            tint = Color(0xFFE5484D),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }

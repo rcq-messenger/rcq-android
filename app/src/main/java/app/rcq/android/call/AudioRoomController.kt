@@ -35,7 +35,26 @@ class AudioRoomController(
         val capacity: Int = 8,
     )
 
-    data class Member(val uin: Int, val nickname: String, val speaking: Boolean = false)
+    data class Member(
+        val uin: Int,
+        val nickname: String,
+        val speaking: Boolean = false,
+        /// Owner silenced this person. The island has always sent it; the
+        /// roster simply threw it away, so the badge never appeared.
+        val mutedByOwner: Boolean = false,
+        /// Avatar of a room-mate. The island gates it by room membership, the
+        /// same relationship a group roster already treats as enough.
+        val avatarMediaId: String? = null,
+        val avatarMediaKey: String? = null,
+    )
+
+    private fun memberOf(m: com.google.gson.JsonObject, uin: Int): Member = Member(
+        uin = uin,
+        nickname = m.get("nickname")?.takeIf { !it.isJsonNull }?.asString ?: "#$uin",
+        mutedByOwner = m.get("muted_by_owner")?.takeIf { !it.isJsonNull }?.asBoolean ?: false,
+        avatarMediaId = m.get("avatar_media_id")?.takeIf { !it.isJsonNull }?.asString,
+        avatarMediaKey = m.get("avatar_media_key")?.takeIf { !it.isJsonNull }?.asString,
+    )
 
     private val _rooms = MutableStateFlow<List<Room>>(emptyList())
     val rooms: StateFlow<List<Room>> = _rooms.asStateFlow()
@@ -185,7 +204,7 @@ class AudioRoomController(
                 obj.getAsJsonArray("members")?.forEach { el ->
                     val m = el.asJsonObject
                     val uin = m.get("uin")?.asInt ?: return@forEach
-                    fresh[uin] = Member(uin, m.get("nickname")?.takeIf { !it.isJsonNull }?.asString ?: "#$uin")
+                    fresh[uin] = memberOf(m, uin)
                 }
                 _roster.value = fresh
                 updateActiveCount(roomId, fresh.size)
@@ -194,7 +213,7 @@ class AudioRoomController(
                 if (_activeRoomId.value != roomId) return
                 val m = obj.getAsJsonObject("member") ?: return
                 val uin = m.get("uin")?.asInt ?: return
-                _roster.value = _roster.value + (uin to Member(uin, m.get("nickname")?.takeIf { !it.isJsonNull }?.asString ?: "#$uin"))
+                _roster.value = _roster.value + (uin to memberOf(m, uin))
                 updateActiveCount(roomId, _roster.value.size)
                 mesh.dialNewPeer(uin) // existing member is the offerer
             }

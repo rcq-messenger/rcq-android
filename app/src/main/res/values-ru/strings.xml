@@ -387,6 +387,7 @@
     <string name="rooms_share_text">Заходи в мою комнату RCQ «%1$s», ключ %2$s</string>
     <string name="rooms_joining">Подключение…</string>
     <string name="rooms_you">Вы</string>
+    <string name="rooms_muted_by_owner">Владелец выключил микрофон</string>
     <string name="rooms_leave">Выйти</string>
     <string name="rooms_err_in_call">Сначала завершите звонок.</string>
     <string name="rooms_err_busy">Вы заняты в другой сессии.</string>
@@ -900,6 +901,8 @@
     <string name="chat_voice_release_cancel">Отпустите для отмены</string>
     <string name="chat_input_hint">Сообщение</string>
     <string name="chat_play_voice">Воспроизвести голос</string>
+    <string name="chat_play_audio">Воспроизвести</string>
+    <string name="chat_pause_audio">Пауза</string>
     <string name="chat_play_video">Воспроизвести видео</string>
     <string name="chat_prev_photo">Фото</string>
     <string name="chat_prev_file">Файл</string>
