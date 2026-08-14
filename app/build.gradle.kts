@@ -22,8 +22,8 @@ android {
         applicationId = "app.rcq.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 119
-        versionName = "0.119"
+        versionCode = 120
+        versionName = "0.120"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // libsignal ships native .so for 4 ABIs; keep the real-device ones
         // (arm64-v8a, armeabi-v7a) + x86_64 for the emulator, drop 32-bit x86.

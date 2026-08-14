@@ -291,7 +291,7 @@ private fun LanguagePickerDialog(current: String, onPick: (String) -> Unit, onDi
     val c = RcqTheme.colors
     RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.onboard_language)) {
         LazyColumn(Modifier.heightIn(max = 380.dp)) {
-            items(LanguageManager.supported, key = { it.code }) { lang ->
+            items(LanguageManager.available, key = { it.code }) { lang ->
                 Row(
                     Modifier.fillMaxWidth().clickable { onPick(lang.code) }.padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,

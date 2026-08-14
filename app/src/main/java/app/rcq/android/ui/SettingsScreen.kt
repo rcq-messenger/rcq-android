@@ -1911,7 +1911,7 @@ private fun LanguageScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.onboard_language), onBack)
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-            items(LanguageManager.supported, key = { it.code }) { lang ->
+            items(LanguageManager.available, key = { it.code }) { lang ->
                 Row(
                     Modifier.fillMaxWidth().clickable { activity?.let { LanguageManager.set(it, lang.code) } }.padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
