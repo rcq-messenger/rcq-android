@@ -606,14 +606,23 @@ class Session(context: Context) {
         val inviterUin = ContactAddLink.pending.value
             ?.takeIf { it.host == null && (host ?: RcqApi.DEFAULT_HOST) == RcqApi.DEFAULT_HOST }
             ?.uin
+        // Prove the signing key is ours before claiming it. Best-effort: an
+        // island that predates the challenge endpoint 404s, and registration
+        // there works exactly as it did.
+        val signingPubB64 = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP)
+        val regChallenge = runCatching { regApi.registerChallenge(signingPubB64).challenge }.getOrNull()
         val resp = regApi.register(
             RcqApi.RegisterRequest(
                 nickname = nickname,
                 identity_key = Base64.encodeToString(identity.identityPublic, Base64.NO_WRAP),
-                signing_key = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP),
+                signing_key = signingPubB64,
                 inviter_uin = inviterUin,
                 invite = invite?.takeIf { it.isNotBlank() },
                 device_id = DeviceId.get(appCtx),
+                challenge = regChallenge,
+                signature = regChallenge?.let {
+                    app.rcq.android.crypto.RecoveryPhrase.signChallenge(identity.signingPrivate, it)
+                },
             )
         )
         // Consumed: the server already made the two of them contacts, so the
@@ -2356,14 +2365,22 @@ class Session(context: Context) {
         if (h == serverHost()) throw IllegalArgumentException("own_island")
         VisitedIslandsStore.get(h)?.let { return it }
         val uin = store.uin ?: throw IllegalStateException("no identity")
-        val creds = Multihome.recoverOn(h, signingPriv(), signingPub())
-            ?: RcqApi("https://$h").register(
+        val creds = Multihome.recoverOn(h, signingPriv(), signingPub()) ?: run {
+            val api = RcqApi("https://$h")
+            val skB64 = Base64.encodeToString(signingPub(), Base64.NO_WRAP)
+            val challenge = runCatching { api.registerChallenge(skB64).challenge }.getOrNull()
+            api.register(
                 RcqApi.RegisterRequest(
                     nickname = store.nickname ?: "user-$uin",
                     identity_key = Base64.encodeToString(identityPub(), Base64.NO_WRAP),
-                    signing_key = Base64.encodeToString(signingPub(), Base64.NO_WRAP),
+                    signing_key = skB64,
+                    challenge = challenge,
+                    signature = challenge?.let {
+                        app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv(), it)
+                    },
                 ),
             )
+        }
         val v = VisitedIslandsStore.Visited(h, creds.uin, creds.token, System.currentTimeMillis())
         VisitedIslandsStore.save(v)
         return v

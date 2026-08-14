@@ -137,6 +137,13 @@ class RcqApi(
         // "primary" like every other install of the account, and two of them
         // evict each other's websocket forever.
         val device_id: String? = null,
+        // Proof that we hold the private half of `signing_key`: a nonce from
+        // /auth/register/challenge and our signature over it. The island needs
+        // it before it will let a key that is already claimed be claimed again,
+        // or hand out a specific number — a public key alone used to be enough
+        // to do both, which is how somebody else's recovery could be captured.
+        val challenge: String? = null,
+        val signature: String? = null,
     )
 
     data class RegisterResponse(val uin: Int, val token: String)
@@ -238,6 +245,13 @@ class RcqApi(
     }
 
     data class SessionResponse(val token: String = "", val ws_url: String = "")
+
+    /** Nonce to sign at registration. Same shape as the recovery challenge, and
+     *  deliberately a different `typ` on the island so neither is replayable as
+     *  the other. */
+    suspend fun registerChallenge(signingKey: String): RecoverChallengeResponse = withContext(Dispatchers.IO) {
+        post("/auth/register/challenge", gson.toJson(RecoverChallengeRequest(signingKey)), authed = false, RecoverChallengeResponse::class.java)
+    }
 
     suspend fun recoverChallenge(signingKey: String): RecoverChallengeResponse = withContext(Dispatchers.IO) {
         post("/auth/recover/challenge", gson.toJson(RecoverChallengeRequest(signingKey)), authed = false, RecoverChallengeResponse::class.java)

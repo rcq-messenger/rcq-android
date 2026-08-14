@@ -89,17 +89,29 @@ object Multihome {
         if (host == ownHost) throw IllegalArgumentException("primary_island")
         if (MultihomeStore.list(ownUin).any { it.host == host }) throw IllegalArgumentException("already_added")
 
-        val creds = recoverOn(host, signingPriv, signingPub)
-            ?: RcqApi("https://$host").register(
+        val creds = recoverOn(host, signingPriv, signingPub) ?: run {
+            val api = RcqApi("https://$host")
+            val skB64 = Base64.encodeToString(signingPub, Base64.NO_WRAP)
+            // ⚠ The number is only handed out under proof now. Without the
+            // signature the island still registers us, but on a fresh number,
+            // and "one number everywhere" quietly stops being true. An island
+            // too old to know the endpoint 404s and we register as before.
+            val challenge = runCatching { api.registerChallenge(skB64).challenge }.getOrNull()
+            api.register(
                 RcqApi.RegisterRequest(
                     nickname = nickname,
                     identity_key = Base64.encodeToString(identityPub, Base64.NO_WRAP),
-                    signing_key = Base64.encodeToString(signingPub, Base64.NO_WRAP),
+                    signing_key = skB64,
                     // Ask to keep our primary number on this backup island
                     // (best-effort; the server mints a fresh uin if it's taken).
                     desired_uin = ownUin,
+                    challenge = challenge,
+                    signature = challenge?.let {
+                        app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv, it)
+                    },
                 ),
             )
+        }
         val home = MultihomeStore.Home(ownUin, host, creds.uin, creds.token, System.currentTimeMillis(), auto)
         MultihomeStore.save(home)
         return home
