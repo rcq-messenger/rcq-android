@@ -19,11 +19,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -307,53 +305,29 @@ fun UinShopScreen(
 
     if (showConfirm) {
         val cents = displayedQuote?.price_cents
-        AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            containerColor = c.bgSecondary,
-            title = {
-                Text(
-                    if (cents != null) stringResource(R.string.uin_shop_confirm_title_priced, typed, priceDisplay(cents))
-                    else stringResource(R.string.uin_shop_confirm_title),
-                    color = c.textPrimary,
-                )
-            },
-            text = { Text(stringResource(R.string.uin_shop_confirm_body), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = { showConfirm = false; runPurchase() }) {
-                    Text(stringResource(R.string.uin_shop_confirm_cta), color = c.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            },
+        RcqAskSheet(
+            onDismiss = { showConfirm = false },
+            title = if (cents != null) stringResource(R.string.uin_shop_confirm_title_priced, typed, priceDisplay(cents))
+            else stringResource(R.string.uin_shop_confirm_title),
+            body = stringResource(R.string.uin_shop_confirm_body),
+            actions = listOf(
+                SheetAction(stringResource(R.string.uin_shop_confirm_cta)) { showConfirm = false; runPurchase() },
+            ),
         )
     }
 
     // The number is in the collection. Moving onto it is the second, separate
-    // step; "Later" leaves the account exactly as it was and the number safe.
+    // step; "Later" leaves the account exactly as it was and the number safe —
+    // so it IS the way out of this sheet, and names the cancel row.
     held?.let { target ->
-        AlertDialog(
-            onDismissRequest = { held = null; typed = "" },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.uin_shop_held_title, target.toString()), color = c.textPrimary) },
-            text = {
-                Text(
-                    stringResource(R.string.uin_shop_held_body, (session.uin ?: 0).toString()),
-                    color = c.textSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { held = null; moveOnto(target) }) {
-                    Text(stringResource(R.string.uin_shop_held_now), color = c.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { held = null; typed = "" }) {
-                    Text(stringResource(R.string.uin_shop_held_later), color = c.textSecondary)
-                }
-            },
+        RcqAskSheet(
+            onDismiss = { held = null; typed = "" },
+            title = stringResource(R.string.uin_shop_held_title, target.toString()),
+            body = stringResource(R.string.uin_shop_held_body, (session.uin ?: 0).toString()),
+            actions = listOf(
+                SheetAction(stringResource(R.string.uin_shop_held_now)) { held = null; moveOnto(target) },
+            ),
+            cancelLabel = stringResource(R.string.uin_shop_held_later),
         )
     }
 }

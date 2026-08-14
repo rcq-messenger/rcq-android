@@ -334,7 +334,16 @@ internal fun CapsuleButton(label: String, enabled: Boolean = true, modifier: Mod
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 40.dp, vertical = 14.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+    ) {
+        // ⚠ White on the disabled fill is white on light grey. The button used
+        // to live only on the accent, so nobody saw it; on a sheet a disabled
+        // Send is a common state and it has to stay readable.
+        Text(
+            label,
+            color = if (enabled) Color.White else c.textSecondary,
+            fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
 
 /**
@@ -349,7 +358,8 @@ internal fun CapsuleButton(label: String, enabled: Boolean = true, modifier: Mod
  * Three stacked choices rather than a confirm/dismiss pair, because "delete the
  * messages too" and "keep them" are different outcomes, not a confirmation:
  * neither should be the one you hit by reflex, and backing out has to be
- * possible from both.
+ * possible from both. As a sheet the two outcomes are rows and the way out is
+ * the cancel row the sheet appends.
  */
 @Composable
 internal fun RemoveContactDialog(
@@ -357,24 +367,13 @@ internal fun RemoveContactDialog(
     onDismiss: () -> Unit,
     onRemove: (alsoDeleteMessages: Boolean) -> Unit,
 ) {
-    val c = RcqTheme.colors
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.home_remove_title, nickname), color = c.textPrimary) },
-        text = { Text(stringResource(R.string.home_remove_body), color = c.textSecondary) },
-        confirmButton = {
-            androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.End) {
-                androidx.compose.material3.TextButton(onClick = { onRemove(true) }) {
-                    Text(stringResource(R.string.home_remove_with_chat), color = Color(0xFFE5484D))
-                }
-                androidx.compose.material3.TextButton(onClick = { onRemove(false) }) {
-                    Text(stringResource(R.string.home_remove_keep_chat), color = c.accent)
-                }
-                androidx.compose.material3.TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            }
-        },
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.home_remove_title, nickname),
+        body = stringResource(R.string.home_remove_body),
+        actions = listOf(
+            SheetAction(stringResource(R.string.home_remove_with_chat), destructive = true) { onRemove(true) },
+            SheetAction(stringResource(R.string.home_remove_keep_chat)) { onRemove(false) },
+        ),
     )
 }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -62,6 +63,9 @@ import app.rcq.android.ui.HomeScreen
 import app.rcq.android.ui.ManageAccountsScreen
 import app.rcq.android.ui.OnboardingScreen
 import app.rcq.android.ui.ProfileEditScreen
+import app.rcq.android.ui.RcqAskSheet
+import app.rcq.android.ui.RcqSheet
+import app.rcq.android.ui.SheetAction
 import app.rcq.android.ui.RcqTheme
 import app.rcq.android.ui.SettingsScreen
 import androidx.compose.ui.platform.LocalContext
@@ -1035,14 +1039,11 @@ private fun InAppBanner(b: Session.InAppBanner, onTap: () -> Unit) {
  *  composable in HomeScreen already took `AddContactDialog`. */
 @Composable
 private fun ContactAddDialog2(address: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    val c = RcqTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.addlink_title), color = c.textPrimary) },
-        text = { Text(stringResource(R.string.addlink_body, address), color = c.textSecondary, fontSize = 14.sp) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.common_add), color = c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.addlink_title),
+        body = stringResource(R.string.addlink_body, address),
+        actions = listOf(SheetAction(stringResource(R.string.common_add), onClick = onConfirm)),
     )
 }
 
@@ -1050,32 +1051,22 @@ private fun ContactAddDialog2(address: String, onConfirm: () -> Unit, onDismiss:
  *  another island (joining guest-registers your key there). */
 @Composable
 private fun GroupJoinDialog(host: String?, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    val c = RcqTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(if (host != null) R.string.group_invite_island else R.string.group_invite_title), color = c.textPrimary) },
-        text = {
-            Text(
-                if (host != null) stringResource(R.string.group_invite_island_hint, host) else stringResource(R.string.group_join_confirm),
-                color = c.textSecondary, fontSize = 14.sp,
-            )
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.group_invite_join), color = c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = stringResource(if (host != null) R.string.group_invite_island else R.string.group_invite_title),
+        body = if (host != null) stringResource(R.string.group_invite_island_hint, host)
+               else stringResource(R.string.group_join_confirm),
+        actions = listOf(SheetAction(stringResource(R.string.group_invite_join), onClick = onConfirm)),
     )
 }
 
 @Composable
 private fun WebLinkDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    val c = RcqTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.weblink_title), color = c.textPrimary) },
-        text = { Text(stringResource(R.string.weblink_body), color = c.textSecondary, fontSize = 14.sp) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.weblink_confirm), color = c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.weblink_title),
+        body = stringResource(R.string.weblink_body),
+        actions = listOf(SheetAction(stringResource(R.string.weblink_confirm), onClick = onConfirm)),
     )
 }
 
@@ -1090,32 +1081,28 @@ private fun ServerJoinDialog(host: String, hasInvite: Boolean, onConfirm: () -> 
     val info by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(initialValue = null, host) {
         value = app.rcq.android.net.RcqApi.serverInfoOf(host)
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = {
-            Text(
-                info?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.join_server_title),
-                color = c.textPrimary,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.join_server_body, host), color = c.textSecondary, fontSize = 14.sp)
-                info?.welcome?.takeIf { it.isNotBlank() }?.let { rules ->
-                    Text(
-                        rules, color = c.textPrimary, fontSize = 13.sp,
-                        modifier = Modifier
-                            .heightIn(max = 220.dp)
-                            .verticalScroll(rememberScrollState()),
-                    )
-                }
-                if (hasInvite) Text(stringResource(R.string.join_server_invite), color = c.accent, fontSize = 12.sp)
+    RcqSheet(
+        onDismiss = onDismiss,
+        title = info?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.join_server_title),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.join_server_body, host), color = c.textSecondary, fontSize = 14.sp)
+            info?.welcome?.takeIf { it.isNotBlank() }?.let { rules ->
+                Text(
+                    rules, color = c.textPrimary, fontSize = 13.sp,
+                    modifier = Modifier
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
             }
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.join_server_join), color = c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-    )
+            if (hasInvite) Text(stringResource(R.string.join_server_invite), color = c.accent, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+            CapsuleButton(stringResource(R.string.join_server_join), modifier = Modifier.fillMaxWidth(), onClick = onConfirm)
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+            }
+        }
+    }
 }
 
 @Composable
@@ -1127,13 +1114,9 @@ private fun UpdateDialog(
 ) {
     val c = RcqTheme.colors
     val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
-    AlertDialog(
-        // Always dismissible: the download is process-level and keeps going.
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.update_title, update.versionName), color = c.textPrimary) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    // Always dismissible: the download is process-level and keeps going.
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.update_title, update.versionName)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // The NOTES scroll within a cap (long patch notes used to push the
                 // buttons off-screen). The download progress is PINNED BELOW the
                 // scroll, NOT inside it — previously it sat after the notes inside
@@ -1149,36 +1132,33 @@ private fun UpdateDialog(
                             .verticalScroll(rememberScrollState()),
                     )
                 }
-                if (active != null) {
-                    if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
-                    else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())
-                    Text(stringResource(R.string.update_downloading_pct, (active.progress.coerceAtLeast(0f) * 100).toInt()), color = c.textSecondary, fontSize = 13.sp)
-                    Text(stringResource(R.string.update_bg_hint), color = c.textSecondary, fontSize = 11.sp)
-                }
+            if (active != null) {
+                if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
+                else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())
+                Text(stringResource(R.string.update_downloading_pct, (active.progress.coerceAtLeast(0f) * 100).toInt()), color = c.textSecondary, fontSize = 13.sp)
+                Text(stringResource(R.string.update_bg_hint), color = c.textSecondary, fontSize = 11.sp)
             }
-        },
-        confirmButton = {
-            if (active == null) TextButton(onClick = onUpdate) { Text(stringResource(R.string.update_install), color = c.accent) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
+            Spacer(Modifier.height(8.dp))
+            if (active == null) {
+                CapsuleButton(stringResource(R.string.update_install), modifier = Modifier.fillMaxWidth(), onClick = onUpdate)
+                Spacer(Modifier.height(4.dp))
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(if (active != null) R.string.common_close else R.string.update_later), color = c.textSecondary)
             }
-        },
-    )
+        }
+    }
 }
 
 
 @Composable
 private fun CrashConsentDialog(onSend: () -> Unit, onDismiss: () -> Unit) {
-    val c = RcqTheme.colors
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.crash_consent_title), color = c.textPrimary) },
-        text = { Text(stringResource(R.string.crash_consent_body), color = c.textSecondary, fontSize = 14.sp) },
-        confirmButton = { TextButton(onClick = onSend) { Text(stringResource(R.string.crash_consent_send), color = c.accent) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.crash_consent_dismiss), color = c.textSecondary) } },
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.crash_consent_title),
+        body = stringResource(R.string.crash_consent_body),
+        actions = listOf(SheetAction(stringResource(R.string.crash_consent_send), onClick = onSend)),
+        cancelLabel = stringResource(R.string.crash_consent_dismiss),
     )
 }
 

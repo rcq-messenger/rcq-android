@@ -22,12 +22,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -149,30 +147,25 @@ internal fun PollBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
     if (showVoters) {
         val g = m.groupId?.let { session.group(it) }
         fun nameOf(uin: Int): String = g?.members?.firstOrNull { it.uin == uin }?.nickname ?: "#$uin"
-        AlertDialog(
-            onDismissRequest = { showVoters = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.poll_voters_title), color = c.textPrimary) },
-            text = {
-                Column(
-                    Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    content.options.forEachIndexed { i, label ->
-                        val voters = poll?.tallies?.firstOrNull { it.option_index == i }?.voter_uins ?: emptyList()
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("$label — ${voters.size}", color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                            if (voters.isEmpty()) {
-                                Text(stringResource(R.string.poll_no_voters), color = c.textSecondary, fontSize = 13.sp)
-                            } else {
-                                voters.forEach { uin -> Text(nameOf(uin), color = c.textSecondary, fontSize = 13.sp) }
-                            }
+        RcqSheet(onDismiss = { showVoters = false }, title = stringResource(R.string.poll_voters_title)) {
+            Column(
+                Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                content.options.forEachIndexed { i, label ->
+                    val voters = poll?.tallies?.firstOrNull { it.option_index == i }?.voter_uins ?: emptyList()
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("$label — ${voters.size}", color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        if (voters.isEmpty()) {
+                            Text(stringResource(R.string.poll_no_voters), color = c.textSecondary, fontSize = 13.sp)
+                        } else {
+                            voters.forEach { uin -> Text(nameOf(uin), color = c.textSecondary, fontSize = 13.sp) }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { showVoters = false }) { Text(stringResource(R.string.common_close), color = c.accent) } },
-        )
+            }
+            PollSheetRow(stringResource(R.string.common_close)) { showVoters = false }
+        }
     }
 }
 
@@ -192,56 +185,67 @@ internal fun PollComposerDialog(
     val clean = options.map { it.trim() }.filter { it.isNotEmpty() }
     val valid = question.trim().isNotEmpty() && clean.size >= 2
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.poll_create), color = c.textPrimary) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = question, onValueChange = { question = it.take(280) },
-                    placeholder = { Text(stringResource(R.string.poll_question), color = c.textSecondary) },
-                    modifier = Modifier.fillMaxWidth(), singleLine = false,
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.poll_create)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            RcqField(
+                value = question, onValueChange = { question = it.take(280) },
+                placeholder = stringResource(R.string.poll_question),
+                modifier = Modifier.fillMaxWidth(), singleLine = false,
+            )
+            options.forEachIndexed { i, opt ->
+                RcqField(
+                    value = opt,
+                    onValueChange = { v -> options = options.toMutableList().also { it[i] = v.take(120) } },
+                    placeholder = stringResource(R.string.poll_option_hint, i + 1),
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
                 )
-                options.forEachIndexed { i, opt ->
-                    OutlinedTextField(
-                        value = opt,
-                        onValueChange = { v -> options = options.toMutableList().also { it[i] = v.take(120) } },
-                        placeholder = { Text(stringResource(R.string.poll_option_hint, i + 1), color = c.textSecondary) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    )
-                }
-                if (options.size < 10) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { options = options + "" }.padding(vertical = 4.dp),
-                    ) {
-                        Icon(Icons.Filled.Add, null, tint = c.accent, modifier = Modifier.width(20.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.poll_add_option), color = c.accent, fontSize = 14.sp)
-                    }
-                }
+            }
+            if (options.size < 10) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { single = !single },
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { options = options + "" }.padding(vertical = 4.dp),
                 ) {
-                    Checkbox(checked = single, onCheckedChange = { single = it })
-                    Text(stringResource(R.string.poll_single), color = c.textPrimary, fontSize = 14.sp)
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { anon = !anon },
-                ) {
-                    Checkbox(checked = anon, onCheckedChange = { anon = it })
-                    Text(stringResource(R.string.poll_anonymous), color = c.textPrimary, fontSize = 14.sp)
+                    Icon(Icons.Filled.Add, null, tint = c.accent, modifier = Modifier.width(20.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.poll_add_option), color = c.accent, fontSize = 14.sp)
                 }
             }
-        },
-        confirmButton = {
-            TextButton(enabled = valid, onClick = { onCreate(question.trim(), clean, single, anon) }) {
-                Text(stringResource(R.string.poll_post), color = if (valid) c.accent else c.textSecondary)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { single = !single },
+            ) {
+                Checkbox(checked = single, onCheckedChange = { single = it })
+                Text(stringResource(R.string.poll_single), color = c.textPrimary, fontSize = 14.sp)
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { anon = !anon },
+            ) {
+                Checkbox(checked = anon, onCheckedChange = { anon = it })
+                Text(stringResource(R.string.poll_anonymous), color = c.textPrimary, fontSize = 14.sp)
+            }
+        }
+        SheetGap()
+        // Was a button with `enabled = valid`: greyed and inert until there is a
+        // question and at least two options.
+        PollSheetRow(stringResource(R.string.poll_post), dimmed = !valid) {
+            if (valid) onCreate(question.trim(), clean, single, anon)
+        }
+        PollSheetRow(stringResource(R.string.common_cancel), dimmed = true, onClick = onDismiss)
+    }
+}
+
+/** RcqAskSheet grows its own Cancel; the two custom-body sheets above do not, so
+ *  they carry their close/cancel row by hand. */
+@Composable
+private fun PollSheetRow(label: String, dimmed: Boolean = false, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Text(
+        label,
+        color = if (dimmed) c.textSecondary else c.accent,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick).padding(vertical = 14.dp),
     )
 }

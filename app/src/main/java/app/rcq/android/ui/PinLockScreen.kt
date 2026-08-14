@@ -171,7 +171,7 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 8.dp),
         )
-        OutlinedTextField(
+        RcqField(
             value = pin,
             onValueChange = { if (it.length <= 12 && it.all { ch -> ch.isDigit() }) pin = it },
             visualTransformation = PasswordVisualTransformation(),

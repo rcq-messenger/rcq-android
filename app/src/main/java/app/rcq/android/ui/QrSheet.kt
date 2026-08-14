@@ -8,10 +8,12 @@ import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -19,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,89 +80,94 @@ fun QrDialog(
     val bmp = remember(qrPayload) { qrBitmap(qrPayload) }
     val ownAvatar by session.ownAvatar.collectAsState()
     val ownStatus by session.status.collectAsState()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = c.bgSecondary,
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_done), color = c.accent) } },
-        title = { Text(stringResource(R.string.qr_title), color = c.textPrimary) },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (bmp != null) {
-                    // Your face in the middle of your own code (iOS parity).
-                    // The code is held up to a stranger, so the middle of it is
-                    // worth the person holding it. PersonAvatar draws the plain
-                    // status flower when no picture is set, which is what the
-                    // phones showed here before — nothing changes for anyone
-                    // who has not set one.
-                    //
-                    // ⚠ 40dp over 220dp is ~3.3% of the code's AREA. Error
-                    // correction is level M, which tolerates about 15%, so the
-                    // badge must not grow much past this.
-                    Box(contentAlignment = Alignment.Center) {
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = stringResource(R.string.qr_title),
-                            filterQuality = FilterQuality.None,
-                            modifier = Modifier
-                                .size(220.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White)
-                                .padding(10.dp),
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.qr_title)) {
+        Column(
+            Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (bmp != null) {
+                // Your face in the middle of your own code (iOS parity).
+                // The code is held up to a stranger, so the middle of it is
+                // worth the person holding it. PersonAvatar draws the plain
+                // status flower when no picture is set, which is what the
+                // phones showed here before — nothing changes for anyone
+                // who has not set one.
+                //
+                // ⚠ 40dp over 220dp is ~3.3% of the code's AREA. Error
+                // correction is level M, which tolerates about 15%, so the
+                // badge must not grow much past this.
+                Box(contentAlignment = Alignment.Center) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = stringResource(R.string.qr_title),
+                        filterQuality = FilterQuality.None,
+                        modifier = Modifier
+                            .size(220.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .padding(10.dp),
+                    )
+                    // A white ring so the picture reads as ON the code
+                    // rather than punched into it, and so the scanner sees
+                    // a clean edge.
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PersonAvatar(
+                            id = ownAvatar?.first,
+                            key = ownAvatar?.second,
+                            status = ownStatus,
+                            session = session,
+                            size = 40.dp,
                         )
-                        // A white ring so the picture reads as ON the code
-                        // rather than punched into it, and so the scanner sees
-                        // a clean edge.
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .background(Color.White),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PersonAvatar(
-                                id = ownAvatar?.first,
-                                key = ownAvatar?.second,
-                                status = ownStatus,
-                                session = session,
-                                size = 40.dp,
-                            )
-                        }
                     }
                 }
-                Text(
-                    "$uin",
-                    color = c.textPrimary,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                // Copy the UIN, or share a Telegram-style https link anyone can tap.
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("UIN", "$uin"))
-                        Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Filled.ContentCopy, null, tint = c.accent, modifier = Modifier.size(16.dp))
-                        Text(" " + stringResource(R.string.qr_copy_uin), color = c.accent, fontSize = 13.sp)
-                    }
-                    TextButton(onClick = {
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, context.getString(R.string.qr_share_text, "$uin", shareLink))
-                        }
-                        context.startActivity(Intent.createChooser(send, context.getString(R.string.qr_share)))
-                    }) {
-                        Icon(Icons.Filled.Share, null, tint = c.accent, modifier = Modifier.size(16.dp))
-                        Text(" " + stringResource(R.string.qr_share), color = c.accent, fontSize = 13.sp)
-                    }
-                }
-                Text(
-                    stringResource(R.string.qr_hint),
-                    color = c.textSecondary,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                )
             }
-        },
-    )
+            Text(
+                "$uin",
+                color = c.textPrimary,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            // Copy the UIN, or share a Telegram-style https link anyone can tap.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("UIN", "$uin"))
+                    Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(Icons.Filled.ContentCopy, null, tint = c.accent, modifier = Modifier.size(16.dp))
+                    Text(" " + stringResource(R.string.qr_copy_uin), color = c.accent, fontSize = 13.sp)
+                }
+                TextButton(onClick = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, context.getString(R.string.qr_share_text, "$uin", shareLink))
+                    }
+                    context.startActivity(Intent.createChooser(send, context.getString(R.string.qr_share)))
+                }) {
+                    Icon(Icons.Filled.Share, null, tint = c.accent, modifier = Modifier.size(16.dp))
+                    Text(" " + stringResource(R.string.qr_share), color = c.accent, fontSize = 13.sp)
+                }
+            }
+            Text(
+                stringResource(R.string.qr_hint),
+                color = c.textSecondary,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+        SheetGap(16)
+        Text(
+            stringResource(R.string.common_done),
+            color = c.accent, fontSize = 16.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onDismiss).padding(vertical = 14.dp),
+        )
+    }
 }

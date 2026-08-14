@@ -107,16 +107,13 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -1293,39 +1290,35 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         val byAsset = remember(m.reactions) {
             m.reactions.entries.groupBy { it.value }.entries.sortedByDescending { it.value.size }
         }
-        AlertDialog(
-            onDismissRequest = { whoReactedMsg = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.reactions_who_title), color = c.textPrimary) },
-            text = {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    byAsset.forEach { (asset, entries) ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-                        ) {
-                            // 30dp (was 20): the smiley is the subject of the
-                            // group, 20dp read as tiny (founder report).
-                            EmoticonGif(asset, Modifier.size(30.dp), animate = false)
-                            Spacer(Modifier.width(8.dp))
-                            Text("${entries.size}", color = c.textSecondary, fontSize = 14.sp)
-                        }
-                        entries.forEach { (uin, _) ->
-                            val name = group?.memberName(uin) ?: session.contactName(uin)
-                            Text(
-                                name, color = c.textPrimary, fontSize = 14.sp,
-                                modifier = Modifier.padding(start = 28.dp, top = 2.dp, bottom = 2.dp),
-                            )
-                        }
+        RcqSheet(
+            onDismiss = { whoReactedMsg = null },
+            title = stringResource(R.string.reactions_who_title),
+        ) {
+            // Bounded: the dialog used to cap this list for us, a sheet does not,
+            // and a long list would push the Done row off the bottom.
+            Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                byAsset.forEach { (asset, entries) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                    ) {
+                        // 30dp (was 20): the smiley is the subject of the
+                        // group, 20dp read as tiny (founder report).
+                        EmoticonGif(asset, Modifier.size(30.dp), animate = false)
+                        Spacer(Modifier.width(8.dp))
+                        Text("${entries.size}", color = c.textSecondary, fontSize = 14.sp)
+                    }
+                    entries.forEach { (uin, _) ->
+                        val name = group?.memberName(uin) ?: session.contactName(uin)
+                        Text(
+                            name, color = c.textPrimary, fontSize = 14.sp,
+                            modifier = Modifier.padding(start = 28.dp, top = 2.dp, bottom = 2.dp),
+                        )
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { whoReactedMsg = null }) {
-                    Text(stringResource(R.string.common_done), color = c.accent)
-                }
-            },
-        )
+            }
+            SheetTextRow(stringResource(R.string.common_done)) { whoReactedMsg = null }
+        }
     }
 
     actionMsg?.let { m ->
@@ -1417,39 +1410,33 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         var editValue by remember(m.id) {
             mutableStateOf(TextFieldValue(m.body, selection = TextRange(m.body.length)))
         }
-        AlertDialog(
-            onDismissRequest = { editMsg = null },
-            // The dialog window is its OWN sub-window and does NOT inherit the
-            // activity's adjustResize, so for a long message the keyboard covered
-            // the field and the user typed blind. decorFitsSystemWindows=false +
-            // imePadding on the content makes the dialog ride above the IME, and the
-            // bounded+scrolling field keeps the caret visible instead of growing tall.
-            properties = DialogProperties(decorFitsSystemWindows = false),
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.chat_edit_title), color = c.textPrimary) },
-            text = {
-                Box(
-                    Modifier.fillMaxWidth().imePadding().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 12.dp, vertical = 10.dp),
-                ) {
-                    BasicTextField(
-                        value = editValue,
-                        onValueChange = { editValue = it },
-                        textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
-                        cursorBrush = SolidColor(c.accent),
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val newText = editValue.text.trim()
-                    val orig = m
-                    editMsg = null
-                    if (newText.isNotEmpty() && newText != orig.body) scope.launch { runCatching { session.sendEdit(orig, newText) } }
-                }) { Text(stringResource(R.string.common_save), color = c.accent) }
-            },
-            dismissButton = { TextButton(onClick = { editMsg = null }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+        // A sheet, not a centre dialog: the old AlertDialog was its OWN sub-window
+        // and did NOT inherit the activity's adjustResize, so for a long message the
+        // keyboard covered the field and the user typed blind (it needed
+        // decorFitsSystemWindows=false + imePadding to work around that). The sheet
+        // comes up with the keyboard, and the bounded+scrolling field still keeps the
+        // caret visible instead of growing tall.
+        RcqSheet(onDismiss = { editMsg = null }, title = stringResource(R.string.chat_edit_title)) {
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                BasicTextField(
+                    value = editValue,
+                    onValueChange = { editValue = it },
+                    textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
+                    cursorBrush = SolidColor(c.accent),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
+                )
+            }
+            SheetGap()
+            SheetTextRow(stringResource(R.string.common_save)) {
+                val newText = editValue.text.trim()
+                val orig = m
+                editMsg = null
+                if (newText.isNotEmpty() && newText != orig.body) scope.launch { runCatching { session.sendEdit(orig, newText) } }
+            }
+            SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { editMsg = null }
+        }
     }
 
     if (attachMenu) {
@@ -1515,71 +1502,63 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Share a group invite into this chat: pick one of your groups, send its
     // canonical link as a text message (renders as a join card on both ends).
     if (showGroupPicker) {
-        AlertDialog(
-            onDismissRequest = { showGroupPicker = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.chat_attach_group), color = c.textPrimary) },
-            text = {
-                if (groups.isEmpty()) {
-                    Text(stringResource(R.string.group_invite_none), color = c.textSecondary)
-                } else {
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                        groups.forEach { g ->
-                            Row(
-                                Modifier.fillMaxWidth().clickable {
-                                    showGroupPicker = false
-                                    val (shareId, shareHost) = session.groupShareRef(g.id)
-                                    val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
-                                    scope.launch {
-                                        runCatching {
-                                            if (isGroup) session.sendGroupText(groupId!!, url) else session.sendText(peer!!, url)
-                                        }
+        RcqSheet(
+            onDismiss = { showGroupPicker = false },
+            title = stringResource(R.string.chat_attach_group),
+        ) {
+            if (groups.isEmpty()) {
+                Text(stringResource(R.string.group_invite_none), color = c.textSecondary)
+            } else {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    groups.forEach { g ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                showGroupPicker = false
+                                val (shareId, shareHost) = session.groupShareRef(g.id)
+                                val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
+                                scope.launch {
+                                    runCatching {
+                                        if (isGroup) session.sendGroupText(groupId!!, url) else session.sendText(peer!!, url)
                                     }
-                                }.padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                GroupAvatar(g, session, 28.dp, animated = true)
-                                Text(g.name, color = c.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                                }
+                            }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            GroupAvatar(g, session, 28.dp, animated = true)
+                            Text(g.name, color = c.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showGroupPicker = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+            }
+            SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { showGroupPicker = false }
+        }
     }
 
     // In-chat bridge sharing: pick a relay from your pool to hand the peer so
     // they can route through it when their own relays are blocked.
     if (showRelayPicker) {
         val pool = remember { session.shareableRelays() }
-        AlertDialog(
-            onDismissRequest = { showRelayPicker = false },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.relay_share_pick_title), color = c.textPrimary) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.relay_share_pick_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-                    if (groupId != null) Text(stringResource(R.string.relay_share_group_warn), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                        pool.forEach { r ->
-                            MessageAction("${r.proto.uppercase()} · ${r.server}:${r.port}") {
-                                showRelayPicker = false
-                                val gid = groupId
-                                val p = peer
-                                scope.launch { runCatching {
-                                    if (gid != null) session.shareRelayToGroup(gid, r) else p?.let { session.shareRelay(it, r) }
-                                } }
-                            }
-                        }
+        RcqSheet(
+            onDismiss = { showRelayPicker = false },
+            title = stringResource(R.string.relay_share_pick_title),
+        ) {
+            Text(stringResource(R.string.relay_share_pick_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+            if (groupId != null) Text(stringResource(R.string.relay_share_group_warn), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                pool.forEach { r ->
+                    MessageAction("${r.proto.uppercase()} · ${r.server}:${r.port}") {
+                        showRelayPicker = false
+                        val gid = groupId
+                        val p = peer
+                        scope.launch { runCatching {
+                            if (gid != null) session.shareRelayToGroup(gid, r) else p?.let { session.shareRelay(it, r) }
+                        } }
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showRelayPicker = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-        )
+            }
+            SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { showRelayPicker = false }
+        }
     }
 
     if (showPollComposer && groupId != null) {
@@ -1624,31 +1603,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             isSelf -> stringResource(R.string.chat_saved_title)
             else -> session.contactName(peer ?: 0)
         }
-        AlertDialog(
-            onDismissRequest = { confirmClearThread = false },
-            containerColor = c.bgSecondary,
-            // Three cases, not two. Saved messages are a thread with yourself,
-            // and it used to fall through to the 1:1 copy — which promised the
-            // messages would stay with "your contact" and warned about someone
-            // who is not there (#413).
-            title = {
-                Text(
-                    stringResource(if (isSelf) R.string.home_clear_chat_self else R.string.home_clear_chat),
-                    color = c.textPrimary,
-                )
-            },
-            text = {
-                Text(
-                    if (isSelf) stringResource(R.string.home_clear_chat_body_self)
-                    else stringResource(
-                        if (isGroup) R.string.home_clear_chat_body_group else R.string.home_clear_chat_body,
-                        threadName,
-                    ),
-                    color = c.textSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
+        // Three cases, not two. Saved messages are a thread with yourself,
+        // and it used to fall through to the 1:1 copy — which promised the
+        // messages would stay with "your contact" and warned about someone
+        // who is not there (#413).
+        RcqAskSheet(
+            onDismiss = { confirmClearThread = false },
+            title = stringResource(if (isSelf) R.string.home_clear_chat_self else R.string.home_clear_chat),
+            body = if (isSelf) stringResource(R.string.home_clear_chat_body_self)
+            else stringResource(
+                if (isGroup) R.string.home_clear_chat_body_group else R.string.home_clear_chat_body,
+                threadName,
+            ),
+            actions = listOf(
+                SheetAction(stringResource(R.string.home_clear_chat_confirm), destructive = true) {
                     confirmClearThread = false
                     when (target) {
                         is ChatTarget.Peer -> session.clearPeerThread(target.uin)
@@ -1656,13 +1624,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                     // Nothing left to show here.
                     onBack()
-                }) { Text(stringResource(R.string.home_clear_chat_confirm), color = Color(0xFFE5484D)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmClearThread = false }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            },
+                },
+            ),
         )
     }
 }
@@ -1898,6 +1861,22 @@ private fun Composer(
 
 /** m:ss for a duration in seconds. */
 private fun formatDuration(sec: Int): String = "%d:%02d".format(sec / 60, sec % 60)
+
+/** RcqAskSheet grows its own Cancel; a custom-body [RcqSheet] does not, so the
+ *  sheets in this file carry their confirm/cancel rows by hand. `dimmed` is the
+ *  weight a Cancel had as a dialog button. */
+@Composable
+private fun SheetTextRow(label: String, dimmed: Boolean = false, onClick: () -> Unit) {
+    val c = RcqTheme.colors
+    Text(
+        label,
+        color = if (dimmed) c.textSecondary else c.accent,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick).padding(vertical = 14.dp),
+    )
+}
 
 @Composable
 private fun MessageAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
@@ -2138,33 +2117,33 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
         }
     }
     if (showJoin && (p != null || foreignHost != null)) {
-        AlertDialog(
-            onDismissRequest = { if (!joining) showJoin = false },
-            containerColor = c.bgSecondary,
-            title = { Text(p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title), color = c.textPrimary) },
-            text = {
-                if (p != null) Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary)
-                else Text(stringResource(R.string.group_invite_island_hint, foreignHost ?: ""), color = c.textSecondary)
-            },
-            confirmButton = {
-                TextButton(enabled = !joining, onClick = {
-                    joining = true
-                    scope.launch {
-                        if (foreignHost != null) {
-                            val alias = session.joinForeignGroup(foreignHost, groupId)
-                            joining = false
-                            showJoin = false
-                            if (alias != null) onOpenGroup(alias)
-                        } else {
-                            val g = session.joinGroup(groupId)
-                            joining = false
-                            showJoin = false
-                            if (g != null) onOpenGroup(groupId)
+        RcqAskSheet(
+            onDismiss = { if (!joining) showJoin = false },
+            title = p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title),
+            body = if (p != null) pluralStringResource(R.plurals.members, p.member_count, p.member_count)
+            else stringResource(R.string.group_invite_island_hint, foreignHost ?: ""),
+            actions = listOf(
+                // Greyed and inert while a join is in flight — the row stands in for
+                // a button that was `enabled = !joining`.
+                SheetAction(stringResource(R.string.group_invite_join), dimmed = joining) {
+                    if (!joining) {
+                        joining = true
+                        scope.launch {
+                            if (foreignHost != null) {
+                                val alias = session.joinForeignGroup(foreignHost, groupId)
+                                joining = false
+                                showJoin = false
+                                if (alias != null) onOpenGroup(alias)
+                            } else {
+                                val g = session.joinGroup(groupId)
+                                joining = false
+                                showJoin = false
+                                if (g != null) onOpenGroup(groupId)
+                            }
                         }
                     }
-                }) { Text(stringResource(R.string.group_invite_join), color = c.accent) }
-            },
-            dismissButton = { TextButton(enabled = !joining, onClick = { showJoin = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+                },
+            ),
         )
     }
 }
@@ -2243,39 +2222,29 @@ internal fun PinnedAnnouncement(
         }
     }
     if (showPinSheet) {
-        AlertDialog(
-            onDismissRequest = { showPinSheet = false },
-            confirmButton = {
-                TextButton(onClick = { showPinSheet = false }) {
-                    Text(stringResource(R.string.common_close), color = c.accent)
+        RcqSheet(onDismiss = { showPinSheet = false }, title = stringResource(R.string.gi_pinned)) {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                if (hasPinText) {
+                    ClickableText(
+                        text = annotated,
+                        style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
+                        onClick = { offset ->
+                            annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
+                                val mUin = it.item.toInt()
+                                if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
+                                return@ClickableText
+                            }
+                            annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
+                        },
+                    )
                 }
-            },
-            icon = { Icon(Icons.Filled.PushPin, null, tint = c.accent) },
-            title = { Text(stringResource(R.string.gi_pinned), color = c.textPrimary) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    if (hasPinText) {
-                        ClickableText(
-                            text = annotated,
-                            style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
-                            onClick = { offset ->
-                                annotated.getStringAnnotations("MENTION", offset, offset).firstOrNull()?.let {
-                                    val mUin = it.item.toInt()
-                                    if (mUin != ownUin) { showPinSheet = false; onOpenPeerInfo(mUin) }
-                                    return@ClickableText
-                                }
-                                annotated.getStringAnnotations("URL", offset, offset).firstOrNull()?.let { runCatching { uriHandler.openUri(it.item) } }
-                            },
-                        )
-                    }
-                    pinGroupIds.forEach { gref ->
-                        Spacer(Modifier.height(6.dp))
-                        PinnedGroupChip(session, gref, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
-                    }
+                pinGroupIds.forEach { gref ->
+                    Spacer(Modifier.height(6.dp))
+                    PinnedGroupChip(session, gref, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
                 }
-            },
-            containerColor = c.bgSecondary,
-        )
+            }
+            SheetTextRow(stringResource(R.string.common_close)) { showPinSheet = false }
+        }
     }
 }
 
@@ -2347,31 +2316,30 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
         }
     }
     if (showJoin && (p != null || foreignHost != null)) {
-        AlertDialog(
-            onDismissRequest = { if (!joining) showJoin = false },
-            containerColor = c.bgSecondary,
-            title = { Text(p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title), color = c.textPrimary) },
-            text = {
-                if (p != null) Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary)
-                else Text(stringResource(R.string.group_invite_island_hint, foreignHost ?: ""), color = c.textSecondary)
-            },
-            confirmButton = {
-                TextButton(enabled = !joining, onClick = {
-                    joining = true
-                    scope.launch {
-                        if (foreignHost != null) {
-                            val alias = session.joinForeignGroup(foreignHost, groupId)
-                            joining = false; showJoin = false
-                            if (alias != null) onOpenGroup(alias)
-                        } else {
-                            val g = session.joinGroup(groupId)
-                            joining = false; showJoin = false
-                            if (g != null) onOpenGroup(groupId)
+        RcqAskSheet(
+            onDismiss = { if (!joining) showJoin = false },
+            title = p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title),
+            body = if (p != null) pluralStringResource(R.plurals.members, p.member_count, p.member_count)
+            else stringResource(R.string.group_invite_island_hint, foreignHost ?: ""),
+            actions = listOf(
+                // Same as GroupLinkBubble: dimmed and inert while the join runs.
+                SheetAction(stringResource(R.string.group_invite_join), dimmed = joining) {
+                    if (!joining) {
+                        joining = true
+                        scope.launch {
+                            if (foreignHost != null) {
+                                val alias = session.joinForeignGroup(foreignHost, groupId)
+                                joining = false; showJoin = false
+                                if (alias != null) onOpenGroup(alias)
+                            } else {
+                                val g = session.joinGroup(groupId)
+                                joining = false; showJoin = false
+                                if (g != null) onOpenGroup(groupId)
+                            }
                         }
                     }
-                }) { Text(stringResource(R.string.group_invite_join), color = c.accent) }
-            },
-            dismissButton = { TextButton(enabled = !joining, onClick = { showJoin = false }) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
+                },
+            ),
         )
     }
 }
@@ -2406,56 +2374,47 @@ private fun MediaPreviewDialog(pending: PendingSend, onCancel: () -> Unit, onSen
     val shown = remember(base, spoiler) {
         base?.let { (if (spoiler) blurForSpoiler(it) else it).asImageBitmap() }
     }
-    AlertDialog(
-        onDismissRequest = onCancel,
-        containerColor = c.bgSecondary,
-        title = { Text(stringResource(R.string.chat_media_preview_title), color = c.textPrimary) },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    Modifier
-                        .size(240.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(c.bgPrimary)
-                        .clickable { spoiler = !spoiler },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (shown != null) Image(bitmap = shown, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    if (isVideo && !spoiler) {
-                        Box(
-                            Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(30.dp)) }
-                    }
+    RcqSheet(onDismiss = onCancel, title = stringResource(R.string.chat_media_preview_title)) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier
+                    .size(240.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(c.bgPrimary)
+                    .clickable { spoiler = !spoiler },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (shown != null) Image(bitmap = shown, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                if (isVideo && !spoiler) {
                     Box(
-                        Modifier.align(Alignment.TopEnd).padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)).padding(6.dp),
-                    ) {
-                        Icon(if (spoiler) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
+                        Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(30.dp)) }
                 }
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = caption,
-                    onValueChange = { if (it.length <= 1000) caption = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 3,
-                    placeholder = { Text(stringResource(R.string.chat_caption_hint), color = c.textSecondary, fontSize = 13.sp) },
-                    textStyle = TextStyle(color = c.textPrimary, fontSize = 14.sp),
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    stringResource(if (spoiler) R.string.chat_spoiler_on_hint else R.string.chat_spoiler_off_hint),
-                    color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
-                )
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)).padding(6.dp),
+                ) {
+                    Icon(if (spoiler) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSend(spoiler, caption.trim().takeIf { it.isNotEmpty() }) }) {
-                Text(stringResource(R.string.chat_send), color = c.accent)
-            }
-        },
-        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.common_cancel), color = c.textSecondary) } },
-    )
+            Spacer(Modifier.height(10.dp))
+            RcqField(
+                value = caption,
+                onValueChange = { if (it.length <= 1000) caption = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = stringResource(R.string.chat_caption_hint),
+                singleLine = false,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(if (spoiler) R.string.chat_spoiler_on_hint else R.string.chat_spoiler_off_hint),
+                color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
+            )
+        }
+        SheetGap()
+        SheetTextRow(stringResource(R.string.chat_send)) { onSend(spoiler, caption.trim().takeIf { it.isNotEmpty() }) }
+        SheetTextRow(stringResource(R.string.common_cancel), dimmed = true, onClick = onCancel)
+    }
 }
 
 /** A chat-list render unit: a normal single message, or a collapsed media

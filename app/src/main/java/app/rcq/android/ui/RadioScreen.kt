@@ -294,12 +294,12 @@ private fun RadioChatView(session: Session, onLeave: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedTextField(
+            RcqField(
                 value = draft,
                 onValueChange = { draft = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(stringResource(R.string.radio_message_hint), color = c.textSecondary) },
-                maxLines = 4,
+                placeholder = stringResource(R.string.radio_message_hint),
+                singleLine = false,
             )
             Icon(
                 Icons.Filled.Mic, stringResource(R.string.radio_ptt),
@@ -387,42 +387,31 @@ private fun ReactionPickerDialog(onDismiss: () -> Unit, onPick: (String) -> Unit
 
 @Composable
 private fun CreateRoomDialog(onDismiss: () -> Unit, onCreate: (String, String?) -> Unit) {
-    val c = RcqTheme.colors
     var name by remember { mutableStateOf("") }
     var pwd by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.clip(RoundedCornerShape(18.dp)).background(c.bgSecondary).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(stringResource(R.string.radio_create_room), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.radio_room_name)) }, singleLine = true)
-            OutlinedTextField(pwd, { pwd = it }, label = { Text(stringResource(R.string.radio_room_password_opt)) }, singleLine = true)
-            CapsuleButton(stringResource(R.string.radio_create), enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                onCreate(name.trim(), pwd.takeIf { it.isNotBlank() })
-            }
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.radio_create_room)) {
+        RcqField(name, { name = it }, placeholder = stringResource(R.string.radio_room_name), singleLine = true)
+        SheetGap()
+        RcqField(pwd, { pwd = it }, placeholder = stringResource(R.string.radio_room_password_opt), singleLine = true)
+        SheetGap()
+        CapsuleButton(stringResource(R.string.radio_create), enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            onCreate(name.trim(), pwd.takeIf { it.isNotBlank() })
         }
     }
 }
 
 @Composable
 private fun JoinRoomDialog(roomName: String, onDismiss: () -> Unit, onJoin: (String) -> Unit) {
-    val c = RcqTheme.colors
     var pwd by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.clip(RoundedCornerShape(18.dp)).background(c.bgSecondary).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(roomName.ifBlank { stringResource(R.string.radio_room) }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            OutlinedTextField(
-                pwd, { pwd = it },
-                label = { Text(stringResource(R.string.radio_room_password)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            )
-            CapsuleButton(stringResource(R.string.radio_join), enabled = pwd.isNotBlank(), modifier = Modifier.fillMaxWidth()) { onJoin(pwd) }
-        }
+    RcqSheet(onDismiss = onDismiss, title = roomName.ifBlank { stringResource(R.string.radio_room) }) {
+        RcqField(
+            pwd, { pwd = it },
+            placeholder = stringResource(R.string.radio_room_password),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        )
+        SheetGap()
+        CapsuleButton(stringResource(R.string.radio_join), enabled = pwd.isNotBlank(), modifier = Modifier.fillMaxWidth()) { onJoin(pwd) }
     }
 }
 

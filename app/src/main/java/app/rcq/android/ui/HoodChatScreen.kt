@@ -113,10 +113,10 @@ fun HoodChatScreen(session: Session, bucket: String, onBack: () -> Unit) {
                 modifier = Modifier.size(28.dp).clip(CircleShape).clickable { showEmoji = !showEmoji },
             )
             Spacer(Modifier.width(8.dp))
-            OutlinedTextField(
+            RcqField(
                 value = draft, onValueChange = { draft = it.take(500) },
-                placeholder = { Text(stringResource(R.string.hood_hint)) },
-                modifier = Modifier.weight(1f), maxLines = 4,
+                placeholder = stringResource(R.string.hood_hint),
+                modifier = Modifier.weight(1f), singleLine = false,
                 keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Text),
             )
             Spacer(Modifier.width(8.dp))

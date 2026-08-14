@@ -79,11 +79,11 @@ internal fun InChatSearchOverlay(
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
+            RcqField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.weight(1f).focusRequester(focus),
-                placeholder = { Text(stringResource(R.string.chat_search_hint), color = c.textSecondary) },
+                placeholder = stringResource(R.string.chat_search_hint),
                 leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.textSecondary) },
                 singleLine = true,
             )

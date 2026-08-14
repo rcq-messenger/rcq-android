@@ -15,11 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -76,20 +73,22 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
         Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(stringResource(R.string.restore_hint), color = c.textSecondary, fontSize = 14.sp)
 
-            OutlinedTextField(
+            RcqField(
                 value = phrase,
                 onValueChange = { phrase = it; error = null },
                 modifier = Modifier.fillMaxWidth().height(140.dp),
-                placeholder = { Text(stringResource(R.string.restore_phrase_ph), color = c.textSecondary) },
+                placeholder = stringResource(R.string.restore_phrase_ph),
+                // 24 words wrap over several lines.
+                singleLine = false,
                 enabled = !busy,
             )
             Text(stringResource(R.string.restore_wordcount, wordCount), color = if (wordCount == 24) c.accent else c.textSecondary, fontSize = 12.sp)
 
-            OutlinedTextField(
+            RcqField(
                 value = server,
                 onValueChange = { server = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.restore_server_ph), color = c.textSecondary) },
+                placeholder = stringResource(R.string.restore_server_ph),
                 singleLine = true,
                 enabled = !busy,
             )
@@ -146,20 +145,17 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
     // silently lost working group chat instead. Restoring a number you already
     // hold has no use case that this cost is worth: you already have it.
     duplicateUin?.let { dupUin ->
-        AlertDialog(
-            // Both ways out lead out. Dismissing by tapping outside used to
-            // just hide the dialog and leave the phrase typed with Restore
-            // still armed, so the only thing the next tap could do was show
-            // this same dialog again.
-            onDismissRequest = { duplicateUin = null; onBack() },
-            containerColor = RcqTheme.colors.bgSecondary,
-            title = { Text(stringResource(R.string.restore_title), color = RcqTheme.colors.textPrimary) },
-            text = { Text(stringResource(R.string.restore_already_here, dupUin), color = RcqTheme.colors.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = { duplicateUin = null; onBack() }) {
-                    Text(stringResource(R.string.common_ok), color = RcqTheme.colors.accent)
-                }
-            },
+        RcqAskSheet(
+            // Both ways out lead out. Dismissing the sheet used to just hide
+            // the dialog and leave the phrase typed with Restore still armed,
+            // so the only thing the next tap could do was show this same
+            // question again.
+            onDismiss = { duplicateUin = null; onBack() },
+            title = stringResource(R.string.restore_title),
+            body = stringResource(R.string.restore_already_here, dupUin),
+            actions = listOf(
+                SheetAction(stringResource(R.string.common_ok)) { duplicateUin = null; onBack() },
+            ),
         )
     }
 }

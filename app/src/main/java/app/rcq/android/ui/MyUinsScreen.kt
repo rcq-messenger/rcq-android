@@ -13,17 +13,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -204,48 +201,34 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
     }
 
     confirm?.let { target ->
-        AlertDialog(
-            onDismissRequest = { confirm = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.my_uins_confirm_title, target.toString()), color = c.textPrimary) },
-            text = {
-                Text(
-                    stringResource(R.string.my_uins_confirm_body, (data?.active ?: session.uin ?: 0).toString()),
-                    color = c.textSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { confirm = null; activate(target) }) {
-                    Text(stringResource(R.string.my_uins_confirm_cta), color = c.accent)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = null }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            },
+        RcqAskSheet(
+            onDismiss = { confirm = null },
+            title = stringResource(R.string.my_uins_confirm_title, target.toString()),
+            body = stringResource(R.string.my_uins_confirm_body, (data?.active ?: session.uin ?: 0).toString()),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.my_uins_confirm_cta),
+                    onClick = { confirm = null; activate(target) },
+                ),
+            ),
         )
     }
 
     confirmRelease?.let { target ->
-        AlertDialog(
-            onDismissRequest = { confirmRelease = null },
-            containerColor = c.bgSecondary,
-            title = { Text(stringResource(R.string.my_uins_release_title, target.toString()), color = c.textPrimary) },
+        RcqAskSheet(
+            onDismiss = { confirmRelease = null },
+            title = stringResource(R.string.my_uins_release_title, target.toString()),
             // The warning lives here rather than on the row: the number goes
             // back into the pool and somebody else can take it, so this is not
             // undoable and should be read once, not glanced at.
-            text = { Text(stringResource(R.string.my_uins_release_body), color = c.textSecondary) },
-            confirmButton = {
-                TextButton(onClick = { confirmRelease = null; release(target) }) {
-                    Text(stringResource(R.string.my_uins_release_cta), color = Color(0xFFE5484D))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmRelease = null }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-            },
+            body = stringResource(R.string.my_uins_release_body),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.my_uins_release_cta),
+                    destructive = true,
+                    onClick = { confirmRelease = null; release(target) },
+                ),
+            ),
         )
     }
 }
