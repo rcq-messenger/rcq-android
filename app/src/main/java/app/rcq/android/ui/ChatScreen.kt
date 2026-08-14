@@ -317,6 +317,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // A picked photo/video waiting in the pre-send preview (tap to blur).
     var pendingSend by remember { mutableStateOf<PendingSend?>(null) }
     val mediaSending by session.mediaSending.collectAsState()
+    val mediaProgress by session.mediaProgress.collectAsState()
     val mediaFailed by session.mediaSendFailed.collectAsState()
     var showGroupPicker by remember { mutableStateOf(false) }
     var showRelayPicker by remember { mutableStateOf(false) }
@@ -1222,15 +1223,34 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = c.accent,
-                    )
+                    // Determinate as soon as the socket tells us anything: a
+                    // spinner alone cannot distinguish a slow upload from one
+                    // that never started (#537, asked for from Shanghai).
+                    val p = mediaProgress
+                    if (p == null) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = c.accent,
+                        )
+                    } else {
+                        CircularProgressIndicator(
+                            progress = { p },
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = c.accent,
+                        )
+                    }
                     Text(
                         pluralStringResource(R.plurals.chat_media_sending, mediaSending, mediaSending),
                         color = c.textSecondary, fontSize = 13.sp,
                     )
+                    if (p != null) {
+                        Text(
+                            "${(p * 100).toInt()}%",
+                            color = c.textSecondary, fontSize = 13.sp,
+                        )
+                    }
                 }
             }
             Composer(

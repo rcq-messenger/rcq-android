@@ -8,6 +8,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -1249,9 +1250,47 @@ class RcqApi(
     data class UploadResponse(val media_id: String, val size: Int = 0)
 
     /** Upload an encrypted blob. Free up to the island's size cap. */
-    suspend fun uploadBlob(bytes: ByteArray): UploadResponse = withContext(Dispatchers.IO) {
+/** The blob part of an upload, written in chunks so progress means something.
+ *
+ *  ⚠ Wrapping the finished multipart body in a counting sink does NOT work:
+ *  the source is a byte array in memory, so OkHttp hands it to the socket in
+ *  one or two writes and the callback fires twice for a 31 MB file — a bar
+ *  that jumps from nothing to done. Writing the array ourselves in 64 KB
+ *  slices is what turns it into a line that moves.
+ *
+ *  Asked for by a tester in Shanghai (report #537): on a slow uplink a
+ *  spinner cannot be told apart from an upload that never started.
+ */
+private class ProgressBody(
+    private val bytes: ByteArray,
+    private val type: okhttp3.MediaType?,
+    private val onProgress: (sent: Long, total: Long) -> Unit,
+) : RequestBody() {
+    override fun contentType() = type
+    override fun contentLength() = bytes.size.toLong()
+
+    override fun writeTo(sink: okio.BufferedSink) {
+        val total = bytes.size.toLong()
+        var sent = 0L
+        val chunk = 64 * 1024
+        while (sent < total) {
+            val n = minOf(chunk.toLong(), total - sent).toInt()
+            sink.write(bytes, sent.toInt(), n)
+            sink.flush()
+            sent += n
+            onProgress(sent, total)
+        }
+    }
+}
+
+    suspend fun uploadBlob(
+        bytes: ByteArray,
+        onProgress: ((sent: Long, total: Long) -> Unit)? = null,
+    ): UploadResponse = withContext(Dispatchers.IO) {
+        val part = if (onProgress == null) bytes.toRequestBody(OCTET)
+                   else ProgressBody(bytes, OCTET, onProgress)
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("blob", "photo.bin", bytes.toRequestBody(OCTET))
+            .addFormDataPart("blob", "photo.bin", part)
             .build()
         val b = Request.Builder().url("$baseUrl/media/upload").post(body)
         token?.let { b.header("Authorization", "Bearer $it") }
