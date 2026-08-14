@@ -234,6 +234,7 @@ class Session(context: Context) {
         turn = { api.turnCredentials() },
         api = { api },
         isInCall = { calls.state.value.active },
+        selfUin = { uin ?: 0 },
     )
 
     /** People Nearby (geohash check-in). REST-polled; no WS routing. */
@@ -4730,9 +4731,15 @@ class Session(context: Context) {
             "call_renegotiate", "call_renegotiate_answer", "call_renegotiate_decline",
             "call_ice_restart", "call_ice_restart_answer" ->
                 calls.onSignal(type, obj)
+            // ⚠ `room_deleted` never existed: the island calls it
+            // `audio_room_deleted`, so deleting a room left everyone else
+            // sitting in a room that was gone. Same class of miss as the four
+            // owner events below, none of which were ever routed here.
             "room_roster", "room_member_entered", "room_member_left", "room_offer",
-            "room_answer", "room_ice", "room_speaking", "room_enter_rejected", "room_deleted",
-            "audio_room_renamed" ->
+            "room_answer", "room_ice", "room_speaking", "room_enter_rejected",
+            "audio_room_deleted", "audio_room_kicked", "audio_room_membership_revoked",
+            "audio_room_key_rotated", "audio_room_member_muted",
+            "audio_room_owner_only_changed", "audio_room_renamed" ->
                 audioRooms.onSignal(type, obj)
             "hood_message", "hood_count", "hood_delete", "hood_reaction" ->
                 hood.onSignal(type, obj)

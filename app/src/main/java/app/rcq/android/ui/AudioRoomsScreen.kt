@@ -304,6 +304,7 @@ private fun InRoomView(session: Session) {
     val muted by controller.localMuted.collectAsState()
     val speakerOn by controller.speakerOn.collectAsState()
     val joining by controller.joining.collectAsState()
+    val ownerOnly by controller.ownerOnlySpeaking.collectAsState()
     val ownUin = session.uin
     val members = roster.values.sortedBy { it.uin }
     // The ceiling belongs on this screen too: it is the one place you can see
@@ -327,6 +328,17 @@ private fun InRoomView(session: Session) {
             color = Color(0xFFB8BCC4), fontSize = 14.sp,
             modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+        // The island has always announced this; nothing on Android read it, so
+        // a room where only the owner may speak looked exactly like one where
+        // everyone may, right up until your microphone did nothing.
+        if (ownerOnly) {
+            Text(
+                stringResource(R.string.rooms_owner_only_note),
+                color = Color(0xFFE5A13D), fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(members, key = { it.uin }) { m ->
