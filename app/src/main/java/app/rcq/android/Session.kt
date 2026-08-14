@@ -2415,7 +2415,7 @@ class Session(context: Context) {
     /** §5c: media in a group lives on the GROUP's island — upload there (the
      *  guest client for foreign groups; own api otherwise). */
     private suspend fun uploadBlobForGroup(groupId: Int, blob: ByteArray): RcqApi.UploadResponse =
-        groupCtx(groupId).api.uploadBlob(blob)
+        groupCtx(groupId).api.uploadBlob(blob, ::reportUpload)
 
     fun group(id: Int): RcqGroup? = _groups.value.firstOrNull { it.id == id }
 
@@ -3430,7 +3430,7 @@ class Session(context: Context) {
      *  survives our island dying), plus a best-effort copy on our island for
      *  carbons + re-fetch. Mirrors web-chat media.ts uploadBlob. */
     private suspend fun uploadBlobFor(toUin: Int, blob: ByteArray): RcqApi.UploadResponse {
-        val ci = CrossIslandStore.findByUin(toUin) ?: return api.uploadBlob(blob)
+        val ci = CrossIslandStore.findByUin(toUin) ?: return api.uploadBlob(blob, ::reportUpload)
         return withContext(Dispatchers.IO) {
             val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
             // The peer-island copy is REQUIRED — that's the one they read.
@@ -3454,6 +3454,18 @@ class Session(context: Context) {
      *  silence is what made the two failures underneath it unreadable. */
     private val _mediaSending = MutableStateFlow(0)
     val mediaSending: StateFlow<Int> = _mediaSending.asStateFlow()
+    /// How far the current upload has got, 0f..1f, or null while we do not
+    /// know (cross-island deposits and the encrypt step report nothing).
+    private val _mediaProgress = MutableStateFlow<Float?>(null)
+    val mediaProgress: StateFlow<Float?> = _mediaProgress.asStateFlow()
+
+    /// Called from the upload thread for every chunk that reaches the socket.
+    /// Kept deliberately dumb: the last write wins, because with two uploads in
+    /// flight a shared bar showing the newer one is honest enough, and the
+    /// count next to it already says how many there are.
+    private fun reportUpload(sent: Long, total: Long) {
+        _mediaProgress.value = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else null
+    }
 
     /** Last media send that failed, for the chat to surface once. */
     private val _mediaSendFailed = MutableStateFlow(0)
@@ -3484,6 +3496,7 @@ class Session(context: Context) {
                 _mediaSendFailed.value += 1
             } finally {
                 _mediaSending.value = (_mediaSending.value - 1).coerceAtLeast(0)
+                if (_mediaSending.value == 0) _mediaProgress.value = null
             }
         }
     }
