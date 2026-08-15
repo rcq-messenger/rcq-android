@@ -654,9 +654,14 @@
     <string name="snd_message_title">Sonidos de mensaje</string>
     <string name="snd_message_desc">Avisar de un mensaje nuevo: un tono con la app abierta, una notificación cuando no lo está.</string>
     <string name="snd_presence_title">Contacto conectado / desconectado</string>
-    <string name="snd_presence_desc">Suena un tono cuando uno de tus contactos se conecta o se desconecta.</string>
+    <string name="snd_presence_desc">«Todos» suena con cualquier contacto. «Favoritos» suena solo con la gente que marcaste. «Apagado» no suena nunca.</string>
     <string name="snd_volume_title">Volumen del tono dentro de la app</string>
-    <string name="snd_footer">Este control ajusta el tono que suena con la app abierta; va con el volumen multimedia (los botones de volumen) y se calla en los modos silencio, vibración y No molestar. Con la app en segundo plano el mensaje llega como notificación del sistema, y el volumen de esa lo decide Android. Silenciar un chat concreto (mantén pulsado el chat en la pantalla principal) calla los dos.</string>
+    <string name="snd_volume_desc">Ajusta el tono que suena con la app abierta respecto al nivel del sistema. El volumen de la notificación en sí lo decide Android, no nosotros.</string>
+    <string name="snd_presence_all">Todos</string>
+    <string name="snd_presence_favorites">Favoritos</string>
+    <string name="snd_presence_off">Apagado</string>
+    <string name="snd_system_channel">Sonido y volumen de la notificación</string>
+    <string name="snd_footer">La app abierta toca su propio tono; en segundo plano el mismo tono llega como notificación del sistema. Los dos van con el volumen de notificaciones y se callan en los modos silencio, vibración y No molestar. El control de arriba solo puede bajar nuestro tono por debajo del nivel del sistema; ese nivel se cambia en los ajustes de notificaciones. Silenciar un chat concreto (mantén pulsado el chat en la pantalla principal) calla los dos.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Las traducciones llegan poco a poco. Lo que no esté traducido se muestra en inglés.</string>
     <string name="notif_push">Notificaciones push</string>

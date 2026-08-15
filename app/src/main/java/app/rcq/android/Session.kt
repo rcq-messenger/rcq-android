@@ -53,6 +53,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import app.rcq.android.security.PanicPinService
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
@@ -3471,7 +3473,13 @@ class Session(context: Context) {
                 // Sender-keys distribution / recovery (never rendered). SKDM binds
                 // the chain to its authenticated sender; SKNACK asks the kid owner
                 // to re-distribute. Both ride the per-member sealed path.
-                is Envelope.Skdm -> SenderKeyStore.acceptSkdm(me, env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck)
+                is Envelope.Skdm -> {
+                    val ok = SenderKeyStore.acceptSkdm(me, env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck)
+                    // The chain landed — anything we held for this kid can be
+                    // read now. Without this the broadcasts that arrived first
+                    // stay lost even though the key is finally here.
+                    if (ok) replayHeldGmsg(env.kid)
+                }
                 is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
                 else -> routeGroupEnvelope(env, groupId, dec.senderUin)
             }
@@ -3489,6 +3497,18 @@ class Session(context: Context) {
             if (SenderKeyStore.ownsKid(me, hdr.kid)) return // my own broadcast echoed back
             val key = SenderKeyStore.deriveInbound(me, hdr.kid, hdr.epoch, hdr.index)
             if (key == null) {
+                // ⚠ DO NOT just drop it. This is a broadcast we cannot open
+                // YET, not one we can never open: the chain key rides a
+                // separate envelope on a separate endpoint, and it can be late
+                // (a member added mid-conversation, an SKDM that missed the
+                // offline queue). Dropping meant the message was gone for good
+                // even after recovery, because SKNACK is answered with the
+                // chain AT THE SENDER'S CURRENT INDEX and [deriveInbound]
+                // refuses anything behind it. That is the second half of "мне
+                // приходит уведомление, что есть сообщение в группе, захожу —
+                // а его там нет" (#547), and the reason a newly added member
+                // hears nothing for messages everyone else can read (#544).
+                holdGmsg(hdr.kid, groupId, payloadB64)
                 if (!SenderKeyStore.knowsKid(me, hdr.kid)) sendSknack(groupId, hdr.kid)
                 return
             }
@@ -3580,6 +3600,35 @@ class Session(context: Context) {
     /** Minimal holder so the routing block keeps its `dec.senderUin` reads
      *  whether the sender came from a sealed decrypt or a sender-keys chain. */
     private data class SenderUin(val senderUin: Int)
+
+    /** Broadcasts held back waiting for their chain key, by kid.
+     *
+     *  In-memory and bounded: the queue drain re-delivers anything a process
+     *  restart loses, and holding an unbounded number of un-openable blobs is
+     *  its own bug. [HELD_GMSG_CAP] payloads per kid, [HELD_GMSG_KIDS] kids —
+     *  enough for the real case (a handful of posts between "you were added"
+     *  and "your SKDM arrived"), nowhere near enough to matter for memory. */
+    private val heldGmsg = java.util.concurrent.ConcurrentHashMap<String, MutableList<Pair<Int, String>>>()
+
+    private fun holdGmsg(kid: String, groupId: Int, payloadB64: String) {
+        if (heldGmsg.size >= HELD_GMSG_KIDS && !heldGmsg.containsKey(kid)) return
+        val list = heldGmsg.getOrPut(kid) { java.util.Collections.synchronizedList(mutableListOf()) }
+        synchronized(list) {
+            if (list.any { it.second == payloadB64 }) return
+            if (list.size >= HELD_GMSG_CAP) list.removeAt(0)
+            list.add(groupId to payloadB64)
+        }
+    }
+
+    /** The chain for [kid] just arrived — re-run everything we held for it.
+     *  Taken out of the map FIRST so a payload that still fails is re-held at
+     *  most once and can never spin. [storeGroup] dedupes by envelope UUID, so
+     *  a payload the drain also delivers costs nothing. */
+    private fun replayHeldGmsg(kid: String) {
+        val held = heldGmsg.remove(kid) ?: return
+        val copy = synchronized(held) { held.toList() }
+        copy.forEach { (gid, payload) -> ingestGmsg(payload, gid) }
+    }
 
     /** Per-(kid) debounce so a burst of un-openable gmsg fires at most one NACK
      *  per recovery window. */
@@ -5515,7 +5564,17 @@ class Session(context: Context) {
         runCatching { refreshPending() }
     }
 
-    private suspend fun refreshContacts() {
+    /** Serialises [refreshContacts]. Every `presence` WS frame launches one,
+     *  and a burst (a contact reconnecting, or a whole island coming back)
+     *  launches several at once. Concurrent refreshes each snapshot
+     *  `_contacts.value` BEFORE any of them writes it, so they all see the same
+     *  offline→online edge and each one chimes for it: one person coming online,
+     *  two or three "о-оу". Whoever holds the lock does the compare-and-swap
+     *  alone, and the ones behind it compare against the already-updated list
+     *  and find nothing to announce. */
+    private val contactsRefreshLock = Mutex()
+
+    private suspend fun refreshContacts() = contactsRefreshLock.withLock {
         // Snapshot presence before the refresh so we can play a sound on
         // online/offline transitions (iOS SoundService parity).
         //
@@ -5554,8 +5613,10 @@ class Session(context: Context) {
                 val before = prevPresence[ct.uin] ?: return@forEach
                 val wasOnline = before != UserStatus.OFFLINE
                 val isOnline = ct.presence != UserStatus.OFFLINE
-                if (!wasOnline && isOnline) app.rcq.android.media.SoundService.contactOnline()
-                else if (wasOnline && !isOnline) app.rcq.android.media.SoundService.contactOffline()
+                if (wasOnline == isOnline) return@forEach
+                val fav = LocalStores.isFavorite(LocalStores.peerThread(ct.uin))
+                if (isOnline) app.rcq.android.media.SoundService.contactOnline(fav)
+                else app.rcq.android.media.SoundService.contactOffline(fav)
             }
         }
         // Seed the identity cache so sends to contacts skip a lookup.
@@ -6147,5 +6208,8 @@ class Session(context: Context) {
         const val LADDER_COOLDOWN_MS = 5 * 60_000L
         /** Newest news post this device has been shown. */
         const val K_NEWS_SEEN = "news_seen_id"
+        /** Un-openable broadcasts held per kid / distinct kids held. */
+        const val HELD_GMSG_CAP = 64
+        const val HELD_GMSG_KIDS = 16
     }
 }

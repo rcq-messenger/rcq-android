@@ -13,6 +13,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -84,6 +85,25 @@ private val DarkColors = RcqColors(
 )
 
 val LocalRcqColors = staticCompositionLocalOf { DarkColors }
+
+/** The palette a surface of this darkness wants its text and glyphs drawn
+ *  from. The two variants are the only two sets of foregrounds the app has, so
+ *  chrome that lands on something other than the theme background (a wallpaper)
+ *  borrows one of them rather than inventing a third. */
+internal fun rcqColorsFor(dark: Boolean): RcqColors = if (dark) DarkColors else LightColors
+
+/**
+ * Does chrome drawn ON this colour need the DARK theme's light foregrounds?
+ *
+ * ⚠ The threshold is not the obvious "darker than mid-grey". Black text and
+ * white text trade places at the luminance where their contrast ratios against
+ * the surface are equal — (L + 0.05) / 0.05 == 1.05 / (L + 0.05) — which is
+ * L ≈ 0.179, not 0.5. Half-way is wrong by a wide margin on saturated colours:
+ * the "Sunset" wallpaper (#FF8008) has L ≈ 0.37, so a 0.5 threshold calls it
+ * dark and paints white on it at a contrast ratio of 2.5, while the black it
+ * rejects scores 8.3.
+ */
+internal fun Color.needsLightChrome(): Boolean = luminance() < 0.179f
 
 object RcqTheme {
     val colors: RcqColors

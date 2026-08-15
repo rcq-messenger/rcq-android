@@ -654,9 +654,14 @@
     <string name="snd_message_title">Mesaj sesleri</string>
     <string name="snd_message_desc">Yeni mesajı duyur: uygulama açıkken bir ses, kapalıyken bildirim.</string>
     <string name="snd_presence_title">Kişi çevrimiçi / çevrimdışı</string>
-    <string name="snd_presence_desc">Kişilerinden biri çevrimiçi olduğunda ya da çıktığında ses çal.</string>
+    <string name="snd_presence_desc">«Herkes» her kişi için ses çalar. «Favoriler» yalnızca yıldızladığın kişiler için çalar. «Kapalı» hiç çalmaz.</string>
     <string name="snd_volume_title">Uygulama içi ses düzeyi</string>
-    <string name="snd_footer">Bu kaydırıcı, açık uygulamanın çaldığı sesi ayarlar; medya ses düzeyine (ses düğmelerine) bağlıdır ve sessiz, titreşim ile Rahatsız etmeyin modlarında susar. Uygulama arka plandayken mesaj bunun yerine sistem bildirimi olarak gelir, ne kadar yüksek olacağını da Android belirler. Sohbet başına susturma (ana ekranda bir sohbete uzun basarak) ikisini birden susturur.</string>
+    <string name="snd_volume_desc">Açık uygulamanın çaldığı sesi sistem düzeyine göre ölçekler. Bildirimin kendisinin ne kadar yüksek olacağını biz değil Android belirler.</string>
+    <string name="snd_presence_all">Herkes</string>
+    <string name="snd_presence_favorites">Favoriler</string>
+    <string name="snd_presence_off">Kapalı</string>
+    <string name="snd_system_channel">Bildirim sesi ve ses düzeyi</string>
+    <string name="snd_footer">Açık uygulama kendi sesini çalar; arka plandayken aynı ses sistem bildirimi olarak gelir. İkisi de bildirim ses düzeyine bağlıdır ve sessiz, titreşim ile Rahatsız etmeyin modlarında susar. Yukarıdaki kaydırıcı sesimizi ancak sistem düzeyinin altına indirebilir; o düzeyin kendisi bildirim ayarlarından değişir. Sohbet başına susturma (ana ekranda bir sohbete uzun basarak) ikisini birden susturur.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Çeviriler yavaş yavaş ekleniyor. Çevrilmemiş metinler İngilizce görünür.</string>
     <string name="notif_push">Anlık bildirimler</string>

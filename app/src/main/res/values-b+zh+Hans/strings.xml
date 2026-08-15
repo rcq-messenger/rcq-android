@@ -654,9 +654,14 @@
     <string name="snd_message_title">消息提示音</string>
     <string name="snd_message_desc">提示新消息：应用打开时播放提示音，未打开时发送通知。</string>
     <string name="snd_presence_title">联系人上线 / 下线</string>
-    <string name="snd_presence_desc">当你的某位联系人上线或下线时播放提示音。</string>
+    <string name="snd_presence_desc">「全部」对任何联系人都播放提示音，「收藏」只对你标了星标的人播放，「关闭」则从不播放。</string>
     <string name="snd_volume_title">应用内提示音音量</string>
-    <string name="snd_footer">这个滑块设置的是应用打开时播放的提示音音量；它跟随媒体音量（音量键），在静音、振动和勿扰模式下保持安静。应用在后台时，消息改为以系统通知的形式到达，音量由 Android 决定。单个聊天的静音（在主屏幕长按聊天）会同时关掉两者。</string>
+    <string name="snd_volume_desc">把应用打开时播放的提示音相对系统音量缩放。通知本身有多响由 Android 决定，不由我们决定。</string>
+    <string name="snd_presence_all">全部</string>
+    <string name="snd_presence_favorites">收藏</string>
+    <string name="snd_presence_off">关闭</string>
+    <string name="snd_system_channel">通知声音与音量</string>
+    <string name="snd_footer">应用打开时播放自己的提示音；应用在后台时，同一个提示音以系统通知的形式到达。两者都跟随通知音量，并在静音、振动和勿扰模式下保持安静。上面的滑块只能把我们的提示音调得比系统音量更轻；系统音量本身要在通知设置里改。单个聊天的静音（在主屏幕长按聊天）会同时关掉两者。</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">翻译会逐步推出。未翻译的文字会回退到英文。</string>
     <string name="notif_push">推送通知</string>
