@@ -63,6 +63,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import app.rcq.android.R
 import app.rcq.android.data.LocalStores
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
+import androidx.compose.ui.input.pointer.pointerInput
 
 /**
  * The classic KOLOBOK emoticon set, bundled in `assets/emoticons/<name>.gif`
@@ -292,6 +297,17 @@ internal fun EmoticonText(
     // #2: reports the layout so the caller can tell if the text was actually
     // truncated (hasVisualOverflow) and only then offer "Show more".
     onTextLayout: ((androidx.compose.ui.text.TextLayoutResult) -> Unit)? = null,
+    /// The bubble's own long-press (the message menu), handed down so it still
+    /// works ON a mention or a link.
+    ///
+    /// ★★ Without this, a message that IS a mention or IS a link had no
+    /// reachable menu at all — no reply, no copy, no delete, no reaction.
+    /// Compose's text-link handling owns every gesture inside the link's
+    /// bounds, and it only knows about taps: press and hold on `@Anna` and the
+    /// release still fires as a tap, so the profile opens and the parent's
+    /// `combinedClickable` never sees a long click. In a group "@Anna" on its
+    /// own is one of the commonest messages there is.
+    onLongPress: (() -> Unit)? = null,
 ) {
     val tokens = remember(body) { Emoticons.tokenize(body) }
     val accent = RcqTheme.colors.accent
@@ -353,8 +369,49 @@ internal fun EmoticonText(
         }
         ann to inlineMap
     }
-    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
+    Text(annotated, color = color, fontSize = fontSize, lineHeight = lineHeight, inlineContent = inline, modifier = modifier.longPressBeatsLinks(onLongPress), maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
 }
+
+/** Give a long press back to the message bubble, even on top of a link.
+ *
+ *  Compose's text-link gesture detector claims the whole pointer stream inside
+ *  a link and resolves it as a tap on release, however long the finger stayed
+ *  down. So this watches the SAME stream in the Initial pass — before the link
+ *  sees it — and does nothing at all until the long-press timeout has passed.
+ *  A normal tap is therefore untouched and still opens the profile or the URL.
+ *  Only a press that outlasts the timeout is taken: we consume it, fire the
+ *  menu, and swallow the rest of the gesture so the release cannot land as a
+ *  tap on the link the finger happens to be resting on.
+ */
+private fun Modifier.longPressBeatsLinks(onLongPress: (() -> Unit)?): Modifier =
+    if (onLongPress == null) this else this.pointerInput(onLongPress) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val held = try {
+                withTimeout(viewConfiguration.longPressTimeoutMillis) {
+                    // Returns as soon as the finger lifts or the gesture is
+                    // cancelled — i.e. an ordinary tap, which is not ours.
+                    var up = false
+                    while (!up) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        if (ev.changes.none { it.pressed }) up = true
+                    }
+                }
+                false
+            } catch (_: PointerEventTimeoutCancellationException) {
+                true
+            }
+            if (!held) return@awaitEachGesture
+            onLongPress()
+            // Everything left in this gesture belongs to us now.
+            var pressed = true
+            while (pressed) {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                ev.changes.forEach { it.consume() }
+                pressed = ev.changes.any { it.pressed }
+            }
+        }
+    }
 
 /** Append [text], turning each resolvable mention into a clickable accent nick
  *  (tap → [onMentionClick]): `#<uin>` via [mentionNick] (renders the nick), and

@@ -3079,6 +3079,9 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     mentionNick = mentionNick, onMentionClick = onMentionClick, mentionMatch = mentionMatch,
                     maxLines = if (collapsed) 14 else Int.MAX_VALUE,
                     onTextLayout = { if (collapsed) bodyOverflow = it.hasVisualOverflow },
+                    // The bubble's long-press has to survive on top of a link:
+                    // Compose gives every gesture inside one to the link itself.
+                    onLongPress = onLongPress,
                 )
                 if (collapsed && (bodyOverflow || manyLines)) {
                     Text(
