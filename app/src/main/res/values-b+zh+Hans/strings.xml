@@ -537,6 +537,7 @@
     <string name="cs_burn_body">这会删除你的账号和所有本地数据。无法撤销。</string>
     <string name="cs_about_version">版本 %1$s</string>
     <string name="cs_about_features">开源。</string>
+    <string name="cs_about_source">在 GitHub 上查看源代码</string>
     <!-- Settings: profile editor -->
     <string name="pe_title">编辑个人资料</string>
     <string name="pe_saved">个人资料已保存</string>

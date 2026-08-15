@@ -555,6 +555,7 @@
     <string name="cs_burn_body">Это удалит ваш аккаунт и все локальные данные. Отменить нельзя.</string>
     <string name="cs_about_version">Версия %1$s</string>
     <string name="cs_about_features">Открытый код.</string>
+    <string name="cs_about_source">Исходный код на GitHub</string>
 
     <!-- Settings: profile editor -->
     <string name="pe_title">Редактировать профиль</string>
