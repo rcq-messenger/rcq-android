@@ -95,6 +95,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.execSQL("CREATE INDEX idx_messages_peer ON messages(peer_uin, sent_at)")
         db.execSQL("CREATE INDEX idx_messages_group ON messages(group_id, sent_at)")
         db.execSQL(DELETED_IDS_DDL)
+        db.execSQL(DECOY_CONTACTS_DDL)
     }
 
     private fun upgrade(db: SQLiteDatabase, oldVersion: Int) {
@@ -131,6 +132,37 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         if (oldVersion < 14) db.execSQL("ALTER TABLE messages ADD COLUMN reply_to_id TEXT")
         if (oldVersion < 15) db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER")
         if (oldVersion < 16) db.execSQL(DELETED_IDS_DDL)
+        if (oldVersion < 17) db.execSQL(DECOY_CONTACTS_DDL)
+    }
+
+    // ── decoy roster (only ever populated in the DECOY store) ────────────
+    //
+    // The duress view needs a contact list, and it must not be the real one:
+    // the peers in the decoy store carry SYNTHETIC uins, so the real roster
+    // would not match a single thread. Kept inside this SQLCipher file — under
+    // the decoy slot's own key — rather than in prefs, which are readable
+    // without any PIN. On a real account's db the table exists and stays empty.
+
+    fun putDecoyContact(uin: Int, nickname: String) {
+        db.execSQL("INSERT OR REPLACE INTO decoy_contacts (uin, nickname) VALUES (?, ?)", arrayOf<Any>(uin, nickname))
+    }
+
+    fun decoyContacts(): List<Pair<Int, String>> {
+        val out = ArrayList<Pair<Int, String>>()
+        db.rawQuery("SELECT uin, nickname FROM decoy_contacts ORDER BY rowid ASC", null).use { c ->
+            while (c.moveToNext()) out.add(c.getInt(0) to c.getString(1))
+        }
+        return out
+    }
+
+    fun clearDecoyContacts() { db.execSQL("DELETE FROM decoy_contacts") }
+
+    /** Drop every row this store holds (messages, tombstones, decoy roster).
+     *  Used when re-seeding the decoy store, which is always a full rebuild. */
+    fun wipeAll() {
+        db.execSQL("DELETE FROM messages")
+        db.execSQL("DELETE FROM deleted_ids")
+        db.execSQL("DELETE FROM decoy_contacts")
     }
 
     /** Delete every message whose disappearing-message TTL has elapsed and
@@ -309,7 +341,12 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 16
+        const val VERSION = 17
+
+        /** The decoy store's own contact list (synthetic uins). Created on
+         *  every db so the schema is uniform; empty everywhere but the decoy. */
+        private const val DECOY_CONTACTS_DDL =
+            "CREATE TABLE IF NOT EXISTS decoy_contacts (uin INTEGER PRIMARY KEY, nickname TEXT NOT NULL)"
 
         /** Envelopes deleted on this device. Kept forever on purpose: a copy can
          *  come back from the offline queue at any later launch, and one row per
@@ -390,6 +427,10 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
                 if (src.exists()) src.renameTo(File(target.path + suffix))
             }
         }
+
+        /** Does this account's db file exist on disk? */
+        fun exists(context: Context, accountId: String): Boolean =
+            context.applicationContext.getDatabasePath(dbName(accountId)).exists()
 
         /** Delete an account's db file (local account delete / burn). */
         fun wipeAccount(context: Context, accountId: String) {

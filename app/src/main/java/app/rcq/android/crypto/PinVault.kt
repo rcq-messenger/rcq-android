@@ -44,20 +44,65 @@ object PinVault {
     private val gson = Gson()
     private val rng = SecureRandom()
 
+    /**
+     * ⚠ Every field added here must be NULLABLE. Gson skips nulls on write and
+     * tolerates absent keys on read, so an old slot decodes into a new [Layout]
+     * (missing fields = null) and a new slot still fits the fixed budget as
+     * long as [payloadFits] says so. The vault FORMAT (version, slot/payload
+     * sizes, KDF rounds) must never change: a changed format makes readVault
+     * return null, which the app reads as "no PIN set" while the history stays
+     * unreadable ciphertext.
+     *
+     * ⚠⚠ MEASURED BUDGET — do not estimate it, the estimate is always low.
+     * The real slot is the tight one. As the app writes it (decoyAccountId
+     * cleared by commitDecoyPin) the worst case is 265 of 320. Add the 36-char
+     * legacy [decoyAccountId] back on top and it is 321 — over. The term nobody
+     * counts is the escaping: a 32-byte key base64s to 44 characters ending in
+     * one '=', and Gson's default HTML-escaping writes every '=' as "=",
+     * so each of [dataKeyB64] and [decoyDataKeyB64] costs 5 bytes more than it
+     * looks. Anything added here must be measured against
+     * PinVaultTest.maximalPayloadsStillSeal, not reasoned about.
+     */
     data class Layout(
         var realSlot: Int,
         var decoySlot: Int? = null,
         var wipeSlot: Int? = null,
+        // LEGACY decoy (pre-own-store): the roster account the decoy PIN
+        // revealed, back when the decoy slot carried the REAL dataKey. Its
+        // presence is exactly what marks a vault as needing the one-time decoy
+        // migration; the new model leaves it null.
         var decoyAccountId: String? = null,
+        // The decoy's OWN SQLCipher key + identity, kept in the REAL slot so an
+        // unlocked real session can re-seed / rebuild the decoy store without
+        // knowing the decoy PIN. Never the real dataKey.
+        var decoyDataKeyB64: String? = null,
+        var decoyUin: Int? = null,
+        var decoyNickname: String? = null,
+        // DISPLAY mirror of the wipe slot's own flag. The authoritative copy
+        // lives in the WIPE slot payload (below) because only that slot's PIN
+        // can act on it; this copy exists so the settings screen can show the
+        // current setting from a real session. Never read at wipe time.
+        var wipeServer: Boolean? = null,
     )
 
     data class SlotPayload(
         val mode: Int,
         val dataKeyB64: String? = null,
         var layout: Layout? = null,
-        // On a DECOY slot: which local account the decoy PIN reveals (the real
-        // accounts are hidden while it's active).
+        // On a LEGACY DECOY slot: which local account the decoy PIN reveals
+        // (the real accounts are hidden while it's active). Null on every decoy
+        // slot written by the own-store model.
         val decoyAccountId: String? = null,
+        // On a DECOY slot: the synthetic identity the duress session presents.
+        // No roster account, no server registration — just a number and a name
+        // so the decoy view has an owner.
+        val decoyUin: Int? = null,
+        val decoyNickname: String? = null,
+        // On a WIPE slot: also erase the account server-side, not just locally.
+        // Lives HERE and nowhere else — prefs are readable and writable without
+        // any PIN, so someone holding an unlocked phone could switch it off.
+        // Absent on an old slot → decodes as null → treated as FALSE.
+        val wipeServer: Boolean? = null,
     )
 
     /** Result of a successful unlock: the matched payload + the derived key
@@ -65,6 +110,15 @@ object PinVault {
     data class Unlock(val payload: SlotPayload, val slotKey: ByteArray)
 
     fun isConfigured(context: Context): Boolean = readVault(context) != null
+
+    /** Does [payload] still fit the fixed slot budget once serialised?
+     *
+     *  Every caller that adds a field to a slot MUST ask this first. A payload
+     *  that does not fit makes [sealSlot] throw, and a throw halfway through
+     *  "add a decoy PIN" would leave the vault half-written. Callers check,
+     *  refuse, and leave the vault exactly as it was. */
+    fun payloadFits(payload: SlotPayload): Boolean =
+        gson.toJson(payload).toByteArray(Charsets.UTF_8).size + 2 <= PAYLOAD_LEN
 
     // ── KDF ──────────────────────────────────────────────────────────
     private fun deriveKey(context: Context, pin: String, salt: ByteArray): ByteArray {
@@ -204,6 +258,26 @@ object PinVault {
         return newKey
     }
 
+    /** Seal [payload] into [index] under a key derived from [pin], REPLACING
+     *  whatever was there. Refuses (and writes nothing) if [pin] already opens
+     *  a different slot, which would make one PIN mean two things.
+     *
+     *  Distinct from [addSlot]: that one only fills a free index, so it cannot
+     *  re-point an existing decoy slot. Doing that with addSlot meant clearing
+     *  the old slot first — and a refusal after the clear would have destroyed
+     *  a working duress PIN. Nothing is written here until every check passes. */
+    fun writeSlotWithPin(context: Context, index: Int, payload: SlotPayload, pin: String): Boolean {
+        if (!payloadFits(payload)) return false
+        val vault = readVault(context) ?: return false
+        if (index !in 0 until SLOT_COUNT) return false
+        val key = deriveKey(context, pin, vault.salt)
+        vault.slots.forEachIndexed { i, slot -> if (i != index && openSlot(slot, key) != null) return false }
+        val slots = vault.slots.toMutableList()
+        slots[index] = sealSlot(payload, key)
+        writeVault(context, VaultFile(vault.salt, slots))
+        return true
+    }
+
     fun freeSlotIndex(layout: Layout): Int? {
         val used = listOfNotNull(layout.realSlot, layout.decoySlot, layout.wipeSlot).toSet()
         return (0 until SLOT_COUNT).firstOrNull { it !in used }
@@ -214,6 +288,7 @@ object PinVault {
      *  opens a slot (would collide with an existing PIN) or no slot is free.
      *  Used to add a decoy / wipe PIN to an unlocked real vault. */
     fun addSlot(context: Context, pin: String, payload: SlotPayload, layout: Layout): Int? {
+        if (!payloadFits(payload)) return null
         val vault = readVault(context) ?: return null
         val key = deriveKey(context, pin, vault.salt)
         if (vault.slots.any { openSlot(it, key) != null }) return null // pin already in use

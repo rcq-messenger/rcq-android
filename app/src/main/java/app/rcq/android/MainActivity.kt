@@ -387,6 +387,8 @@ private fun RcqApp(session: Session) {
     // Panic-PIN lock gate: while locked, the message DB stays closed and the
     // lock screen replaces the Registered UI (see the `when` below).
     val locked by app.rcq.android.security.PanicPinService.locked.collectAsState()
+    // Pre-own-store decoy still in the vault: one screen, after the real PIN.
+    val decoyMigrationDue by session.decoyMigrationDue.collectAsState()
     var chatTarget by remember { mutableStateOf<ChatTarget?>(null) }
     // The pending update. Declared up here with the other screen state because
     // the home header's badge sits above the update dialog in the tree and
@@ -624,6 +626,13 @@ private fun RcqApp(session: Session) {
                 onWiped = { resetNav(); state = UiState.Onboarding },
                 onAccountChanged = { newUin -> resetNav(); state = UiState.Registered(newUin) },
             )
+            // One-time decoy rebuild (panic-PIN): shown straight after a REAL
+            // unlock when a pre-own-store decoy is still in the vault. Sits
+            // directly under the lock screen so it is the first thing after
+            // the PIN, and is dismissible — the old decoy PIN keeps working
+            // until it is finished.
+            s is UiState.Registered && !locked && decoyMigrationDue ->
+                app.rcq.android.ui.DecoyMigrationScreen(session, onDone = { })
             // Add an account by recovery phrase (from onboarding OR from the
             // account-management screen). recoverAccount() adds a NEW local
             // account slot and switches to it, so onRestored lands on its Home.

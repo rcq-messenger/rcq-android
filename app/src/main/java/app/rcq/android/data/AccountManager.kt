@@ -62,22 +62,37 @@ object AccountManager {
     private val _decoyMode = MutableStateFlow<String?>(null)
     val decoyMode: StateFlow<String?> = _decoyMode.asStateFlow()
 
-    /** The roster as the UI should show it: the full list normally, or just
-     *  the decoy account while decoy mode is active. Account switcher + manage
-     *  screen read THIS, never [accounts], so the real accounts stay hidden. */
+    // A MIGRATED decoy session, where the decoy is not a roster account at all
+    // but its own store with its own identity. Nothing from the roster may be
+    // shown while this is on — not even one entry — because every entry in it
+    // is a real account. Runtime-only, like [_decoyMode].
+    private val _decoySession = MutableStateFlow(false)
+    val decoySession: StateFlow<Boolean> = _decoySession.asStateFlow()
+
+    /** The roster as the UI should show it: the full list normally, just the
+     *  decoy account under the LEGACY decoy filter, and nothing at all in a
+     *  migrated decoy session. Account switcher + manage screen read THIS,
+     *  never [accounts], so the real accounts stay hidden. */
     val visibleAccounts: Flow<List<Account>> =
-        combine(_accounts, _decoyMode) { accts, decoy ->
-            if (decoy != null) accts.filter { it.id == decoy } else accts
+        combine(_accounts, _decoyMode, _decoySession) { accts, decoy, own ->
+            when {
+                own -> emptyList()
+                decoy != null -> accts.filter { it.id == decoy }
+                else -> accts
+            }
         }
 
     fun enterDecoyMode(decoyAccountId: String) { _decoyMode.value = decoyAccountId }
     fun exitDecoyMode() { _decoyMode.value = null }
-    val isDecoyMode: Boolean get() = _decoyMode.value != null
+    fun enterDecoySession() { _decoySession.value = true }
+    fun exitDecoySession() { _decoySession.value = false }
+    val isDecoyMode: Boolean get() = _decoyMode.value != null || _decoySession.value
 
     /** Current filtered snapshot (decoy-aware) — the [collectAsState] initial
      *  value, so the UI never shows the full roster for even one frame while
      *  decoy mode is active. */
     fun visibleNow(): List<Account> {
+        if (_decoySession.value) return emptyList()
         val d = _decoyMode.value
         return if (d != null) _accounts.value.filter { it.id == d } else _accounts.value
     }
@@ -135,6 +150,17 @@ object AccountManager {
         val acct = Account(UUID.randomUUID().toString(), serverHost, System.currentTimeMillis(), displayLabel)
         _accounts.value = _accounts.value + acct
         _activeId.value = acct.id
+        save()
+        return acct
+    }
+
+    /** Add an account under a CALLER-CHOSEN id and make it active. Only the
+     *  duress reset needs this: it has already written that id's storage
+     *  (identity slots + message db) before the roster entry exists. */
+    fun addWithId(id: String, serverHost: String?, displayLabel: String? = null): Account {
+        val acct = Account(id, serverHost, System.currentTimeMillis(), displayLabel)
+        _accounts.value = _accounts.value.filterNot { it.id == id } + acct
+        _activeId.value = id
         save()
         return acct
     }

@@ -122,6 +122,11 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
                 PanicPinService.SubmitResult.REAL -> {
                     // Real PIN reveals everything: make sure decoy mode is off.
                     app.rcq.android.data.AccountManager.exitDecoyMode()
+                    // A decoy left over from the old model has to be rebuilt
+                    // once, and only a real PIN entry can do it (the rebuild
+                    // writes the real slot). Raised here rather than at boot so
+                    // a biometric unlock never lands on it.
+                    session.refreshDecoyMigration()
                     // host recomposes away
                 }
                 PanicPinService.SubmitResult.DECOY -> {

@@ -160,6 +160,21 @@ class SecureStore(context: Context, accountId: String) {
             e.apply()
         }
 
+        /** Write a uin + nickname and NOTHING else for [accountId].
+         *
+         *  Used by exactly one path: a duress "remove PIN", which has to leave
+         *  the coercer with a working PIN-less app built out of the decoy's
+         *  contents. There is no server account behind it, so there is no token
+         *  and no key material to invent — [isRegistered] stays false and the
+         *  session never connects, which reads as an offline app rather than as
+         *  a fabricated identity. */
+        fun saveShellIdentity(context: Context, accountId: String, uin: Int, nickname: String) {
+            openPrefs(context).edit()
+                .putInt("$accountId.$K_UIN", uin)
+                .putString("$accountId.$K_NICK", nickname)
+                .apply()
+        }
+
         /** Remove every slot for [accountId] (local account delete / burn). */
         fun wipeAccount(context: Context, accountId: String) = wipeKeys(openPrefs(context), "$accountId.")
 
