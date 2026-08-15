@@ -210,7 +210,37 @@ object CrossIslandSender {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         ownHost: String,
-    ): Boolean = depositToPrimary(contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost)
+    ): Boolean = depositToPrimary(
+        contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost,
+        envelopeType = callEnvelopeType(env),
+    )
+
+    /**
+     * §5d — which OUTER `envelope_type` a call deposit rides.
+     *
+     * `"call"` asks the recipient's island to RING a device that holds no live
+     * socket: it fires the same VoIP + UnifiedPush pair a same-island
+     * `call_offer` does, instead of the ordinary message alert. Without it the
+     * deposit sat in the queue and a closed app never made a sound — a call
+     * that does not ring is not a call.
+     *
+     * Only the two signals that must reach a CLOSED app ask for it: the OFFER,
+     * which is the call, and the END, which takes a ring down when the caller
+     * gives up before pickup. `call_answer` / `call_ice` / `call_renegotiate*`
+     * only ever matter to an app that is already up and holding this call, so
+     * they stay `"message"` and buy the recipient's island no extra knowledge.
+     *
+     * ⚠ WHAT THIS TELLS THE RECIPIENT'S ISLAND: that a call is arriving for
+     * this user, at this instant. Nothing else — who is calling, on which
+     * island, the call id, audio vs video and the SDP all stay inside the
+     * sealed envelope, which that island cannot open. Founder decision
+     * 2026-08-15, made because a censor can already infer a call from packet
+     * timing and size.
+     */
+    private fun callEnvelopeType(env: Envelope): String {
+        val sig = (env as? Envelope.CallSignal)?.sig
+        return if (sig == "call_offer" || sig == "call_end") "call" else "message"
+    }
 
     /** §5f cross-island contact requests: same one-hop deposit as [deliverCall]
      *  (primary island, `envelope_type: "message"`, v=1-sealed to the identity
@@ -247,7 +277,12 @@ object CrossIslandSender {
 
     /** One sealed envelope, one deposit, PRIMARY island only. No backup-home
      *  copies: those mailboxes are polled (~30s), and both callers are
-     *  interactive (call signalling, a contact request the sender is waiting on). */
+     *  interactive (call signalling, a contact request the sender is waiting on).
+     *
+     *  [envelopeType] is the OUTER type the island routes on, and stays
+     *  `"message"` for everything but the two §5d signals that must wake a
+     *  closed app — see [callEnvelopeType]. The INNER envelope is unchanged in
+     *  every case; nothing else about the wire moves. */
     private fun depositToPrimary(
         host: String,
         uin: Int,
@@ -257,12 +292,13 @@ object CrossIslandSender {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         ownHost: String,
+        envelopeType: String = "message",
     ): Boolean {
         val recipientPub = Base64.decode(identityKeyB64, Base64.NO_WRAP)
         val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
         val body = JsonObject().apply {
             addProperty("to_uin", uin)
-            addProperty("envelope_type", "message")
+            addProperty("envelope_type", envelopeType)
             addProperty("payload", payload)
         }.toString().toRequestBody(JSON)
         val req = Request.Builder().url("https://$host/messages/sealed").post(body).build()

@@ -263,6 +263,15 @@ private fun IncomingCallUi(
     onDecline: () -> Unit,
 ) {
     val bg = Color(0xFF101418)
+    // §5d: a cross-island wake rings before the envelope has named the caller,
+    // so the name slot can legitimately hold the neutral "Incoming call"
+    // (Push.showSealedIncomingCall) or, on an older row, nothing at all. Both
+    // render as the neutral label — never the hardcoded "RCQ" this used to
+    // show, which read as the app itself calling — the subtitle is then dropped
+    // rather than printed twice, and the disc shows "?" instead of the first
+    // letter of a label that is not a name.
+    val neutral = stringRes(R.string.call_incoming)
+    val unnamed = nickname.isBlank() || nickname == neutral
     Column(
         modifier = Modifier.fillMaxSize().background(bg).padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -273,18 +282,20 @@ private fun IncomingCallUi(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = nickname.ifBlank { "RCQ" },
+                text = if (unnamed) neutral else nickname,
                 color = Color.White,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = stringRes(if (video) R.string.call_incoming_video else R.string.call_incoming),
-                color = Color(0xFFB0B8C0),
-                fontSize = 15.sp,
-            )
+            if (!unnamed || video) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringRes(if (video) R.string.call_incoming_video else R.string.call_incoming),
+                    color = Color(0xFFB0B8C0),
+                    fontSize = 15.sp,
+                )
+            }
         }
         // The caller, in the middle of the screen, the way the in-app call
         // surface shows them. This screen had a name at the top, two buttons at
@@ -305,7 +316,7 @@ private fun IncomingCallUi(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = nickname.trim().firstOrNull()?.uppercase() ?: "?",
+                    text = if (unnamed) "?" else nickname.trim().firstOrNull()?.uppercase() ?: "?",
                     color = Color.White,
                     fontSize = 40.sp,
                     fontWeight = FontWeight.SemiBold,

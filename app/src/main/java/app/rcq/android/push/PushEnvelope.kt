@@ -76,18 +76,10 @@ internal object PushEnvelope {
         // hold nobody. A generic "new message" is exactly what an ordinary
         // account looks like, so staying generic costs the decoy nothing.
         if (PanicPinService.isLocked || PanicPinService.inDecoySession) return null
-        if (SealedSender.wireVersion(envB64) != 1) return null
 
         val store = SecureStore(ctx, accountId)
-        val priv = store.identityPrivate ?: return null
         val me = store.uin ?: return null
-        val dec = runCatching {
-            SealedSender.decryptV1(
-                envB64,
-                priv,
-                X25519PrivateKeyParameters(priv, 0).generatePublicKey().encoded,
-            )
-        }.getOrNull() ?: return null
+        val dec = decrypt(ctx, accountId, envB64) ?: return null
 
         val host = dec.senderHost
         val quarantined = host != null &&
@@ -106,6 +98,89 @@ internal object PushEnvelope {
             preview = preview,
             mentionsMe = preview != null && mentionsMe(preview, me, store.nickname),
             quarantined = quarantined,
+        )
+    }
+
+    /** v=1 decrypt with [accountId]'s identity key, or null when the envelope
+     *  is not v=1, the account has no key, or it does not open for us. The
+     *  panic-PIN / decoy rules are NOT here: each caller states its own, because
+     *  they differ (see [openCall]). */
+    private fun decrypt(ctx: Context, accountId: String, envB64: String): SealedSender.Decrypted? {
+        if (SealedSender.wireVersion(envB64) != 1) return null
+        val priv = SecureStore(ctx, accountId).identityPrivate ?: return null
+        return runCatching {
+            SealedSender.decryptV1(
+                envB64,
+                priv,
+                X25519PrivateKeyParameters(priv, 0).generatePublicKey().encoded,
+            )
+        }.getOrNull()
+    }
+
+    /** What a §5d cross-island CALL wake carries once opened. */
+    data class Call(
+        val senderUin: Int,
+        val senderHost: String,
+        /** The caller's name from this account's cross-island roster, or null
+         *  when we hold none — the ringer then falls back to a neutral label
+         *  rather than inventing one. */
+        val senderName: String?,
+        /** The §5d signal verbatim: call_offer / call_end / … */
+        val sig: String,
+        val callId: String,
+        /** "audio" or "video". */
+        val media: String,
+        val sdp: String,
+        /** Sender epoch SECONDS — a wake replayed hours later must not ring. */
+        val ts: Long,
+        /** The sender is an ACCEPTED cross-island contact of this account.
+         *  Only they may make this phone ring (§5d); a stranger's deposit is a
+         *  request, not a call. */
+        val accepted: Boolean,
+    )
+
+    /**
+     * Open the sealed envelope a §5d CALL wake carries (`envType: "call"`).
+     *
+     * The recipient's island cannot see who is calling, the call id, audio vs
+     * video or the SDP — all of it is inside this envelope — so the wake it
+     * sends is anonymous by construction and the ring has nothing to show
+     * until this runs. Returns null when the wake must stay generic: no `env`
+     * (the island drops one too large for a push), a non-v=1 envelope, a
+     * decrypt failure, or an envelope that is not a call signal at all.
+     *
+     * ⚠ Deliberately NOT gated on [PanicPinService.isLocked], unlike [open]:
+     * nothing this returns goes on the lock screen by itself. The call id,
+     * media and SDP are wire plumbing, and whether the caller's NAME is shown
+     * is the ringer's decision (it stays neutral while locked). A locked phone
+     * must still be able to ring — otherwise the lock silently forwards every
+     * call to voicemail. A DECOY session still gets nothing: a phone that is
+     * supposed to hold nobody must not announce a real contact.
+     */
+    fun openCall(ctx: Context, accountId: String, envB64: String): Call? {
+        if (PanicPinService.inDecoySession) return null
+        val dec = decrypt(ctx, accountId, envB64) ?: return null
+        val cs = dec.envelope as? Envelope.CallSignal ?: return null
+        // §5d exists only across islands: a same-island call rides the WS as
+        // plaintext call_* events and never arrives as an envelope.
+        val host = dec.senderHost ?: return null
+        val store = SecureStore(ctx, accountId)
+        val ownHosts = setOf(
+            store.serverHost ?: app.rcq.android.net.RcqApi.DEFAULT_HOST,
+            app.rcq.android.net.RelayConfigStore.frontHost,
+        ).filter { it.isNotBlank() }
+        if (ownHosts.any { it.equals(host, ignoreCase = true) }) return null
+        val ci = CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host)
+        return Call(
+            senderUin = dec.senderUin,
+            senderHost = host,
+            senderName = ci?.nickname?.takeIf { it.isNotBlank() },
+            sig = cs.sig,
+            callId = cs.cid,
+            media = cs.data["media"] ?: "video",
+            sdp = cs.data["sdp"].orEmpty(),
+            ts = cs.ts,
+            accepted = ci != null,
         )
     }
 
@@ -129,6 +204,10 @@ internal object PushEnvelope {
         // pings, secure-screen sync, call signaling, federation records and
         // sender-key admin. None of them is a new message, and waking the user
         // for one is the "ложные уведомления, новых сообщений нет" report.
+        //
+        // A §5d CallSignal is here on purpose too: it must never raise a
+        // MESSAGE banner. It gets a ring instead, through [openCall] — a call
+        // wake arrives with `envType: "call"` and never reaches this function.
         else -> null
     }
 

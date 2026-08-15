@@ -488,6 +488,15 @@ class CallController(
 
     private fun handleIncomingOffer(from: Int, callId: String, obj: JsonObject, ring: Boolean = true) {
         if (_state.value.active) {
+            // ⚠ A DUPLICATE OF THE CALL WE ARE ALREADY ON IS NOT A SECOND
+            // CALLER. §5d cross-island: the sealed offer that woke this phone
+            // is ALSO sitting in the offline queue (the island queues the
+            // deposit and wakes us because no socket was up), so the socket
+            // hands us the very same call_offer a moment after we answered it
+            // from the push — and answering "busy" to that hung the call up on
+            // ourselves, one second in. Ignore our own call; only a genuinely
+            // different one gets the busy reply.
+            if (_state.value.info?.id == callId) return
             send(signal("call_end", from, callId, mapOf("reason" to "busy")))
             return
         }
@@ -501,7 +510,18 @@ class CallController(
         // The push-accept path already rang on the lock screen and accepts
         // immediately, so skip the in-app ringer + ring watchdog there.
         if (ring) {
-            if (app.rcq.android.RcqApp.foreground) {
+            // …and so does the SAME offer arriving twice: a §5d wake parks the
+            // call and rings on the full-screen surface, then the socket drains
+            // the same deposit out of the queue and lands here. Take the state
+            // (so Answer works through this controller) but not the noise — two
+            // Ringers on one call is two ringtones over each other. The timeout
+            // is still armed: the ring has to end somewhere.
+            if (app.rcq.android.call.IncomingCallStore.pending?.callId == callId) {
+                // The full-screen surface owns this ring, so the in-app screen
+                // must not put a second Accept/Decline under it either.
+                _incomingViaFsi.value = true
+                armRingTimeout(call)
+            } else if (app.rcq.android.RcqApp.foreground) {
                 ringer.startIncoming()
                 armRingTimeout(call)
             } else {
