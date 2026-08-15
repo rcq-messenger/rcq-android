@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit
  *     "versionCode": 2,
  *     "versionName": "0.2",
  *     "notes": "What changed",
+ *     "notes_i18n": { "en": "What changed", "ru": "Что изменилось" },
  *     "url": "https://rcq.app/android/rcq-universal.apk",
  *     "abis": {
  *       "arm64-v8a":   "https://rcq.app/android/rcq-arm64-v8a.apk",
@@ -206,7 +207,24 @@ object UpdateChecker {
                     // mirror_base + the primary URL's filename = the same APK on
                     // the GitHub release (byte-identical), used as a fallback host.
                     val mirror = obj.get("mirror_base")?.asString?.let { it + url.substringAfterLast('/') }
-                    Update(vc, obj.get("versionName")?.asString ?: "$vc", obj.get("notes")?.asString.orEmpty(), url, mirror)
+                    // Release notes in the reader's language.
+                    //
+                    // ⚠ The app ships in seven languages and this dialog used to
+                    // show ONE string to all of them — whatever the person
+                    // writing the manifest happened to type, which in practice
+                    // was Russian. Caught on a Chinese-locale emulator being
+                    // offered 0.123 in Russian.
+                    //
+                    // `notes_i18n` is optional and `notes` stays the fallback,
+                    // so a manifest without it behaves exactly as before and an
+                    // older client reading a manifest WITH it is unaffected —
+                    // which matters, because the manifest is shared with every
+                    // version already installed out there.
+                    val notes = obj.getAsJsonObject("notes_i18n")?.let { m ->
+                        val tag = java.util.Locale.getDefault().language.lowercase()
+                        (m.get(tag) ?: m.get("en"))?.asString
+                    } ?: obj.get("notes")?.asString.orEmpty()
+                    Update(vc, obj.get("versionName")?.asString ?: "$vc", notes, url, mirror)
                 }
             }.getOrNull()
             if (u != null) return@withContext u
