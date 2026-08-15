@@ -66,7 +66,16 @@ internal object PushEnvelope {
         // Panic PIN: while the app is locked its own history is unreadable, so
         // putting the plaintext on the lock screen would walk straight around
         // the lock. Stay generic until the user unlocks.
-        if (PanicPinService.isLocked) return null
+        //
+        // ⚠⚠ A DECOY session is not locked, and that is the hole. Every read
+        // below goes to per-account storage BY ACCOUNT ID ([nameFor] reads the
+        // cached roster, [CrossIslandStore.getFor] the cross-island one), so it
+        // bypasses the decoy's namespace binding entirely: a wake arriving
+        // while someone is being coerced would put a real contact's name and a
+        // line of their message on the screen of a phone that is supposed to
+        // hold nobody. A generic "new message" is exactly what an ordinary
+        // account looks like, so staying generic costs the decoy nothing.
+        if (PanicPinService.isLocked || PanicPinService.inDecoySession) return null
         if (SealedSender.wireVersion(envB64) != 1) return null
 
         val store = SecureStore(ctx, accountId)

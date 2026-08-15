@@ -92,6 +92,12 @@ class RcqApi(
      * An HTTP error means the island answered, and a tunnel would not change it.
      */
     private fun viaBestRoute(call: (OkHttpClient) -> okhttp3.Response): okhttp3.Response {
+        // ⚠ The single chokepoint for every REST call this client makes, and
+        // therefore the place a duress session is stopped. A migrated decoy
+        // keeps `Session.store` (and this token) on the REAL account by design,
+        // so without this any duress-view screen that fetches would answer with
+        // — or write to — the real account. See [DuressGate].
+        app.rcq.android.security.DuressGate.check()
         if (isPrimary) return call(http())
         if (host in blockedHosts && SingBoxTransport.engageForBlockedDestination("api:$host")) {
             return call(http())

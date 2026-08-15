@@ -93,6 +93,11 @@ class RadioController(
 
     // ── discovery lifecycle ───────────────────────────────────────────
     fun startDiscovery() {
+        // Refused under duress (iOS parity). Going on the air puts a callsign
+        // and a live radio link out to everyone in Bluetooth / Wi-Fi Direct
+        // range, from a phone in someone else's hands. The screen shows an
+        // empty peer list, which is what it shows most of the time anyway.
+        if (app.rcq.android.security.DuressGate.isActive) return
         if (_isOnline.value) return
         endpointId = RadioBleDiscovery.newEndpointId()
         clearSessionState()
