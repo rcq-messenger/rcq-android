@@ -44,6 +44,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -2794,21 +2796,26 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
     var wpin by remember { mutableStateOf("") }
     var wconfirm by remember { mutableStateOf("") }
     var werror by remember { mutableStateOf<String?>(null) }
+    // Default OFF, and re-defaulted every time the form opens.
+    var wipeServer by remember { mutableStateOf(false) }
     // Report #237 (deniability): while unlocked into a DECOY session, the PIN
     // screen must not reveal that a decoy/wipe PIN — or any hidden account —
     // exists. In decoy mode we hide the whole Duress + biometric surface and
     // show only a plausible Change/Remove PIN (Remove is duress-aware in
     // Session.removePin: it wipes the hidden accounts instead of exposing them).
     val decoyModeId by app.rcq.android.data.AccountManager.decoyMode.collectAsState()
-    val inDecoyMode = decoyModeId != null
+    val decoyOwnStore by app.rcq.android.data.AccountManager.decoySession.collectAsState()
+    val inDecoyMode = decoyModeId != null || decoyOwnStore
     // Decoy PIN (panic-PIN phase 2): a PIN that reveals only a chosen account.
-    val roster by app.rcq.android.data.AccountManager.accounts.collectAsState()
     var decoyConfigured by remember { mutableStateOf(session.hasDecoyPin) }
     var decoyEditing by remember { mutableStateOf(false) }
     var dpin by remember { mutableStateOf("") }
     var dconfirm by remember { mutableStateOf("") }
     var derror by remember { mutableStateOf<String?>(null) }
-    var decoyAccount by remember { mutableStateOf<String?>(null) }
+    // The decoy is no longer a roster account: it is its own store, seeded
+    // with copies of conversations the user picks here.
+    var decoyThreads by remember { mutableStateOf(emptySet<Int>()) }
+    var decoyCandidates by remember { mutableStateOf(emptyList<Pair<Int, String>>()) }
     // Biometric unlock (panic-PIN phase 4): mutually exclusive with the duress
     // PINs, since a fingerprint/face reveals the real account.
     val activity = remember(context) { context.findFragmentActivity() }
@@ -2864,6 +2871,27 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                 }
             } else if (wipeEditing) {
                 Text(stringResource(R.string.pin_wipe_desc), color = c.textSecondary, fontSize = 13.sp)
+                // "Also erase the account on the server", DEFAULT OFF. The flag
+                // is written into the WIPE SLOT itself, never into prefs: prefs
+                // are readable and writable by anyone holding an unlocked
+                // phone, and switching this off is the first thing someone who
+                // found the feature would do. Default off is also what every
+                // locale's copy has always promised ("on this device").
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .clickable { wipeServer = !wipeServer }.padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (wipeServer) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                        null,
+                        tint = if (wipeServer) Color(0xFFE5484D) else c.textSecondary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(stringResource(R.string.pin_wipe_server_label), color = c.textPrimary, fontSize = 14.sp)
+                }
+                Text(stringResource(R.string.pin_wipe_server_desc), color = c.textSecondary, fontSize = 12.sp)
                 RcqField(
                     value = wpin,
                     onValueChange = { if (onlyDigits(it)) wpin = it },
@@ -2891,7 +2919,7 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                     if (wpin != wconfirm) { werror = context.getString(R.string.pin_mismatch); return@CapsuleButton }
                     scope.launch {
                         busy = true; werror = null
-                        val ok = withContext(Dispatchers.Default) { session.setWipePin(wpin) }
+                        val ok = withContext(Dispatchers.Default) { session.setWipePin(wpin, wipeServer) }
                         busy = false
                         if (ok) { wipeConfigured = true; wipeEditing = false; wpin = ""; wconfirm = "" }
                         else werror = context.getString(R.string.pin_wipe_taken)
@@ -2905,21 +2933,8 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                 Text(stringResource(R.string.pin_decoy_plausibility), color = c.textSecondary, fontSize = 13.sp)
                 Text(stringResource(R.string.pin_decoy_pick), color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 SettingsGroup {
-                    roster.forEachIndexed { i, a ->
-                        if (i > 0) Divider()
-                        val nick = app.rcq.android.data.SecureStore.peekNickname(context, a.id) ?: "—"
-                        val uin = app.rcq.android.data.SecureStore.peekUin(context, a.id)
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { decoyAccount = a.id }.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (decoyAccount == a.id) Icons.Filled.RadioButtonChecked else Icons.Filled.RadioButtonUnchecked,
-                                null, tint = if (decoyAccount == a.id) c.accent else c.textSecondary, modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Column { Text(nick, color = c.textPrimary, fontSize = 14.sp); uin?.let { Text("#$it", color = c.textSecondary, fontSize = 12.sp) } }
-                        }
+                    DecoyThreadPicker(decoyCandidates, decoyThreads) { uin ->
+                        decoyThreads = if (uin in decoyThreads) decoyThreads - uin else decoyThreads + uin
                     }
                 }
                 RcqField(
@@ -2939,14 +2954,14 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                 derror?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
                 CapsuleButton(
                     label = if (busy) stringResource(R.string.pin_busy) else stringResource(R.string.common_save),
-                    enabled = dpin.length >= 4 && decoyAccount != null && !busy,
+                    enabled = dpin.length >= 4 && decoyThreads.isNotEmpty() && !busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (dpin != dconfirm) { derror = context.getString(R.string.pin_mismatch); return@CapsuleButton }
-                    val acc = decoyAccount ?: return@CapsuleButton
+                    if (decoyThreads.isEmpty()) { derror = context.getString(R.string.pin_decoy_needs_chats); return@CapsuleButton }
                     scope.launch {
                         busy = true; derror = null
-                        val ok = withContext(Dispatchers.Default) { session.setDecoyPin(dpin, acc) }
+                        val ok = withContext(Dispatchers.Default) { session.setDecoyPin(dpin, decoyThreads.toList()) }
                         busy = false
                         if (ok) { decoyConfigured = true; decoyEditing = false; dpin = ""; dconfirm = "" }
                         else derror = context.getString(R.string.pin_wipe_taken)
@@ -3015,7 +3030,7 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                                 value = stringResource(R.string.pin_duress_unavailable_bio),
                             ) {}
                         } else SettingsRow(Icons.Filled.DeleteForever, stringResource(R.string.pin_wipe_set)) {
-                            wipeEditing = true; wpin = ""; wconfirm = ""; werror = null
+                            wipeEditing = true; wpin = ""; wconfirm = ""; werror = null; wipeServer = false
                         }
                     } else {
                         SettingsRow(Icons.Filled.DeleteForever, stringResource(R.string.pin_wipe_remove), destructive = true) {
@@ -3030,13 +3045,15 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
                     if (!decoyConfigured) {
                         if (bioEnabled) {
                             SettingsRow(Icons.Filled.Lock, stringResource(R.string.pin_decoy_set), value = stringResource(R.string.pin_duress_unavailable_bio)) {}
-                        } else if (roster.size >= 2) {
+                        } else {
+                            // No account requirement any more: the decoy has its
+                            // own store and its own identity, so one account is
+                            // enough. What it needs is conversations to show.
                             SettingsRow(Icons.Filled.Lock, stringResource(R.string.pin_decoy_set)) {
                                 decoyEditing = true; dpin = ""; dconfirm = ""; derror = null
-                                decoyAccount = roster.firstOrNull()?.id
+                                decoyThreads = emptySet()
+                                decoyCandidates = session.decoySeedCandidates()
                             }
-                        } else {
-                            SettingsRow(Icons.Filled.Lock, stringResource(R.string.pin_decoy_set), value = stringResource(R.string.pin_decoy_needs_two)) {}
                         }
                     } else {
                         SettingsRow(Icons.Filled.Lock, stringResource(R.string.pin_decoy_remove), destructive = true) {

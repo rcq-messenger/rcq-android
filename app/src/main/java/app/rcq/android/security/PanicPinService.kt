@@ -23,11 +23,19 @@ import kotlinx.coroutines.flow.asStateFlow
 object PanicPinService {
     enum class SubmitResult { REAL, DECOY, WIPE, WRONG, LOCKED_OUT }
 
-    /** Set on a DECOY submit: the account the caller should switch to + hide
-     *  the rest behind. Consumed by [Session] right after [submit]. */
+    /** Set on a LEGACY DECOY submit: the roster account the caller should
+     *  switch to + hide the rest behind. Only ever non-null for a vault written
+     *  before the decoy got its own store. Consumed by [Session] after [submit]. */
     @Volatile
     var pendingDecoyAccountId: String? = null
         private set
+
+    /** Set on a WIPE submit: did that slot ask for the server-side account to
+     *  be erased too? Read from the WIPE SLOT PAYLOAD and nowhere else — prefs
+     *  can be flipped by anyone holding an unlocked phone. Absent on an old
+     *  slot, which decodes as null and therefore FALSE. */
+    @Volatile
+    private var pendingWipeServer: Boolean = false
 
     @Volatile
     var dataKey: ByteArray? = null
@@ -70,6 +78,7 @@ object PanicPinService {
         decoyPayload = null
         decoySlotKey = null
         pendingDecoyAccountId = null
+        pendingWipeServer = false
     }
 
     /** Epoch-ms the lockout lasts until, or null if not locked out. */
@@ -100,19 +109,26 @@ object PanicPinService {
                 SubmitResult.REAL
             }
             PinVault.MODE_DECOY -> {
-                // Unlock into the decoy account, hiding the real ones. The
-                // decoy slot carries the SAME dataKey (so the encrypted DBs
-                // open). We do NOT clear `locked` here — the caller
-                // (Session.applyDecoyUnlock) switches + filters the roster
-                // FIRST, then calls completeUnlock, so the real accounts never
-                // flash on screen. Real PIN entry later exits decoy mode.
+                // The decoy slot carries its OWN dataKey, which opens exactly
+                // one file — the decoy store — and nothing else on the device.
+                // (A LEGACY slot, written before this change, still carries the
+                // real key and a roster account id; [decoyIsLegacy] tells the
+                // caller which of the two it is holding.)
+                //
+                // We do NOT clear `locked` here — the caller
+                // (Session.applyDecoyUnlock) raises the decoy view FIRST, then
+                // calls completeUnlock, so the real accounts never flash on
+                // screen. Real PIN entry later exits decoy mode.
                 dataKey = PinVault.dataKeyBytes(unlock.payload)
                 decoyPayload = unlock.payload
                 decoySlotKey = unlock.slotKey
                 pendingDecoyAccountId = unlock.payload.decoyAccountId
                 SubmitResult.DECOY
             }
-            PinVault.MODE_WIPE -> SubmitResult.WIPE
+            PinVault.MODE_WIPE -> {
+                pendingWipeServer = unlock.payload.wipeServer == true
+                SubmitResult.WIPE
+            }
             else -> SubmitResult.WRONG
         }
     }
@@ -132,6 +148,17 @@ object PanicPinService {
      *  the device key to this one. */
     fun setRealPin(context: Context, pin: String): ByteArray? {
         if (pin.length < PinVault.MIN_PIN_LENGTH) return null
+        // ⚠⚠ R1, enforced here and not only in the UI (iOS has always had this
+        // guard in setRealPIN; Android relied on the Settings screen's
+        // `configured` flag, which is a remembered snapshot).
+        //
+        // [PinVault.createWithRealPin] regenerates the pepper and mints a NEW
+        // dataKey. Run against an existing vault it would leave every account's
+        // SQLCipher file encrypted under a key that no longer exists anywhere,
+        // and the caller would then "rekey" them FROM the device key — which is
+        // not the key they are under — so every open fails. That is the whole
+        // history of every account with a PIN, gone and unrecoverable.
+        if (PinVault.isConfigured(context)) return null
         val unlock = PinVault.createWithRealPin(context, pin)
         realPayload = unlock.payload
         realSlotKey = unlock.slotKey
@@ -143,17 +170,47 @@ object PanicPinService {
     /** Is a wipe PIN configured? (Only meaningful while unlocked-real.) */
     fun hasWipePin(): Boolean = realPayload?.layout?.wipeSlot != null
 
+    /** Does the configured wipe PIN also erase the account server-side?
+     *  DISPLAY only, read from the real slot's layout mirror — the wipe itself
+     *  reads the wipe slot's own copy (see [consumeWipeServer]). */
+    fun wipeErasesServer(): Boolean = realPayload?.layout?.wipeServer == true
+
+    /** Take + clear the "also erase server-side" flag carried by the wipe slot
+     *  that was just entered. Defaults to FALSE: an absent flag in an old slot
+     *  decodes as null, and the UI has only ever promised "on this device". */
+    fun consumeWipeServer(): Boolean {
+        val v = pendingWipeServer
+        pendingWipeServer = false
+        return v
+    }
+
     /** Add a wipe PIN: entering it at the lock screen erases everything (the
      *  caller acts on [SubmitResult.WIPE]). Seals a WIPE slot under [pin] and
      *  records it in the real slot's layout. Requires an unlocked real session;
-     *  [pin] must differ from the real/decoy PINs and a slot must be free. */
-    fun setWipePin(context: Context, pin: String): Boolean {
+     *  [pin] must differ from the real/decoy PINs and a slot must be free.
+     *
+     *  [eraseServer] rides in the WIPE SLOT payload, so it cannot be flipped
+     *  without that PIN. Default off, matching what every locale's copy says. */
+    fun setWipePin(context: Context, pin: String, eraseServer: Boolean = false): Boolean {
         if (pin.length < PinVault.MIN_PIN_LENGTH) return false
         if (BiometricVault.isEnabled(context)) return false // mutually exclusive
         val real = realPayload ?: return false
         val key = realSlotKey ?: return false
         val layout = real.layout ?: return false
-        val slot = PinVault.addSlot(context, pin, PinVault.SlotPayload(mode = PinVault.MODE_WIPE), layout) ?: return false
+        val wipePayload = PinVault.SlotPayload(
+            mode = PinVault.MODE_WIPE,
+            // Only write the flag when it is ON: a null costs no bytes, and the
+            // slot budget is fixed.
+            wipeServer = if (eraseServer) true else null,
+        )
+        // Check the REAL slot's new size before anything is written: the layout
+        // grows by the mirror below, and a payload that no longer fits must
+        // leave the vault exactly as it was rather than half-updated.
+        val previousWipeServer = layout.wipeServer
+        layout.wipeServer = if (eraseServer) true else null
+        if (!PinVault.payloadFits(real)) { layout.wipeServer = previousWipeServer; return false }
+        val slot = PinVault.addSlot(context, pin, wipePayload, layout)
+        if (slot == null) { layout.wipeServer = previousWipeServer; return false }
         layout.wipeSlot = slot
         PinVault.writeSlot(context, layout.realSlot, real, key) // re-seal real with the updated layout
         return true
@@ -168,35 +225,93 @@ object PanicPinService {
         val slot = layout.wipeSlot ?: return true
         PinVault.writeSlot(context, slot, null, null)
         layout.wipeSlot = null
+        layout.wipeServer = null
         PinVault.writeSlot(context, layout.realSlot, real, key)
         return true
     }
 
-    /** Is a decoy PIN configured, and which account does it reveal? */
+    /** Is a decoy PIN configured? */
     fun hasDecoyPin(): Boolean = realPayload?.layout?.decoySlot != null
+
+    /** LEGACY decoy still in place: the configured decoy names a roster account
+     *  and its slot carries the REAL dataKey. These vaults keep working exactly
+     *  as before until the user passes the one-time migration screen — a decoy
+     *  PIN that stops working under coercion is worse than an old one. */
+    fun decoyNeedsMigration(): Boolean {
+        val layout = realPayload?.layout ?: return false
+        return layout.decoySlot != null && layout.decoyDataKeyB64 == null
+    }
+
+    /** The account a LEGACY decoy reveals (null once migrated). */
     fun decoyAccountId(): String? = realPayload?.layout?.decoyAccountId
 
-    /** Add a decoy PIN that unlocks into [decoyAccountId], hiding the other
-     *  (real) accounts. The decoy slot carries the SAME dataKey as the real
-     *  one (so the encrypted DBs open), plus the decoy account id. Requires an
-     *  unlocked real session with a free slot. */
-    fun setDecoyPin(context: Context, pin: String, decoyAccountId: String): Boolean {
+    /** The decoy's own key + synthetic identity, as recorded in the real slot.
+     *  Only an unlocked REAL session can read this. */
+    data class DecoyIdentity(val dataKey: ByteArray, val uin: Int, val nickname: String)
+
+    /** Mint (or re-use) the decoy's own key + identity for a rebuild. Reusing
+     *  them when they already exist keeps the same duress identity across a
+     *  re-pick of conversations, which is what a returning coercer would
+     *  expect to see. Requires an unlocked real session with a writable real
+     *  slot — biometrics deliberately do not hold [realSlotKey]. */
+    fun prepareDecoyIdentity(context: Context): DecoyIdentity? {
+        if (BiometricVault.isEnabled(context)) return null // mutually exclusive
+        val layout = realPayload?.layout ?: return null
+        if (realSlotKey == null) return null
+        val key = layout.decoyDataKeyB64
+            ?.let { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }
+            ?: app.rcq.android.data.DecoyStore.newDataKey()
+        return DecoyIdentity(
+            dataKey = key,
+            uin = layout.decoyUin ?: app.rcq.android.data.DecoyStore.randomUin(),
+            nickname = layout.decoyNickname ?: app.rcq.android.data.DecoyStore.randomNickname(),
+        )
+    }
+
+    /**
+     * Seal the decoy slot under [pin] and record [id] in the real slot's
+     * layout. The decoy slot carries [id]'s OWN dataKey — never the real one —
+     * so the duress PIN opens the decoy store and nothing else.
+     *
+     * Call only after the decoy store has actually been seeded: a decoy PIN
+     * that opens an empty view is the tell the feature exists to avoid.
+     */
+    fun commitDecoyPin(context: Context, pin: String, id: DecoyIdentity): Boolean {
         if (pin.length < PinVault.MIN_PIN_LENGTH) return false
-        if (BiometricVault.isEnabled(context)) return false // mutually exclusive
+        if (BiometricVault.isEnabled(context)) return false
         val real = realPayload ?: return false
         val key = realSlotKey ?: return false
-        val dk = dataKey ?: return false
         val layout = real.layout ?: return false
         val payload = PinVault.SlotPayload(
             mode = PinVault.MODE_DECOY,
-            dataKeyB64 = android.util.Base64.encodeToString(dk, android.util.Base64.NO_WRAP),
-            decoyAccountId = decoyAccountId,
+            dataKeyB64 = android.util.Base64.encodeToString(id.dataKey, android.util.Base64.NO_WRAP),
+            decoyUin = id.uin,
+            decoyNickname = id.nickname,
         )
-        val slot = PinVault.addSlot(context, pin, payload, layout) ?: return false
-        layout.decoySlot = slot
-        layout.decoyAccountId = decoyAccountId
+        // Re-point the EXISTING decoy slot when there is one (the old duress
+        // PIN dies with the overwrite), otherwise take a free index.
+        val index = layout.decoySlot ?: PinVault.freeSlotIndex(layout) ?: return false
+        // Snapshot the layout so a refusal anywhere below leaves the vault
+        // byte-identical rather than half-migrated.
+        val prev = layout.copy()
+        layout.decoySlot = index
+        layout.decoyAccountId = null // the decoy is no longer a roster account
+        layout.decoyDataKeyB64 = android.util.Base64.encodeToString(id.dataKey, android.util.Base64.NO_WRAP)
+        layout.decoyUin = id.uin
+        layout.decoyNickname = id.nickname
+        if (!PinVault.payloadFits(real) || !PinVault.payloadFits(payload)) { restore(layout, prev); return false }
+        // Nothing is written until this returns true.
+        if (!PinVault.writeSlotWithPin(context, index, payload, pin)) { restore(layout, prev); return false }
         PinVault.writeSlot(context, layout.realSlot, real, key)
         return true
+    }
+
+    private fun restore(layout: PinVault.Layout, from: PinVault.Layout) {
+        layout.decoySlot = from.decoySlot
+        layout.decoyAccountId = from.decoyAccountId
+        layout.decoyDataKeyB64 = from.decoyDataKeyB64
+        layout.decoyUin = from.decoyUin
+        layout.decoyNickname = from.decoyNickname
     }
 
     fun removeDecoyPin(context: Context): Boolean {
@@ -207,16 +322,28 @@ object PanicPinService {
         PinVault.writeSlot(context, slot, null, null)
         layout.decoySlot = null
         layout.decoyAccountId = null
+        layout.decoyDataKeyB64 = null
+        layout.decoyUin = null
+        layout.decoyNickname = null
         PinVault.writeSlot(context, layout.realSlot, real, key)
         return true
     }
 
-    /** Take + clear the pending decoy account id (after a DECOY submit). */
+    /** Take + clear the pending LEGACY decoy account id (after a DECOY submit).
+     *  Null for a migrated decoy, which has no roster account at all. */
     fun consumeDecoyAccountId(): String? {
         val id = pendingDecoyAccountId
         pendingDecoyAccountId = null
         return id
     }
+
+    /** True while the CURRENT decoy session came from a legacy slot (roster
+     *  account + the real dataKey) rather than its own store. */
+    val decoyIsLegacy: Boolean get() = decoyPayload?.decoyAccountId != null
+
+    /** The synthetic identity the current decoy session presents. */
+    fun decoySessionUin(): Int? = decoyPayload?.decoyUin
+    fun decoySessionNickname(): String? = decoyPayload?.decoyNickname
 
     /** Clear the lock — called by [Session.applyDecoyUnlock] only AFTER it has
      *  switched to the decoy account + filtered the roster, so the UI never
@@ -275,6 +402,11 @@ object PanicPinService {
     /** True while unlocked into the decoy (duress) view. */
     val inDecoySession: Boolean get() = decoySlotKey != null
 
+    /** True while the real slot can be re-sealed, i.e. the real PIN was typed
+     *  this session. A biometric unlock deliberately never holds the real slot
+     *  key, which is why the decoy migration screen cannot be reached from one. */
+    val canWriteRealSlot: Boolean get() = realSlotKey != null
+
     /** Change the PIN from within a decoy session: re-seal the DECOY slot under
      *  [newPin]. The real slot is untouched, so the hidden accounts stay hidden
      *  and their PIN unchanged — a coercer who was given the decoy PIN can
@@ -301,6 +433,7 @@ object PanicPinService {
         decoyPayload = null
         decoySlotKey = null
         pendingDecoyAccountId = null
+        pendingWipeServer = false
         _locked.value = false
         return SecureStore.deviceKey(context)
     }
@@ -314,6 +447,7 @@ object PanicPinService {
         decoyPayload = null
         decoySlotKey = null
         pendingDecoyAccountId = null
+        pendingWipeServer = false
         _locked.value = true
     }
 }

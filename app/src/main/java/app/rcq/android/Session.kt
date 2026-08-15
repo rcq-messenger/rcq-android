@@ -15,6 +15,7 @@ import app.rcq.android.crypto.SignalStoreDb
 import app.rcq.android.crypto.SignalStores
 import org.signal.libsignal.protocol.DuplicateMessageException
 import app.rcq.android.data.AccountManager
+import app.rcq.android.data.DecoyStore
 import app.rcq.android.data.LocalStores
 import app.rcq.android.data.MessageDb
 import app.rcq.android.data.SecureStore
@@ -44,6 +45,8 @@ import com.google.gson.JsonObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -395,6 +398,12 @@ class Session(context: Context) {
      *  knew. Observed off [LocalStores.muted] in [start], so it both reconciles
      *  existing mutes once on launch and re-syncs on every mute/unmute. */
     private suspend fun syncPushMutes() {
+        // In a migrated decoy session LocalStores is bound to the DECOY
+        // namespace while `api` still carries the real account's token, so this
+        // would push the decoy's (empty) mute set over the real account's
+        // server-side one — silently un-muting everything the user muted. The
+        // collector that drives this is started by start() and outlives the lock.
+        if (duressViewUp) return
         if (!LocalStores.isAccountBound()) return
         runCatching {
             api.setPushPreferences(
@@ -406,7 +415,48 @@ class Session(context: Context) {
         }
     }
 
-    val nickname: String get() = store.nickname ?: "—"
+    // ── decoy (duress) session identity ──────────────────────────────
+    // Set only while unlocked into a MIGRATED decoy, which is not a roster
+    // account at all: it has its own SQLCipher store, its own key and this
+    // synthetic identity, and it never touches the network. While these are
+    // set, `store` still points at the real active account — every accessor
+    // the UI reads for "who am I" must therefore prefer these, or the duress
+    // view would show the real number under the decoy's history.
+    @Volatile
+    private var decoySessionUin: Int? = null
+    @Volatile
+    private var decoySessionNickname: String? = null
+
+    /** True while this session is showing the decoy's own store. */
+    val inDecoySession: Boolean get() = decoySessionUin != null
+
+    /**
+     * ⚠⚠ The guard every path that touches the REAL account must ask.
+     *
+     * In a MIGRATED decoy session `store` still points at the real active
+     * account while `db` is the DECOY file — that mismatch is the whole shape
+     * of the feature, and it is also a loaded gun. Anything that fetches with
+     * the real token and writes through `db` will pull real messages off the
+     * island, ACK them there, and file them in the duress store: gone from the
+     * real history for good, and sitting in front of whoever was handed the
+     * duress PIN.
+     *
+     * It is not enough to disconnect once on the way in. The periodic
+     * coroutines `start()` launches are never cancelled ([tearDownForLock]
+     * clears `started`, not the scope), so the route watchdog wakes 60 seconds
+     * later, sees a socket that is down, and redials with the real uin+token.
+     * That is the path that loses messages, and it is reached without the user
+     * touching anything.
+     *
+     * True from the moment the decoy slot opens (before [startDecoySession]
+     * has run) until the vault state is cleared, so no window is left open
+     * between [PanicPinService.submit] and the session flipping over.
+     */
+    private val duressViewUp: Boolean
+        get() = decoySessionUin != null ||
+            (PanicPinService.inDecoySession && !PanicPinService.decoyIsLegacy)
+
+    val nickname: String get() = decoySessionNickname ?: store.nickname ?: "—"
 
     // uin -> recipient X25519 identity public (raw), from contacts or lookup.
     private val peerIdentityCache = HashMap<Int, ByteArray>()
@@ -530,6 +580,7 @@ class Session(context: Context) {
                     // Leaving decoy mode on re-lock so the next unlock starts
                     // clean (a fresh real PIN reveals all accounts again).
                     AccountManager.exitDecoyMode()
+                    AccountManager.exitDecoySession()
                     if (started) tearDownForLock()
                 }
             }
@@ -537,7 +588,7 @@ class Session(context: Context) {
     }
 
     val isRegistered: Boolean get() = store.isRegistered
-    val uin: Int? get() = store.uin
+    val uin: Int? get() = decoySessionUin ?: store.uin
     /** The server this identity lives on (for display in Settings). */
     val currentServer: String get() = serverHost()
 
@@ -915,6 +966,11 @@ class Session(context: Context) {
             var deadStreak = 0
             while (true) {
                 delay(60_000)
+                // ⚠⚠ This coroutine is never cancelled — tearDownForLock()
+                // clears `started`, not the scope — so it keeps ticking through
+                // a lock and into a duress session, where every branch below
+                // would redial or re-route the REAL account. Sit it out.
+                if (duressViewUp) { deadStreak = 0; continue }
                 // Auto-engaged tunnel on a network that has since recovered: drop
                 // it. Until now it stayed up for the whole session ("the shield
                 // never went away until I killed the service"), which is both
@@ -1213,12 +1269,24 @@ class Session(context: Context) {
     }
 
     private fun connectAndSync(uin: Int, token: String) {
+        // ⚠⚠ Never from a migrated decoy session. [uin]/[token] here are always
+        // the REAL account's (they come out of `store`), and `db` is the decoy
+        // file: every frame this socket delivered would be filed in the duress
+        // store and acked on the island, i.e. removed from the real history.
+        // The reachable caller is not the user — it is the route watchdog in
+        // start(), whose coroutine outlives the lock.
+        if (duressViewUp) return
         socket.connect(
             uin = uin,
             token = token,
             onEvent = ::handleEvent,
             onState = { up ->
-                _connected.value = up
+                // `|| duressViewUp`: entering a migrated decoy disconnects the
+                // real socket, and OkHttp delivers that onClosed a few
+                // milliseconds later — after startDecoySession has already set
+                // the dot green. Without this the duress view sits on a
+                // permanent "Connecting…", which is itself something to explain.
+                _connected.value = up || duressViewUp
                 // When the link went down, so the watchdog below can tell a
                 // blip (the socket's own backoff handles those) from a network
                 // that has started blocking us and needs the whole route
@@ -1279,6 +1347,7 @@ class Session(context: Context) {
      *  strand the UI with an empty roster until the next cold start; the
      *  retry (and the reconnect-driven re-call) make it recover on its own. */
     private fun syncGraph() {
+        if (duressViewUp) return
         scope.launch { runCatching { withRetry { drainQueue() } } }
         // Multihoming v1: also drain the backup-island mailboxes (dedup by
         // envelope uuid collapses anything the primary already delivered).
@@ -1536,6 +1605,12 @@ class Session(context: Context) {
      *  messages the primary already delivered are collapsed by the
      *  INSERT-OR-IGNORE envelope-uuid dedup in [store]. Never throws. */
     private suspend fun drainBackupQueuesOnce() {
+        // The island DELETES each row once it is handed over (Multihome.ack),
+        // so draining into the decoy store does not copy a message — it moves
+        // it there and destroys the only other copy. This loop runs on a timer
+        // that survives the lock, so the guard belongs here and not only at the
+        // call site.
+        if (duressViewUp) return
         val uin = store.uin ?: return
         if (MultihomeStore.list(uin).isEmpty()) return
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
@@ -1567,6 +1642,7 @@ class Session(context: Context) {
      *  normal ingest, whose cross-island consent gate quarantines unknown
      *  senders. Never throws. */
     private suspend fun drainVisitedQueuesOnce() {
+        if (duressViewUp) return   // same acked-and-gone hazard as the backup drain
         if (VisitedIslandsStore.list().isEmpty()) return
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
@@ -1603,6 +1679,23 @@ class Session(context: Context) {
      *  device-key path, migrate any legacy plaintext DB to encrypted once. */
     private fun bindDb(accountId: String) {
         if (::db.isInitialized) db.close()
+        // Third branch, and the whole point of the decoy rework: a MIGRATED
+        // decoy session opens the decoy's OWN file under the decoy slot's OWN
+        // key. It never sees an account's database and never sees the real
+        // dataKey, so handing over the duress PIN no longer hands over the
+        // SQLCipher passphrase for every account on the device.
+        // A LEGACY decoy (pre-migration) still rides the account path below,
+        // exactly as before, until the user passes the migration screen.
+        if (PanicPinService.inDecoySession && !PanicPinService.decoyIsLegacy) {
+            val decoyKey = PanicPinService.dataKey
+                ?: throw DbLocked(DecoyStore.STORE_ID, IllegalStateException("decoy session without a key"))
+            db = runCatching { MessageDb(appCtx, DecoyStore.STORE_ID, decoyKey) }.getOrElse { e ->
+                CrashReporter.crumb(appCtx, "bindDb_failed")
+                android.util.Log.e("RCQ", "decoy store would not open", e)
+                throw DbLocked(DecoyStore.STORE_ID, e)
+            }
+            return
+        }
         val pinKey = PanicPinService.dataKey
         val key = if (pinKey != null) pinKey else {
             val deviceKey = SecureStore.deviceKey(appCtx)
@@ -1651,6 +1744,17 @@ class Session(context: Context) {
         if (::db.isInitialized) { db.close() }
         started = false
         everConnected = false
+        _decoyMigrationDue.value = false
+        // Leaving a decoy session: drop the synthetic identity and put the
+        // per-account prefs back on the real active account, so the next real
+        // unlock does not read the decoy's unread counts and roster cache.
+        if (decoySessionUin != null) {
+            decoySessionUin = null
+            decoySessionNickname = null
+            _contacts.value = emptyList()
+            AccountManager.exitDecoySession()
+            LocalStores.bindAccount(AccountManager.activeId.value)
+        }
         // The roster is deliberately KEPT here (the chat list must survive a
         // lock), so its presence values are frozen at lock time. That makes
         // them a stale baseline: unlock hours later and the first live refresh
@@ -1674,7 +1778,7 @@ class Session(context: Context) {
      *  coercer with the decoy PIN changes "their" PIN without ever touching or
      *  revealing the hidden real accounts). */
     suspend fun changePin(newPin: String): Boolean = withContext(Dispatchers.IO) {
-        if (AccountManager.decoyMode.value != null) PanicPinService.changeDecoyPin(appCtx, newPin)
+        if (PanicPinService.inDecoySession) PanicPinService.changeDecoyPin(appCtx, newPin)
         else PanicPinService.changeRealPin(appCtx, newPin)
     }
 
@@ -1690,6 +1794,14 @@ class Session(context: Context) {
      *  ordinary PIN removal; the real accounts are gone from the device
      *  (recoverable later from a seed phrase on another device). */
     suspend fun removePin(): Boolean = withContext(Dispatchers.IO) {
+        // A MIGRATED decoy session has its own path: the decoy is not a roster
+        // account any more, and this session holds only the decoy slot's key —
+        // it could not rekey the real accounts' databases back to the device
+        // key even if it wanted to, and destroying the vault from here would
+        // take their history with it.
+        if (PanicPinService.inDecoySession && !PanicPinService.decoyIsLegacy) {
+            return@withContext removePinFromDuress()
+        }
         val decoyId = AccountManager.decoyMode.value
         if (decoyId != null) {
             AccountManager.accounts.value.filter { it.id != decoyId }.forEach { acc ->
@@ -1708,9 +1820,92 @@ class Session(context: Context) {
         val vaultKey = PanicPinService.dataKey ?: return@withContext false
         val deviceKey = SecureStore.deviceKey(appCtx)
         rekeyAllAccountDbs(from = vaultKey, to = deviceKey)
+        // Destroying the vault throws away the decoy slot and with it the only
+        // key to the decoy store, so the file could never be opened again by
+        // anyone — but it would still be there, a database nothing can read
+        // under a filename that is identical on every install. Take it with the
+        // PIN, the way iOS's removeAllPINs does.
+        runCatching {
+            DecoyStore.destroy(appCtx)
+            LocalStores.clearAccount(DecoyStore.STORE_ID)
+        }
         PanicPinService.removePin(appCtx)
         if (decoyId != null) AccountManager.exitDecoyMode()
         true
+    }
+
+    /**
+     * "Remove PIN" tapped from inside a MIGRATED duress session.
+     *
+     * Report #237 rewritten. The old rule was "wipe every account except the
+     * decoy account", which is meaningless now that the decoy is not a roster
+     * account at all. What has to stay true is the outcome the coercer sees:
+     * the PIN is gone and the app opens straight into the conversations they
+     * were just shown. What has to stay true for the user is that the hidden
+     * accounts are never left readable on the device.
+     *
+     * So: copy the decoy's history into a fresh account under the device key,
+     * erase every real account's local storage, then destroy the vault and the
+     * decoy store. The real accounts are gone from this phone (recoverable from
+     * their recovery phrase elsewhere); what remains is an ordinary PIN-less
+     * install holding the decoy's chats.
+     *
+     * ⚠ The copy is a COPY. Nothing here runs `PRAGMA rekey` and nothing here
+     * re-encrypts a store in place — the decoy file is read, a new file is
+     * written under the device key, and only then is the original deleted.
+     */
+    private fun removePinFromDuress(): Boolean {
+        val decoyKey = PanicPinService.dataKey ?: return false
+        val decoyUin = decoySessionUin ?: return false
+        val decoyNick = decoySessionNickname ?: DecoyStore.randomNickname()
+        val deviceKey = SecureStore.deviceKey(appCtx)
+        runCatching { calls.teardown() }
+        runCatching { audioRooms.teardown() }
+        runCatching { nearby.teardown() }
+        runCatching { hood.teardown() }
+        runCatching { radio.teardown() }
+        runCatching { socket.disconnect() }
+        if (::db.isInitialized) runCatching { db.close() }
+        val shellId = java.util.UUID.randomUUID().toString()
+        val roster = DecoyStore.exportTo(appCtx, decoyKey, shellId, deviceKey)
+        // The copied file is already SQLCipher-encrypted under the device key;
+        // mark it so the plaintext-migration probe never opens it keyless.
+        SecureStore.setMsgDbMigrated(appCtx, shellId)
+        AccountManager.accounts.value.forEach { acc ->
+            runCatching {
+                SecureStore.wipeAccount(appCtx, acc.id)
+                MessageDb.wipeAccount(appCtx, acc.id)
+                SignalStoreDb.wipeAccount(appCtx, acc.id)
+                app.rcq.android.data.VisitStore.wipeAccount(acc.id)
+                CrossIslandStore.wipeAccount(acc.id)
+                VisitedIslandsStore.wipeAccount(acc.id)
+                LocalStores.clearAccount(acc.id)
+            }
+            AccountManager.remove(acc.id)
+        }
+        DecoyStore.destroy(appCtx)
+        LocalStores.clearAccount(DecoyStore.STORE_ID)
+        PanicPinService.removePin(appCtx)   // destroys the vault + pepper
+        AccountManager.exitDecoyMode()
+        AccountManager.exitDecoySession()
+        // Stand the leftovers up as the one remaining, PIN-less account. No
+        // token and no keys: it is not registered anywhere, so the session
+        // never connects and the app simply looks offline.
+        SecureStore.saveShellIdentity(appCtx, shellId, decoyUin, decoyNick)
+        AccountManager.addWithId(shellId, null, null)
+        decoySessionUin = null
+        decoySessionNickname = null
+        rebindTo(shellId)
+        LocalStores.bindAccount(shellId)
+        runCatching { LocalStores.setCachedContactsJson(gson.toJson(roster)) }
+        runCatching {
+            bindDb(shellId)
+            loadMessagesFromDb()
+        }
+        _contacts.value = roster
+        started = true      // nothing to connect to; keep start() from trying
+        _connected.value = false
+        return true
     }
 
     /** Rekey the active DB in place + every inactive account's DB (opened then
@@ -1732,8 +1927,17 @@ class Session(context: Context) {
     val pinConfigured: Boolean get() = PanicPinService.isConfigured(appCtx)
     val hasWipePin: Boolean get() = PanicPinService.hasWipePin()
 
-    /** Add a wipe PIN: entering it at the lock screen erases everything. */
-    suspend fun setWipePin(pin: String): Boolean = withContext(Dispatchers.IO) { PanicPinService.setWipePin(appCtx, pin) }
+    /** Does the configured wipe PIN also erase the account server-side?
+     *  Display only — the wipe reads the flag out of the wipe slot itself. */
+    val wipeErasesServer: Boolean get() = PanicPinService.wipeErasesServer()
+
+    /** Add a wipe PIN: entering it at the lock screen erases everything on this
+     *  device, and — only when [eraseServer] is on — the account on the island
+     *  too. Default off: the flag has never existed before and every locale's
+     *  copy promises "on this device". */
+    suspend fun setWipePin(pin: String, eraseServer: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        PanicPinService.setWipePin(appCtx, pin, eraseServer)
+    }
 
     /** Remove the wipe PIN. */
     suspend fun removeWipePin(): Boolean = withContext(Dispatchers.IO) { PanicPinService.removeWipePin(appCtx) }
@@ -1744,6 +1948,16 @@ class Session(context: Context) {
      *  server-side accounts survive (recoverable later from another device if
      *  the keys were backed up); this is about the seized device. */
     suspend fun wipeEverything() = withContext(Dispatchers.IO) {
+        // Read the flag out of the WIPE SLOT that was just entered, before the
+        // vault goes. It is not in prefs on purpose: anyone holding an unlocked
+        // phone can edit prefs, and switching this off is exactly what someone
+        // who found the feature would do.
+        val alsoServer = PanicPinService.consumeWipeServer()
+        // Server-side erasure runs FIRST — it needs the tokens the local wipe
+        // is about to destroy — and is strictly best-effort with a short
+        // deadline. A duress wipe has to be instant and has to work offline, so
+        // an unreachable island must never hold the local wipe up.
+        if (alsoServer) deleteAccountsServerSide()
         runCatching { calls.teardown() }
         runCatching { audioRooms.teardown() }
         runCatching { nearby.teardown() }
@@ -1765,6 +1979,16 @@ class Session(context: Context) {
             }
             AccountManager.remove(acc.id)
         }
+        // ⚠ The decoy store is NOT a roster account, so the loop above never
+        // reaches it. Without this a duress wipe left the seeded conversations
+        // on disk under a fixed, recognisable filename that nothing can open —
+        // a fresh-install-looking app with one unexplainable encrypted database
+        // beside it, which is the opposite of what a wipe PIN is for. (iOS does
+        // this in performPanicWipe; Android had no equivalent.)
+        runCatching {
+            DecoyStore.destroy(appCtx)
+            LocalStores.clearAccount(DecoyStore.STORE_ID)
+        }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
         peerIdentityCache.clear(); noV2Peers.clear(); presenceBaselineLive = false; ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
@@ -1772,16 +1996,123 @@ class Session(context: Context) {
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
     }
 
+    /** DELETE /auth/account for every account on the roster, each against its
+     *  own island with its own token. Best-effort and time-boxed: this rides a
+     *  duress wipe, where waiting is not an option. */
+    private suspend fun deleteAccountsServerSide() {
+        // ⚠ ONE deadline for the whole thing, and the calls run in parallel.
+        // Per-account timeouts in a loop multiply: ten accounts on an island
+        // that is merely unreachable (which is exactly what a hostile network
+        // looks like) meant eighty seconds of a duress wipe not happening while
+        // someone watched the screen. The local wipe is the part that must be
+        // instant; this is the best-effort extra.
+        kotlinx.coroutines.withTimeoutOrNull(8_000) {
+            coroutineScope {
+                AccountManager.accounts.value.map { acc ->
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            val s = SecureStore(appCtx, acc.id)
+                            val token = s.token ?: return@runCatching
+                            val host = s.serverHost ?: RcqApi.DEFAULT_HOST
+                            RcqApi("https://$host", isPrimary = false).apply { setToken(token) }.deleteAccount()
+                        }.onFailure {
+                            android.util.Log.w("RCQpin", "duress server delete failed for ${acc.id}: ${it.message}")
+                        }
+                    }
+                }.forEach { it.await() }
+            }
+        }
+    }
+
     val hasDecoyPin: Boolean get() = PanicPinService.hasDecoyPin()
     fun decoyAccountId(): String? = PanicPinService.decoyAccountId()
 
-    /** Add a decoy PIN that unlocks into [decoyAccountId] and hides the other
-     *  accounts. Requires an unlocked real session + ≥2 accounts. */
-    suspend fun setDecoyPin(pin: String, decoyAccountId: String): Boolean = withContext(Dispatchers.IO) {
-        PanicPinService.setDecoyPin(appCtx, pin, decoyAccountId)
+    /** A decoy configured under the OLD model (a roster account + the real
+     *  dataKey) is still in the vault and has to be rebuilt once. */
+    val decoyNeedsMigration: Boolean get() = PanicPinService.decoyNeedsMigration()
+
+    // The one-time decoy migration screen (E). Raised after an unlock with the
+    // REAL PIN and only then: rebuilding the decoy writes the real slot, and
+    // the real slot key exists only when the real PIN was actually typed —
+    // which is exactly why a biometric unlock can never reach this screen.
+    private val _decoyMigrationDue = MutableStateFlow(false)
+    val decoyMigrationDue: StateFlow<Boolean> = _decoyMigrationDue.asStateFlow()
+
+    /** Called right after a REAL unlock. Deferrable on purpose: the old decoy
+     *  PIN keeps working until the user finishes, so nagging is the worst this
+     *  can do, and being trapped behind a modal during duress is not. */
+    fun refreshDecoyMigration() {
+        _decoyMigrationDue.value = PanicPinService.decoyNeedsMigration() && PanicPinService.canWriteRealSlot
     }
 
-    suspend fun removeDecoyPin(): Boolean = withContext(Dispatchers.IO) { PanicPinService.removeDecoyPin(appCtx) }
+    fun dismissDecoyMigration() { _decoyMigrationDue.value = false }
+
+    /** Can the decoy be (re)built right now? Needs the REAL slot key, which
+     *  only a real PIN entry produces — a biometric unlock deliberately never
+     *  holds it, so the migration screen is unreachable from one. */
+    val canRebuildDecoy: Boolean get() = PanicPinService.canWriteRealSlot
+
+    /** The 1:1 conversations that can be copied into the decoy, newest first:
+     *  peer uin -> display name. Read from what is already loaded in memory,
+     *  so this costs nothing and only ever offers threads that actually have
+     *  messages (an empty one would seed an empty decoy). */
+    fun decoySeedCandidates(): List<Pair<Int, String>> =
+        _messages.value.entries
+            .filter { it.value.isNotEmpty() }
+            .sortedByDescending { e -> e.value.maxOf { it.sentAt } }
+            .map { it.key to contactName(it.key) }
+
+    /**
+     * Build (or rebuild) the decoy: mint its own key + synthetic identity, seed
+     * its own store with copies of [peerUins]' conversations, and only then
+     * seal the duress PIN.
+     *
+     * The seeding is what makes the decoy survive being looked at, and the
+     * rewriting inside [DecoyStore.seed] is what stops it giving itself away:
+     * the copied rows carry synthetic uins, so nothing in that file points at
+     * a real person. Nothing here touches the real slot's dataKey or any
+     * existing account database.
+     */
+    suspend fun setDecoyPin(pin: String, peerUins: List<Int>): Boolean = withContext(Dispatchers.IO) {
+        val id = PanicPinService.prepareDecoyIdentity(appCtx) ?: return@withContext false
+        // Is there already a decoy slot? It decides what a refusal below may
+        // destroy: a store the existing duress PIN still opens must survive.
+        val hadDecoy = PanicPinService.hasDecoyPin()
+        val threads = peerUins.distinct().mapNotNull { uin ->
+            val msgs = _messages.value[uin].orEmpty().filter { it.groupId == null }
+            if (msgs.isEmpty()) null
+            else DecoyStore.SeedThread(realUin = uin, displayName = contactName(uin), messages = msgs)
+        }
+        // Refuse rather than seal a PIN over an empty store: every picked thread
+        // turning out to hold nothing copyable is the one case the UI's
+        // "pick at least one" check cannot see, and an empty decoy is the tell.
+        if (threads.isEmpty()) return@withContext false
+        if (!DecoyStore.seed(appCtx, id.dataKey, id.uin, threads)) return@withContext false
+        if (!PanicPinService.commitDecoyPin(appCtx, pin, id)) {
+            // The PIN was refused (too short, collides with another slot, or no
+            // free slot) and the vault is exactly as commitDecoyPin found it.
+            // If there was no decoy before, leave nothing an unlock could open.
+            // If there WAS one, its slot and key are untouched, so the store we
+            // just re-seeded is still the store that PIN opens — deleting it
+            // would take a working duress view away and leave an empty one.
+            if (!hadDecoy) DecoyStore.destroy(appCtx)
+            return@withContext false
+        }
+        true
+    }
+
+    suspend fun removeDecoyPin(): Boolean = withContext(Dispatchers.IO) {
+        val ok = PanicPinService.removeDecoyPin(appCtx)
+        // The store is only reachable with the slot we just cleared, but a file
+        // full of someone's copied conversations should not outlive the feature
+        // — nor should the plaintext prefs (unread counts, mutes) it wrote
+        // under its own namespace.
+        if (ok) {
+            DecoyStore.destroy(appCtx)
+            LocalStores.clearAccount(DecoyStore.STORE_ID)
+        }
+        ok
+    }
 
     /** File a bug report — rides the /reports queue with context=bug_bounty
      *  (iOS parity; target is self, which the backend allows for bug_bounty).
@@ -1910,15 +2241,85 @@ class Session(context: Context) {
 
     fun disableBiometric() = PanicPinService.disableBiometric(appCtx)
 
-    /** After a DECOY submit at the lock screen: switch the active account to the
-     *  decoy + filter the roster down to it, so the real accounts stay hidden.
-     *  The dataKey is already set (the decoy slot carries the real one). */
+    /** After a DECOY submit at the lock screen.
+     *
+     *  Two shapes, decided by the slot that just opened:
+     *   - LEGACY (a vault written before the decoy got its own store): the slot
+     *     names a roster account and carries the REAL dataKey, so we do exactly
+     *     what we always did. These keep working untouched until the user
+     *     passes the one-time migration screen — a duress PIN that stops
+     *     working under coercion is worse than an out-of-date one.
+     *   - MIGRATED: there is no roster account. We raise the decoy's own store
+     *     under its own key, present its synthetic identity, and never connect. */
     suspend fun applyDecoyUnlock() {
-        val decoyId = PanicPinService.consumeDecoyAccountId() ?: return
-        AccountManager.enterDecoyMode(decoyId)                  // hide the real accounts FIRST
-        if (AccountManager.activeId.value == decoyId) start()   // already active; just bring it up
-        else switchToAccount(decoyId)                           // disconnect + rebind + start
-        PanicPinService.completeUnlock()                        // only now reveal the (decoy) UI
+        val legacyId = PanicPinService.consumeDecoyAccountId()
+        if (legacyId != null) {
+            AccountManager.enterDecoyMode(legacyId)                  // hide the real accounts FIRST
+            if (AccountManager.activeId.value == legacyId) start()   // already active; just bring it up
+            else switchToAccount(legacyId)                           // disconnect + rebind + start
+            PanicPinService.completeUnlock()                         // only now reveal the (decoy) UI
+            return
+        }
+        if (!PanicPinService.inDecoySession) return
+        startDecoySession()
+    }
+
+    /** Raise the duress view: the decoy store, the decoy identity, and nothing
+     *  else. Deliberately offline — the decoy has no server account to speak
+     *  for it, and a socket opened here would be the real account's. Presence
+     *  reads as connected (iOS parity) so the view doesn't advertise itself
+     *  with a permanent "Connecting…". */
+    private suspend fun startDecoySession() {
+        calls.teardown()
+        audioRooms.teardown()
+        nearby.teardown()
+        hood.teardown()
+        radio.teardown()
+        socket.disconnect()
+        decoySessionUin = PanicPinService.decoySessionUin() ?: DecoyStore.randomUin()
+        decoySessionNickname = PanicPinService.decoySessionNickname() ?: DecoyStore.randomNickname()
+        // Everything the real session had in memory goes, before a single
+        // frame of the duress view is drawn.
+        _contacts.value = emptyList()
+        _pending.value = emptyList()
+        _outgoing.value = emptyList()
+        _messages.value = emptyMap()
+        _groups.value = emptyList()
+        _groupMessages.value = emptyMap()
+        _stories.value = emptyList()
+        _devices.value = null
+        _ownAvatar.value = null
+        backupHomes.value = emptyList()
+        activeRandomPeer = null
+        activeRandomPairId = null
+        _randomMessages.value = emptyList()
+        _random.value = RandomState.Idle
+        _typingFrom.value = null
+        activeThread = null
+        // Unread counts, mutes and the roster cache are per-account prefs and
+        // are NOT encrypted. Point them at the decoy's own namespace so the
+        // duress session never writes a synthetic uin into the real account's
+        // slots — and never reads the real account's out.
+        LocalStores.bindAccount(DecoyStore.STORE_ID)
+        // Nothing from the roster may be shown: every entry in it is a real
+        // account, and the decoy is not one of them.
+        AccountManager.enterDecoySession()
+        withContext(Dispatchers.IO) {
+            runCatching {
+                bindDb(DecoyStore.STORE_ID)
+                loadMessagesFromDb()
+                _contacts.value = DecoyStore.contacts(db)
+            }.onFailure {
+                _dbLocked.value = true
+                android.util.Log.e("RCQ", "decoy history unavailable", it)
+            }
+        }
+        // start() must never run for this session: it would read the REAL
+        // account's uin + token out of `store` and connect with them.
+        started = true
+        everConnected = false
+        _connected.value = true
+        PanicPinService.completeUnlock()
     }
 
     /** Wipe local message history (both 1:1 and group threads) without
@@ -2925,6 +3326,7 @@ class Session(context: Context) {
 
     /** Decrypt + store an inbound group message under its group thread. */
     private fun ingestGroup(payloadB64: String, groupId: Int) {
+        if (duressViewUp) return   // see ingest(): `db` is the duress store here
         runCatching {
             val me = store.uin ?: return
             val dec = decryptInbound(payloadB64)
@@ -4236,6 +4638,9 @@ class Session(context: Context) {
     }
 
     private fun ingest(payloadB64: String) {
+        // Last line of defence: in a migrated decoy session `db` is the duress
+        // store, and a real message written there is a real message lost.
+        if (duressViewUp) return
         runCatching {
             val dec = decryptInbound(payloadB64)
             // Removed contacts are silently dropped — sealed sender means
@@ -4432,6 +4837,7 @@ class Session(context: Context) {
     }
 
     private suspend fun drainQueue() {
+        if (duressViewUp) return   // acking the real account's queue from the decoy view loses it
         CrashReporter.crumb(appCtx, "drain_queue")
         // ack=1 protocol: the server holds each row until we confirm we ingested
         // it. Collect the ids that made it through ingest, then ack them; a lost

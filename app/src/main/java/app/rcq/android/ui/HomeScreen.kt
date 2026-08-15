@@ -337,8 +337,22 @@ internal fun HomeScreen(
     // the account switcher never reveals the hidden real accounts.
     val accountList by app.rcq.android.data.AccountManager.visibleAccounts.collectAsState(initial = app.rcq.android.data.AccountManager.visibleNow())
     val activeId by app.rcq.android.data.AccountManager.activeId.collectAsState()
-    val accountRows = remember(accountList, activeId, session.nickname) {
-        accountList.sortedBy { it.createdAt }.map { a ->
+    // A migrated decoy session has no roster entry at all (the decoy is not an
+    // account), so the switcher is built from the session's own synthetic
+    // identity instead. Without this the switcher would be empty while the
+    // header showed a name, which is the kind of inconsistency the duress view
+    // exists to avoid.
+    val inOwnStoreDecoy = session.inDecoySession
+    val accountRows = remember(accountList, activeId, session.nickname, inOwnStoreDecoy) {
+        if (inOwnStoreDecoy) listOf(
+            AccountRow(
+                id = app.rcq.android.data.DecoyStore.STORE_ID,
+                nickname = session.nickname,
+                uin = session.uin,
+                host = app.rcq.android.net.RcqApi.DEFAULT_HOST,
+                active = true,
+            )
+        ) else accountList.sortedBy { it.createdAt }.map { a ->
             AccountRow(
                 id = a.id,
                 nickname = app.rcq.android.data.SecureStore.peekNickname(context, a.id) ?: "—",
@@ -374,7 +388,7 @@ internal fun HomeScreen(
                 bypassManual = bypassManual,
                 onUpdateBadge = onUpdateBadge,
                 accounts = accountRows,
-                canAddAccount = accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
+                canAddAccount = !inOwnStoreDecoy && accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
                 onPickStatus = { scope.launch { session.setStatus(it) } },
                 onAddContact = { showAdd = true },
                 onSearch = { showSearch = true },
