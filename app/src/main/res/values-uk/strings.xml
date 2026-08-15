@@ -890,6 +890,7 @@
     <string name="chat_play_audio">Слухати аудіо</string>
     <string name="chat_pause_audio">Пауза</string>
     <string name="chat_play_video">Дивитися відео</string>
+    <string name="chat_pause_video">Пауза</string>
     <string name="chat_prev_photo">Фото</string>
     <string name="chat_prev_file">Файл</string>
     <string name="chat_prev_voice">Голосове повідомлення</string>

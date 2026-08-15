@@ -141,6 +141,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -308,6 +310,33 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var whoReactedMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var editMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var replyTarget by remember { mutableStateOf<ChatMessage?>(null) }
+    // Choosing "reply" (swipe or the message menu) has to bring the keyboard up
+    // together with the reply chip. It used to only set `replyTarget`, so the
+    // chip appeared over a composer nobody was focused on and you had to tap
+    // the input field before you could type the answer.
+    val composerFocus = remember { FocusRequester() }
+    // A counter, not a boolean: replying twice in a row must fire the effect
+    // twice, and the second reply would not change a boolean that is already
+    // true. Bumped by `startReply` below.
+    var replyFocusTick by remember { mutableStateOf(0) }
+    val startReply: (ChatMessage) -> Unit = { m ->
+        replyTarget = m
+        replyFocusTick++
+    }
+    LaunchedEffect(replyFocusTick) {
+        if (replyFocusTick > 0) {
+            // The message-action sheet is still on screen on the frame "Reply"
+            // is tapped, and focus cannot land on the composer while the sheet
+            // owns the window. Wait for the composition that removes it (and
+            // the one that adds the reply chip) before asking.
+            withFrameNanos {}
+            withFrameNanos {}
+            // Read-only channels render no composer at all, so the requester
+            // has nothing to focus — that is a no-op, not a crash.
+            runCatching { composerFocus.requestFocus() }
+            exitKeyboard?.show()
+        }
+    }
     var attachMenu by remember { mutableStateOf(false) }
     var showPollComposer by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
@@ -323,6 +352,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var showRelayPicker by remember { mutableStateOf(false) }
     // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
     var fullscreenImage by remember { mutableStateOf<ByteArray?>(null) }
+    // ...and of a video. Same shape on purpose: the player reads the DECRYPTED
+    // BYTES and never a URL, so a received clip is watched here rather than
+    // being written out as plaintext for whatever player happens to be
+    // installed to open (see VideoViewer.kt).
+    var fullscreenVideo by remember { mutableStateOf<ByteArray?>(null) }
     val listState = rememberLazyListState()
 
     // Share / save media to device (report #6 — Android couldn't share/download
@@ -873,29 +907,38 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
                 Text(sub, color = if (isTyping) c.accent else c.textSecondary, fontSize = 12.sp)
             }
-            // Chat actions live in an overflow menu (iOS parity) instead of
-            // loose header icons: calls (1:1, gated on the peer's call_policy)
-            // + search. Own click consumes the tap so the header's open-info
-            // click doesn't also fire.
+            // Calling somebody was two taps and a menu you had to know about.
+            // The web client has always had the phone and the camera straight
+            // in the header, and a call is the one chat action worth a
+            // permanent target — so they come out of the overflow menu and sit
+            // next to it. Same gate as the menu items had, unchanged: 1:1 only,
+            // never the Saved-messages thread, and the PEER's call_policy (do
+            // THEY accept calls from us) rather than our own setting.
             val canCall = !isGroup && !isSelf && peer != null && peerContact?.callable != false
+            if (canCall) {
+                Icon(
+                    Icons.Filled.Call, stringResource(R.string.call_voice_cd), tint = c.accent,
+                    modifier = Modifier.size(24.dp).clip(CircleShape)
+                        .clickable { placeCall(app.rcq.android.call.CallController.Media.AUDIO) },
+                )
+                Spacer(Modifier.width(14.dp))
+                Icon(
+                    Icons.Filled.Videocam, stringResource(R.string.call_video_cd), tint = c.accent,
+                    modifier = Modifier.size(24.dp).clip(CircleShape)
+                        .clickable { placeCall(app.rcq.android.call.CallController.Media.VIDEO) },
+                )
+                Spacer(Modifier.width(14.dp))
+            }
+            // Everything else stays in the overflow menu. Own click consumes
+            // the tap so the header's open-info click doesn't also fire.
             Box {
                 Icon(
                     Icons.Filled.MoreVert, stringResource(R.string.chat_menu_cd), tint = c.accent,
                     modifier = Modifier.size(24.dp).clip(CircleShape).clickable { chatMenu = true },
                 )
                 DropdownMenu(expanded = chatMenu, onDismissRequest = { chatMenu = false }) {
-                    if (canCall) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.call_voice_cd), color = c.textPrimary) },
-                            leadingIcon = { Icon(Icons.Filled.Call, null, tint = c.accent) },
-                            onClick = { chatMenu = false; placeCall(app.rcq.android.call.CallController.Media.AUDIO) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.call_video_cd), color = c.textPrimary) },
-                            leadingIcon = { Icon(Icons.Filled.Videocam, null, tint = c.accent) },
-                            onClick = { chatMenu = false; placeCall(app.rcq.android.call.CallController.Media.VIDEO) },
-                        )
-                    }
+                    // No call entries here any more — they are the two icons to
+                    // the left. Leaving both would give one action two homes.
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_search_hint), color = c.textPrimary) },
                         leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.accent) },
@@ -1023,7 +1066,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             SystemNoticeRow(m)
                         } else {
                             val senderPic = if (row.showSender) authorMember(m) else null
-                            SwipeToReply(side = swipeSide, onReply = { replyTarget = m }) {
+                            SwipeToReply(side = swipeSide, onReply = { startReply(m) }) {
                             MessageBubble(
                                 session, m,
                                 senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
@@ -1034,6 +1077,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 onLongPress = { actionMsg = m },
                                 onOpenGroup = onOpenGroup,
                                 onViewImage = { fullscreenImage = it },
+                                onViewVideo = { fullscreenVideo = it },
                                 mentionNick = mentionNick,
                                 onMentionClick = onMentionClick,
                                 mentionMatch = mentionMatch,
@@ -1052,6 +1096,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         senderAvatarKey = if (row.showSender) authorMember(row.items.first())?.avatarMediaKey else null,
                         onLongPress = { actionMsg = row.items.first() },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
+                        onViewImage = { fullscreenImage = it },
+                        onViewVideo = { fullscreenVideo = it },
                     )
                 }
             }
@@ -1255,6 +1301,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
             Composer(
                 threadKey = threadKey,
+                focusRequester = composerFocus,
                 isGroup = isGroup,
                 members = group?.members ?: emptyList(),
                 ownUin = ownUin,
@@ -1304,6 +1351,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             },
             onDismiss = { fullscreenImage = null },
+        )
+    }
+
+    fullscreenVideo?.let { bytes ->
+        FullscreenVideoViewer(
+            bytes,
+            onShare = { MediaSaver.share(context, it, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4") },
+            onSave = {
+                runSave {
+                    val ok = MediaSaver.saveToGallery(context, it, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4")
+                    val msg = if (ok) context.getString(R.string.media_saved_to, "Movies/RCQ") else saveFailToast
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            // A codec this device cannot decode is still worth watching
+            // somewhere: fall back to the old behaviour rather than to a black
+            // rectangle. This is the ONLY path that writes a decrypted clip out.
+            onUnsupported = { openFile(context, it, "video-${System.currentTimeMillis()}.mp4", "video/mp4") },
+            onDismiss = { fullscreenVideo = null },
         )
     }
 
@@ -1398,7 +1464,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             ) { AnimatedEmoticon(asset, Modifier.size(32.dp)) }
                         }
                     }
-                    MessageAction(stringResource(R.string.chat_reply)) { replyTarget = m; actionMsg = null }
+                    MessageAction(stringResource(R.string.chat_reply)) { startReply(m); actionMsg = null }
                     if (m.kind == "photo" || m.kind == "video" || m.kind == "file" || m.kind == "voice") {
                         MessageAction(stringResource(R.string.media_share)) { shareMessageMedia(m); actionMsg = null }
                         MessageAction(stringResource(R.string.media_save)) { saveMessageMedia(m); actionMsg = null }
@@ -1459,12 +1525,32 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             Box(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgPrimary).padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
+                // ⚠⚠ `maxLines`, NOT `heightIn(max).verticalScroll()`. The two look
+                // identical — an 8-line box you can scroll — and only one of them
+                // follows the caret.
+                //
+                // An external `verticalScroll` measures its child with an INFINITE
+                // height, so the field lays itself out at its full height, never
+                // clips, and its own caret-following scroll has nothing to do. The
+                // outer scroller, for its part, knows about a text field but not
+                // about a caret inside one, so it stays where it is. Result: the box
+                // shows the first eight lines of the message for ever and you type
+                // line nine blind — founder, "не видно что печатаешь, когда длинное
+                // сообщение".
+                //
+                // `maxLines` bounds the field from the inside (Compose turns it into
+                // a height constraint on the text itself), which switches on the
+                // field's built-in scroll — the one that exists precisely to keep the
+                // caret in view. Same visible box, and now it follows you down.
+                // This is what the chat composer has always done; the edit field was
+                // the one place that grew its own scroller instead.
                 BasicTextField(
                     value = editValue,
                     onValueChange = { editValue = it },
                     textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
                     cursorBrush = SolidColor(c.accent),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             SheetGap()
@@ -1633,7 +1719,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             messages = messages,
             onClose = { showAllMedia = false },
             onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = it } },
-            onOpenVideo = { m -> mediaBytes(m) { openFile(context, it, "video-${m.id}.mp4", "video/mp4") } },
+            onOpenVideo = { m -> mediaBytes(m) { fullscreenVideo = it } },
         )
     }
     if (confirmClearThread) {
@@ -1672,6 +1758,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 @Composable
 private fun Composer(
     threadKey: String,
+    // Owned by ChatScreen so choosing "reply" can put the caret in here and
+    // raise the keyboard without the user tapping the field first.
+    focusRequester: FocusRequester,
     isGroup: Boolean,
     members: List<app.rcq.android.model.GroupMember>,
     ownUin: Int,
@@ -1841,7 +1930,8 @@ private fun Composer(
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
                         keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                         maxLines = 5,
-                        modifier = Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) showEmoji = false },
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
+                            .onFocusChanged { if (it.isFocused) showEmoji = false },
                     )
                 }
             }
@@ -2618,7 +2708,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (ByteArray) -> Unit = {}) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -2637,7 +2727,7 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
                 Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
         }
-        AlbumGrid(session, items, onLongPress)
+        AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo)
         items.firstOrNull { it.body.isNotEmpty() }?.let { cap ->
             EmoticonText(
                 cap.body, color = c.textPrimary, fontSize = 14.sp,
@@ -2658,7 +2748,13 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumGrid(session: Session, items: List<ChatMessage>, onLongPress: () -> Unit) {
+private fun AlbumGrid(
+    session: Session,
+    items: List<ChatMessage>,
+    onLongPress: () -> Unit,
+    onViewImage: (ByteArray) -> Unit = {},
+    onViewVideo: (ByteArray) -> Unit = {},
+) {
     val maxW = 240.dp
     val sp = 3.dp
     val half = (maxW - sp) / 2f
@@ -2667,25 +2763,25 @@ private fun AlbumGrid(session: Session, items: List<ChatMessage>, onLongPress: (
         val gridMod = Modifier.clip(RoundedCornerShape(12.dp))
         when (count) {
             2 -> Row(gridMod, horizontalArrangement = Arrangement.spacedBy(sp)) {
-                AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress)
-                AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress)
+                AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
+                AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
             }
             3 -> Column(gridMod, verticalArrangement = Arrangement.spacedBy(sp)) {
-                AlbumTile(session, items[0], maxW, maxW * 0.55f, onLongPress)
+                AlbumTile(session, items[0], maxW, maxW * 0.55f, onLongPress, onViewImage, onViewVideo)
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[1], half, maxW * 0.385f, onLongPress)
-                    AlbumTile(session, items[2], half, maxW * 0.385f, onLongPress)
+                    AlbumTile(session, items[1], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo)
+                    AlbumTile(session, items[2], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo)
                 }
             }
             else -> Column(gridMod, verticalArrangement = Arrangement.spacedBy(sp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress)
-                    AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress)
+                    AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
+                    AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[2], half, maxW * 0.5f, onLongPress)
+                    AlbumTile(session, items[2], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
                     Box(contentAlignment = Alignment.Center) {
-                        AlbumTile(session, items[3], half, maxW * 0.5f, onLongPress)
+                        AlbumTile(session, items[3], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
                         if (items.size > 4) {
                             Box(
                                 Modifier.size(half, maxW * 0.5f).background(Color.Black.copy(alpha = 0.5f)),
@@ -2704,9 +2800,16 @@ private fun AlbumGrid(session: Session, items: List<ChatMessage>, onLongPress: (
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPress: () -> Unit) {
+private fun AlbumTile(
+    session: Session,
+    m: ChatMessage,
+    w: Dp,
+    h: Dp,
+    onLongPress: () -> Unit,
+    onViewImage: (ByteArray) -> Unit = {},
+    onViewVideo: (ByteArray) -> Unit = {},
+) {
     val c = RcqTheme.colors
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isVideo = m.kind == "video"
     val photo by produceState<ByteArray?>(initialValue = null, m.id) {
@@ -2726,10 +2829,12 @@ private fun AlbumTile(session: Session, m: ChatMessage, w: Dp, h: Dp, onLongPres
             onClick = {
                 val mid = m.mediaId; val key = m.mediaKey
                 if (mid != null && key != null) scope.launch {
-                    val bytes = session.fetchImage(mid, key)
+                    // An album tile used to hand BOTH kinds to an external app,
+                    // so the same photo opened in-app from a single bubble and
+                    // in the gallery app from an album. Both stay in-app now.
+                    val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
                     if (bytes != null) {
-                        if (isVideo) openFile(context, bytes, "video-${m.id}.mp4", "video/mp4")
-                        else openFile(context, bytes, "photo-${m.id}.jpg", "image/jpeg")
+                        if (isVideo) onViewVideo(bytes) else onViewImage(bytes)
                     }
                 }
             },
@@ -2841,7 +2946,7 @@ private fun SwipeToReply(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -2907,7 +3012,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
         } else if (m.kind == "file") {
             FileBubble(session, m, onLongPress)
         } else if (m.kind == "video") {
-            VideoBubble(session, m, onLongPress)
+            VideoBubble(session, m, onLongPress, onViewVideo)
             if (m.body.isNotEmpty()) {
                 EmoticonText(
                     m.body, color = c.textPrimary, fontSize = 14.sp,
@@ -3165,8 +3270,10 @@ private fun FullscreenImageViewer(
 
 /// One control of the full-screen media viewer: a white glyph on a dark disc,
 /// so it stays readable whatever the photo underneath happens to be.
+/// Shared with the video viewer (VideoViewer.kt) — the two must not drift into
+/// two different-looking sets of buttons.
 @Composable
-private fun ViewerAction(
+internal fun ViewerAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     modifier: Modifier = Modifier,
@@ -3393,9 +3500,8 @@ private fun VoiceBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit) {
+private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit, onView: (ByteArray) -> Unit = {}) {
     val c = RcqTheme.colors
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var revealed by remember(m.id) { mutableStateOf(false) }
     val hidden = m.spoiler && !revealed
@@ -3420,8 +3526,13 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                     if (hidden) { revealed = true; return@combinedClickable }
                     val mid = m.mediaId; val key = m.mediaKey
                     if (mid != null && key != null) scope.launch {
+                        // Decrypt, then hand the BYTES to the in-app player.
+                        // This used to write the plaintext clip into the shared
+                        // FileProvider cache and fire an ACTION_VIEW chooser,
+                        // which meant a private video left the app the moment
+                        // you watched it.
                         val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
-                        if (bytes != null) openFile(context, bytes, "video-${m.id}.mp4", "video/mp4")
+                        if (bytes != null) onView(bytes)
                     }
                 },
                 onLongClick = onLongPress,

@@ -890,6 +890,7 @@
     <string name="chat_play_audio">Sesi çal</string>
     <string name="chat_pause_audio">Duraklat</string>
     <string name="chat_play_video">Videoyu oynat</string>
+    <string name="chat_pause_video">Videoyu duraklat</string>
     <string name="chat_prev_photo">Fotoğraf</string>
     <string name="chat_prev_file">Dosya</string>
     <string name="chat_prev_voice">Sesli mesaj</string>

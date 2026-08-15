@@ -890,6 +890,7 @@
     <string name="chat_play_audio">播放音频</string>
     <string name="chat_pause_audio">暂停</string>
     <string name="chat_play_video">播放视频</string>
+    <string name="chat_pause_video">暂停视频</string>
     <string name="chat_prev_photo">照片</string>
     <string name="chat_prev_file">文件</string>
     <string name="chat_prev_voice">语音消息</string>

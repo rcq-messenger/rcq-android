@@ -285,6 +285,14 @@ class RcqApi(
         // Null unless we are a mutual contact of theirs (or it is our own row).
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
+        // Real name, ONLY while the account's profile is "everyone" — the
+        // island blanks both fields otherwise, on this endpoint and on search.
+        // The island has always sent these; we simply threw them away, which is
+        // why two accounts that share an auto-generated nickname
+        // ("user-5835" — four random digits, so collisions are routine) looked
+        // like the same person in the Add sheet.
+        val first_name: String? = null,
+        val last_name: String? = null,
     )
 
     suspend fun userInfo(uin: Int): UserInfo = withContext(Dispatchers.IO) {
