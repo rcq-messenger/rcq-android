@@ -268,6 +268,9 @@ object NetworkAudit {
         //    healthy network it would just be noise in the report.
         var carriersOpen = 0
         var carrierNames = ""
+        /// Carrier address probed under OUR name: tells "the address is allowed"
+        /// from "only that service is allowed". Null when no carrier answered.
+        var carrierOurName: Pair<Reach, String>? = null
         // ⚠ Measured on EVERY run, not only when the island is unreachable.
         // Somebody whose island answers fine still turns the bypass on, and on
         // a network that blocks UDP the Hysteria2 half of the pool cannot carry
@@ -286,10 +289,12 @@ object NetworkAudit {
         }
         if (direct.first != Reach.OPEN) {
             val reachable = ArrayList<String>()
+            var firstCarrierIp: String? = null
             for (c in CARRIERS) {
                 if (probe(c, 443, c, timeoutMs = 4000).first != Reach.BLOCKED) {
                     carriersOpen++
                     reachable += c.substringBefore('.')
+                    if (firstCarrierIp == null) firstCarrierIp = resolve(c)
                 }
             }
             carrierNames = reachable.joinToString("+")
@@ -299,6 +304,29 @@ object NetworkAudit {
                 if (carriersOpen > 0) "$carriersOpen из ${CARRIERS.size} отвечают ($carrierNames)"
                 else "ни одно из ${CARRIERS.size} не отвечает",
             )
+            // ⚠⚠ The question the line above does NOT answer, and the one that
+            // decides whether renting a machine in that cloud is worth anything:
+            // is the ADDRESS permitted, or only that service's own name on it?
+            //
+            // "storage.yandexcloud.net answers" proves the filter admits THAT
+            // endpoint. A VM we rent in the same cloud has a different address,
+            // and under a per-IP whitelist it would be as dead as our own. So
+            // re-probe the carrier's address while claiming OUR name: if the
+            // connection still stands, the permission follows the address and a
+            // machine standing in that range works. If it dies, the permission
+            // follows the service, and the only way in is to ride INSIDE it.
+            //
+            // Same shape as the xname/xaddr pair above, which is what tells
+            // BY_NAME from BY_ADDRESS in the first place.
+            carrierOurName = firstCarrierIp?.let { probe(it, 443, islandHost, timeoutMs = 4000) }
+            carrierOurName?.let {
+                lines += Line(
+                    "адрес облака + наше имя",
+                    it.first != Reach.BLOCKED,
+                    if (it.first != Reach.BLOCKED) "проходит: разрешён АДРЕС, машина в этом облаке заработает"
+                    else "не проходит: разрешён только сам сервис, аренда машины там не поможет",
+                )
+            }
         }
 
         // ⚠⚠ The relay that carries call MEDIA, tested the way calls reach it:
@@ -393,9 +421,10 @@ object NetworkAudit {
         // One line, short enough to retype off a screen if it comes to that.
         val compact = buildString {
             // Bumped to /2 when the carrier + udp fields were added, /3 when the
-            // last-call fields were: a line without them is from an older build,
-            // not from a network that lacked them.
-            append("RCQ-NET/3 ")
+            // last-call fields were, /4 for `cip` (carrier address under our
+            // name): a line without them is from an older build, not from a
+            // network that lacked them.
+            append("RCQ-NET/4 ")
             append(if (controlOk) "ctl:ok " else "ctl:dead ")
             append("dns:${if (islandIp != null) "ok" else "fail"} ")
             append("dir:${short(direct.first)} ")
@@ -418,6 +447,10 @@ object NetworkAudit {
             if (direct.first != Reach.OPEN) {
                 append("carrier:$carriersOpen/${CARRIERS.size}")
                 if (carrierNames.isNotEmpty()) append("($carrierNames)")
+                // The half of the carrier answer that decides whether renting a
+                // machine in that cloud is worth the money. `cip:ok` = the
+                // address is permitted; `cip:block` = only the service is.
+                carrierOurName?.let { append("/cip:${short(it.first)}") }
                 append(" ")
             }
             append("=> ${verdict.name}")
