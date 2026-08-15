@@ -904,6 +904,28 @@ private fun RcqApp(session: Session) {
             }
         }
 
+        // ⚠ DEEP LINKS ARE DROPPED IN A DURESS SESSION.
+        //
+        // Every dialog below acts FOR THE REAL ACCOUNT: `rcq://link` hands a
+        // browser web access to it (the whole history), `rcq://add` and
+        // `/u/<uin>` fire a contact request under the real uin, `rcq://server`
+        // and `rcq://group` join with the real identity. All of them are
+        // reachable by a coercer WITHOUT touching RCQ's own UI — a QR code, a
+        // link in another app, a scanned invite — so the in-app gating done
+        // elsewhere never sees them.
+        //
+        // Cleared rather than merely hidden, so nothing fires the moment the
+        // real session comes back. A link that does nothing is what a link
+        // looks like on a phone with no network.
+        if (session.inDecoySession) {
+            LaunchedEffect(Unit) {
+                ServerJoinLink.pending.value = null
+                WebLinkRequest.pending.value = null
+                ContactAddLink.pending.value = null
+                GroupJoinLink.pending.value = null
+            }
+        }
+
         // Server-join from a scanned rcq://server/<host>?invite=<code> deep link:
         // confirm, then register a fresh account on that host with the invite.
         val joinReq by ServerJoinLink.pending.collectAsState()

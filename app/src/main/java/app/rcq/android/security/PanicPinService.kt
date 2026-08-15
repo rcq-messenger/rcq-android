@@ -20,6 +20,37 @@ import kotlinx.coroutines.flow.asStateFlow
  * routes a wipe-slot match to [SubmitResult.WIPE], so adding those modes later
  * won't reshuffle the vault.
  */
+/**
+ * One process-wide latch: "a duress session is up, no request may leave this
+ * device carrying the real identity".
+ *
+ * Clearing screens is not enough. A MIGRATED decoy session deliberately keeps
+ * `Session.store` — and therefore `Session.api` and its bearer token — pointed
+ * at the REAL account while only the SQLCipher file and the per-account stores
+ * move. [Session.duressViewUp] already refuses the paths that were known to
+ * matter (the route watchdog, both queue drains, the mute sync, the cross-island
+ * refreshes), but every OTHER caller of `api` still authenticates as the real
+ * user: the profile editor, linked devices, my numbers, my reports, the UIN
+ * shop, an avatar upload, a story post. Some of those WRITE.
+ *
+ * So the gate sits under the HTTP clients themselves and refuses. An IOException
+ * is what every one of those paths already handles as "no network", which is
+ * what the duress view claims to be anyway.
+ *
+ * ⚠ Deliberately narrower than [PanicPinService.inDecoySession]: a LEGACY decoy
+ * is a genuine roster account with its own credentials, and muting it would
+ * break a configuration that is still in the field.
+ */
+object DuressGate {
+    val isActive: Boolean
+        get() = PanicPinService.inDecoySession && !PanicPinService.decoyIsLegacy
+
+    /** Call immediately before dispatching an HTTP request. */
+    fun check() {
+        if (isActive) throw java.io.IOException("offline")
+    }
+}
+
 object PanicPinService {
     enum class SubmitResult { REAL, DECOY, WIPE, WRONG, LOCKED_OUT }
 

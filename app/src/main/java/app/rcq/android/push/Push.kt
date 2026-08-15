@@ -612,6 +612,26 @@ object Push {
         }
     }
 
+    /**
+     * Drop every message notification already sitting in the shade.
+     *
+     * ⚠ Suppressing NEW wakes does nothing about the ones delivered BEFORE the
+     * phone changed hands: real names and real message previews, one pull of
+     * the shade away, without the coercer touching the app at all. Called on
+     * entering a duress session. Call notifications are left alone — those are
+     * cancelled by their own lifecycle and an orphaned ringer would be worse.
+     */
+    fun clearDeliveredMessages(ctx: Context) {
+        runCatching {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            for (n in nm.activeNotifications) {
+                if (n.id != CALL_NOTIF_ID && n.id != ONGOING_CALL_NOTIF_ID) {
+                    runCatching { NotificationManagerCompat.from(ctx).cancel(n.id) }
+                }
+            }
+        }
+    }
+
     /** Build + post a wake notification for a {type:"msg"} push payload. */
     fun showMessage(ctx: Context, json: JsonObject) {
         ensureChannels(ctx)
@@ -707,12 +727,25 @@ object Push {
             }
         }
 
+        // ⚠ [PushEnvelope.open] REFUSING IS NOT ENOUGH. It only stops us
+        // decrypting; the wake ALSO carries server-set strings, and they are
+        // real identities: `group_name` is the real group's name, and `title`
+        // is the sender's nickname for every kind the server can label. So a
+        // locked or coerced phone still put a real group and a real name on the
+        // lock screen without anyone touching it — `opened` was null the whole
+        // time and the fallbacks did the leaking.
+        val quiet = app.rcq.android.security.PanicPinService.isLocked ||
+            app.rcq.android.security.DuressGate.isActive
         val title = when {
+            quiet -> ctx.getString(R.string.app_name)
             groupName != null -> groupName
             opened != null && !opened.quarantined -> opened.senderName
             else -> str("title") ?: ctx.getString(R.string.app_name)
         }
         val body = when {
+            // Generic on purpose, and NOT the server's `body` either — that is
+            // the message text on an older backend.
+            quiet -> ctx.getString(R.string.push_new_message)
             opened?.preview == null || opened.quarantined -> str("body") ?: ctx.getString(
                 if (isGroup) R.string.push_new_group_message else R.string.push_new_message,
             )
@@ -898,6 +931,13 @@ object Push {
         if (str("kind") == "end") { dismissIncomingCall(ctx, callId); return }
         val sdp = str("sdp") ?: return
         val fromUin = json.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
+        // ⚠ A REAL PERSON'S NAME, FULL SCREEN, WITHOUT ANYONE TOUCHING THE
+        // PHONE. The payload carries the caller's nickname and this raises a
+        // full-screen intent with it, so a call landing during a duress session
+        // announced a real contact over the decoy view — and answering would
+        // have opened the real account's media path. Dropped entirely: a call
+        // that never rings reads as one the caller cancelled.
+        if (app.rcq.android.security.DuressGate.isActive) return
         ensureChannels(ctx)
         val nickname = str("nickname") ?: "#$fromUin"
         val media = str("media") ?: "video"

@@ -69,6 +69,10 @@ object CrossIslandSender {
      * the island and it answered, which the tunnel would not change.
      */
     private fun <T> viaBestRoute(host: String, call: (OkHttpClient) -> T): T {
+        // Everything here is addressed FROM the real uin and signed with the
+        // real key: §5e profile broadcasts, sealed deposits to foreign islands,
+        // contact-request cards. See [DuressGate].
+        app.rcq.android.security.DuressGate.check()
         if (host in needsTunnel && SingBoxTransport.engageForBlockedDestination(host)) {
             return call(http())
         }

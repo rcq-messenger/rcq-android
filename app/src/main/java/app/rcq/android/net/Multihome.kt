@@ -53,6 +53,10 @@ object Multihome {
      *  tunnel). Direct (unchanged) when the transport is off. The RcqApi-based
      *  paths here are already proxy-aware; this covers the raw-client calls. */
     private fun http(): OkHttpClient {
+        // Called immediately before every raw cross-island call here (backup
+        // homes, guest registrations, the signed home-island record). All of it
+        // proves possession of the REAL signing key. See [DuressGate].
+        app.rcq.android.security.DuressGate.check()
         val p = SingBoxTransport.proxy() ?: return baseClient
         return proxiedClient ?: baseClient.newBuilder().proxy(p).build().also { proxiedClient = it }
     }

@@ -249,7 +249,12 @@ class Session(context: Context) {
         scope = scope,
         api = { api },
         send = { obj -> socket.send(obj.toString()) },
-        nick = { if (nearby.anonymous.value) nearby.displayName.value else (store.nickname ?: store.uin?.toString() ?: "?") },
+        // Same reason as the radio callsign below: `store` is the REAL account
+        // in a migrated decoy session, so with the anonymous toggle off this
+        // signed the duress session's hood messages with the real nickname.
+        // The hood itself is refused by the DuressGate (it is server-backed),
+        // but the label must not be the real one on any path.
+        nick = { if (nearby.anonymous.value) nearby.displayName.value else (nickname.takeIf { it != "—" } ?: uin?.toString() ?: "?") },
         isAnonymous = { nearby.anonymous.value },
     )
 
@@ -258,7 +263,14 @@ class Session(context: Context) {
     val radio = app.rcq.android.nearby.RadioController(
         appContext = appCtx,
         scope = scope,
-        displayName = { if (nearby.anonymous.value) nearby.displayName.value else (store.nickname ?: store.uin?.toString() ?: "Stranger") },
+        // ⚠ `nickname`/`uin`, NOT `store.nickname`/`store.uin`. In a migrated
+        // decoy session `store` is still the REAL account, so with the
+        // anonymous toggle off this lambda put the REAL nickname (or the real
+        // number) into every radio advertisement, roster frame and voice frame
+        // — broadcast over Bluetooth and Wi-Fi Direct to everyone in range,
+        // from a phone that is supposed to belong to nobody. The Session-level
+        // accessors already prefer the decoy identity.
+        displayName = { if (nearby.anonymous.value) nearby.displayName.value else (nickname.takeIf { it != "—" } ?: uin?.toString() ?: "Stranger") },
     )
 
     private val _contacts = MutableStateFlow<List<Contact>>(emptyList())
@@ -713,14 +725,29 @@ class Session(context: Context) {
 
     /** The active account's 24-word recovery phrase, or null for a legacy
      *  account whose keys predate seed-derivation (use [legacyExportPhrase]). */
-    fun recoveryPhrase(): List<String>? =
-        store.recoverySeed?.let { app.rcq.android.crypto.RecoveryPhrase.encode(it, appCtx) }
+    fun recoveryPhrase(): List<String>? {
+        // ⚠ THE WHOLE ACCOUNT, FOREVER, AND `store` IS STILL THE REAL ONE IN A
+        // MIGRATED DECOY SESSION — that mismatch is the shape of the feature.
+        // Only the UI stood between a coercer and the real seed, and that UI is
+        // a PIN gate verifying the REAL pin, so under duress it rejected the
+        // coercer's pin as "wrong" — which announces that a second pin exists.
+        //
+        // The decoy identity genuinely has no seed, so null is both true and
+        // plausible: the recovery screen already renders "not available" for
+        // legacy accounts, and the backup screen already refuses without a
+        // phrase. Both take those paths silently.
+        if (duressViewUp) return null
+        return store.recoverySeed?.let { app.rcq.android.crypto.RecoveryPhrase.encode(it, appCtx) }
+    }
 
     /** A LEGACY account (no seed) backup: its raw identity keys exported as a
      *  48-word phrase (idPriv||signPriv = 64 bytes). null for a seed-derived
      *  account (use [recoveryPhrase]) or if keys are missing/malformed. Restore
      *  via [recoverAccount], which accepts either a 24- or 48-word phrase. */
     fun legacyExportPhrase(): List<String>? {
+        // Same reasoning as [recoveryPhrase] — this is the raw identity
+        // keypair, which is if anything worse.
+        if (duressViewUp) return null
         if (store.recoverySeed != null) return null
         val id = store.identityPrivate ?: return null
         val sign = store.signingPrivate ?: return null
@@ -866,6 +893,41 @@ class Session(context: Context) {
         return store.uin ?: error("account has no identity")
     }
 
+    /**
+     * Point EVERY per-account plaintext store at [accountId] (null = none, all
+     * reads empty).
+     *
+     * ⚠⚠ One list, one call site each, on purpose. These four are the stores
+     * that live outside SQLCipher and are keyed by account id, and every one of
+     * them holds real people: the roster cache + aliases + blocked list
+     * (LocalStores), cross-island contacts (CrossIslandStore), guest
+     * registrations and foreign-group aliases on other islands
+     * (VisitedIslandsStore) and the profile-view tally (VisitStore).
+     *
+     * The decoy session binds them to [DecoyStore.STORE_ID], which has no rows —
+     * that is what makes the duress view show only what was seeded. Binding
+     * them one by one at each call site is how the decoy path came to move
+     * LocalStores and leave the other three pointing at the real account, which
+     * put real cross-island contacts in front of a coercer. Add a new
+     * per-account store HERE or it will be missed the same way.
+     */
+    private fun bindPerAccountStores(accountId: String?) {
+        LocalStores.bindAccount(accountId)
+        app.rcq.android.data.VisitStore.bindAccount(accountId)
+        CrossIslandStore.bindAccount(accountId)
+        VisitedIslandsStore.bindAccount(accountId)
+    }
+
+    /** Drop everything the decoy namespace could have written outside its own
+     *  SQLCipher file. Companion to [DecoyStore.destroy]: the store file is not
+     *  the only thing a duress session leaves on disk. */
+    private fun wipeDecoyNamespaceStores() {
+        LocalStores.clearAccount(DecoyStore.STORE_ID)
+        app.rcq.android.data.VisitStore.wipeAccount(DecoyStore.STORE_ID)
+        CrossIslandStore.wipeAccount(DecoyStore.STORE_ID)
+        VisitedIslandsStore.wipeAccount(DecoyStore.STORE_ID)
+    }
+
     /** Tear the in-memory session state down and re-point every per-account
      *  store at [accountId]; [start] then loads its history + connects. */
     private fun rebindTo(accountId: String) {
@@ -878,10 +940,7 @@ class Session(context: Context) {
         // db is (re)opened by bindDb() in start(), with the current dataKey.
         if (::db.isInitialized) db.close()
         signalStores = SignalStores(SignalStoreDb(appCtx, accountId))
-        LocalStores.bindAccount(accountId)
-        app.rcq.android.data.VisitStore.bindAccount(accountId)
-        CrossIslandStore.bindAccount(accountId)
-        VisitedIslandsStore.bindAccount(accountId)
+        bindPerAccountStores(accountId)
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
@@ -1488,6 +1547,12 @@ class Session(context: Context) {
     val backupHomes = MutableStateFlow<List<MultihomeStore.Home>>(emptyList())
 
     private fun refreshBackupHomes() {
+        // Keyed on `store.uin` — the REAL number even under duress — and each
+        // row is a real `uin@host` of the person being coerced. Same rule as
+        // the cross-island roster: the duress view lists nothing it was not
+        // seeded with. [startDecoySession] empties the flow; this stops any
+        // later call refilling it.
+        if (duressViewUp) { backupHomes.value = emptyList(); return }
         backupHomes.value = store.uin?.let { MultihomeStore.list(it) } ?: emptyList()
     }
 
@@ -1752,8 +1817,13 @@ class Session(context: Context) {
             decoySessionUin = null
             decoySessionNickname = null
             _contacts.value = emptyList()
+            ciRequests.value = emptyList()
             AccountManager.exitDecoySession()
-            LocalStores.bindAccount(AccountManager.activeId.value)
+            // All four, not just LocalStores: the decoy session re-pointed every
+            // per-account store at its own namespace, and leaving three of them
+            // there would give the next REAL unlock an empty cross-island roster
+            // and no visited islands — the duress leak's mirror image.
+            bindPerAccountStores(AccountManager.activeId.value)
         }
         // The roster is deliberately KEPT here (the chat list must survive a
         // lock), so its presence values are frozen at lock time. That makes
@@ -1827,7 +1897,7 @@ class Session(context: Context) {
         // PIN, the way iOS's removeAllPINs does.
         runCatching {
             DecoyStore.destroy(appCtx)
-            LocalStores.clearAccount(DecoyStore.STORE_ID)
+            wipeDecoyNamespaceStores()
         }
         PanicPinService.removePin(appCtx)
         if (decoyId != null) AccountManager.exitDecoyMode()
@@ -1884,7 +1954,7 @@ class Session(context: Context) {
             AccountManager.remove(acc.id)
         }
         DecoyStore.destroy(appCtx)
-        LocalStores.clearAccount(DecoyStore.STORE_ID)
+        wipeDecoyNamespaceStores()
         PanicPinService.removePin(appCtx)   // destroys the vault + pepper
         AccountManager.exitDecoyMode()
         AccountManager.exitDecoySession()
@@ -1987,7 +2057,7 @@ class Session(context: Context) {
         // this in performPanicWipe; Android had no equivalent.)
         runCatching {
             DecoyStore.destroy(appCtx)
-            LocalStores.clearAccount(DecoyStore.STORE_ID)
+            wipeDecoyNamespaceStores()
         }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
         peerIdentityCache.clear(); noV2Peers.clear(); presenceBaselineLive = false; ackedReads.clear()
@@ -2109,7 +2179,7 @@ class Session(context: Context) {
         // under its own namespace.
         if (ok) {
             DecoyStore.destroy(appCtx)
-            LocalStores.clearAccount(DecoyStore.STORE_ID)
+            wipeDecoyNamespaceStores()
         }
         ok
     }
@@ -2296,11 +2366,41 @@ class Session(context: Context) {
         _random.value = RandomState.Idle
         _typingFrom.value = null
         activeThread = null
-        // Unread counts, mutes and the roster cache are per-account prefs and
-        // are NOT encrypted. Point them at the decoy's own namespace so the
-        // duress session never writes a synthetic uin into the real account's
-        // slots — and never reads the real account's out.
-        LocalStores.bindAccount(DecoyStore.STORE_ID)
+        // An in-app banner is a real contact's name and a line of their message
+        // sitting in a flow the lock does not clear; it would be drawn over the
+        // duress view the moment it appears.
+        _banner.value = null
+        _dbLocked.value = false
+        // ⚠ AND THE NOTIFICATIONS ALREADY IN THE SHADE. `PushEnvelope.open`
+        // refusing under duress only covers wakes that arrive from now on; the
+        // ones delivered BEFORE the phone changed hands are still sitting there
+        // with real names and real previews, one swipe down away, without the
+        // app being touched at all.
+        app.rcq.android.push.Push.clearDeliveredMessages(appCtx)
+        // Server capabilities are whatever the REAL session's /server/info
+        // answered — a decoy never asks anyone. Left true, the UIN shop and
+        // "my numbers" rows advertise a storefront to an identity that has no
+        // island, and both screens then hang on a request the DuressGate refuses.
+        _uinShopEnabled.value = false
+        // The real session's chosen status (Away, Busy, an "Invisible") carried
+        // straight into the duress view, where it is a statement about the real
+        // user and not about the account on screen. iOS resets it the same way.
+        _status.value = UserStatus.ONLINE
+        // Pending cross-island requests are the one roster-shaped list that is
+        // NOT rebuilt on entry: it is a flow filled by the real session and
+        // [tearDownForLock] deliberately keeps the chat list across a lock, so
+        // locking a live session and unlocking with the duress PIN handed the
+        // coercer a "cross-island requests" section full of real people, name
+        // and uin@host and all. Emptied here, and [refreshCiRequests] refuses
+        // to refill it while the duress view is up.
+        ciRequests.value = emptyList()
+        // Unread counts, mutes, the roster cache, cross-island contacts, the
+        // islands we hold guest registrations on and the profile-view tally are
+        // all per-account prefs OUTSIDE SQLCipher. Point every one of them at
+        // the decoy's own namespace (empty) so the duress session never writes a
+        // synthetic uin into the real account's slots — and, the part that
+        // matters under coercion, never reads the real account's out.
+        bindPerAccountStores(DecoyStore.STORE_ID)
         // Nothing from the roster may be shown: every entry in it is a real
         // account, and the decoy is not one of them.
         AccountManager.enterDecoySession()
@@ -2320,6 +2420,30 @@ class Session(context: Context) {
         everConnected = false
         _connected.value = true
         PanicPinService.completeUnlock()
+    }
+
+    /** The duress-session half of [burnAccount]. Empties the seeded history and
+     *  roster and leaves the decoy sitting on a blank account.
+     *
+     *  Deliberately does NOT remove the decoy PIN from the vault: rewriting a
+     *  slot needs the real slot key, which a decoy session does not hold (by
+     *  design — see [PanicPinService.changeDecoyPin]). The PIN keeps working and
+     *  keeps opening an empty account, which is what a burnt account looks like.
+     *
+     *  Also clears the decoy namespace's own plaintext stores, so the next
+     *  duress unlock does not inherit unread counts or mutes from this one. */
+    private suspend fun burnDecoySession() = withContext(Dispatchers.IO) {
+        runCatching { if (::db.isInitialized) db.close() }
+        DecoyStore.destroy(appCtx)
+        wipeDecoyNamespaceStores()
+        // Re-open the (now absent) store so the session keeps a live, empty
+        // handle rather than one pointing at a deleted file.
+        runCatching { bindDb(DecoyStore.STORE_ID) }
+        _messages.value = emptyMap()
+        _groupMessages.value = emptyMap()
+        _contacts.value = emptyList()
+        _groups.value = emptyList()
+        _stories.value = emptyList()
     }
 
     /** Wipe local message history (both 1:1 and group threads) without
@@ -3493,6 +3617,20 @@ class Session(context: Context) {
      *  remains the session hot-swaps onto it and its UIN is returned;
      *  otherwise returns null (back to a fresh-install / onboarding state). */
     suspend fun burnAccount(): Int? {
+        // ⚠ IN A DURESS SESSION THIS BURNS THE DECOY, NEVER THE REAL ACCOUNT.
+        //
+        // "Burn account" is a plain destructive row in Settings and a coercer
+        // is exactly the person who taps it. Run unchanged it would delete the
+        // REAL account server-side and then wipe its SecureStore — recovery
+        // seed and identity keys included — from inside the duress view. The
+        // decoy is the sacrificial session; it must be able to destroy itself
+        // and nothing else.
+        //
+        // What the coercer sees is what they asked for: the account empties.
+        if (duressViewUp) {
+            burnDecoySession()
+            return decoySessionUin
+        }
         val burnedId = AccountManager.activeId.value
         // The server call decides whether anything is actually erased, so a
         // failure must not be swallowed: wiping local storage regardless left
@@ -5216,6 +5354,13 @@ class Session(context: Context) {
     val ciRequests = MutableStateFlow<List<CrossIslandRequestsStore.Request>>(emptyList())
 
     fun refreshCiRequests() {
+        // ⚠⚠ `store.uin` is the REAL account's number even in a duress session
+        // (the decoy is not a roster account, so `store` never moves), and this
+        // store is keyed by ownUin rather than by account id — so without the
+        // guard a single refresh from the decoy view would list every real
+        // person waiting for an answer on another island. The quarantine has
+        // nothing to do with the decoy: it stays hidden until a real unlock.
+        if (duressViewUp) { ciRequests.value = emptyList(); return }
         ciRequests.value = store.uin?.let { CrossIslandRequestsStore.list(it) } ?: emptyList()
     }
 
@@ -5243,6 +5388,12 @@ class Session(context: Context) {
      *  held by a same-island contact). Called after every contacts refresh
      *  (which overwrites the list) + on accept. */
     fun mergeCrossIslandContacts() {
+        // The decoy roster is exactly what was seeded and nothing else. The
+        // store is bound to the decoy namespace so this would return nothing
+        // anyway; the guard is here because this is the one function whose job
+        // is to ADD real people to the visible roster, and a future call site
+        // that runs after an unlock must not be able to reach it.
+        if (duressViewUp) return
         val extra = crossIslandContacts().filter { c -> _contacts.value.none { it.uin == c.uin } }
         if (extra.isNotEmpty()) _contacts.value = _contacts.value + extra
     }

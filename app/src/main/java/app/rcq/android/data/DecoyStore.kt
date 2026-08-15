@@ -84,11 +84,25 @@ object DecoyStore {
             // invert). Uniqueness matters: two threads collapsing onto one uin
             // would merge two people's conversations in the duress view.
             val taken = HashSet<Int>().apply { add(decoyUin) }
+            var written = 0
             threads.forEach { thread ->
                 var fake = randomUin()
                 while (!taken.add(fake)) fake = randomUin()
                 db.putDecoyContact(fake, thread.displayName)
-                copyThread(db, thread, fake, decoyUin)
+                written += copyThread(db, thread, fake, decoyUin)
+            }
+            // ⚠⚠ COUNT THE ROWS, do not assume them. The roster is written per
+            // thread and the messages per row, so a seed that writes contacts
+            // and no messages is not a hypothetical failure mode — it is the
+            // exact shape iOS shipped: a decoy with names in the chat list and
+            // every conversation empty, which is a louder tell than no decoy at
+            // all. Nothing here throws on a rejected insert (CONFLICT_IGNORE
+            // returns -1), so a silent zero is the only way it would surface.
+            // Refusing sends the caller down the "do not commit a decoy PIN"
+            // path instead of sealing one over an empty view.
+            if (written == 0) {
+                android.util.Log.e("RCQpin", "decoy seeding wrote 0 messages from ${threads.size} thread(s)")
+                return false
             }
             true
         } catch (e: Exception) {
@@ -99,8 +113,10 @@ object DecoyStore {
         }
     }
 
-    /** Copy one conversation into [db], rewriting every identifier. */
-    private fun copyThread(db: MessageDb, thread: SeedThread, fakePeer: Int, decoyUin: Int) {
+    /** Copy one conversation into [db], rewriting every identifier. Returns the
+     *  number of rows that actually landed, so [seed] can refuse a decoy whose
+     *  contacts have no messages under them. */
+    private fun copyThread(db: MessageDb, thread: SeedThread, fakePeer: Int, decoyUin: Int): Int {
         val rows = thread.messages.filter { it.groupId == null }.sortedBy { it.sentAt }
         // First pass: allocate the new envelope ids, so replies and albums
         // inside the copied thread can point at the copies rather than at ids
@@ -108,6 +124,7 @@ object DecoyStore {
         val idMap = HashMap<String, String>(rows.size)
         rows.forEach { idMap[it.id] = UUID.randomUUID().toString() }
         val albumMap = HashMap<String, String>()
+        var written = 0
         rows.forEach { msg ->
             val copy = msg.copy(
                 id = idMap.getValue(msg.id),
@@ -135,8 +152,9 @@ object DecoyStore {
                 // leave a hole exactly where a hole cannot be explained.
                 expiresAt = null,
             )
-            db.insert(copy, honourTombstones = false)
+            if (db.insert(copy, honourTombstones = false)) written++
         }
+        return written
     }
 
     /** The decoy roster, as the chat list wants it. Reads the store that is
