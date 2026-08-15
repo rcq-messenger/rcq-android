@@ -1990,6 +1990,28 @@ private fun AddContactDialog(
     // matter how hard you dragged it — the drag simply had nowhere to go. It
     // still OPENS half-way (the default sheet state keeps its partial anchor);
     // only the ceiling changed.
+    //
+    // ⚠⚠ DO NOT "finish the job" by giving this sheet the treatment the other
+    // typing sheets got (`rememberRcqSheetState()` + `rcqSheetInsets` + an outer
+    // `verticalScroll`, see Sheets.kt). It is excluded on purpose, and the outer
+    // scroll in particular would not merely change the look, it would EMPTY the
+    // sheet: a `verticalScroll` measures its child with an INFINITE height, and
+    // both `fillMaxHeight()` on the Column below and `weight(1f)` on the result
+    // list resolve against the incoming max height. With that max unbounded,
+    // `fillMaxHeight` becomes a no-op and every weighted child collapses to zero,
+    // so the search field and all results would render at nothing tall. This
+    // layout is height-driven by design (#524); it cannot live inside a scroller.
+    //
+    // `skipPartiallyExpanded` is separately unwanted here: the half-open opening
+    // position IS the #524 decision, not an accident of the anchor.
+    //
+    // ⏭ What this sheet still does NOT do is move for the keyboard, because a
+    // ModalBottomSheet is its own SOFT_INPUT_ADJUST_NOTHING window (Sheets.kt
+    // explains the mechanism). The one change that would be safe on its own is
+    // `contentWindowInsets = rcqSheetInsets`, which only shrinks the height the
+    // content resolves against and so keeps `fillMaxHeight`/`weight` bounded and
+    // keeps the partial anchor. Left undone deliberately: it changes a surface
+    // governed by a founder decision and nobody has looked at it on a device.
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
@@ -2207,12 +2229,33 @@ private fun AddContactDialog(
                             // thing you are checking against what you typed should be
                             // the line your eye lands on.
                             val name = u.nickname?.trim().orEmpty()
+                            // ⚠ Two hits CAN carry the same nickname, and it is not
+                            // a bug in the search: nicknames are not unique (no
+                            // constraint on `users.nickname`), and every client
+                            // names a fresh account `user-` + four random digits —
+                            // 9000 possibilities, so a repeat is expected long
+                            // before a hundred accounts exist. A user typed a
+                            // nickname and got two rows reading "user-5835" (#2019
+                            // and #32164535) and reasonably read that as the same
+                            // person listed twice.
+                            //
+                            // The number already separates them, but only if you
+                            // read it. The real name does it at a glance, and the
+                            // island has been sending it all along (public profiles
+                            // only) — the row simply dropped it.
+                            val realName = listOfNotNull(
+                                u.first_name?.trim()?.takeIf { it.isNotEmpty() },
+                                u.last_name?.trim()?.takeIf { it.isNotEmpty() },
+                            ).joinToString(" ")
                             val state = when {
                                 already -> stringResource(R.string.add_already_contact)
                                 u.uin in sentTo -> stringResource(R.string.add_request_sent)
                                 else -> ""
                             }
-                            val sub = listOf(name, state).filter { it.isNotEmpty() }.joinToString(" · ")
+                            val sub = listOf(name, realName, state)
+                                .filter { it.isNotEmpty() }
+                                .distinct()
+                                .joinToString(" · ")
                             AddResultRow("#${u.uin}", sub) {
                                 // Contact → open chat; not yet a contact → open the
                                 // profile preview where you can send the request.
@@ -2303,9 +2346,18 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
     var err by remember { mutableStateOf<String?>(null) }
     // Sheet: two text fields and a keyboard. A centred dialog gets shoved
     // around by the IME on a short screen and the token field ends up under it.
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+    // ⚠ A sheet is a window of its own and does not move for the keyboard by
+    // itself — see [rememberRcqSheetState] / [rcqSheetInsets] in Sheets.kt for
+    // why both of these are mandatory on anything that takes typing.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        sheetState = rememberRcqSheetState(),
+        contentWindowInsets = rcqSheetInsets,
+    ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp).padding(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
@@ -2377,9 +2429,19 @@ private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<I
     // capped the roster at 260dp inside an already-boxed centred surface, so
     // picking people out of a long contact list meant scrolling a small window
     // inside a small window.
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+    // ⚠ Sheet state + insets: see [rememberRcqSheetState] / [rcqSheetInsets].
+    // The outer scroll is what keeps "Create" reachable once the keyboard has
+    // taken half the screen; the member list keeps its own (capped) scroll, and
+    // hands the gesture on when it runs out.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        sheetState = rememberRcqSheetState(),
+        contentWindowInsets = rcqSheetInsets,
+    ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp).padding(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
@@ -2430,9 +2492,18 @@ private fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: ()
     // floating mid-screen fights the IME for room (same reasoning as the Add
     // sheet). The "are you sure" prompts that used to stay centred are sheets
     // too now, so nothing on this screen is a Material dialog any more.
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+    // ⚠ Sheet state + insets: see [rememberRcqSheetState] / [rcqSheetInsets].
+    // This is a report — prose, several lines of it — so it is exactly the sheet
+    // that used to sink a line at a time as the reason re-wrapped (#546).
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        sheetState = rememberRcqSheetState(),
+        contentWindowInsets = rcqSheetInsets,
+    ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp).padding(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(

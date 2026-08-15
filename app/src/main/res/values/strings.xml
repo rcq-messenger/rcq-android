@@ -920,6 +920,7 @@
     <string name="chat_play_audio">Play audio</string>
     <string name="chat_pause_audio">Pause</string>
     <string name="chat_play_video">Play video</string>
+    <string name="chat_pause_video">Pause video</string>
     <string name="chat_prev_photo">Photo</string>
     <string name="chat_prev_file">File</string>
     <string name="chat_prev_voice">Voice message</string>

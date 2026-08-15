@@ -890,6 +890,7 @@
     <string name="chat_play_audio">Tocar o áudio</string>
     <string name="chat_pause_audio">Pausar</string>
     <string name="chat_play_video">Reproduzir o vídeo</string>
+    <string name="chat_pause_video">Pausar o vídeo</string>
     <string name="chat_prev_photo">Foto</string>
     <string name="chat_prev_file">Arquivo</string>
     <string name="chat_prev_voice">Mensagem de voz</string>

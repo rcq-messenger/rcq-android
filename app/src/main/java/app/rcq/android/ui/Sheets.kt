@@ -5,18 +5,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -52,9 +60,22 @@ fun RcqSheet(
     content: @Composable () -> Unit,
 ) {
     val c = RcqTheme.colors
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bgSecondary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+        sheetState = rememberRcqSheetState(),
+        contentWindowInsets = rcqSheetInsets,
+    ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            // Scrollable, always. A sheet is exactly as tall as its content, and
+            // the content is measured against (screen - status bar - keyboard).
+            // Without this, anything that does not fit is simply not reachable:
+            // that is #536 ("with a lot of text the button does not fit on
+            // screen"), and it is also every "send" and "cancel" that fell off
+            // the bottom of the media sheet once the keyboard was up.
+            Modifier.fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 24.dp),
         ) {
             if (title != null) {
                 Text(
@@ -66,6 +87,60 @@ fun RcqSheet(
             content()
         }
     }
+}
+
+/**
+ * ⚠⚠ The sheet state every RCQ sheet must use, and the reason it is not the
+ * default one.
+ *
+ * Material3 1.3.0 recomputes the sheet's drag anchors every time the CONTENT
+ * changes size, and its recompute reads (ModalBottomSheet.kt, verified in the
+ * shipped bytecode):
+ *
+ *     PartiallyExpanded, Expanded ->
+ *         if (newAnchors.hasAnchorFor(PartiallyExpanded)) PartiallyExpanded
+ *         else if (newAnchors.hasAnchorFor(Expanded)) Expanded else Hidden
+ *
+ * Read that again: a sheet the user has dragged fully open is retargeted BACK to
+ * half-height on every resize, as long as a half-height anchor exists — and one
+ * exists whenever the content is taller than half the screen. A bottom sheet is
+ * measured from its content, so "the content changed size" is what a text field
+ * does every time a line wraps. That single line of Material is the whole of
+ * #542 ("moving onto the 4th line drags the sheet back down"), #546 ("the input
+ * starts sinking after every re-wrap, I have to drag it back up by hand") and
+ * the first half of #543 (after adding media the sheet "rises too little" — it
+ * never rose, it opened at the half-height anchor and the comment field and the
+ * buttons were below the fold).
+ *
+ * `skipPartiallyExpanded` deletes the half-height anchor, so the retarget has
+ * nowhere to fall back to and always resolves to Expanded. It is not a styling
+ * preference; it is the fix. Sheets shorter than half the screen never had that
+ * anchor in the first place and are unaffected.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun rememberRcqSheetState(): SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+/**
+ * ⚠⚠ The insets a sheet must consume, and the reason the default is not enough.
+ *
+ * A ModalBottomSheet is its OWN window, and Material3 1.3.0 creates that window
+ * with `WindowCompat.setDecorFitsSystemWindows(false)` and, on API 30+,
+ * `setSoftInputMode(SOFT_INPUT_ADJUST_NOTHING)`. Nothing resizes and nothing
+ * moves when the keyboard opens: the IME inset is merely PUBLISHED, and somebody
+ * has to consume it (the same lesson the profile editor learned — see
+ * `ProfileEditScreen`, where the inset belongs to the screen, not to whoever
+ * mounted it). Material's own default, `BottomSheetDefaults.windowInsets`, is
+ * the system bars and nothing else, which is why the keyboard came up straight
+ * over the sheet — the second half of #543.
+ *
+ * `union` takes the larger of each side, so the bottom is max(navigation bar,
+ * keyboard): the nav-bar gap when the keyboard is down, exactly the keyboard
+ * when it is up, and never the two stacked on top of each other.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+val rcqSheetInsets: @Composable () -> WindowInsets = {
+    BottomSheetDefaults.windowInsets.union(WindowInsets.ime)
 }
 
 /** One choice in [RcqAskSheet]. `destructive` paints it red, `dimmed` greys it
@@ -154,6 +229,21 @@ fun RcqField(
     /// starts one line tall reads as "type a word here", not "tell me what
     /// happened", so the box has to look like the answer it wants.
     minLines: Int = 1,
+    /// ⚠⚠ Height CEILING, and it must exist. A multi-line field with no ceiling
+    /// grows one line per wrap for as long as you keep typing, and everything
+    /// under it — the send button, the cancel — is pushed off the bottom of the
+    /// sheet (#536). Worse, in a bottom sheet each of those growth steps is a
+    /// content resize, which is what drags the sheet back down (see
+    /// [rememberRcqSheetState]): the unbounded field is not just a victim of
+    /// that bug, it is what keeps firing it.
+    ///
+    /// A ceiling also switches the field's OWN scroll on. That is the part that
+    /// matters for the person typing: a bounded field scrolls internally and
+    /// keeps the caret in view, so line 30 is as visible as line 1. Wrapping a
+    /// field in an external `verticalScroll` instead looks the same and is not —
+    /// the field then measures at full height against an infinite parent, never
+    /// clips, never scrolls itself, and the caret walks off the bottom.
+    maxLines: Int = if (singleLine) 1 else 8,
     isError: Boolean = false,
     enabled: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
@@ -174,6 +264,10 @@ fun RcqField(
             },
             singleLine = singleLine,
             minLines = minLines,
+            // Material asserts minLines <= maxLines. A caller that asks for a
+            // taller floor than the default ceiling means the floor, so let it
+            // push the ceiling up rather than crash.
+            maxLines = maxLines.coerceAtLeast(minLines),
             isError = isError,
             enabled = enabled,
             keyboardOptions = keyboardOptions,
