@@ -92,10 +92,23 @@ sealed interface RandomState {
  *  delete-for-everyone until their next reconnect. */
 private const val TYPED_CONTROL_SENDS = false
 
+/** Frame types that carry a sealed envelope on the live socket. Anything not
+ *  listed is dropped in silence, which is why the list has to cover every type
+ *  ANY client deposits, not just the ones that draw a bubble.
+ *
+ *  ⚠ "call" is the §5d cross-island call deposit (`envelope_type: "call"`,
+ *  2026-08-15). Our own islands relabel that frame "message" exactly because
+ *  this set did not contain it: a call to somebody whose app was OPEN arrived
+ *  as an unlisted frame, was dropped here, and rang nothing — and the wake
+ *  cannot cover it, since the wake only fires when NOTHING is connected.
+ *  Listed here too so a self-hosted island that passes the deposit type
+ *  straight through still reaches [ingest]. Routing is by the INNER kind
+ *  either way; this only decides whether the frame is opened at all. */
 private val SEALED_WS_TYPES = setOf(
     "message", "system", "secscreen", "nudge", "bounce",
     "read", "reaction", "edit", "delete", "visit",
     "carbon", "skdm", "sknack", "homerec", "relay_share",
+    "call",
 )
 
 /**
@@ -4792,7 +4805,15 @@ class Session(context: Context) {
             // as a missed call instead of ringing.
             (dec.envelope as? Envelope.CallSignal)?.let { cs ->
                 val host = dec.senderHost ?: return@runCatching // same-island calls use the WS, not envelopes
-                if (host == serverHost()) return@runCatching
+                // ⚠ The Cloudflare FRONT is OUR island by another road, and a
+                // build that stamps `cdn.rcq.app` instead of the island is not
+                // a cross-island caller. This gate used to name serverHost()
+                // alone while the message gate below (and §5e/§5f) named both,
+                // so such a sender's TEXTS arrived and every one of their call
+                // signals was dropped one line later at the CrossIslandStore
+                // lookup: they could write but never ring. Same host set
+                // everywhere now.
+                if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
                 if (CrossIslandStore.get(dec.senderUin, host) == null) return@runCatching
                 if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
                     val media = appCtx.getString(

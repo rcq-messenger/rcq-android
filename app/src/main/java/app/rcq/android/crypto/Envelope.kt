@@ -478,7 +478,11 @@ sealed interface Envelope {
 
         fun fromJsonBytes(bytes: ByteArray): Envelope {
             val obj = JsonParser.parseString(String(bytes, Charsets.UTF_8)).asJsonObject
-            val id = obj.get("id")?.asString ?: UUID.randomUUID().toString()
+            // `asString` on an object or an array throws, and this runs for
+            // EVERY kind — including the §5d/§5e/§5f control envelopes, which
+            // arrive from a stranger on another island over an endpoint that is
+            // unauthenticated by design. A malformed id is a missing id.
+            val id = obj.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: UUID.randomUUID().toString()
             val reply = obj.getAsJsonObject("reply")?.let {
                 Reply(
                     id = it.get("id")?.asString.orEmpty(),
@@ -559,12 +563,25 @@ sealed interface Envelope {
                 )
                 "secscreen" -> SecureScreen(obj.get("on")?.asBoolean ?: false)
                 "shot" -> ScreenshotTaken(obj.get("id")?.asString ?: id)
+                // §5d. Every field is guarded, like `contactreq` and `profile`
+                // below: this envelope arrives from a peer on ANOTHER island
+                // over an endpoint that is unauthenticated by design, so a
+                // non-string `sig`/`cid` (Gson's `asString` throws
+                // UnsupportedOperationException on an object) or a non-numeric
+                // `ts` (NumberFormatException) would throw out of the decoder.
+                // The queue drain catches per row, so that costs one lost
+                // signal rather than the whole drain — but a call signal is
+                // exactly the thing that must degrade to "ignored", never to
+                // "threw", and the two sibling kinds already do.
                 "call" -> CallSignal(
                     id = id,
-                    sig = obj.get("sig")?.asString.orEmpty(),
-                    cid = obj.get("cid")?.asString.orEmpty(),
-                    ts = obj.get("ts")?.asLong ?: 0L,
-                    data = obj.getAsJsonObject("data")
+                    sig = obj.get("sig")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                    cid = obj.get("cid")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                    ts = obj.get("ts")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong ?: 0L,
+                    // `getAsJsonObject` casts, so a `data` that is an array or
+                    // a string throws ClassCastException before the filter
+                    // below ever runs.
+                    data = obj.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
                         ?.entrySet()
                         ?.mapNotNull { (k, v) -> if (v.isJsonPrimitive) k to v.asString else null }
                         ?.toMap() ?: emptyMap(),

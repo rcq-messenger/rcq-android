@@ -55,6 +55,12 @@ object Push {
      *  the shade, which is the only place it is needed. */
     const val CHANNEL_CALL_ONGOING = "rcq_call_ongoing"
     private const val CALL_NOTIF_ID = 0x2C01
+    /** How long a §5d offer is worth ringing for, in seconds. Same 60s the
+     *  caller rings for ([app.rcq.android.Session]'s callOfferTtlSec and the
+     *  parked-offer age bound in MainActivity): a sealed deposit can reach us
+     *  from the offline queue long after the caller gave up, and a phone that
+     *  rings for a call nobody is on is worse than a missed-call row. */
+    private const val CALL_OFFER_TTL_SEC = 60L
     /** ⚠ NOT 0x2C02: that is [app.rcq.android.push.embedded.PushSocketService]'s
      *  foreground-service notification. Shipping the live-call controls on that id
      *  in 0.101 made the two overwrite each other — starting a call replaced the
@@ -927,6 +933,12 @@ object Push {
     fun showIncomingCall(ctx: Context, json: JsonObject) {
         fun str(k: String): String? =
             json.get(k)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+        // §5d cross-island call wake. The island that woke us cannot see the
+        // caller, the call id, audio-vs-video or the SDP — every one of those
+        // is inside the sealed envelope — so instead of the flat payload below
+        // it sends {kind:"sealed", envType:"call", env:<ciphertext>}. We open
+        // the envelope ourselves to get them.
+        if (str("kind") == "sealed") { showSealedIncomingCall(ctx, json); return }
         val callId = str("call_id") ?: return
         if (str("kind") == "end") { dismissIncomingCall(ctx, callId); return }
         val sdp = str("sdp") ?: return
@@ -938,9 +950,125 @@ object Push {
         // have opened the real account's media path. Dropped entirely: a call
         // that never rings reads as one the caller cancelled.
         if (app.rcq.android.security.DuressGate.isActive) return
+        ring(ctx, callId, fromUin, str("nickname") ?: "#$fromUin", str("media") ?: "video", sdp)
+    }
+
+    /**
+     * Raise the incoming-call UI for a §5d cross-island wake.
+     *
+     * The wake is anonymous by construction — the recipient's island learns
+     * only that a call is arriving for this user, never who from — so
+     * everything the ring needs comes out of the sealed envelope it carries.
+     * Three outcomes:
+     *
+     *  - it opens and is an OFFER from an accepted cross-island contact →
+     *    a full ring, with their real name, answerable straight from the
+     *    notification like any other call;
+     *  - it opens and is an END → the ring for that call comes down (the
+     *    caller gave up before we picked up);
+     *  - it does not open (no `env` because the island dropped one too large
+     *    for a push, a locked-out key, a decoy session) → a NEUTRAL alert
+     *    with no name and no call to answer. Opening the app connects the
+     *    socket, drains the deposit from the queue and rings for real; the
+     *    alternative is a call that makes no sound at all.
+     */
+    private fun showSealedIncomingCall(ctx: Context, json: JsonObject) {
+        fun str(k: String): String? =
+            json.get(k)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+        // Same reason as the flat path: a full-screen ring naming a real
+        // contact is exactly what a duress session must never produce.
+        if (app.rcq.android.security.DuressGate.isActive) return
+        val env = str("env")
+        // The server retries a publish whose response it lost, and ntfy replays
+        // its cache to a redialling distributor — both carry a byte-identical
+        // ciphertext. Re-offering the same call would reset an acceptance the
+        // user has already made, so the duplicate stops here.
+        if (env != null && !SeenWakes.firstTime(env)) return
+        // Which local account is this wake for? Same rule the message wake
+        // uses: a multi-account device shares one endpoint, so `to_uin` picks
+        // the store to decrypt against.
+        val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
+        val acctId = toUin?.let { u ->
+            AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
+        } ?: AccountManager.activeId.value
+        val call = if (env != null && acctId != null) {
+            runCatching { PushEnvelope.openCall(ctx, acctId, env) }.getOrNull()
+        } else {
+            null
+        }
+        if (call == null) { showAnonymousCallWake(ctx); return }
+        if (call.sig == "call_end") { dismissIncomingCall(ctx, call.callId); return }
+        // Anything else (answer/ice/renegotiate) only means something to an app
+        // that is already holding this call, and that app has it over the
+        // socket. Nothing to ring about.
+        if (call.sig != "call_offer") return
+        // §5d: only an ACCEPTED cross-island contact may make this phone ring.
+        // A stranger's deposit is a contact request (§5f), quarantined by the
+        // Session — it must not raise a full-screen anything.
+        if (!call.accepted) return
+        // A queue drain can hand us an offer hours old; the caller hung up long
+        // ago. The Session logs that as a missed call, which is the honest
+        // outcome — ringing for it is not.
+        if (System.currentTimeMillis() / 1000 - call.ts > CALL_OFFER_TTL_SEC) return
+        if (call.sdp.isBlank()) { showAnonymousCallWake(ctx); return }
+        // No name while the app is locked: the ring is fine on a lock screen,
+        // the caller's identity is not. It fills itself in as soon as the app
+        // is unlocked and the Session ingests this same offer out of the queue.
+        //
+        // ⚠ The neutral label is the LOCALIZED "Incoming call", not the app's
+        // own name and not `#<uin>`. `R.string.app_name` put "RCQ" in the
+        // CALLER slot of a CallStyle notification, i.e. the app appeared to be
+        // phoning the user; `#<uin>` (the flat same-island fallback) would be
+        // worse still here, because a cross-island uin renders exactly like a
+        // local number belonging to somebody else entirely — the wrong-person
+        // family of bug this whole section exists to close. This string is
+        // word-for-word what iOS shows on its CallKit handle
+        // (`call.incoming.unknown_caller`) in all seven locales, so the two
+        // platforms ring the same call the same way. Non-blank on purpose: it
+        // survives the round trip through IncomingCallStore and the
+        // notification that IncomingCallActivity re-posts from onStop, where a
+        // blank would fall through to the `#<uin>` label.
+        val name = call.senderName
+            ?.takeIf { !app.rcq.android.security.PanicPinService.isLocked }
+            ?: ctx.getString(R.string.call_incoming)
+        ring(ctx, call.callId, call.senderUin, name, call.media, call.sdp)
+    }
+
+    /** A call we know is arriving but cannot open: alert without a name and
+     *  without pretending there is something to answer. Tapping opens the app,
+     *  which connects and drains the real offer out of the queue; the ring that
+     *  follows replaces this notification (same id). Times itself out like an
+     *  unanswered call so a wake we never resolved does not sit in the shade. */
+    private fun showAnonymousCallWake(ctx: Context) {
+        // Never over a ring that is already up: this shares the call
+        // notification id, so posting it while a real offer is parked would
+        // strip the Answer/Decline buttons off a call the user is looking at.
+        if (IncomingCallStore.pending != null) return
         ensureChannels(ctx)
-        val nickname = str("nickname") ?: "#$fromUin"
-        val media = str("media") ?: "video"
+        val pi = PendingIntent.getActivity(
+            ctx, 6,
+            Intent(ctx, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notif = NotificationCompat.Builder(ctx, CHANNEL_CALLS_RING)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(ctx.getString(R.string.app_name))
+            .setContentText(ctx.getString(R.string.call_incoming))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setTimeoutAfter(60_000L)
+            .build()
+        runCatching { NotificationManagerCompat.from(ctx).notify(CALL_NOTIF_ID, notif) }
+    }
+
+    /** Park the offer and raise the ring. Shared by the flat (same-island VoIP)
+     *  wake and the §5d sealed one, so a cross-island call is answered through
+     *  exactly the same surface as any other. */
+    private fun ring(ctx: Context, callId: String, fromUin: Int, nickname: String, media: String, sdp: String) {
+        ensureChannels(ctx)
         val video = media == "video"
         IncomingCallStore.offer(
             IncomingCallStore.Pending(
