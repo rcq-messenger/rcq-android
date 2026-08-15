@@ -469,9 +469,15 @@ internal fun HomeScreen(
                 if (ciReqs.isNotEmpty()) {
                     item(key = "cireq-h") { SectionHeader(stringResource(R.string.home_sec_ci_requests), ciReqs.size, collapsed = false, onToggle = {}) }
                     items(ciReqs, key = { "ci${it.uin}@${it.host}" }) { r ->
+                        // §5f rows carry the requester's own name and greeting.
+                        // The island tag stays visible either way: a cross-island
+                        // name must never be able to pass as a local contact.
+                        val address = "${r.uin}@${r.host}"
                         CiPendingRow(
-                            tag = "${r.uin}@${r.host}",
-                            preview = r.preview,
+                            tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
+                            preview = r.preview.ifEmpty {
+                                if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
+                            },
                             onAccept = { scope.launch { runCatching { session.acceptCrossIslandRequest(r.uin, r.host) } } },
                             onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
                         )
@@ -2156,7 +2162,19 @@ private fun AddContactDialog(
                                             android.widget.Toast.makeText(context, context.getString(R.string.add_ci_number_clash, ci.uin), android.widget.Toast.LENGTH_LONG).show()
                                             return@launch
                                         }
-                                        if (session.addCrossIslandContact(ci.uin, ci.host)) onOpenChat(ci.uin)
+                                        // §5f: adding `uin@host` deposits a contact
+                                        // request to their island. Open the chat
+                                        // either way (the row is ours), but do not
+                                        // stay silent when the request never left.
+                                        when (session.addCrossIslandContactDetailed(ci.uin, ci.host)) {
+                                            Session.CiAdd.SENT -> onOpenChat(ci.uin)
+                                            Session.CiAdd.ADDED_ONLY -> {
+                                                android.widget.Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), android.widget.Toast.LENGTH_LONG).show()
+                                                onOpenChat(ci.uin)
+                                            }
+                                            Session.CiAdd.FAILED ->
+                                                android.widget.Toast.makeText(context, context.getString(R.string.ci_request_failed), android.widget.Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 }
                             }

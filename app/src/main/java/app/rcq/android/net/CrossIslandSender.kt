@@ -206,16 +206,46 @@ object CrossIslandSender {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         ownHost: String,
+    ): Boolean = depositToPrimary(contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost)
+
+    /** §5f cross-island contact requests: same one-hop deposit as [deliverCall]
+     *  (primary island, `envelope_type: "message"`, v=1-sealed to the identity
+     *  key from the peer's open card), addressed by a RAW card key rather than a
+     *  stored contact — a `request` may go out before any local row exists and a
+     *  `decline` after the row is gone. Zero server changes. */
+    fun deliverContactRequest(
+        host: String,
+        uin: Int,
+        identityKeyB64: String,
+        env: Envelope,
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        ownHost: String,
+    ): Boolean = depositToPrimary(host, uin, identityKeyB64, env, ownUin, signingPriv, signingPub, ownHost)
+
+    /** One sealed envelope, one deposit, PRIMARY island only. No backup-home
+     *  copies: those mailboxes are polled (~30s), and both callers are
+     *  interactive (call signalling, a contact request the sender is waiting on). */
+    private fun depositToPrimary(
+        host: String,
+        uin: Int,
+        identityKeyB64: String,
+        env: Envelope,
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        ownHost: String,
     ): Boolean {
-        val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
+        val recipientPub = Base64.decode(identityKeyB64, Base64.NO_WRAP)
         val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
         val body = JsonObject().apply {
-            addProperty("to_uin", contact.uin)
+            addProperty("to_uin", uin)
             addProperty("envelope_type", "message")
             addProperty("payload", payload)
         }.toString().toRequestBody(JSON)
-        val req = Request.Builder().url("https://${contact.host}/messages/sealed").post(body).build()
-        return runCatching { viaBestRoute(contact.host) { c -> c.newCall(req).execute() }.use { it.isSuccessful } }.getOrDefault(false)
+        val req = Request.Builder().url("https://$host/messages/sealed").post(body).build()
+        return runCatching { viaBestRoute(host) { c -> c.newCall(req).execute() }.use { it.isSuccessful } }.getOrDefault(false)
     }
 
     /** Deliver [env] to a cross-island [contact]: v=1-seal to their identity key

@@ -2967,6 +2967,7 @@ class Session(context: Context) {
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
+                is Envelope.ContactRequest -> Unit // §5f is 1:1 consent, never group-sealed
                 is Envelope.Skdm -> Unit         // intercepted in ingestGroup before routing
                 is Envelope.Sknack -> Unit       // intercepted in ingestGroup before routing
                 is Envelope.RelayShare ->
@@ -4228,6 +4229,18 @@ class Session(context: Context) {
                 Multihome.applyPushedRecord(dec.senderUin, dec.senderSigningPub, hr.rec)
                 return@runCatching
             }
+            // §5f cross-island contact requests. Routed here, BEFORE the
+            // quarantine below, because a `contactreq` is not a message: it
+            // opens a PENDING request in the requests list (where a same-island
+            // request appears) and never enters the message store. Same-island
+            // adds still go through POST /contacts/request, so an envelope that
+            // did not cross an island boundary is ignored.
+            (dec.envelope as? Envelope.ContactRequest)?.let { cr ->
+                val host = dec.senderHost ?: return@runCatching
+                if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
+                handleContactRequest(dec.senderUin, host, cr)
+                return@runCatching
+            }
             // Variant A consent: a 1:1 message from an un-accepted CROSS-ISLAND
             // sender (its from_host isn't ours and we haven't added them) is
             // QUARANTINED as a request instead of landing in the chat list.
@@ -4300,6 +4313,7 @@ class Session(context: Context) {
                 is Envelope.Poll -> Unit       // polls are group-only; ignore in 1:1
                 is Envelope.CallSignal -> Unit // intercepted above, never reaches here
                 is Envelope.HomeRecord -> Unit // intercepted above, never reaches here
+                is Envelope.ContactRequest -> Unit // §5f, intercepted above
                 is Envelope.Carbon ->
                     // A message I sent from ANOTHER device, echoed to my own uin.
                     // Only honour my own carbon; file the inner message as fromMe
@@ -4419,19 +4433,137 @@ class Session(context: Context) {
         return _contacts.value.any { it.uin == uin && (it.host == null) != here }
     }
 
-    suspend fun addCrossIslandContact(uin: Int, host: String): Boolean = withContext(Dispatchers.IO) {
-        if (clashesWithKnownNumber(uin, host)) return@withContext false
-        val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext false
-        CrossIslandStore.save(
-            CrossIslandStore.Contact(
-                uin = uin, host = host,
-                nickname = card.nickname?.takeIf { it.isNotBlank() } ?: "$uin@$host",
-                identityKey = card.identityKey, signingKey = card.signingKey,
-                signalIdentityKey = card.signalIdentityKey, addedAt = System.currentTimeMillis(),
-                gender = card.gender, statusMessage = card.statusMessage,
-            )
+    /** Outcome of a §5f cross-island add. [SENT] = the local row is written AND
+     *  the peer's island took our `contactreq`; [ADDED_ONLY] = the row is here
+     *  but nothing reached them (say so — do NOT claim a request was sent);
+     *  [FAILED] = no card, no row, nothing happened. */
+    enum class CiAdd { FAILED, ADDED_ONLY, SENT }
+
+    // ⚠ There is deliberately no boolean `addCrossIslandContact` any more. A
+    // single yes/no is what let every caller print "Request sent" for what was
+    // only a local row (§5f); callers must see SENT and ADDED_ONLY apart.
+
+    /**
+     * Add `uin@host` locally AND deposit a §5f `contactreq` to their island.
+     *
+     * [act] is what the peer is told: `request` (default — the ordinary add),
+     * `accept` (we are taking a request they sent us, which is what makes the
+     * relationship MUTUAL and unblocks §5d calls / §5e refresh), or null for
+     * the receive side, where announcing back would loop.
+     *
+     * ⚠ The local row and the key pinning are written exactly as before: the
+     * pinned identity/signing keys come from the open card and nothing in a
+     * contactreq envelope may ever write to them. The deposit is best-effort and
+     * strictly additive — a failed deposit still leaves the contact added, and
+     * the caller is told the difference instead of guessing.
+     */
+    suspend fun addCrossIslandContactDetailed(
+        uin: Int,
+        host: String,
+        act: String? = Envelope.ACT_REQUEST,
+    ): CiAdd = withContext(Dispatchers.IO) {
+        if (clashesWithKnownNumber(uin, host)) return@withContext CiAdd.FAILED
+        val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext CiAdd.FAILED
+        val contact = CrossIslandStore.Contact(
+            uin = uin, host = host,
+            nickname = card.nickname?.takeIf { it.isNotBlank() } ?: "$uin@$host",
+            identityKey = card.identityKey, signingKey = card.signingKey,
+            signalIdentityKey = card.signalIdentityKey, addedAt = System.currentTimeMillis(),
+            gender = card.gender, statusMessage = card.statusMessage,
         )
-        true
+        CrossIslandStore.save(contact)
+        if (act == null) return@withContext CiAdd.ADDED_ONLY
+        if (depositContactRequest(host, uin, contact.identityKey, act)) CiAdd.SENT else CiAdd.ADDED_ONLY
+    }
+
+    /** Seal a §5f `contactreq` to [identityKeyB64] (the key from the peer's open
+     *  card) and deposit it to their PRIMARY island — the §5d path, no server
+     *  changes. Returns true only when the island actually took it. */
+    private fun depositContactRequest(
+        host: String,
+        uin: Int,
+        identityKeyB64: String,
+        act: String,
+        note: String? = null,
+    ): Boolean {
+        val me = store.uin ?: return false
+        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: "#$me"
+        return runCatching {
+            CrossIslandSender.deliverContactRequest(
+                host, uin, identityKeyB64,
+                Envelope.contactRequest(act, nick, note),
+                me, signingPriv(), signingPub(), serverHost(),
+            )
+        }.onFailure {
+            android.util.Log.e("RCQci", "contactreq $act to $uin@$host failed: ${it.message}")
+        }.getOrDefault(false)
+    }
+
+    // §5f anti-abuse: one contactreq per sender identity per minute is enough
+    // for consent; the rest are dropped on the floor, so a flood cannot even
+    // rewrite the pending row it already owns.
+    private val ciReqSeenAt = java.util.Collections.synchronizedMap(HashMap<String, Long>())
+    private val CI_REQ_MIN_INTERVAL_MS = 60_000L
+
+    /**
+     * §5f receive side. `request` from a stranger opens a pending row; from
+     * someone already accepted it is a no-op (never a second row). `accept`
+     * makes them an accepted cross-island contact here, so both sides hold each
+     * other — the mutual state §5d checks. `decline` drops our pending row for
+     * them, silently. A blocked sender is dropped silently, same as same-island.
+     */
+    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest) {
+        val me = store.uin ?: return
+        if (uin == me) return
+        if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return
+        when (cr.act) {
+            Envelope.ACT_REQUEST -> {
+                // Rate-limit REQUESTS only: those are what a stranger can flood.
+                // An accept/decline answers something we started, and throttling
+                // it would strand a glare (both sides requested at once) with a
+                // pending row nobody can clear.
+                val key = "$uin@${host.lowercase()}"
+                val now = System.currentTimeMillis()
+                val last = ciReqSeenAt[key]
+                if (last != null && now - last < CI_REQ_MIN_INTERVAL_MS) return
+                ciReqSeenAt[key] = now
+                // Already ours: nothing to consent to, and no second row.
+                if (CrossIslandStore.get(uin, host) != null) return
+                if (CrossIslandRequestsStore.holdContactRequest(me, uin, host, cr.nickname, cr.note)) {
+                    refreshCiRequests()
+                }
+            }
+            Envelope.ACT_ACCEPT -> {
+                // They took the request we sent. We already hold their row (the
+                // add wrote it — that is what "we asked them" means on every
+                // client), so leave it alone: re-adding would re-pin keys from a
+                // card fetch an envelope just triggered. Both sides now hold
+                // each other, which is the mutual state §5d checks.
+                if (CrossIslandStore.get(uin, host) != null) {
+                    CrossIslandRequestsStore.clear(me, uin, host)
+                    refreshCiRequests()
+                    return
+                }
+                // An `accept` from someone we never asked is NOT a licence to
+                // add them: adding here let any stranger self-add with one
+                // envelope, skipping the consent step §5f exists to create (and
+                // once in the roster their messages skip the Variant A
+                // quarantine and §5d lets them call). File it as a pending row
+                // the user decides on — same as iOS and web, so one envelope
+                // means one thing on all three clients.
+                if (CrossIslandRequestsStore.holdContactRequest(me, uin, host, cr.nickname, cr.note)) {
+                    refreshCiRequests()
+                }
+            }
+            Envelope.ACT_DECLINE -> {
+                // Silent: drop the pending row we hold for them and say nothing.
+                // Their contact row (and its pinned keys) is the user's own add
+                // and is not touched from the wire.
+                CrossIslandRequestsStore.clear(me, uin, host)
+                refreshCiRequests()
+            }
+            else -> Unit // unknown act from a newer client
+        }
     }
 
     // ── cross-island message requests (Variant A consent) ──
@@ -4471,12 +4603,17 @@ class Session(context: Context) {
     /** Accept a cross-island request: save the sender as a contact FIRST (so the
      *  held payloads pass the consent gate), then re-ingest them so the messages
      *  surface in the now-visible thread, and surface the contact in the roster. */
-    suspend fun acceptCrossIslandRequest(uin: Int, host: String) {
-        val me = store.uin ?: return
-        addCrossIslandContact(uin, host)
+    /** §5f: accepting also DEPOSITS an `accept` back to the requester's island,
+     *  so both sides end up holding the other as accepted — the mutual state
+     *  §5d already checks and §5e assumes. If the card can't be fetched nothing
+     *  was accepted, so the pending row stays instead of vanishing. */
+    suspend fun acceptCrossIslandRequest(uin: Int, host: String): Boolean {
+        val me = store.uin ?: return false
+        if (addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT) == CiAdd.FAILED) return false
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload) }
         mergeCrossIslandContacts()
         refreshCiRequests()
+        return true
     }
 
     fun blockCrossIslandRequest(uin: Int, host: String) {

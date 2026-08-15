@@ -724,6 +724,8 @@
     <string name="ci_send_request">发送请求</string>
     <string name="ci_no_such_number">还没有人使用这个号码。</string>
     <string name="ci_request_failed">请求发送失败。</string>
+    <string name="ci_contact_request">想添加你为联系人</string>
+    <string name="ci_request_not_delivered">已添加，但请求未送达对方。</string>
     <string name="ci_remove_fav">取消星标</string>
     <string name="ci_add_fav">设为星标</string>
     <string name="ci_unmute">取消静音</string>

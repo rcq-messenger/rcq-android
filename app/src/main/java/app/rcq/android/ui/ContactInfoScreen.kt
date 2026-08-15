@@ -277,14 +277,28 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 }
                 Spacer(Modifier.height(12.dp))
             } else if (contact == null && crossIslandHost != null) {
-                // Cross-island group member: add them as a cross-island contact
-                // (works even though they're on another server). Immediate add,
-                // not a request — so the button just says "Add".
+                // Cross-island add. ⚠ This used to flip to "Request sent" on the
+                // spot, outside the coroutine — and there was no request at all:
+                // the add was a purely local row and the peer was never told
+                // (spec §5f). It now deposits a `contactreq` to their island and
+                // reports what actually happened: sent, added-but-undelivered,
+                // or nothing at all.
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                         .background(if (requestSent) c.bgSecondary else c.accent)
                         .clickable(enabled = !requestSent) {
-                            scope.launch { runCatching { session.addCrossIslandContact(uin, crossIslandHost) } }; requestSent = true
+                            scope.launch {
+                                when (runCatching { session.addCrossIslandContactDetailed(uin, crossIslandHost) }
+                                    .getOrDefault(Session.CiAdd.FAILED)) {
+                                    Session.CiAdd.SENT -> requestSent = true
+                                    Session.CiAdd.ADDED_ONLY -> {
+                                        requestSent = true
+                                        Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), Toast.LENGTH_LONG).show()
+                                    }
+                                    Session.CiAdd.FAILED ->
+                                        Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }.padding(14.dp),
                     horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
                 ) {
