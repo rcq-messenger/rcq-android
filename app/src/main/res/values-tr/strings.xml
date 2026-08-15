@@ -537,7 +537,7 @@
     <string name="cs_burn_body">Bu, hesabını ve bütün yerel verini siler. Geri alınamaz.</string>
     <string name="cs_about_version">Sürüm %1$s</string>
     <string name="cs_about_features">Açık kaynak.</string>
-    <string name="cs_about_source">GitHub'da kaynak kodu</string>
+    <string name="cs_about_source">GitHub\'da kaynak kodu</string>
     <!-- Settings: profile editor -->
     <string name="pe_title">Profili düzenle</string>
     <string name="pe_saved">Profil kaydedildi</string>

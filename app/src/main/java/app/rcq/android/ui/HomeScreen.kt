@@ -628,7 +628,10 @@ internal fun HomeScreen(
             PreviewOverlay(
                 title = session.contactName(ct.uin),
                 subtitle = "#${ct.uin}",
-                avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp, host = ct.host) },
+                // No host: a PERSON's picture always lives on OUR island —
+                // ours natively, a cross-island contact's because §5e DEPOSITS
+                // the blob here rather than having us pull it from theirs.
+                avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp) },
                 actions = contactActions(ct, session, scope, context, onOpenChat,
                     onReport = { reportTarget = it },
                     onClearThread = { clearPeerTarget = it },
@@ -1468,10 +1471,14 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
     ) {
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
             // A picture when the contact has one, the status flower otherwise.
-            // Cross-island rows keep the glyph: presence does not cross islands
-            // and neither does the blob.
+            // Cross-island rows used to keep the glyph unconditionally, because
+            // the blob did not cross islands. §5e crosses it: the peer DEPOSITS
+            // their encrypted picture into our island and hands us the key in a
+            // sealed envelope, so there is a real picture to draw and it is
+            // fetched from our own island like any other. Presence still does
+            // not cross — that is what `crossIsland` keeps marking.
             PersonAvatar(
-                contact.avatarMediaId.takeIf { contact.host == null }, contact.avatarMediaKey,
+                contact.avatarMediaId, contact.avatarMediaKey,
                 contact.presence, session, 28.dp, crossIsland = contact.host != null,
             )
             UnreadBadge(unread, Modifier.align(Alignment.TopEnd))

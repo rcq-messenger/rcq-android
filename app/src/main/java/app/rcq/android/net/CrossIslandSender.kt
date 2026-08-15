@@ -224,6 +224,23 @@ object CrossIslandSender {
         ownHost: String,
     ): Boolean = depositToPrimary(host, uin, identityKeyB64, env, ownUin, signingPriv, signingPub, ownHost)
 
+    /** §5e cross-island profile refresh: same one-hop deposit as
+     *  [deliverContactRequest] (primary island, `envelope_type: "message"`,
+     *  v=1-sealed to the identity key the peer's open card pinned at add time),
+     *  addressed by a STORED contact — the audience is exactly the accepted
+     *  cross-island contacts, by construction. The picture's blob must already
+     *  have been put on [contact]'s island with [depositBlob] before this call:
+     *  the recipient fetches media from their OWN island and islands never talk
+     *  to each other. Zero server changes. */
+    fun deliverProfile(
+        contact: CrossIslandStore.Contact,
+        env: Envelope,
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        ownHost: String,
+    ): Boolean = depositToPrimary(contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost)
+
     /** One sealed envelope, one deposit, PRIMARY island only. No backup-home
      *  copies: those mailboxes are polled (~30s), and both callers are
      *  interactive (call signalling, a contact request the sender is waiting on). */

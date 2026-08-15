@@ -144,7 +144,9 @@ fun ShareTargetScreen(
                     subtitle = "#${ct.uin}",
                     onClick = { onPick(ChatTarget.Peer(ct.uin)) },
                 ) {
-                    PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp, host = ct.host)
+                    // No host: a person's picture is on OUR island either way —
+                    // §5e deposits a cross-island contact's blob here.
+                    PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp)
                 }
             }
             items(rooms, key = { "g${it.id}" }) { g ->
