@@ -261,6 +261,14 @@ class Session(context: Context) {
     private val _contacts = MutableStateFlow<List<Contact>>(emptyList())
     val contacts: StateFlow<List<Contact>> = _contacts.asStateFlow()
 
+    /// The message database would not open under the key we hold, so this
+    /// session runs WITHOUT local history while everything else works. Kept as
+    /// state rather than swallowed, because an empty thread list and a locked
+    /// one look identical and mean opposite things: one is "nothing here", the
+    /// other is "your history is on this device and we cannot read it".
+    private val _dbLocked = MutableStateFlow(false)
+    val dbLocked: StateFlow<Boolean> = _dbLocked.asStateFlow()
+
     private val _pending = MutableStateFlow<List<PendingRequest>>(emptyList())
     val pending: StateFlow<List<PendingRequest>> = _pending.asStateFlow()
 
@@ -977,8 +985,18 @@ class Session(context: Context) {
             // the ~1s synchronous block that delayed the first frame). Must run
             // before connectAndSync, the only ingest path that writes to db.
             withContext(Dispatchers.IO) {
-                bindDb(AccountManager.activeId.value ?: "")
-                loadMessagesFromDb()
+                // ⚠ A locked database must not take the socket down with it.
+                // Everything below this block — the transport ladder and
+                // connectAndSync — is what makes the app usable at all, and it
+                // has nothing to do with local history. Losing both at once is
+                // what turned a key problem into "the app will not connect".
+                runCatching {
+                    bindDb(AccountManager.activeId.value ?: "")
+                    loadMessagesFromDb()
+                }.onFailure {
+                    _dbLocked.value = true
+                    android.util.Log.e("RCQ", "history unavailable this session", it)
+                }
             }
             CrashReporter.crumb(appCtx, "load_db")
             // Obfuscated transport (censorship circumvention), engaged BEFORE
@@ -1591,8 +1609,29 @@ class Session(context: Context) {
             runCatching { MessageDb.migrateToEncrypted(appCtx, accountId, deviceKey) }
             deviceKey
         }
-        db = MessageDb(appCtx, accountId, key)
+        // ⚠⚠ Opening under a wrong key throws, and this used to be bare. The
+        // caller runs inside `scope.launch { withContext(IO) { … } }` on a
+        // SupervisorJob, so the throw killed exactly this coroutine and, with
+        // it, everything queued behind it: `loadMessagesFromDb()`,
+        // `runRouteLadder()` and `connectAndSync()`. The person then reports
+        // "the app will not connect", and we go looking in the network — the
+        // one place the fault is not. Whatever happens to the database, the
+        // socket must still come up.
+        //
+        // No database is not the same as an empty one, so nothing is recreated
+        // here: a wrong key is recoverable (enter the right PIN) while a
+        // recreated file is not.
+        db = runCatching { MessageDb(appCtx, accountId, key) }.getOrElse { e ->
+            CrashReporter.crumb(appCtx, "bindDb_failed")
+            android.util.Log.e("RCQ", "message db would not open for $accountId", e)
+            throw DbLocked(accountId, e)
+        }
     }
+
+    /** The message database refused the key we have. Distinct from a generic
+     *  failure so the UI can say "this history is locked" instead of showing an
+     *  empty thread list, which reads as "everything is gone". */
+    class DbLocked(val accountId: String, cause: Throwable) : Exception(cause)
 
     /** Tear the live session down when the app locks (background with a PIN
      *  set, flipped by [PanicPinService.lock]): drop the socket + in-memory
