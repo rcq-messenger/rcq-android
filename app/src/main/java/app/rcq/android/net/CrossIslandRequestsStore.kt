@@ -29,14 +29,25 @@ object CrossIslandRequestsStore {
         val host: String,
         val firstAt: Long,
         val msgs: MutableList<Held>,
+        // §5f: a row opened by an explicit `contactreq` rather than by
+        // quarantining a message. [nickname]/[note] come from the envelope, so
+        // the row renders a name and a greeting with no card fetch. gson leaves
+        // them null/false on entries written before §5f.
+        val nickname: String? = null,
+        val note: String? = null,
+        val contactReq: Boolean = false,
     ) {
-        val preview: String get() = msgs.firstOrNull()?.preview ?: ""
+        val preview: String get() = msgs.firstOrNull()?.preview ?: note.orEmpty()
     }
 
     private const val PREFS = "rcq_ci_requests"
     private const val KEY = "requests"
     private const val KEY_BLOCKED = "blocked"
     private const val MAX_HELD = 20
+    /** §5f anti-abuse: a deposit is open, so a stranger's request costs one
+     *  HTTP call. Bound the pending list per account — a flood fills a list
+     *  that stops growing, not the disk. */
+    private const val MAX_REQUESTS = 50
     private val gson = Gson()
     private lateinit var prefs: SharedPreferences
 
@@ -69,6 +80,35 @@ object CrossIslandRequestsStore {
         r.msgs.add(Held(payload, preview))
         while (r.msgs.size > MAX_HELD) r.msgs.removeAt(0)
         map[k] = r
+        writeAll(map)
+        return true
+    }
+
+    /**
+     * §5f: open (or refresh) a PENDING cross-island contact request. Unlike
+     * [hold] it carries no sealed payload — a `contactreq` is not a message and
+     * never enters the message store; the row exists so the request can be
+     * Accepted or Blocked in the same list a same-island pending request shows
+     * up in. A second `request` from the same sender refreshes the one row
+     * rather than adding another. Returns false when the sender is blocked or
+     * the pending list is full (caller drops the envelope).
+     */
+    fun holdContactRequest(ownUin: Int, uin: Int, host: String, nickname: String?, note: String?): Boolean {
+        if (isBlocked(ownUin, uin, host)) return false
+        val map = all()
+        val k = reqKey(ownUin, uin, host)
+        val old = map[k]
+        if (old == null && map.values.count { it.ownUin == ownUin } >= MAX_REQUESTS) return false
+        map[k] = Request(
+            ownUin = ownUin,
+            uin = uin,
+            host = host,
+            firstAt = old?.firstAt ?: System.currentTimeMillis(),
+            msgs = old?.msgs ?: mutableListOf(),
+            nickname = nickname?.takeIf { it.isNotBlank() } ?: old?.nickname,
+            note = note?.takeIf { it.isNotBlank() } ?: old?.note,
+            contactReq = true,
+        )
         writeAll(map)
         return true
     }

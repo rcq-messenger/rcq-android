@@ -749,6 +749,8 @@
     <string name="ci_send_request">Отправить запрос</string>
     <string name="ci_no_such_number">Этот номер пока никем не занят.</string>
     <string name="ci_request_failed">Запрос отправить не удалось.</string>
+    <string name="ci_contact_request">Хочет добавить вас</string>
+    <string name="ci_request_not_delivered">Добавлен, но запрос до него не дошёл.</string>
     <string name="ci_remove_fav">Убрать из избранного</string>
     <string name="ci_add_fav">В избранное</string>
     <string name="ci_unmute">Включить звук</string>

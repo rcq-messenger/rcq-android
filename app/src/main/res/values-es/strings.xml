@@ -724,6 +724,8 @@
     <string name="ci_send_request">Enviar solicitud</string>
     <string name="ci_no_such_number">Todavía nadie tiene este número.</string>
     <string name="ci_request_failed">No se pudo enviar la solicitud.</string>
+    <string name="ci_contact_request">Quiere añadirte</string>
+    <string name="ci_request_not_delivered">Añadido, pero la solicitud no llegó.</string>
     <string name="ci_remove_fav">Quitar de Favoritos</string>
     <string name="ci_add_fav">Añadir a Favoritos</string>
     <string name="ci_unmute">Quitar el silencio</string>

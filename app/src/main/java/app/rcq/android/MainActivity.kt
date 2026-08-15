@@ -955,11 +955,24 @@ private fun RcqApp(session: Session) {
                             ContactAddLink.pending.value = null
                             scope.launch {
                                 if (ci != null) {
-                                    val ok = runCatching { session.addCrossIslandContact(req.uin, ci) }.getOrDefault(false)
-                                    if (ok) {
-                                        chatTarget = ChatTarget.Peer(req.uin)
-                                    } else {
-                                        Toast.makeText(context, context.getString(R.string.addlink_failed), Toast.LENGTH_LONG).show()
+                                    // §5f: the cross-island add now DEPOSITS a
+                                    // contact request to the peer's island. A
+                                    // scanned QR used to say "request sent" while
+                                    // nothing had been sent and no pending list
+                                    // would ever hold it — report the deposit,
+                                    // not the local write.
+                                    when (runCatching { session.addCrossIslandContactDetailed(req.uin, ci) }
+                                        .getOrDefault(Session.CiAdd.FAILED)) {
+                                        Session.CiAdd.SENT -> {
+                                            Toast.makeText(context, context.getString(R.string.addlink_request_sent), Toast.LENGTH_SHORT).show()
+                                            chatTarget = ChatTarget.Peer(req.uin)
+                                        }
+                                        Session.CiAdd.ADDED_ONLY -> {
+                                            Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), Toast.LENGTH_LONG).show()
+                                            chatTarget = ChatTarget.Peer(req.uin)
+                                        }
+                                        Session.CiAdd.FAILED ->
+                                            Toast.makeText(context, context.getString(R.string.addlink_failed), Toast.LENGTH_LONG).show()
                                     }
                                 } else {
                                     val ok = runCatching { session.addContact(req.uin) }.isSuccess

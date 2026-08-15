@@ -724,6 +724,8 @@
     <string name="ci_send_request">İstek gönder</string>
     <string name="ci_no_such_number">Bu numara henüz kimsede değil.</string>
     <string name="ci_request_failed">İstek gönderilemedi.</string>
+    <string name="ci_contact_request">Sizi eklemek istiyor</string>
+    <string name="ci_request_not_delivered">Eklendi, ancak istek karşı tarafa ulaşmadı.</string>
     <string name="ci_remove_fav">Favorilerden çıkar</string>
     <string name="ci_add_fav">Favorilere ekle</string>
     <string name="ci_unmute">Sesi aç</string>

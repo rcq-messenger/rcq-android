@@ -753,6 +753,8 @@
     <string name="ci_send_request">Send request</string>
     <string name="ci_no_such_number">Nobody holds this number yet.</string>
     <string name="ci_request_failed">Could not send the request.</string>
+    <string name="ci_contact_request">Wants to add you</string>
+    <string name="ci_request_not_delivered">Added, but the request did not reach them.</string>
     <string name="ci_remove_fav">Remove from favorites</string>
     <string name="ci_add_fav">Add to favorites</string>
     <string name="ci_unmute">Unmute</string>

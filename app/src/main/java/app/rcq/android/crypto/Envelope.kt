@@ -133,6 +133,26 @@ sealed interface Envelope {
         val data: Map<String, String>,
     ) : Envelope
 
+    /** Cross-island contact request (wire kind "contactreq", spec §5f). Adding
+     *  someone on another island used to be a purely LOCAL act: fetch their
+     *  card, write a row, claim success. Nothing was deposited and the peer was
+     *  never told — which is why a QR scan announced a request that was never
+     *  sent, why §5d cross-island calls stayed gated on a mutual state the
+     *  normal flow could not reach, and why §5e had no audience. This envelope
+     *  is the missing half of "add": [act] "request" opens a PENDING request on
+     *  the peer's side, "accept" makes both sides accepted, "decline" drops the
+     *  peer's pending row. [nickname] is the SENDER's display name (so a
+     *  request renders before any card fetch), [note] an optional short
+     *  greeting, [ts] sender epoch SECONDS. Carries no keys: identity stays
+     *  pinned from the open card, never from this envelope. */
+    data class ContactRequest(
+        val id: String,
+        val act: String,
+        val ts: Long,
+        val nickname: String,
+        val note: String? = null,
+    ) : Envelope
+
     /** Home-island record self-push (federation gossip B1, wire kind "homerec").
      *  Carries the SENDER's own signed home-island record so a contact caches
      *  where to reach them even after the sender's island dies. [rec] is the
@@ -281,6 +301,23 @@ sealed interface Envelope {
             addProperty("ts", ts)
             add("data", JsonObject().apply { data.forEach { (k, v) -> addProperty(k, v) } })
         }.toString().toByteArray(Charsets.UTF_8)
+        is ContactRequest -> JsonObject().apply {
+            addProperty("kind", "contactreq")
+            addProperty("id", id)
+            addProperty("ts", ts)
+            addProperty("act", act)
+            addProperty("nickname", nickname)
+            // `note` is OMITTED when there is no greeting, never emitted as
+            // JSON null. That is the omit-if-absent rule every other optional
+            // on this wire already follows (RelayShare.note two cases below,
+            // `ttl?.let`, iOS `encodeIfPresent`, web `if (env.x != null)`), and
+            // the §5f block's `"note":"…"|null` is shorthand for "optional",
+            // not a demand for an explicit null. iOS and web both omit; this
+            // used to emit `"note":null` and was the only client that did.
+            // Decoding stays tolerant of BOTH forms (see fromJsonBytes: a
+            // JsonNull is not a primitive, so it reads back as null).
+            if (!note.isNullOrEmpty()) addProperty("note", note)
+        }.toString().toByteArray(Charsets.UTF_8)
         is HomeRecord -> JsonObject().apply {
             addProperty("kind", "homerec")
             add("rec", rec)
@@ -348,6 +385,23 @@ sealed interface Envelope {
         /** Wrap a call_* WS signal for cross-island deposit, stamped now. */
         fun callSignal(sig: String, cid: String, data: Map<String, String>): CallSignal =
             CallSignal(UUID.randomUUID().toString().uppercase(), sig, cid, System.currentTimeMillis() / 1000, data)
+
+        /** §5f acts. `request` opens a pending request on the peer, `accept`
+         *  makes the relationship mutual (the precondition §5d checks),
+         *  `decline` drops the peer's pending row. */
+        const val ACT_REQUEST = "request"
+        const val ACT_ACCEPT = "accept"
+        const val ACT_DECLINE = "decline"
+
+        /** Build a §5f contact-request envelope stamped now (epoch SECONDS). */
+        fun contactRequest(act: String, nickname: String, note: String? = null): ContactRequest =
+            ContactRequest(
+                UUID.randomUUID().toString().uppercase(),
+                act,
+                System.currentTimeMillis() / 1000,
+                nickname,
+                note?.takeIf { it.isNotBlank() },
+            )
 
         fun screenshotTaken(): ScreenshotTaken =
             ScreenshotTaken(UUID.randomUUID().toString().uppercase())
@@ -449,6 +503,13 @@ sealed interface Envelope {
                         ?.entrySet()
                         ?.mapNotNull { (k, v) -> if (v.isJsonPrimitive) k to v.asString else null }
                         ?.toMap() ?: emptyMap(),
+                )
+                "contactreq" -> ContactRequest(
+                    id = id,
+                    act = obj.get("act")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                    ts = obj.get("ts")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
+                    nickname = obj.get("nickname")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                    note = obj.get("note")?.takeIf { it.isJsonPrimitive }?.asString,
                 )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,
