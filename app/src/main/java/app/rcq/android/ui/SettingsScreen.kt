@@ -669,6 +669,18 @@ private fun SettingsRoot(
             ) {
                 Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp)
                 Text(stringResource(R.string.cs_about_features), color = c.textSecondary, fontSize = 12.sp)
+                // "Open source" was a claim with nowhere to go. The repo is
+                // public, and the one place a person looks for it is the line
+                // that already says the version.
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                Text(
+                    stringResource(R.string.cs_about_source),
+                    color = c.accent,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri("https://github.com/rcq-messenger/rcq-android")
+                    },
+                )
                 Divider()
                 val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
                 when {

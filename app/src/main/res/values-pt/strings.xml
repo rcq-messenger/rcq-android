@@ -537,6 +537,7 @@
     <string name="cs_burn_body">Isto apaga sua conta e todos os dados locais. Não pode ser desfeito.</string>
     <string name="cs_about_version">Versão %1$s</string>
     <string name="cs_about_features">Código aberto.</string>
+    <string name="cs_about_source">Código-fonte no GitHub</string>
     <!-- Settings: profile editor -->
     <string name="pe_title">Editar perfil</string>
     <string name="pe_saved">Perfil salvo</string>

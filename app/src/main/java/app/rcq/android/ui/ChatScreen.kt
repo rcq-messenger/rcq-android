@@ -1332,10 +1332,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                     entries.forEach { (uin, _) ->
                         val name = group?.memberName(uin) ?: session.contactName(uin)
-                        Text(
-                            name, color = c.textPrimary, fontSize = 14.sp,
-                            modifier = Modifier.padding(start = 28.dp, top = 2.dp, bottom = 2.dp),
-                        )
+                        // The picture, not just the name. Every other list of
+                        // people in the app carries one, and this is the list
+                        // where "who was that" is the entire question. The
+                        // member row is gated by membership, exactly like the
+                        // nickname beside it, so no new exposure.
+                        val member = group?.members?.firstOrNull { it.uin == uin }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 28.dp, top = 3.dp, bottom = 3.dp),
+                        ) {
+                            PersonAvatar(
+                                member?.avatarMediaId ?: peerContact?.avatarMediaId?.takeIf { uin == peer },
+                                member?.avatarMediaKey ?: peerContact?.avatarMediaKey?.takeIf { uin == peer },
+                                member?.presence ?: UserStatus.OFFLINE,
+                                session,
+                                22.dp,
+                                host = group?.host,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(name, color = c.textPrimary, fontSize = 14.sp)
+                        }
                     }
                 }
             }

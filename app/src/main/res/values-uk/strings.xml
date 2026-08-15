@@ -537,6 +537,7 @@
     <string name="cs_burn_body">Це видаляє твій акаунт і всі локальні дані. Скасувати неможливо.</string>
     <string name="cs_about_version">Версія %1$s</string>
     <string name="cs_about_features">Відкритий код.</string>
+    <string name="cs_about_source">Вихідний код на GitHub</string>
     <!-- Settings: profile editor -->
     <string name="pe_title">Змінити профіль</string>
     <string name="pe_saved">Профіль збережено</string>
