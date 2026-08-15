@@ -679,9 +679,14 @@
     <string name="snd_message_title">Message sounds</string>
     <string name="snd_message_desc">Announce a new message: a tone while the app is open, a notification when it is not.</string>
     <string name="snd_presence_title">Contact online / offline</string>
-    <string name="snd_presence_desc">Play a tone when one of your contacts comes online or goes offline.</string>
+    <string name="snd_presence_desc">Everyone plays a tone for any contact. Favourites plays only for the people you starred. Off never plays one.</string>
     <string name="snd_volume_title">In-app tone volume</string>
-    <string name="snd_footer">This slider sets the tone the open app plays; it rides the media volume (the volume buttons) and stays quiet in silent, vibrate and Do Not Disturb modes. With the app in the background a message arrives as a system notification instead, and Android sets how loud that is. Per-chat mute (long-press a chat on the home screen) silences both.</string>
+    <string name="snd_volume_desc">Scales the tone the open app plays. How loud a notification itself is belongs to Android, not to us.</string>
+    <string name="snd_presence_all">Everyone</string>
+    <string name="snd_presence_favorites">Favourites</string>
+    <string name="snd_presence_off">Off</string>
+    <string name="snd_system_channel">Notification sound and volume</string>
+    <string name="snd_footer">The open app plays its own tone; with the app in the background the same tone arrives as a system notification. Both ride the notification volume, and both stay quiet in silent, vibrate and Do Not Disturb modes. The slider above can only make our tone quieter than the system level — the level itself is changed in the notification settings above. Per-chat mute (long-press a chat on the home screen) silences both.</string>
 
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Translations roll out gradually. Untranslated text falls back to English.</string>

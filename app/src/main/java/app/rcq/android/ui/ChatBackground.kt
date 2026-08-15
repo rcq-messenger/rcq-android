@@ -52,21 +52,40 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal data class ChatBgPreset(val id: String, val label: String, val brush: Brush)
+internal data class ChatBgPreset(
+    val id: String,
+    val label: String,
+    val brush: Brush,
+    /** The colour at the TOP edge of [brush]. Chrome that is drawn OVER the
+     *  wallpaper — the home header — sits on this rather than on the theme's
+     *  background, and takes its foreground from it. See [wallpaperChrome]. */
+    val topColor: Color,
+)
 
 /** Built-in chat wallpapers. Global (one for the whole app), applied behind the
  *  message list in every chat. Founder asked for presets + a custom image. */
 internal object ChatBackgrounds {
     val presets = listOf(
-        ChatBgPreset("ocean", "Ocean", Brush.verticalGradient(listOf(Color(0xFF1A2980), Color(0xFF26D0CE)))),
-        ChatBgPreset("midnight", "Midnight", Brush.verticalGradient(listOf(Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)))),
-        ChatBgPreset("forest", "Forest", Brush.verticalGradient(listOf(Color(0xFF134E5E), Color(0xFF71B280)))),
-        ChatBgPreset("sunset", "Sunset", Brush.verticalGradient(listOf(Color(0xFFFF8008), Color(0xFFFFC837)))),
-        ChatBgPreset("lavender", "Lavender", Brush.verticalGradient(listOf(Color(0xFFE0C3FC), Color(0xFF8EC5FC)))),
-        ChatBgPreset("rose", "Rose", Brush.verticalGradient(listOf(Color(0xFFFFDEE9), Color(0xFFB5FFFC)))),
-        ChatBgPreset("cream", "Cream", SolidColor(Color(0xFFF3EFE7))),
-        ChatBgPreset("graphite", "Graphite", Brush.verticalGradient(listOf(Color(0xFF232526), Color(0xFF414345)))),
+        wallpaper("ocean", "Ocean", listOf(Color(0xFF1A2980), Color(0xFF26D0CE))),
+        wallpaper("midnight", "Midnight", listOf(Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364))),
+        wallpaper("forest", "Forest", listOf(Color(0xFF134E5E), Color(0xFF71B280))),
+        wallpaper("sunset", "Sunset", listOf(Color(0xFFFF8008), Color(0xFFFFC837))),
+        wallpaper("lavender", "Lavender", listOf(Color(0xFFE0C3FC), Color(0xFF8EC5FC))),
+        wallpaper("rose", "Rose", listOf(Color(0xFFFFDEE9), Color(0xFFB5FFFC))),
+        wallpaper("cream", "Cream", listOf(Color(0xFFF3EFE7))),
+        wallpaper("graphite", "Graphite", listOf(Color(0xFF232526), Color(0xFF414345))),
     )
+
+    /** Built from the stops rather than from a ready-made Brush so the top
+     *  colour cannot drift away from the gradient it is supposed to describe —
+     *  a Brush does not hand its stops back. One stop = a flat fill. */
+    private fun wallpaper(id: String, label: String, stops: List<Color>) = ChatBgPreset(
+        id = id,
+        label = label,
+        brush = if (stops.size == 1) SolidColor(stops[0]) else Brush.verticalGradient(stops),
+        topColor = stops[0],
+    )
+
     fun preset(id: String) = presets.firstOrNull { it.id == id }
 }
 
@@ -106,6 +125,80 @@ private fun WallpaperBackground(bg: String, file: java.io.File) {
         }
     }
 }
+
+/**
+ * Colours for chrome that is drawn straight ON TOP of the home wallpaper — the
+ * header's name, account glyph, UIN and overflow dots, which have no fill of
+ * their own and so sit on whatever the wallpaper puts under them.
+ *
+ * ⚠ [RcqTheme.colors] is the WRONG source for those. It follows light/dark
+ * mode, and the wallpaper is picked independently of the mode, so the two
+ * disagree the moment somebody in the light theme chooses "Midnight": the
+ * header keeps its black glyphs and disappears into the wallpaper (#554,
+ * "имя сверху, глиф аватарки и три точки справа чёрные"). The dark theme has
+ * the mirror-image bug on "Rose" and "Cream". What the header actually stands
+ * on is the TOP of the wallpaper, so that is what chooses its foregrounds.
+ *
+ * Falls back to the theme's own colours when no wallpaper is set — then the
+ * header really is standing on `bgPrimary` and nothing needs deciding.
+ */
+@Composable
+internal fun homeChrome(): RcqColors {
+    val bg by LocalStores.homeBackground.collectAsState()
+    val context = LocalContext.current
+    return wallpaperChrome(bg, remember { LocalStores.homeBgFile(context) })
+}
+
+/** The same, for chrome over the CHAT wallpaper (a separate selection). */
+@Composable
+internal fun chatChrome(): RcqColors {
+    val bg by LocalStores.chatBackground.collectAsState()
+    val context = LocalContext.current
+    return wallpaperChrome(bg, remember { LocalStores.chatBgFile(context) })
+}
+
+@Composable
+private fun wallpaperChrome(bg: String, file: java.io.File): RcqColors {
+    val top = wallpaperTopColor(bg, file)
+    return if (top == null) RcqTheme.colors else rcqColorsFor(top.needsLightChrome())
+}
+
+/** What the top of the wallpaper is, or null when there is no wallpaper. */
+@Composable
+private fun wallpaperTopColor(bg: String, file: java.io.File): Color? = when {
+    bg.startsWith("preset:") -> ChatBackgrounds.preset(bg.removePrefix("preset:"))?.topColor
+    bg == "custom" -> {
+        // Re-read when the file is replaced, exactly as the wallpaper itself does.
+        val stamp = file.lastModified()
+        val tone by produceState<Color?>(initialValue = null, stamp) {
+            value = withContext(Dispatchers.IO) { topStripTone(file) }
+        }
+        tone
+    }
+    else -> null
+}
+
+/** Mean colour of the top eighth of a custom wallpaper — the strip the header
+ *  covers. Decoded at 1/16 scale on purpose: the only question being asked is
+ *  "light or dark", and a thumbnail answers it exactly as well as a
+ *  twelve-megapixel photo while costing nothing to hold. */
+private fun topStripTone(file: java.io.File): Color? = runCatching {
+    val opts = BitmapFactory.Options().apply { inSampleSize = 16 }
+    val bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return@runCatching null
+    val rows = (bmp.height / 8).coerceIn(1, bmp.height)
+    val px = IntArray(bmp.width * rows)
+    bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, rows)
+    bmp.recycle()
+    var r = 0L
+    var g = 0L
+    var b = 0L
+    for (p in px) {
+        r += (p shr 16) and 0xFF
+        g += (p shr 8) and 0xFF
+        b += p and 0xFF
+    }
+    if (px.isEmpty()) null else Color((r / px.size).toInt(), (g / px.size).toInt(), (b / px.size).toInt())
+}.getOrNull()
 
 /** Settings picker: None + built-in presets + a custom image from the gallery.
  *  Global wallpaper (applies to all chats). */

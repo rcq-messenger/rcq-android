@@ -585,6 +585,37 @@ object Push {
         }
     }
 
+    /** Open the system settings page for the MESSAGE channel.
+     *
+     *  This is the only place the loudness of a message notification can
+     *  actually be changed: Android owns the notification stream and an app
+     *  cannot set, read or scale it from the outside. #545 is what happens
+     *  without this door — a slider in our settings looked like it set that
+     *  volume, and the person concluded the push "always plays at full volume
+     *  regardless". Our slider now says what it really scales (the tone the
+     *  open app plays) and this row goes where the other half lives. */
+    fun openMessageChannelSettings(ctx: Context) {
+        ensureChannels(ctx)
+        runCatching {
+            ctx.startActivity(
+                Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL_MESSAGES)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            // Pre-O, or an OEM settings app with no channel screen: the app's
+            // own notification settings are the next best thing.
+            runCatching {
+                ctx.startActivity(
+                    Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
+
     /** POST [endpoint] to every local account's island so each can wake this
      *  device. Idempotent server-side (upsert on uin+token). Fire-and-forget;
      *  callable headless (reads per-account creds straight from SecureStore). */
@@ -858,14 +889,66 @@ object Push {
         // ⚠ The timestamp is only refreshed when we actually ALERT. Stamping it
         // on every post let a chain of duplicates keep extending the silence, so
         // a real message twenty seconds later went unheard.
+        //
+        // ⚠ A 1:1 chat has TWO possible ids and the burst window has to cover
+        // both of them, or it covers nothing. A wake whose envelope stayed
+        // sealed (v=2 from an iPhone, a sender-keys group copy) has no sender
+        // to name, so it posts under the shared "dm" id; the SAME message
+        // arriving over the live socket, or a v=1 wake for it, posts under
+        // "peer:N". Keyed per id, those are two first-alerts twenty seconds
+        // apart from each other's point of view: one message, two chimes
+        // (#553). So a peer post consults the anonymous clock as well, and
+        // takes the anonymous notification down — it is the same message,
+        // now with a name on it.
+        //
+        // ⚠ And the OTHER order has to be covered too, or the fix only works
+        // half the time. The live socket is often the fast half: with the app
+        // backgrounded a message can be ingested and posted as "peer:N" before
+        // the wake for it lands (the server skips the push for devices it sees
+        // online, so this is the case where it did NOT see one — the socket was
+        // up all the same). That wake then posts under "dm", finds an empty
+        // clock of its own, and chimes for a message that already chimed. An
+        // anonymous post therefore consults [lastDirectAlertAt] — the last time
+        // ANY 1:1 alerted, named or not.
+        //
+        // That is deliberately coarser than the named direction, and it costs
+        // nothing we were not already paying: the "dm" bucket is SHARED by
+        // every sender we could not name, so two sealed wakes from two
+        // different people inside one window already collapse into a single
+        // chime. A sealed wake cannot tell whose message it is; taking a named
+        // alert as evidence that this window's message has been announced is
+        // the same trade, and the alternative is announcing one message twice.
+        // Groups are untouched — a group wake always carries its group_id, so
+        // it has a real id of its own and never lands in this bucket.
+        val anonId = "dm".hashCode()
+        val isDirect = groupId == null
         val now = android.os.SystemClock.elapsedRealtime()
+        var supersedesAnon = false
         val burstQuiet = synchronized(lastAlertAt) {
             val prev = lastAlertAt[id]
-            val within = prev != null && now - prev < BURST_WINDOW_MS
-            if (!within) lastAlertAt[id] = now
+            // The clock belonging to the OTHER shape this same message could
+            // have arrived in — null for a group, which has only one shape.
+            val cross = when {
+                !isDirect -> null
+                peerUin != null -> lastAlertAt[anonId]  // named copy, sealed one already alerted
+                else -> lastDirectAlertAt               // sealed copy, a named one already alerted
+            }
+            val crossWithin = cross != null && now - cross < BURST_WINDOW_MS
+            // Only the NAMED copy replaces the anonymous notification; the
+            // reverse would take down the better title in favour of the worse.
+            supersedesAnon = crossWithin && peerUin != null && id != anonId
+            val within = (prev != null && now - prev < BURST_WINDOW_MS) || crossWithin
+            if (!within) {
+                lastAlertAt[id] = now
+                if (isDirect) lastDirectAlertAt = now
+            }
             if (lastAlertAt.size > 64) lastAlertAt.entries.removeAll { now - it.value > BURST_WINDOW_MS * 4 }
             within
         }
+        // Same message, better title: replace the anonymous copy instead of
+        // leaving both in the shade. Only inside the window, so an unrelated
+        // sealed wake from an hour ago is not swept away with it.
+        if (supersedesAnon) runCatching { NotificationManagerCompat.from(ctx).cancel(anonId) }
         // The app in front makes its own noise (in-app tone + banner), so a
         // second, louder chime from the system on top of it is the "о-оу
         // несколько раз, тихо и громко" report. The notification is still
@@ -875,9 +958,20 @@ object Push {
         // suppressing the system sound left it entirely silent: the message
         // arrived, the shade filled up, and nothing ever made a noise ("пуш без
         // звука, так и должно быть, когда на одном устройстве оба?").
-        val forAnotherAccount = toUin != null && runCatching {
-            AccountManager.activeId.value?.let { SecureStore(ctx, it).uin } != toUin
-        }.getOrDefault(false)
+        //
+        // ⚠ "Another account" must mean a uin we POSITIVELY resolved and that
+        // differs — not "we could not tell". The old expression read
+        // `activeId?.let { store.uin } != toUin`, which is also true when there
+        // is no active account id yet, when the SecureStore has no uin, and on
+        // any headless start that raced AccountManager.init: the null on the
+        // left never equals the uin on the right. Every one of those cases
+        // un-muted the foreground path, so a message that had just played the
+        // in-app tone chimed a second time from the shade — one message, two
+        // sounds (#553).
+        val activeUin = runCatching {
+            AccountManager.activeId.value?.let { SecureStore(ctx, it).uin }
+        }.getOrNull()
+        val forAnotherAccount = toUin != null && activeUin != null && activeUin != toUin
         val foregroundQuiet = app.rcq.android.RcqApp.foreground && !forAnotherAccount
         // Honour the app's own sound switches. The channel carries our tone, so
         // "App sounds: off" or "Message sounds: off" used to silence only half
@@ -905,6 +999,13 @@ object Push {
 
     /** Last time each notification id made a sound, for burst coalescing. */
     private val lastAlertAt = HashMap<Int, Long>()
+
+    /** Last time ANY 1:1 notification made a sound, named or anonymous.
+     *
+     *  Read only by the anonymous ("dm") post, which by construction cannot
+     *  know whose message it is carrying and so cannot use a per-sender clock.
+     *  Written under the [lastAlertAt] monitor together with it. */
+    private var lastDirectAlertAt: Long? = null
     private const val BURST_WINDOW_MS = 20_000L
 
     /** Wakes already turned into a sound, keyed by the ciphertext they carry.
@@ -996,7 +1097,7 @@ object Push {
         } else {
             null
         }
-        if (call == null) { showAnonymousCallWake(ctx); return }
+        if (call == null) { showAnonymousCallWake(ctx, env); return }
         if (call.sig == "call_end") { dismissIncomingCall(ctx, call.callId); return }
         // Anything else (answer/ice/renegotiate) only means something to an app
         // that is already holding this call, and that app has it over the
@@ -1010,7 +1111,7 @@ object Push {
         // ago. The Session logs that as a missed call, which is the honest
         // outcome — ringing for it is not.
         if (System.currentTimeMillis() / 1000 - call.ts > CALL_OFFER_TTL_SEC) return
-        if (call.sdp.isBlank()) { showAnonymousCallWake(ctx); return }
+        if (call.sdp.isBlank()) { showAnonymousCallWake(ctx, env); return }
         // No name while the app is locked: the ring is fine on a lock screen,
         // the caller's identity is not. It fills itself in as soon as the app
         // is unlocked and the Session ingests this same offer out of the queue.
@@ -1039,7 +1140,7 @@ object Push {
      *  which connects and drains the real offer out of the queue; the ring that
      *  follows replaces this notification (same id). Times itself out like an
      *  unanswered call so a wake we never resolved does not sit in the shade. */
-    private fun showAnonymousCallWake(ctx: Context) {
+    private fun showAnonymousCallWake(ctx: Context, env: String?) {
         // Never over a ring that is already up: this shares the call
         // notification id, so posting it while a real offer is parked would
         // strip the Answer/Decline buttons off a call the user is looking at.
@@ -1062,6 +1163,14 @@ object Push {
             .setTimeoutAfter(60_000L)
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(CALL_NOTIF_ID, notif) }
+        // A call IS arriving — that is the one thing this wake does know — so
+        // the screen comes on for it as it would for a named one. The envelope
+        // is the part we could not open; the display is not. Keyed on the
+        // ciphertext so the distributor replaying its cache cannot wake the
+        // phone twice for one call — and on nothing when the island sent no
+        // envelope at all, which is the one shape of wake that carries no
+        // identity of any kind to key on.
+        wakeScreenForRing(ctx, "anon:${env ?: "unkeyed"}")
     }
 
     /** Park the offer and raise the ring. Shared by the flat (same-island VoIP)
@@ -1111,8 +1220,23 @@ object Push {
         // the audible ring channel in that case so the call still rings instead
         // of being a silent dropped call; the silent channel only when the FSI
         // can actually launch IncomingCallActivity (which rings via Ringer).
-        val fsiOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
-            (ctx.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        val permitted = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+            (nm?.canUseFullScreenIntent() ?: true)
+        // ⚠ Holding the permission is not the only condition, and on Android 12
+        // it is not even a question that can be asked — canUseFullScreenIntent()
+        // arrived in 34, so the line above is unconditionally true there and the
+        // silent channel was chosen on nothing but hope (#458). The other
+        // condition IS readable on every version: a full-screen intent is only
+        // ever delivered from a channel the user has left at IMPORTANCE_HIGH.
+        // Drop it in the phone's settings — or let an OEM battery-saver drop it
+        // — and the FSI is silently downgraded to a heads-up, which on the
+        // silent calls channel makes no sound and shows nothing on a dark
+        // screen. Check it, and fall back to the audible channel when it fails.
+        val channelReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            (nm?.getNotificationChannel(CHANNEL_CALLS)?.importance ?: NotificationManager.IMPORTANCE_HIGH) >=
+            NotificationManager.IMPORTANCE_HIGH
+        val fsiOk = permitted && channelReady
         // ⚠ Having the permission is not the same as the activity launching. A
         // full-screen intent only takes over the screen when the device is
         // LOCKED or the display is off; with the screen on and unlocked Android
@@ -1154,10 +1278,85 @@ object Push {
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, answerPi))
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(CALL_NOTIF_ID, notif) }
+        // AFTER the post, so whatever the system decides to show — the
+        // full-screen IncomingCallActivity or a heads-up on the keyguard — is
+        // already there when the panel comes up rather than a second later.
+        wakeScreenForRing(ctx, callId)
     }
 
     fun cancelCallNotification(ctx: Context) {
         runCatching { NotificationManagerCompat.from(ctx).cancel(CALL_NOTIF_ID) }
+        releaseRingWakeLock()
+    }
+
+    // ── Lighting the screen for a ring ───────────────────────────────────
+    //
+    // ⚠ Posting a notification does NOT turn a dark display on, at any API
+    // level. Until this existed the app's ONLY way to light the screen for an
+    // incoming call was IncomingCallActivity's setTurnScreenOn(), which the
+    // system runs only if it actually launches the full-screen intent — and
+    // whether it does is something we can ask about on Android 14+ and cannot
+    // ask about at all below it. On Android 12 the code simply assumed yes,
+    // and on the same branch (screen off / locked) it also chose the SILENT
+    // calls channel, because IncomingCallActivity was expected to do the
+    // ringing. So the one case where the FSI did not launch produced a phone
+    // that neither lit up nor made a sound: #458, "a screen that was locked
+    // and off does not light up".
+    //
+    // The fix is to stop delegating the display to something we cannot verify.
+    // A wake lock is the one call that lights a screen from a background
+    // component regardless of what the notification does with its intent. The
+    // deprecation on these levels is 2012-vintage and they remain the only
+    // API for this; ACQUIRE_CAUSES_WAKEUP is the part that does the work,
+    // ON_AFTER_RELEASE hands the display to the normal idle timer (or to
+    // IncomingCallActivity's FLAG_KEEP_SCREEN_ON) instead of blanking it the
+    // instant we let go.
+    /** Bounded by the ring window, so a wake we never hear the end of cannot
+     *  hold the display on: the same 60s the notification times out after. */
+    private const val RING_WAKE_MS = 60_000L
+
+    @Volatile
+    private var ringWakeLock: android.os.PowerManager.WakeLock? = null
+
+    /** The call this already woke the screen for.
+     *
+     *  ⚠ Once per CALL, not once per post. IncomingCallActivity re-posts the
+     *  ring from onStop, and one of the ways to reach onStop is the power
+     *  button — which is the user saying "enough". Waking on that post would
+     *  turn the screen straight back on, the Activity would restart, and the
+     *  two would take turns for the length of the ring. */
+    @Volatile
+    private var wokenForCallId: String? = null
+
+    @Synchronized
+    private fun wakeScreenForRing(ctx: Context, callId: String) {
+        if (wokenForCallId == callId) return
+        wokenForCallId = callId
+        val pm = ctx.getSystemService(android.os.PowerManager::class.java) ?: return
+        // Already awake: nothing to turn on, and taking a screen lock we do not
+        // need would only keep a display alive that the user is entitled to let
+        // sleep. The in-call surfaces hold FLAG_KEEP_SCREEN_ON for that.
+        if (pm.isInteractive) return
+        releaseRingWakeLock()
+        @Suppress("DEPRECATION")
+        val lock = runCatching {
+            pm.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE,
+                "rcq:incoming-call",
+            )
+        }.getOrNull() ?: return
+        lock.setReferenceCounted(false)
+        runCatching { lock.acquire(RING_WAKE_MS) }
+        ringWakeLock = lock
+    }
+
+    @Synchronized
+    private fun releaseRingWakeLock() {
+        val lock = ringWakeLock ?: return
+        ringWakeLock = null
+        runCatching { if (lock.isHeld) lock.release() }
     }
 
     /** The control surface for a call that is already up.
@@ -1254,6 +1453,11 @@ object Push {
      *  notification, and tell a showing IncomingCallActivity to finish. */
     fun dismissIncomingCall(ctx: Context, callId: String) {
         IncomingCallStore.clearIf(callId)
+        // This call is over, so the once-per-call wake is spent. Cleared here
+        // and NOT in cancelCallNotification, which the Activity calls the
+        // moment it appears — clearing it there would re-arm the wake for the
+        // notification the same Activity re-posts when it is put aside.
+        if (wokenForCallId == callId) wokenForCallId = null
         cancelCallNotification(ctx)
         runCatching {
             ctx.sendBroadcast(

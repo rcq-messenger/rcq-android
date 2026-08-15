@@ -1022,6 +1022,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // A first-time reader could not tell an empty conversation from one
         // that failed to load.
         if (rows.isEmpty()) {
+            // Nothing but wallpaper under this, so it reads off the wallpaper
+            // rather than off the theme — a light theme with the "Midnight"
+            // wallpaper printed it black on near-black (#554, same defect as
+            // the home header).
+            val ec = chatChrome()
             Column(
                 Modifier.fillMaxSize().padding(top = 96.dp, start = 32.dp, end = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -1030,16 +1035,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 Icon(
                     Icons.AutoMirrored.Filled.Message,
                     contentDescription = null,
-                    tint = c.divider,
+                    tint = ec.divider,
                     modifier = Modifier.size(38.dp),
                 )
                 Text(
                     stringResource(R.string.chat_empty_title),
-                    color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    color = ec.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     stringResource(R.string.chat_empty_body),
-                    color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
+                    color = ec.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
                 )
             }
         }

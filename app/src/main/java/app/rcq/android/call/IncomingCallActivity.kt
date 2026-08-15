@@ -131,6 +131,12 @@ class IncomingCallActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (answerFromNotification(intent)) return
         if (bind(IncomingCallStore.pending) == null) { dismiss(); return }
+        // Re-arm the lock-screen + wake flags. They are a property of a LAUNCH,
+        // not of the Activity: the framework spends the turn-screen-on
+        // permission when the activity is first resumed, so an instance that is
+        // still alive from the previous call (singleTask re-delivers here rather
+        // than creating a new one) would show the second call on a dark screen.
+        showOverLockscreen()
         ringer?.stop()
         ringer = Ringer(this).also { it.startIncoming() }
         window.decorView.removeCallbacks(watchdog)

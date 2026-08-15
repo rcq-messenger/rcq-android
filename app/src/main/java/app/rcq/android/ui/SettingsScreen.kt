@@ -1696,17 +1696,34 @@ private fun statusText(ok: Boolean?, yes: String, no: String): String = when (ok
 @Composable
 private fun SoundsScreen(onBack: () -> Unit) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
     val masterOn by LocalStores.soundMaster.collectAsState()
     val msgOn by LocalStores.soundMessages.collectAsState()
-    val presOn by LocalStores.soundPresence.collectAsState()
+    val presenceMode by LocalStores.presenceSound.collectAsState()
     val volume by LocalStores.soundVolume.collectAsState()
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_sounds), onBack)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingToggleRow(stringResource(R.string.snd_master_title), stringResource(R.string.snd_master_desc), masterOn) { LocalStores.setSoundMaster(it) }
             SettingToggleRow(stringResource(R.string.snd_message_title), stringResource(R.string.snd_message_desc), msgOn, enabled = masterOn) { LocalStores.setSoundMessages(it) }
-            SettingToggleRow(stringResource(R.string.snd_presence_title), stringResource(R.string.snd_presence_desc), presOn, enabled = masterOn) { LocalStores.setSoundPresence(it) }
-            // Volume for the in-app tones only. Releasing the thumb plays the
+            // Presence: everyone / favourites only / off (#552). Not a toggle,
+            // because with a full roster the chime is frequent enough to read
+            // as a malfunction, and "off" was the only escape.
+            SettingsGroup {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.snd_presence_title),
+                        color = if (masterOn) c.textPrimary else c.textSecondary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    SegmentedPresenceSound(presenceMode, enabled = masterOn) { LocalStores.setPresenceSoundMode(it) }
+                    Text(stringResource(R.string.snd_presence_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+            }
+            // Scale factor for the tone the OPEN app plays — say so. The
+            // loudness of the notification itself is Android's, and the row
+            // below goes to where that lives. Releasing the thumb plays the
             // message tone so the level is audible while choosing it.
             SettingsGroup {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
@@ -1721,9 +1738,51 @@ private fun SoundsScreen(onBack: () -> Unit) {
                         enabled = masterOn,
                         colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
                     )
+                    Text(stringResource(R.string.snd_volume_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+            }
+            SettingsGroup {
+                SettingsRow(Icons.Filled.Notifications, stringResource(R.string.snd_system_channel)) {
+                    app.rcq.android.push.Push.openMessageChannelSettings(context)
                 }
             }
             SectionFooter(stringResource(R.string.snd_footer))
+        }
+    }
+}
+
+/** Everyone / favourites / off for the online-offline chime (#552). */
+@Composable
+private fun SegmentedPresenceSound(
+    mode: LocalStores.PresenceSoundMode,
+    enabled: Boolean,
+    onPick: (LocalStores.PresenceSoundMode) -> Unit,
+) {
+    val c = RcqTheme.colors
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgPrimary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        listOf(
+            LocalStores.PresenceSoundMode.ALL to stringResource(R.string.snd_presence_all),
+            LocalStores.PresenceSoundMode.FAVORITES to stringResource(R.string.snd_presence_favorites),
+            LocalStores.PresenceSoundMode.OFF to stringResource(R.string.snd_presence_off),
+        ).forEach { (m, label) ->
+            val sel = mode == m
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(percent = 50))
+                    .background(if (sel && enabled) c.accent else Color.Transparent)
+                    .clickable(enabled = enabled) { onPick(m) }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    color = when {
+                        sel && enabled -> Color.White
+                        sel -> c.textSecondary
+                        else -> c.textSecondary
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
         }
     }
 }

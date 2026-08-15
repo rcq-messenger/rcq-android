@@ -377,6 +377,11 @@ internal fun HomeScreen(
         HomeBackground()
         Column(Modifier.fillMaxSize()) {
             HomeHeader(
+                // ⚠ The header has no fill of its own — it stands on the
+                // wallpaper above, not on `c.bgPrimary` — so its foregrounds
+                // are chosen by what the wallpaper puts under them and not by
+                // the light/dark theme (#554). No wallpaper → this IS `c`.
+                chrome = homeChrome(),
                 session = session,
                 nickname = session.nickname,
                 uin = uin,
@@ -990,6 +995,12 @@ private fun groupActions(
  *  "coming soon" sheet. */
 @Composable
 private fun HomeHeader(
+    /** Foregrounds for everything drawn DIRECTLY on the wallpaper. Equal to
+     *  [RcqTheme.colors] when no home wallpaper is set; the dark or light
+     *  variant, whichever the top of the wallpaper can be read against,
+     *  when there is one. Menus and sheets are NOT chrome — they have their
+     *  own Material surface under them and keep using the theme. */
+    chrome: RcqColors,
     session: Session,
     nickname: String,
     uin: Int,
@@ -1080,8 +1091,9 @@ private fun HomeHeader(
         // add / manage local accounts (iOS AccountManager parity).
         Box(Modifier.align(Alignment.CenterStart)) {
             Icon(
-                // Black (textPrimary), not accent green, per founder.
-                Icons.Outlined.AccountCircle, "Accounts", tint = c.textPrimary,
+                // Black (textPrimary), not accent green, per founder — but the
+                // theme's black only while the theme is what it stands on.
+                Icons.Outlined.AccountCircle, "Accounts", tint = chrome.textPrimary,
                 modifier = Modifier.size(28.dp).clip(CircleShape).clickable { accountMenu = true },
             )
             DropdownMenu(expanded = accountMenu, onDismissRequest = { accountMenu = false }) {
@@ -1150,7 +1162,7 @@ private fun HomeHeader(
                             .align(Alignment.BottomEnd)
                             .size(11.dp)
                             .clip(CircleShape)
-                            .background(c.bgPrimary)
+                            .background(chrome.bgPrimary)
                             .padding(2.dp)
                             .clip(CircleShape)
                             .background(if (connected) c.statusOnline else c.statusAway),
@@ -1179,8 +1191,8 @@ private fun HomeHeader(
                 // under it (founder: they should sit almost touching).
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenProfile).padding(horizontal = 6.dp, vertical = 4.dp),
             ) {
-                Text(nickname, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
-                Text("#$uin", color = c.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+                Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
+                Text("#$uin", color = chrome.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
             }
             // Right of the nick/UIN: a status-width slot holding the stealth
             // shield when the censorship bypass is engaged (iOS StealthHeaderBadge
@@ -1204,7 +1216,7 @@ private fun HomeHeader(
                     Icon(
                         Icons.Filled.FileDownload,
                         stringResource(R.string.update_available_badge, up.versionName),
-                        tint = c.accent,
+                        tint = chrome.accent,
                         modifier = Modifier
                             .size(22.dp)
                             .clip(CircleShape)
@@ -1219,7 +1231,7 @@ private fun HomeHeader(
                     Icon(
                         Icons.Filled.Shield,
                         stringResource(R.string.stealth_info_title),
-                        tint = if (routeVerified) c.accent else c.statusAway,
+                        tint = if (routeVerified) chrome.accent else c.statusAway,
                         modifier = Modifier.size(22.dp).clip(CircleShape).clickable { showStealthInfo = true },
                     )
                 }
@@ -1229,7 +1241,7 @@ private fun HomeHeader(
         // Right — overflow menu.
         Box(Modifier.align(Alignment.CenterEnd)) {
             Icon(
-                Icons.Filled.MoreVert, "Menu", tint = c.textPrimary,
+                Icons.Filled.MoreVert, "Menu", tint = chrome.textPrimary,
                 modifier = Modifier.size(26.dp).clip(CircleShape).clickable { overflowMenu = true },
             )
             // Unread news. Sits on the corner of the glyph so the ellipsis
@@ -1243,7 +1255,7 @@ private fun HomeHeader(
                         .offset(x = 2.dp, y = (-2).dp)
                         .size(9.dp)
                         .clip(CircleShape)
-                        .background(c.bgPrimary)
+                        .background(chrome.bgPrimary)
                         .padding(1.5.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFE5484D)),
@@ -1677,7 +1689,9 @@ private fun InviteNudge(myUin: Int, onAdd: () -> Unit) {
 
 @Composable
 private fun EmptyState(onAdd: () -> Unit, myUin: Int) {
-    val c = RcqTheme.colors
+    // Fills the list area with nothing but the wallpaper behind it, so it takes
+    // the wallpaper's foregrounds and not the theme's, same as the header (#554).
+    val c = homeChrome()
     val context = LocalContext.current
     Column(
         Modifier.fillMaxWidth().padding(vertical = 60.dp, horizontal = 32.dp),
@@ -1709,7 +1723,8 @@ private fun EmptyState(onAdd: () -> Unit, myUin: Int) {
  *  (tester #4/#9/#13). The petal loader is the branded busy indicator. */
 @Composable
 private fun ConnectingState(stealth: Boolean = false) {
-    val c = RcqTheme.colors
+    // Also drawn straight on the wallpaper — see [EmptyState].
+    val c = homeChrome()
     Column(
         Modifier.fillMaxWidth().padding(vertical = 70.dp, horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

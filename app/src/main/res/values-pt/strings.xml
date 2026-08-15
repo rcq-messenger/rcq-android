@@ -654,9 +654,14 @@
     <string name="snd_message_title">Sons de mensagem</string>
     <string name="snd_message_desc">Avisar de uma mensagem nova: um sinal com o app aberto, uma notificação quando ele não está.</string>
     <string name="snd_presence_title">Contato online / offline</string>
-    <string name="snd_presence_desc">Toca um sinal quando um dos seus contatos fica online ou sai.</string>
+    <string name="snd_presence_desc">«Todos» toca para qualquer contato. «Favoritos» toca só para quem você marcou. «Desligado» nunca toca.</string>
     <string name="snd_volume_title">Volume do sinal dentro do app</string>
-    <string name="snd_footer">Este controle ajusta o sinal que o app toca aberto; ele segue o volume de mídia (os botões de volume) e fica quieto nos modos silencioso, vibrar e Não perturbe. Com o app em segundo plano a mensagem chega como notificação do sistema, e é o Android que decide o volume dela. Silenciar uma conversa (toque longo na tela inicial) cala os dois.</string>
+    <string name="snd_volume_desc">Ajusta o sinal que o app toca aberto em relação ao nível do sistema. O volume da notificação em si é decidido pelo Android, não por nós.</string>
+    <string name="snd_presence_all">Todos</string>
+    <string name="snd_presence_favorites">Favoritos</string>
+    <string name="snd_presence_off">Desligado</string>
+    <string name="snd_system_channel">Som e volume da notificação</string>
+    <string name="snd_footer">O app aberto toca o próprio sinal; em segundo plano o mesmo sinal chega como notificação do sistema. Os dois seguem o volume de notificações e ficam quietos nos modos silencioso, vibrar e Não perturbe. O controle acima só consegue deixar o nosso sinal mais baixo que o nível do sistema; esse nível muda nas configurações de notificação. Silenciar uma conversa (toque longo na tela inicial) cala os dois.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">As traduções saem aos poucos. O que faltar aparece em inglês.</string>
     <string name="notif_push">Notificações push</string>

@@ -172,16 +172,29 @@ object LocalStores {
     val animateAvatars: StateFlow<Boolean> = _animateAvatars.asStateFlow()
     val swipeReplySide: StateFlow<SwipeReplySide> = _swipeReplySide.asStateFlow()
     val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
-    // In-app tone volume, 0f..1f. Requested because the tones ride the MEDIA
-    // stream: turning them down meant turning music down with them.
+    // Scale factor for the in-app tone, 0f..1f. NOT an absolute level: the
+    // tone rides the notification stream and only the system sets how loud
+    // that is (see SoundService).
     private val _soundVolume = MutableStateFlow(1f)
     val soundVolume: StateFlow<Float> = _soundVolume.asStateFlow()
 
     private val _soundMessages = MutableStateFlow(true)
     val soundMessages: StateFlow<Boolean> = _soundMessages.asStateFlow()
 
-    private val _soundPresence = MutableStateFlow(true)
-    val soundPresence: StateFlow<Boolean> = _soundPresence.asStateFlow()
+    /** Who the online/offline chime plays for (#552).
+     *
+     *  A two-state toggle was not enough: with a full roster the chime fires
+     *  often enough that the person cannot tell it apart from a bug ("сейчас
+     *  просто звук идёт и я не понимаю это баг или кто-то зашёл"), and the only
+     *  cure on offer was losing it entirely. [FAVORITES] is the middle setting
+     *  — the handful of people whose arrival is actually worth a sound.
+     *
+     *  Device-local, like the rest of this block; the web client's presence
+     *  toggle is the same idea with one fewer step. */
+    enum class PresenceSoundMode { ALL, FAVORITES, OFF }
+
+    private val _presenceSound = MutableStateFlow(PresenceSoundMode.ALL)
+    val presenceSound: StateFlow<PresenceSoundMode> = _presenceSound.asStateFlow()
 
     /** When on, the app window gets FLAG_SECURE: screenshots/screen-recording
      *  are blocked and content is hidden in the app switcher. Device-global,
@@ -257,7 +270,12 @@ object LocalStores {
         }.getOrDefault(SwipeReplySide.LEFT)
         _soundMaster.value = prefs.getBoolean(K_SND_MASTER, true)
         _soundMessages.value = prefs.getBoolean(K_SND_MSG, true)
-        _soundPresence.value = prefs.getBoolean(K_SND_PRES, true)
+        // Migration: the old boolean becomes ALL / OFF, so nobody's phone
+        // changes behaviour on update. The new key wins once it exists.
+        _presenceSound.value = runCatching {
+            prefs.getString(K_SND_PRES_MODE, null)?.let { PresenceSoundMode.valueOf(it) }
+        }.getOrNull()
+            ?: if (prefs.getBoolean(K_SND_PRES, true)) PresenceSoundMode.ALL else PresenceSoundMode.OFF
         _soundVolume.value = prefs.getFloat(K_SND_VOL, 1f).coerceIn(0f, 1f)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
         _pushNudgeDismissed.value = prefs.getBoolean(K_PUSH_NUDGE_DISMISSED, false)
@@ -529,10 +547,18 @@ object LocalStores {
     // ── sound toggles ────────────────────────────────────────────────
     fun soundMasterOn() = _soundMaster.value
     fun soundMessagesOn() = _soundMessages.value
-    fun soundPresenceOn() = _soundPresence.value
+    fun presenceSoundMode() = _presenceSound.value
     fun setSoundMaster(on: Boolean) { _soundMaster.value = on; prefs.edit().putBoolean(K_SND_MASTER, on).apply() }
     fun setSoundMessages(on: Boolean) { _soundMessages.value = on; prefs.edit().putBoolean(K_SND_MSG, on).apply() }
-    fun setSoundPresence(on: Boolean) { _soundPresence.value = on; prefs.edit().putBoolean(K_SND_PRES, on).apply() }
+    fun setPresenceSoundMode(mode: PresenceSoundMode) {
+        _presenceSound.value = mode
+        // The legacy boolean is kept in step so a downgrade (or any code path
+        // still reading it) sees "off" as off rather than as the default on.
+        prefs.edit()
+            .putString(K_SND_PRES_MODE, mode.name)
+            .putBoolean(K_SND_PRES, mode != PresenceSoundMode.OFF)
+            .apply()
+    }
     fun soundVolumeLevel() = _soundVolume.value
     fun setSoundVolume(v: Float) {
         val clamped = v.coerceIn(0f, 1f)
@@ -791,7 +817,8 @@ object LocalStores {
     private const val K_SWIPE_SIDE = "swipe_reply_side"
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
-    private const val K_SND_PRES = "sound_presence"
+    private const val K_SND_PRES = "sound_presence"          // legacy boolean
+    private const val K_SND_PRES_MODE = "sound_presence_mode" // ALL/FAVORITES/OFF
     private const val K_SND_VOL = "sound_volume"
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PUSH_NUDGE_DISMISSED = "push_nudge_dismissed"
