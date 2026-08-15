@@ -357,6 +357,12 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             status = if (m.uin == ownUin) ownStatus else m.presence,
                             session = session,
                             size = 26.dp,
+                            // §5c: a FOREIGN group's roster, and every blob in
+                            // it, lives on THAT island. Without the host this
+                            // asked our own island for a media id it has never
+                            // heard of, so every member's picture 404'd and the
+                            // whole roster fell back to the status flower.
+                            host = session.groupHost(group.id),
                         )
                         Column(Modifier.weight(1f)) {
                             Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)

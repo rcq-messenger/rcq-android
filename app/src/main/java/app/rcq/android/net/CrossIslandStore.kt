@@ -37,11 +37,29 @@ object CrossIslandStore {
         // §5c display, from the open card (gson leaves them null for old entries).
         val gender: String? = null,
         val statusMessage: String? = null,
+        // §5e display: the peer's picture, DEPOSITED by them into OUR island
+        // (§5b PUT /media/{id}) and named by the sealed `profile` envelope. Not
+        // on the open card — the key is the whole access decision, so it never
+        // goes anywhere unauthenticated. Fetched with host = null, like any
+        // blob of ours. Gson leaves both null for rows written before §5e.
+        val avatarMediaId: String? = null,
+        val avatarMediaKey: String? = null,
+        // Sender ts (epoch SECONDS) of the newest `profile` we applied for this
+        // peer. The stale guard: an offline-queue drain can hand us an old
+        // envelope after a newer one, and applying it would put the old name back.
+        val profileTs: Long = 0L,
     )
 
     private lateinit var prefs: SharedPreferences
     private val gson = Gson()
     private const val KEY = "contacts.v1"
+
+    /** §5e inbound bounds. A media id is a client-chosen uuid4 (with or without
+     *  dashes) or an island-assigned id; it goes straight into `/media/{id}`,
+     *  so the charset is restricted on the way IN. Identical to web's gate. */
+    private val MEDIA_ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
+    private const val MEDIA_KEY_MAX = 128
+    private const val NICKNAME_MAX = 64
 
     /** Active account id; null before any account is bound (all reads empty). */
     private var acct: String? = null
@@ -78,6 +96,66 @@ object CrossIslandStore {
     }
 
     fun get(uin: Int, host: String): Contact? = loadAll()[ciKey(uin, host)]
+
+    /**
+     * §5e cross-island profile refresh: apply an inbound `profile` envelope.
+     *
+     * Updates ONLY the display fields — nickname and the picture — of an
+     * EXISTING row. Deliberate properties, each one a rule the spec spells out:
+     *
+     *  - The pinned `identityKey` / `signingKey` / `signalIdentityKey` are
+     *    NEVER touched. They are the anti-impersonation anchor, and an inbound
+     *    envelope with a write path to them would BE an impersonation path.
+     *  - A `profile` from someone we do not hold as an accepted cross-island
+     *    contact is DROPPED (returns false): no row is created, nothing is
+     *    quarantined. It is cosmetic data from a stranger.
+     *  - Stale envelopes (older [ts] than the one we last applied) are ignored,
+     *    so a queue drain replaying an old deposit cannot restore an old name.
+     *  - The write is `commit()`, not `apply()`: the push receiver reads this
+     *    snapshot off DISK with no live Session (see [getFor]), so an
+     *    in-memory-only update would leave notifications on the old name.
+     *
+     * Returns true when something actually changed (the caller refreshes the
+     * roster), false when the envelope was dropped or was a no-op.
+     */
+    fun applyProfile(
+        uin: Int,
+        host: String,
+        nickname: String?,
+        avatarMediaId: String?,
+        avatarMediaKey: String?,
+        ts: Long,
+    ): Boolean {
+        val a = acct ?: return false
+        if (!::prefs.isInitialized) return false
+        val m = loadAll()
+        val k = ciKey(uin, host)
+        val cur = m[k] ?: return false
+        if (ts < cur.profileTs) return false
+        // Half a picture is no picture: an id without its key is unopenable,
+        // and a key without an id names nothing.
+        //
+        // The id is charset- and length-gated because it is interpolated
+        // straight into `/media/{id}`: a peer-supplied `../…` must not be able
+        // to steer that fetch anywhere but at a blob. Same gate web applies, so
+        // the three clients accept exactly the same set of ids.
+        val id = avatarMediaId?.trim()?.takeIf { MEDIA_ID_RE.matches(it) }
+        val key = avatarMediaKey?.trim()?.takeIf { it.isNotEmpty() && it.length <= MEDIA_KEY_MAX }
+        val both = id != null && key != null
+        val next = cur.copy(
+            // An empty nickname is not a rename to nothing — keep what we have.
+            // Bounded like web's: a peer must not be able to write an unbounded
+            // string into our roster and onto our disk.
+            nickname = nickname?.trim()?.takeIf { it.isNotEmpty() }?.take(NICKNAME_MAX) ?: cur.nickname,
+            avatarMediaId = if (both) id else null,
+            avatarMediaKey = if (both) key else null,
+            profileTs = maxOf(ts, cur.profileTs),
+        )
+        if (next == cur) return false
+        m[k] = next
+        prefs.edit().putString(storageKey(a), gson.toJson(m)).commit()
+        return true
+    }
 
     /** Map an incoming sealed message's senderUIN back to a cross-island thread.
      *  Per-island uins can collide in theory; returns the first match. */

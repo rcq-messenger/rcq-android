@@ -2582,6 +2582,9 @@ class Session(context: Context) {
         if (bytes == null) {
             api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = "", avatar_media_key = ""))
             _ownAvatar.value = null
+            // §5e: a cleared picture is a profile change like any other — the
+            // envelope names no picture and the far side drops the old one.
+            broadcastProfileCrossIsland(pictureCleared = true)
             return
         }
         val key = MediaCrypto.newKey()
@@ -2589,8 +2592,14 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
         imageCache.put(upload.media_id, bytes)
+        // Keep the SEALED bytes on disk too: §5e re-deposits this exact blob to
+        // each cross-island contact's island, and pulling our own picture back
+        // from our island every time to do it would be silly.
+        runCatching { mediaDiskFile(upload.media_id).writeBytes(blob); trimMediaDiskCache() }
         api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))
         _ownAvatar.value = upload.media_id to keyB64
+        // §5e: push the new picture (blob + key) to the cross-island contacts.
+        broadcastProfileCrossIsland()
     }
 
     /** My own picture (id to key), so Settings can draw it without a round
@@ -2670,7 +2679,14 @@ class Session(context: Context) {
     suspend fun updateProfile(body: RcqApi.UpdateMeBody): RcqApi.MeProfile? {
         val updated = runCatching { api.updateMe(body) }.getOrNull()
         // Reflect a nickname change locally (the header reads store.nickname).
-        if (updated != null && !body.nickname.isNullOrBlank()) store.updateNickname(body.nickname)
+        if (updated != null && !body.nickname.isNullOrBlank()) {
+            store.updateNickname(body.nickname)
+            // §5e: the island tells same-island contacts over `contact_renamed`,
+            // which cannot reach a holder on ANOTHER island (no host column in
+            // the contacts table, so they are not in the audience). Deposit the
+            // new name to them ourselves.
+            broadcastProfileCrossIsland()
+        }
         // Keep the read-receipt gate in sync when the user changes it.
         if (updated != null) body.read_receipts_visibility?.let { readReceiptsVisibility = it }
         // The PUT response is the full owner-self profile — refresh the cache
@@ -2968,6 +2984,7 @@ class Session(context: Context) {
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
                 is Envelope.ContactRequest -> Unit // §5f is 1:1 consent, never group-sealed
+                is Envelope.ProfileUpdate -> Unit  // §5e is deposited per-contact, never group-sealed
                 is Envelope.Skdm -> Unit         // intercepted in ingestGroup before routing
                 is Envelope.Sknack -> Unit       // intercepted in ingestGroup before routing
                 is Envelope.RelayShare ->
@@ -4241,6 +4258,19 @@ class Session(context: Context) {
                 handleContactRequest(dec.senderUin, host, cr)
                 return@runCatching
             }
+            // §5e cross-island profile refresh. Routed here, BEFORE the
+            // quarantine below, for the same reason a `contactreq` is: it is
+            // not a message and must never reach the message store or open a
+            // request row. It is cosmetic data — from a stranger it is simply
+            // DROPPED. Same-island renames still ride the `contact_renamed` WS
+            // broadcast, so an envelope that did not cross an island boundary
+            // is ignored.
+            (dec.envelope as? Envelope.ProfileUpdate)?.let { pu ->
+                val host = dec.senderHost ?: return@runCatching
+                if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
+                handleProfileUpdate(dec.senderUin, host, pu)
+                return@runCatching
+            }
             // Variant A consent: a 1:1 message from an un-accepted CROSS-ISLAND
             // sender (its from_host isn't ours and we haven't added them) is
             // QUARANTINED as a request instead of landing in the chat list.
@@ -4314,6 +4344,7 @@ class Session(context: Context) {
                 is Envelope.CallSignal -> Unit // intercepted above, never reaches here
                 is Envelope.HomeRecord -> Unit // intercepted above, never reaches here
                 is Envelope.ContactRequest -> Unit // §5f, intercepted above
+                is Envelope.ProfileUpdate -> Unit  // §5e, intercepted above
                 is Envelope.Carbon ->
                     // A message I sent from ANOTHER device, echoed to my own uin.
                     // Only honour my own carbon; file the inner message as fromMe
@@ -4542,6 +4573,11 @@ class Session(context: Context) {
                 if (CrossIslandStore.get(uin, host) != null) {
                     CrossIslandRequestsStore.clear(me, uin, host)
                     refreshCiRequests()
+                    // §5e: the relationship just became mutual, so they are now
+                    // an audience for our profile. Send it once here, so they
+                    // start on our CURRENT name and picture instead of whatever
+                    // the open card said when they fetched it.
+                    depositProfileToNewContact(uin, host)
                     return
                 }
                 // An `accept` from someone we never asked is NOT a licence to
@@ -4563,6 +4599,170 @@ class Session(context: Context) {
                 refreshCiRequests()
             }
             else -> Unit // unknown act from a newer client
+        }
+    }
+
+    // ── §5e cross-island profile refresh (name + picture) ──────────────
+    //
+    // A cross-island contact's name and picture used to be read exactly ONCE,
+    // off the open key card at add time, and never again: the same-island
+    // `contact_renamed` WS broadcast cannot reach a holder on another island,
+    // because the island's contacts table has no host column and so that holder
+    // is not in the audience and cannot be. Someone added as "nick1" read
+    // "nick1" forever. The fix is a PUSH — we deposit our new profile to the
+    // islands of the people allowed to see it. Same transport as §5f.
+
+    /** Deposit my current profile to EVERY accepted cross-island contact.
+     *  Called when the nickname or the picture changes. Fire-and-forget on our
+     *  own scope: a profile edit must not block on N foreign islands, and a
+     *  contact whose island is down simply learns the new name next time. */
+    private fun broadcastProfileCrossIsland(pictureCleared: Boolean = false) {
+        scope.launch {
+            runCatching {
+                // Someone we blocked does not get handed our current name and
+                // face. Same filter web applies to this broadcast.
+                val me = store.uin ?: return@runCatching
+                val targets = CrossIslandStore.list()
+                    .filter { !CrossIslandRequestsStore.isBlocked(me, it.uin, it.host) }
+                depositProfileTo(targets, pictureCleared)
+            }
+        }
+    }
+
+    /** Deposit my current profile to ONE contact that just became accepted, so
+     *  they start out with a current name instead of the card snapshot. */
+    private fun depositProfileToNewContact(uin: Int, host: String) {
+        scope.launch {
+            runCatching {
+                val me = store.uin ?: return@runCatching
+                if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return@runCatching
+                CrossIslandStore.get(uin, host)?.let { depositProfileTo(listOf(it)) }
+            }
+        }
+    }
+
+    /**
+     * Seal a §5e `profile` to each of [targets] and deposit it to their PRIMARY
+     * island.
+     *
+     * ⚠ The picture is DEPOSITED, not pulled: the already-encrypted blob is put
+     * on the RECIPIENT's island first (§5b `PUT /media/{id}`, client-chosen id,
+     * idempotent) and only then is the envelope — which carries the id AND the
+     * key — sealed to that one recipient. The key is never published on the open
+     * card or in the signed home record: both are unauthenticated, and
+     * `GET /media/{id}` has no auth at all, so the key IS the access decision,
+     * and the same-island rule for a picture is relationship-based.
+     *
+     * Per-contact `runCatching`: one unreachable island must not stop the rest.
+     */
+    private suspend fun depositProfileTo(
+        targets: List<CrossIslandStore.Contact>,
+        /** The user just REMOVED their picture. Distinguishes a deliberate
+         *  clear from "the avatar pair is not loaded yet", which the fallback
+         *  below otherwise papers over — and papering over a clear would keep
+         *  re-sending the deleted face. */
+        pictureCleared: Boolean = false,
+    ) = withContext(Dispatchers.IO) {
+        if (targets.isEmpty()) return@withContext
+        val me = store.uin ?: return@withContext
+        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: "#$me"
+        // Only claim a picture we can actually hand over. If the sealed blob
+        // can't be recovered, the envelope goes out naming no picture rather
+        // than naming one the recipient's island will 404.
+        // ⚠ Fall back to the cached profile when the in-memory pair is not
+        // seeded yet (a nickname edit can land before loadProfile finishes).
+        // Without this the envelope would name NO picture and every recipient
+        // would dutifully drop the one they have — a profile refresh that
+        // deletes the face is worse than no refresh.
+        val own = if (pictureCleared) null else _ownAvatar.value ?: cachedProfile()?.let { p ->
+            p.avatar_media_id?.takeIf { it.isNotEmpty() }?.let { id ->
+                p.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { k -> id to k }
+            }
+        }
+        val blob = own?.let { (id, _) -> ownAvatarBlob(id) }
+        // ⚠ HAVE a picture but cannot hand over its bytes → send NOTHING. The
+        // envelope is a SNAPSHOT of the whole display state, so one that names
+        // no picture reads on the far side as "I removed mine" and deletes our
+        // face (web, Android and iOS all clear on absence). A transient failure
+        // to read our own blob must not delete our face everywhere; the name
+        // catches up on the next change.
+        if (own != null && blob == null) {
+            android.util.Log.w("RCQci", "profile push skipped: own avatar blob unavailable")
+            return@withContext
+        }
+        val env = Envelope.profileUpdate(nick, own?.first, own?.second)
+        val priv = signingPriv()
+        val pub = signingPub()
+        val ownHost = serverHost()
+        for (c in targets) {
+            runCatching {
+                // ⚠ The blob must LAND on the recipient's island before the
+                // envelope naming it goes out: islands never talk to each other,
+                // so a recipient resolves the id against their OWN island. A
+                // failed PUT means the id would 404 there — a permanent broken
+                // face — and the same snapshot rule forbids downgrading to a
+                // name-only envelope, so this recipient is skipped entirely.
+                // depositBlob RETURNS false rather than throwing, which is why
+                // the result is checked here and not left to runCatching.
+                if (own != null && blob != null) {
+                    if (!CrossIslandSender.depositBlob(c.host, own.first, blob)) {
+                        android.util.Log.w("RCQci", "profile to ${c.uin}@${c.host} skipped: avatar not deposited")
+                        return@runCatching
+                    }
+                }
+                CrossIslandSender.deliverProfile(c, env, me, priv, pub, ownHost)
+            }.onFailure {
+                android.util.Log.e("RCQci", "profile to ${c.uin}@${c.host} failed: ${it.message}")
+            }
+        }
+    }
+
+    /** My own avatar's ENCRYPTED blob, for re-deposit to a foreign island. Disk
+     *  cache first ([setOwnAvatar] writes it there on upload); otherwise pull
+     *  the sealed bytes back from our own island and keep them. Never the
+     *  decrypted image — the recipient opens it with the key in the envelope. */
+    private suspend fun ownAvatarBlob(mediaId: String): ByteArray? = withContext(Dispatchers.IO) {
+        val f = mediaDiskFile(mediaId)
+        if (f.exists()) return@withContext runCatching { f.readBytes() }.getOrNull()
+        runCatching {
+            api.getBlob(mediaId).also { b -> runCatching { f.writeBytes(b); trimMediaDiskCache() } }
+        }.getOrNull()
+    }
+
+    /**
+     * §5e receive side. Update ONLY the display fields of an EXISTING
+     * cross-island row.
+     *
+     *  - The pinned identity/signing keys are never touched: they are the
+     *    anti-impersonation anchor, and an envelope that could write them would
+     *    be an impersonation path. [CrossIslandStore.applyProfile] copies the
+     *    row and replaces name + picture only.
+     *  - A `profile` from someone we do not hold as an accepted cross-island
+     *    contact is DROPPED — not quarantined, not a pending row. Cosmetic data
+     *    from a stranger is nothing.
+     *  - A device-local ALIAS outranks the received name: the store keeps what
+     *    THEY call themselves, and every display path already reads
+     *    `alias ?: nickname` ([contactName], the Home row, Contact info).
+     *  - The store write is committed to DISK, because the push path reads that
+     *    snapshot with no live Session.
+     */
+    private fun handleProfileUpdate(uin: Int, host: String, pu: Envelope.ProfileUpdate) {
+        val me = store.uin ?: return
+        if (uin == me) return
+        if (!CrossIslandStore.applyProfile(uin, host, pu.nickname, pu.avatarMediaId, pu.avatarMediaKey, pu.ts)) return
+        refreshCrossIslandDisplay()
+    }
+
+    /** Re-read the display fields of the cross-island rows already merged into
+     *  the roster, so a refreshed name/picture lands on every screen at once.
+     *  Only the display fields move — a roster row keeps everything else it
+     *  has, and same-island contacts are untouched. */
+    private fun refreshCrossIslandDisplay() {
+        val fresh = CrossIslandStore.list().associateBy { it.uin to it.host.lowercase() }
+        _contacts.value = _contacts.value.map { c ->
+            val host = c.host ?: return@map c
+            val f = fresh[c.uin to host.lowercase()] ?: return@map c
+            c.copy(nickname = f.nickname, avatarMediaId = f.avatarMediaId, avatarMediaKey = f.avatarMediaKey)
         }
     }
 
@@ -4589,7 +4789,9 @@ class Session(context: Context) {
     private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
         // callable: §5d made cross-island 1:1 calls work (signaling crosses as
         // sealed deposits; media is P2P either way).
-        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = true, host = c.host, gender = c.gender, statusMessage = c.statusMessage)
+        // §5e: their picture, deposited by them into OUR island — so it is
+        // fetched with no host, exactly like a same-island one.
+        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = true, host = c.host, gender = c.gender, statusMessage = c.statusMessage, avatarMediaId = c.avatarMediaId, avatarMediaKey = c.avatarMediaKey)
     }
 
     /** Append cross-island contacts to the displayed roster (skip uin already
@@ -4613,6 +4815,9 @@ class Session(context: Context) {
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload) }
         mergeCrossIslandContacts()
         refreshCiRequests()
+        // §5e: newly accepted → send our current name + picture once, so they
+        // do not sit on the snapshot their card fetch took.
+        depositProfileToNewContact(uin, host)
         return true
     }
 

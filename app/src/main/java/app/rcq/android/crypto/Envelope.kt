@@ -153,6 +153,34 @@ sealed interface Envelope {
         val note: String? = null,
     ) : Envelope
 
+    /** Cross-island profile refresh (wire kind "profile", spec §5e). A contact
+     *  on another island had their name and picture read exactly ONCE, off the
+     *  open key card at add time, and nothing ever refreshed them: the
+     *  same-island `contact_renamed` broadcast cannot reach a holder on another
+     *  island, because the island's contacts table has no host column and so
+     *  that holder is not in the audience. The fix is a PUSH, not a poll — the
+     *  person who changed their profile deposits this envelope to the islands
+     *  of the contacts allowed to see it.
+     *
+     *  [nickname] is the sender's current display name; [avatarMediaId] +
+     *  [avatarMediaKey] name their picture, whose already-encrypted blob is
+     *  DEPOSITED to the recipient's own island (§5b `PUT /media/{id}`) before
+     *  this envelope goes out — never pulled from the owner's island at draw
+     *  time, and the key never published on the open card or the signed record
+     *  (both unauthenticated, while `GET /media/{id}` has no auth at all, so
+     *  the key IS the access decision). Both absent = no picture / picture
+     *  cleared. [ts] is sender epoch SECONDS, used as the stale guard.
+     *
+     *  Carries NO keys: the pinned identity/signing keys are the
+     *  anti-impersonation anchor and this envelope may never write them. */
+    data class ProfileUpdate(
+        val id: String,
+        val ts: Long,
+        val nickname: String,
+        val avatarMediaId: String? = null,
+        val avatarMediaKey: String? = null,
+    ) : Envelope
+
     /** Home-island record self-push (federation gossip B1, wire kind "homerec").
      *  Carries the SENDER's own signed home-island record so a contact caches
      *  where to reach them even after the sender's island dies. [rec] is the
@@ -318,6 +346,28 @@ sealed interface Envelope {
             // JsonNull is not a primitive, so it reads back as null).
             if (!note.isNullOrEmpty()) addProperty("note", note)
         }.toString().toByteArray(Charsets.UTF_8)
+        is ProfileUpdate -> JsonObject().apply {
+            addProperty("kind", "profile")
+            addProperty("id", id)
+            addProperty("ts", ts)
+            addProperty("nickname", nickname)
+            // Same omit-if-absent rule §5f settled on: the picture fields are
+            // OMITTED when there is none, never emitted as JSON null (the
+            // spec's `"…"|null` is shorthand for "optional"). Decoding stays
+            // tolerant of both forms — a JsonNull is not a primitive, so it
+            // reads back as null either way.
+            //
+            // ⚠ ALL-OR-NOTHING, enforced HERE and not only in [profileUpdate].
+            // An id without its key names a blob nobody can open (`GET
+            // /media/{id}` has no auth, so the key IS the access decision), and
+            // web and iOS both collapse a half pair to "no picture" — which,
+            // under the snapshot rule, CLEARS the picture the peer holds. Half
+            // a pair on the wire would therefore delete our face over there.
+            if (!avatarMediaId.isNullOrEmpty() && !avatarMediaKey.isNullOrEmpty()) {
+                addProperty("avatar_media_id", avatarMediaId)
+                addProperty("avatar_media_key", avatarMediaKey)
+            }
+        }.toString().toByteArray(Charsets.UTF_8)
         is HomeRecord -> JsonObject().apply {
             addProperty("kind", "homerec")
             add("rec", rec)
@@ -402,6 +452,21 @@ sealed interface Envelope {
                 nickname,
                 note?.takeIf { it.isNotBlank() },
             )
+
+        /** Build a §5e profile-refresh envelope stamped now (epoch SECONDS).
+         *  Both picture fields or neither — half a picture is no picture. */
+        fun profileUpdate(nickname: String, avatarMediaId: String?, avatarMediaKey: String?): ProfileUpdate {
+            val id = avatarMediaId?.takeIf { it.isNotEmpty() }
+            val key = avatarMediaKey?.takeIf { it.isNotEmpty() }
+            val both = id != null && key != null
+            return ProfileUpdate(
+                UUID.randomUUID().toString().uppercase(),
+                System.currentTimeMillis() / 1000,
+                nickname,
+                if (both) id else null,
+                if (both) key else null,
+            )
+        }
 
         fun screenshotTaken(): ScreenshotTaken =
             ScreenshotTaken(UUID.randomUUID().toString().uppercase())
@@ -510,6 +575,13 @@ sealed interface Envelope {
                     ts = obj.get("ts")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
                     nickname = obj.get("nickname")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
                     note = obj.get("note")?.takeIf { it.isJsonPrimitive }?.asString,
+                )
+                "profile" -> ProfileUpdate(
+                    id = id,
+                    ts = obj.get("ts")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
+                    nickname = obj.get("nickname")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                    avatarMediaId = obj.get("avatar_media_id")?.takeIf { it.isJsonPrimitive }?.asString,
+                    avatarMediaKey = obj.get("avatar_media_key")?.takeIf { it.isJsonPrimitive }?.asString,
                 )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,
