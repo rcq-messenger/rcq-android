@@ -209,6 +209,17 @@ sealed interface ChatTarget {
  *  back). Cleared on send. */
 private object ChatDrafts {
     val byThread = mutableMapOf<String, String>()
+    /** Which message the draft is answering, keyed the same way.
+     *
+     *  ⚠ The reply lives as long as the text it belongs to, and it did not:
+     *  `replyTarget` was composition state, so leaving the chat and coming
+     *  back gave you your sentence back without the quote it was an answer to
+     *  — and sending it then replied to nothing. Reported 2026-08-16.
+     *
+     *  Stores the message id, not the message: the row is re-read from the
+     *  thread on the way back in, and a quote that has since been deleted
+     *  simply does not come back. */
+    val replyByThread = mutableMapOf<String, String>()
 }
 
 /** Put shared text into a thread's composer without sending it — the landing
@@ -309,7 +320,28 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Long-pressing a reaction chip opens a "who reacted" sheet for that message.
     var whoReactedMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var editMsg by remember { mutableStateOf<ChatMessage?>(null) }
-    var replyTarget by remember { mutableStateOf<ChatMessage?>(null) }
+    var replyTarget by remember(threadKey) { mutableStateOf<ChatMessage?>(null) }
+    // Bring the parked reply back with the draft it belongs to. Runs on the
+    // thread's messages because the list arrives asynchronously — on the first
+    // composition it can still be empty.
+    LaunchedEffect(threadKey, messages) {
+        val parked = ChatDrafts.replyByThread[threadKey]
+        if (parked != null && replyTarget == null) {
+            replyTarget = messages.firstOrNull { it.id == parked }
+            // The message is gone (deleted, or the thread has not loaded that
+            // far back). Drop the note rather than leaving it to resurface.
+            if (replyTarget == null && messages.isNotEmpty()) {
+                ChatDrafts.replyByThread.remove(threadKey)
+            }
+        }
+    }
+    // One place that records it, so no path can set the chip without parking
+    // it — and clearing the chip clears the note.
+    LaunchedEffect(threadKey, replyTarget?.id) {
+        val id = replyTarget?.id
+        if (id == null) ChatDrafts.replyByThread.remove(threadKey)
+        else ChatDrafts.replyByThread[threadKey] = id
+    }
     // Choosing "reply" (swipe or the message menu) has to bring the keyboard up
     // together with the reply chip. It used to only set `replyTarget`, so the
     // chip appeared over a composer nobody was focused on and you had to tap
