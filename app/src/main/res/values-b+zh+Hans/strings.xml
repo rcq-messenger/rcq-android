@@ -1119,4 +1119,12 @@
     <plurals name="chat_media_sending">
         <item quantity="other">正在发送 %d 个文件…</item>
     </plurals>
+    <string name="how_title">这是怎么运作的</string>
+    <string name="how_q1">谁能读到我发出的内容？</string>
+    <string name="how_a1">只有你发给的那个人。文字在你的设备上加密，在对方设备上解密，中间的岛只是送一个它打不开的密封信封。\n\n岛能看到的：你曾在线，以及你的信封寄给了谁。它看不到的：里面写了什么。</string>
+    <string name="how_q2">岛是什么，为什么不止一个？</string>
+    <string name="how_a2">岛就是保管你信件的服务器。RCQ 不是一台服务器，而是很多台各自独立的：我们的、别人的，以及你自己搭的那台。\n\n号码由岛发放，所以两座岛上的同一个号码是两个不同的人：地址是号码加上岛。即便如此，不同岛上的人照样互相写信、通话、待在同一个群里。</string>
+    <string name="how_q3">不能用了该怎么办？</string>
+    <string name="how_a3">先弄清是不是被封锁了：设置 → 网络 → 连接诊断，在关闭 VPN 的情况下跑一次完整检查。\n\n它会给你一行结果。通过「报告问题」发给我们：这一行能准确告诉我们你的网络里被封的是什么，没有它我们只能猜。</string>
+    <string name="how_more">更多问题见 rcq.app/faq →</string>
 </resources>

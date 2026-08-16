@@ -1121,4 +1121,12 @@
         <item quantity="one">%d dosya gönderiliyor…</item>
         <item quantity="other">%d dosya gönderiliyor…</item>
     </plurals>
+    <string name="how_title">Bu nasıl çalışıyor</string>
+    <string name="how_q1">Gönderdiğimi kim okuyabilir?</string>
+    <string name="how_a1">Yalnızca gönderdiğiniz kişi. Metin sizin cihazınızda şifrelenir, onunkinde çözülür; aradaki ada mühürlü bir zarf taşır ve onu açamaz.\n\nAdanın gördüğü: çevrimiçi olduğunuz ve zarflarınızın kime gittiği. Görmediği: içinde ne olduğu.</string>
+    <string name="how_q2">Ada nedir ve neden birden fazla var?</string>
+    <string name="how_a2">Ada, postanızı tutan bir sunucudur. RCQ tek bir sunucu değil, birbirinden bağımsız birçok sunucudur: bizimki, başkalarınınki ve kurarsanız sizinki.\n\nNumaranızı bir ada verir, dolayısıyla iki adadaki aynı numara iki farklı kişidir: adres, numara VE adadır. Yine de farklı adalardaki insanlar yazışır, konuşur ve aynı gruplarda bulunur.</string>
+    <string name="how_q3">Çalışmayı bırakınca ne yapmalıyım?</string>
+    <string name="how_a3">Önce engellenip engellenmediğinizi öğrenin: Ayarlar → Ağ → Bağlantı tanılama, ve tam denetimi VPN KAPALIYKEN çalıştırın.\n\nSize tek bir satır verir. Onu Hata bildir üzerinden gönderin: o satır ağınızda tam olarak neyin kapalı olduğunu söyler, onsuz tahmin yürütürüz.</string>
+    <string name="how_more">Daha fazla soru: rcq.app/faq →</string>
 </resources>

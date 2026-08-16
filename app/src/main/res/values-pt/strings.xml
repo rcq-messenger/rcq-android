@@ -1121,4 +1121,12 @@
         <item quantity="one">Enviando %d arquivo…</item>
         <item quantity="other">Enviando %d arquivos…</item>
     </plurals>
+    <string name="how_title">Como funciona</string>
+    <string name="how_q1">Quem pode ler o que eu envio?</string>
+    <string name="how_a1">Só a pessoa para quem você enviou. O texto é cifrado no seu aparelho e decifrado no dela, e a ilha no meio carrega um envelope lacrado que não consegue abrir.\n\nO que a ilha vê: que você esteve on-line e para quem seus envelopes foram endereçados. O que ela não vê: o que há dentro.</string>
+    <string name="how_q2">O que é uma ilha e por que existe mais de uma?</string>
+    <string name="how_a2">Uma ilha é um servidor que guarda sua correspondência. RCQ não é um servidor, são vários independentes: o nosso, os de outras pessoas e o seu, se você mantiver um.\n\nSeu número é emitido por uma ilha, então o mesmo número em duas ilhas são duas pessoas diferentes: o endereço é o número E a ilha. Mesmo assim, gente de ilhas diferentes conversa, se liga e divide grupos.</string>
+    <string name="how_q3">O que faço quando para de funcionar?</string>
+    <string name="how_a3">Primeiro descubra se você está sendo bloqueado: Configurações → Rede → Diagnóstico de conexão, e rode a verificação completa COM A VPN DESLIGADA.\n\nEla devolve uma linha. Mande para nós em Relatar um erro: essa linha diz exatamente o que está fechado na sua rede, e sem ela ficamos no chute.</string>
+    <string name="how_more">Mais perguntas em rcq.app/faq →</string>
 </resources>
