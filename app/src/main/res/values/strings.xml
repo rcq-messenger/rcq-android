@@ -1082,6 +1082,12 @@
     <string name="myreports_status_duplicate">Duplicate</string>
     <string name="myreports_delete">Delete</string>
     <string name="myreports_delete_refused">This one is still under review, so it cannot be deleted yet.</string>
+    <string name="myreports_you">You</string>
+    <string name="myreports_reply">Write back</string>
+    <string name="myreports_reply_placeholder">Add something to this report</string>
+    <string name="myreports_reply_send">Send</string>
+    <string name="myreports_closed">This report is closed. File a new one if it happened again.</string>
+    <string name="myreports_send_error">Could not send. Try again.</string>
     <string name="burn_failed">Could not reach the server, so nothing was deleted. Your account is untouched. Try again when you have a connection.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d note</item>

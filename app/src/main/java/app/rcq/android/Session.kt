@@ -2603,6 +2603,27 @@ class Session(context: Context) {
     suspend fun deleteMyReport(id: Int): Boolean =
         runCatching { api.deleteMyReport(id) }.isSuccess
 
+    /** The outcome of writing back on one's own report. [Closed] is not a
+     *  failure, it is an answer: the operator finished the ticket, so the
+     *  screen says that instead of "try again" forever. */
+    sealed class ReportReply {
+        data class Sent(val turn: RcqApi.ReportTurn) : ReportReply()
+        object Closed : ReportReply()
+        object Failed : ReportReply()
+    }
+
+    /** Add a turn to one of my own reports. This is the half that was missing:
+     *  an operator could answer, but the reporter could not hand over the log
+     *  line they were asked for, so they filed a second report instead. */
+    suspend fun addToMyReport(id: Int, body: String): ReportReply =
+        runCatching { api.addToMyReport(id, body) }.fold(
+            onSuccess = { ReportReply.Sent(it) },
+            onFailure = {
+                if (it.message?.startsWith("HTTP 409") == true) ReportReply.Closed
+                else ReportReply.Failed
+            },
+        )
+
     // ── stories (24h ephemeral) ──────────────────────────────────────
 
     /** Pull the active stories feed into [stories]. Soft-fails (keeps the

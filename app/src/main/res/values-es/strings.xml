@@ -1048,6 +1048,12 @@
     <string name="myreports_status_duplicate">Duplicado</string>
     <string name="myreports_delete">Eliminar</string>
     <string name="myreports_delete_refused">Este todavía está en revisión, así que aún no se puede eliminar.</string>
+    <string name="myreports_you">Tú</string>
+    <string name="myreports_reply">Añadir</string>
+    <string name="myreports_reply_placeholder">Añade algo a este informe</string>
+    <string name="myreports_reply_send">Enviar</string>
+    <string name="myreports_closed">Este informe está cerrado. Si vuelve a pasar, abre uno nuevo.</string>
+    <string name="myreports_send_error">No se pudo enviar. Inténtalo otra vez.</string>
     <string name="burn_failed">No se pudo contactar con el servidor, así que no se borró nada. Tu cuenta está intacta. Inténtalo de nuevo cuando tengas conexión.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d nota</item>

@@ -1048,6 +1048,12 @@
     <string name="myreports_status_duplicate">重复</string>
     <string name="myreports_delete">删除</string>
     <string name="myreports_delete_refused">这条还在处理中，暂时无法删除。</string>
+    <string name="myreports_you">你</string>
+    <string name="myreports_reply">补充</string>
+    <string name="myreports_reply_placeholder">给这条反馈补充点什么</string>
+    <string name="myreports_reply_send">发送</string>
+    <string name="myreports_closed">这条反馈已关闭。如果又出现了，请新提一条。</string>
+    <string name="myreports_send_error">没能发送，请再试一次。</string>
     <string name="burn_failed">没能连上服务器，所以什么都没有删除，你的账号原封不动。等有网络时再试一次。</string>
     <plurals name="saved_notes">
         <item quantity="other">%d 条备忘</item>

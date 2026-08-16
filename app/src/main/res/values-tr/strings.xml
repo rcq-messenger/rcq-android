@@ -1048,6 +1048,12 @@
     <string name="myreports_status_duplicate">Tekrar</string>
     <string name="myreports_delete">Sil</string>
     <string name="myreports_delete_refused">Bu hâlâ inceleniyor, o yüzden şimdilik silinemez.</string>
+    <string name="myreports_you">Siz</string>
+    <string name="myreports_reply">Ekle</string>
+    <string name="myreports_reply_placeholder">Bu bildirime bir şey ekleyin</string>
+    <string name="myreports_reply_send">Gönder</string>
+    <string name="myreports_closed">Bu bildirim kapandı. Yine olduysa yenisini açın.</string>
+    <string name="myreports_send_error">Gönderilemedi. Tekrar deneyin.</string>
     <string name="burn_failed">Sunucuya ulaşılamadı, bu yüzden hiçbir şey silinmedi. Hesabına dokunulmadı. Bağlantın olduğunda tekrar dene.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d not</item>
