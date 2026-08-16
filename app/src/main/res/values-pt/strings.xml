@@ -1048,6 +1048,12 @@
     <string name="myreports_status_duplicate">Duplicado</string>
     <string name="myreports_delete">Apagar</string>
     <string name="myreports_delete_refused">Este ainda está em análise, então não dá para apagar agora.</string>
+    <string name="myreports_you">Você</string>
+    <string name="myreports_reply">Acrescentar</string>
+    <string name="myreports_reply_placeholder">Acrescente algo a este relato</string>
+    <string name="myreports_reply_send">Enviar</string>
+    <string name="myreports_closed">Este relato está fechado. Se acontecer de novo, abra outro.</string>
+    <string name="myreports_send_error">Não deu para enviar. Tente de novo.</string>
     <string name="burn_failed">Não foi possível alcançar o servidor, então nada foi apagado. Sua conta está intacta. Tente de novo quando tiver conexão.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d nota</item>

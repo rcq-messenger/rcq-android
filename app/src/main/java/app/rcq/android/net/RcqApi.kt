@@ -326,17 +326,39 @@ class RcqApi(
     // whether anyone read it. The reply cannot arrive as a chat message (the
     // server holds no keys and never composes envelopes), so it is fetched
     // here on our own session instead.
+    /** One turn in a report's conversation. `from_admin` is the only side the
+     *  reader needs: there is exactly one person on each end. */
+    data class ReportTurn(
+        val id: Int,
+        val from_admin: Boolean = false,
+        val body: String?,
+        val created_at: String?,
+    )
+
     data class MyReport(
         val id: Int,
         val reason: String?,
         val status: String?,
         val created_at: String?,
+        /** The LAST operator answer. An island older than the thread sends only
+         *  this, which is why the screen still falls back to it. */
         val reply: String?,
         val replied_at: String?,
+        /** The whole exchange, oldest first. Empty on an island that predates
+         *  tickets, and on a report nobody has answered or added to. */
+        val thread: List<ReportTurn> = emptyList(),
     )
 
     suspend fun myReports(): List<MyReport> = withContext(Dispatchers.IO) {
         get("/reports/mine", authed = true, Array<MyReport>::class.java).toList()
+    }
+
+    data class ReportTurnBody(val body: String)
+
+    /** Write back on my own report. Throws "HTTP 409" once the report is
+     *  closed, and "HTTP 404" on somebody else's. */
+    suspend fun addToMyReport(id: Int, body: String): ReportTurn = withContext(Dispatchers.IO) {
+        post("/reports/mine/$id/messages", gson.toJson(ReportTurnBody(body)), authed = true, ReportTurn::class.java)
     }
 
     /** Drop one of my own reports. 409 = still open against another user, so
