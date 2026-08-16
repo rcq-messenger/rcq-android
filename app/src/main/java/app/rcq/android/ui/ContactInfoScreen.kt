@@ -146,7 +146,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     // "what they call themselves" underneath, otherwise a rename quietly hides
     // who you are actually talking to.
     val aliases by app.rcq.android.data.LocalStores.aliases.collectAsState()
-    val alias = aliases[uin]
+    val alias = aliases[app.rcq.android.data.LocalStores.aliasKey(uin, crossIslandHost)]
     val theirNickname = profile?.nickname ?: ciCardName ?: contact?.nickname ?: "#$uin"
     val nickname = alias ?: theirNickname
     var editAlias by remember(uin) { mutableStateOf<String?>(null) }
@@ -465,14 +465,14 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             )
             SheetGap()
             SheetActionRow(stringResource(R.string.common_save)) {
-                app.rcq.android.data.LocalStores.setAlias(uin, draft)
+                app.rcq.android.data.LocalStores.setAlias(uin, draft, crossIslandHost)
                 editAlias = null
             }
             // Clearing the alias is not a cancel — it drops the name I gave them
             // and only then closes, so it stays a row of its own.
             if (alias != null) {
                 SheetActionRow(stringResource(R.string.ci_clear_name), dimmed = true) {
-                    app.rcq.android.data.LocalStores.setAlias(uin, null)
+                    app.rcq.android.data.LocalStores.setAlias(uin, null, crossIslandHost)
                     editAlias = null
                 }
             }

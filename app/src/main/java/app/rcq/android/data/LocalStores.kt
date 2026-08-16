@@ -42,8 +42,13 @@ object LocalStores {
      *  row itself, it serves no server-side function, and an island that stores
      *  it is an island that can be made to hand it over. The cost is honest:
      *  aliases do not follow you to another device until the backup does. */
-    private val _aliases = MutableStateFlow<Map<Int, String>>(emptyMap())
-    val aliases: StateFlow<Map<Int, String>> = _aliases.asStateFlow()
+    /** My own names for people, keyed by [aliasKey] — the bare uin for someone
+     *  on this island, `uin@host` for someone on another one. ⚠ A uin is
+     *  per-island, so keying by the number alone gave `1234` here and
+     *  `1234@is2.rcq.app` ONE name between them: renaming the stranger renamed
+     *  your friend. */
+    private val _aliases = MutableStateFlow<Map<String, String>>(emptyMap())
+    val aliases: StateFlow<Map<String, String>> = _aliases.asStateFlow()
 
     private val _muted = MutableStateFlow<Set<String>>(emptySet())
     val muted: StateFlow<Set<String>> = _muted.asStateFlow()
@@ -313,10 +318,12 @@ object LocalStores {
             return
         }
         _favorites.value = prefs.getStringSet(pk(K_FAV), emptySet())!!.toSet()
+        // Rows written before the key carried a host are plain "<uin>=<name>",
+        // and they stay valid: a bare key IS the same-island key.
         _aliases.value = (prefs.getStringSet(pk(K_ALIAS), emptySet()) ?: emptySet())
             .mapNotNull { row ->
                 val i = row.indexOf('=')
-                if (i <= 0) null else row.take(i).toIntOrNull()?.let { it to row.substring(i + 1) }
+                if (i <= 0) null else row.take(i) to row.substring(i + 1)
             }.toMap()
         _muted.value = prefs.getStringSet(pk(K_MUTE), emptySet())!!.toSet()
         _mentionsOnly.value = prefs.getStringSet(pk(K_MENTIONS), emptySet())!!.toSet()
@@ -351,15 +358,21 @@ object LocalStores {
     fun peerThread(uin: Int) = "peer:$uin"
     fun groupThread(id: Int) = "group:$id"
 
-    /** My name for [uin], or null when I never set one. */
-    fun aliasFor(uin: Int): String? = _aliases.value[uin]
+    /** The map key for a person: the bare uin on this island, `uin@host` on
+     *  another. See the note on [_aliases]. */
+    fun aliasKey(uin: Int, host: String? = null): String =
+        if (host.isNullOrBlank()) uin.toString() else "$uin@${host.lowercase()}"
 
-    /** Set (or, with blank, clear) my own name for [uin]. */
-    fun setAlias(uin: Int, name: String?) {
+    /** My name for them, or null when I never set one. */
+    fun aliasFor(uin: Int, host: String? = null): String? = _aliases.value[aliasKey(uin, host)]
+
+    /** Set (or, with blank, clear) my own name for them. */
+    fun setAlias(uin: Int, name: String?, host: String? = null) {
         if (acct == null) return
         val trimmed = name?.trim()?.take(48)?.takeIf { it.isNotEmpty() }
         val next = _aliases.value.toMutableMap()
-        if (trimmed == null) next.remove(uin) else next[uin] = trimmed
+        val k = aliasKey(uin, host)
+        if (trimmed == null) next.remove(k) else next[k] = trimmed
         _aliases.value = next
         prefs.edit().putStringSet(pk(K_ALIAS), next.map { "${it.key}=${it.value}" }.toSet()).apply()
     }
