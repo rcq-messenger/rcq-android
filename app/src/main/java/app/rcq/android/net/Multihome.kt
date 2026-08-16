@@ -128,8 +128,38 @@ object Multihome {
     // role ([SigningKeys]) — its own role, because steering a backup mailbox and
     // steering a tunnel are different powers and should not stay welded to one
     // key. servers.json stays display-only.
-    private const val AUTO_ISLANDS_URL =
-        "https://raw.githubusercontent.com/rcq-messenger/rcq-servers/main/auto-islands.json"
+    // ⚠ Two sources, ours first. GitHub raw is blocked in a good share of the
+    // networks this project exists for, so the one feature whose purpose is
+    // "your island may go away, keep a spare" failed for exactly the people who
+    // need a spare (report #579). The mirror on rcq.app is reachable wherever
+    // the app is. It grants us nothing: the bytes are verified against the
+    // pinned ISLAND_LIST key either way, so a mirror that lies simply fails
+    // verification and the next source is tried.
+    private val AUTO_ISLANDS_URLS = listOf(
+        "https://rcq.app/auto-islands.json",
+        "https://raw.githubusercontent.com/rcq-messenger/rcq-servers/main/auto-islands.json",
+    )
+
+    /** The verified island list from whichever source answers first, or null
+     *  when none of them does. A static host that answers a missing file with
+     *  its index page fails the signature check, which is what makes trying the
+     *  next source safe. */
+    private fun signedIslands(): List<String>? {
+        for (url in AUTO_ISLANDS_URLS) {
+            val islands = runCatching {
+                val jsonBytes = httpBytes(url) ?: return@runCatching null
+                val sigB64 = httpBytes("$url.sig")?.toString(Charsets.UTF_8)?.trim()
+                    ?: return@runCatching null
+                if (!SigningKeys.verify(SigningKeys.Role.ISLAND_LIST, jsonBytes, sigB64)) {
+                    return@runCatching null
+                }
+                val doc = JsonParser.parseString(jsonBytes.toString(Charsets.UTF_8)).asJsonObject
+                doc.getAsJsonArray("islands")?.mapNotNull { normalizeHost(it.asString) } ?: emptyList()
+            }.getOrNull()
+            if (islands != null) return islands
+        }
+        return null
+    }
 
     /** Pick a backup island from the SIGNED island list, minus our own island +
      *  already-added hosts; the FIRST healthy one in list order wins (the order
@@ -138,12 +168,7 @@ object Multihome {
      *  (fail-safe: never auto-register on an unverified island). Plain OkHttp,
      *  same accepted simplification as the deposit path. Blocking — call from IO. */
     fun autoPickHost(ownHost: String, exclude: Set<String>): String? = runCatching {
-        val jsonBytes = httpBytes(AUTO_ISLANDS_URL) ?: return@runCatching null
-        val sigB64 = httpBytes("$AUTO_ISLANDS_URL.sig")?.toString(Charsets.UTF_8)?.trim()
-            ?: return@runCatching null
-        if (!SigningKeys.verify(SigningKeys.Role.ISLAND_LIST, jsonBytes, sigB64)) return@runCatching null
-        val doc = JsonParser.parseString(jsonBytes.toString(Charsets.UTF_8)).asJsonObject
-        val islands = doc.getAsJsonArray("islands")?.mapNotNull { normalizeHost(it.asString) } ?: emptyList()
+        val islands = signedIslands() ?: return@runCatching null
         islands.firstOrNull { it != ownHost && it !in exclude && healthy(it) }
     }.getOrNull()
 
