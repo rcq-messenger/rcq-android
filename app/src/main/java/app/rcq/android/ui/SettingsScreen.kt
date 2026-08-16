@@ -134,7 +134,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
+private enum class SettingsRoute { ROOT, HOW_IT_WORKS, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
 
 @Composable
 internal fun SettingsScreen(
@@ -202,6 +202,7 @@ internal fun SettingsScreen(
             onOpen = { route = it },
         )
         SettingsRoute.PROFILE -> ProfileEditScreen(session) { route = SettingsRoute.ROOT }
+        SettingsRoute.HOW_IT_WORKS -> HowItWorksScreen { route = SettingsRoute.ROOT }
         SettingsRoute.PRIVACY -> PrivacyScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.NETWORK -> NetworkScreen(
             session,
@@ -374,6 +375,7 @@ private fun SettingsRoot(
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_privacy))
             SettingsGroup {
+                SettingsRow(Icons.Filled.Info, stringResource(R.string.how_title)) { onOpen(SettingsRoute.HOW_IT_WORKS) }
                 SettingsRow(Icons.Filled.Lock, stringResource(R.string.settings_row_privacy)) { onOpen(SettingsRoute.PRIVACY) }
                 Divider()
                 SettingsRow(Icons.Filled.NetworkCheck, stringResource(R.string.settings_row_network)) { onOpen(SettingsRoute.NETWORK) }
@@ -1691,6 +1693,61 @@ private fun statusText(ok: Boolean?, yes: String, no: String): String = when (ok
     true -> yes
     false -> no
     null -> "…"
+}
+
+
+/** "How this works" — three questions, one screen.
+ *
+ *  ⚠ NOT a second carousel, and that distinction is the brief. The carousel
+ *  shows what the app can DO, and nobody is confused about that. The confusion
+ *  in the reports is three other things: who can read what I send, what an
+ *  island is and why there is more than one, and what to do when it stops
+ *  working.
+ *
+ *  It lives in Settings permanently rather than at first launch, because the
+ *  question arrives on the third day, by which time an onboarding screen is
+ *  long gone.
+ */
+@Composable
+private fun HowItWorksScreen(onBack: () -> Unit) {
+    val c = RcqTheme.colors
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        SettingsTopBar(stringResource(R.string.how_title), onBack)
+        Column(
+            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            HowAnswer(stringResource(R.string.how_q1), stringResource(R.string.how_a1))
+            HowAnswer(stringResource(R.string.how_q2), stringResource(R.string.how_a2))
+            HowAnswer(stringResource(R.string.how_q3), stringResource(R.string.how_a3))
+            SettingsGroup {
+                Text(
+                    stringResource(R.string.how_more),
+                    color = c.accent,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { runCatching { uriHandler.openUri("https://rcq.app/faq") } }
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HowAnswer(question: String, answer: String) {
+    val c = RcqTheme.colors
+    SettingsGroup {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(question, color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(answer, color = c.textSecondary, fontSize = 13.sp, lineHeight = 18.sp)
+        }
+    }
 }
 
 @Composable
