@@ -70,7 +70,7 @@ fun ShareTargetScreen(
     val people = remember(contacts, query) {
         contacts.filter { !it.blocked }.filter {
             query.isBlank() || it.nickname.contains(query, true) ||
-                (LocalStores.aliasFor(it.uin)?.contains(query, true) == true) ||
+                (LocalStores.aliasFor(it.uin, it.host)?.contains(query, true) == true) ||
                 it.uin.toString().contains(query)
         }
     }

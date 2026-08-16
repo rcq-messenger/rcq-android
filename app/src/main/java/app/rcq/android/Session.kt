@@ -5656,10 +5656,16 @@ class Session(context: Context) {
      *  otherwise the nickname they chose, otherwise their number. Every surface
      *  that shows a person's name goes through here, so a rename lands
      *  everywhere at once. */
-    fun contactName(uin: Int): String =
-        app.rcq.android.data.LocalStores.aliasFor(uin)
-            ?: _contacts.value.firstOrNull { it.uin == uin }?.nickname
+    fun contactName(uin: Int, host: String? = null): String {
+        // The host matters: a uin is per-island, so my name for `1234@is2` must
+        // not be handed to the local #1234. When the caller does not say, fall
+        // back to the host on the contact row itself.
+        val c = _contacts.value.firstOrNull { it.uin == uin && (host == null || it.host == host) }
+            ?: _contacts.value.firstOrNull { it.uin == uin }
+        return app.rcq.android.data.LocalStores.aliasFor(uin, host ?: c?.host)
+            ?: c?.nickname
             ?: "#$uin"
+    }
 
     /** Append a call-summary line to the 1:1 thread (kind="call"), so a
      *  finished/missed call shows in the chat history. Called by

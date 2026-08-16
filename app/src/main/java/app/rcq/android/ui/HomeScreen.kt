@@ -1472,7 +1472,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
     // My own name for this person wins over the nickname they chose. Device-only
     // (see LocalStores.aliases) — a rename says more about the relationship than
     // the contact row does, and the island has no business holding it.
-    val shownName = aliases[contact.uin] ?: contact.nickname
+    val shownName = aliases[LocalStores.aliasKey(contact.uin, contact.host)] ?: contact.nickname
     val c = RcqTheme.colors
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
@@ -1867,7 +1867,7 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
         // finding them by that name is the obvious next complaint.
         else contacts.filter {
             it.nickname.contains(query, true) ||
-                (LocalStores.aliasFor(it.uin)?.contains(query, true) == true) ||
+                (LocalStores.aliasFor(it.uin, it.host)?.contains(query, true) == true) ||
                 it.uin.toString().contains(query)
         }
     }
