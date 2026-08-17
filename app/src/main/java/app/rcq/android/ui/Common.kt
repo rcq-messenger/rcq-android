@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
@@ -40,6 +41,7 @@ import app.rcq.android.R
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,6 +92,7 @@ internal fun SectionHeader(
     val c = RcqTheme.colors
     Row(
         modifier = Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(0.dp))
             .background(c.bgSecondary.copy(alpha = 0.7f))
             .clickable(onClick = onToggle)
@@ -98,10 +101,27 @@ internal fun SectionHeader(
     ) {
         CollapseChevron(collapsed)
         Spacer(Modifier.size(6.dp))
-        Text(title.uppercase(), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.size(4.dp))
-        Text("($count)", color = c.textSecondary, fontSize = 11.sp)
-        Spacer(Modifier.weight(1f))
+        // #593: with the system font turned up the title ran past the right
+        // edge and took `(count)` — and the trailing unread badge behind it —
+        // off screen with it. The title is the part that gives way: it gets
+        // whatever the row has left over and ellipsizes there, while the count
+        // and the trailing slot are measured first and always keep their width.
+        // The text still grows with the font setting; only its ceiling changed.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title.uppercase(),
+                color = c.textSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                // fill = false so a short title keeps the count next to it
+                // instead of parking it at the far end of the row.
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.size(4.dp))
+            Text("($count)", color = c.textSecondary, fontSize = 11.sp, maxLines = 1)
+        }
         trailing?.invoke(this)
     }
 }
