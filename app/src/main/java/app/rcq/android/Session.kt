@@ -5946,17 +5946,31 @@ class Session(context: Context) {
     }
 
     private fun store(msg: ChatMessage, countsUnread: Boolean = true) {
+        // ★★ A note I wrote on my OTHER device (#599: "заметка, написанная из
+        // веба, приходит в приложение как новое сообщение со звуком и пушем, а
+        // должно быть просто синхронизировано"). It reaches this device as an
+        // ordinary sealed envelope addressed to my own number — which is what
+        // makes Saved Messages sync at all — and was then filed as if a
+        // stranger had sent it: on the left, with a chime, a banner and an
+        // unread badge, for something I typed myself a second ago. It is mine:
+        // file it as mine, silently.
+        //
+        // Only the 1:1 self thread qualifies. A group message cannot arrive
+        // from my own number, and an envelope claiming to be from me is signed
+        // by my own key or it never got this far.
+        val ownNote = !msg.fromMe && msg.groupId == null && msg.peerUin == store.uin
+        val row = if (ownNote) msg.copy(fromMe = true) else msg
         // INSERT OR IGNORE dedups by envelope UUID (WS vs queue overlap).
-        if (!db.insert(msg)) return
+        if (!db.insert(row)) return
         val cur = _messages.value.toMutableMap()
-        cur[msg.peerUin] = ((cur[msg.peerUin] ?: emptyList()) + msg).sortedBy { it.sentAt }
+        cur[row.peerUin] = ((cur[row.peerUin] ?: emptyList()) + row).sortedBy { it.sentAt }
         _messages.value = cur
         // Not everything that lands in a thread is something to catch up on.
         // A finished call is a record of something both people were present
         // for; only a missed one is still owed attention.
-        if (countsUnread) bumpUnreadIfInbound(msg, LocalStores.peerThread(msg.peerUin))
+        if (countsUnread) bumpUnreadIfInbound(row, LocalStores.peerThread(row.peerUin))
         // Arrived into the open thread → ack it immediately with a receipt.
-        if (!msg.fromMe && LocalStores.peerThread(msg.peerUin) == activeThread) sendReadReceipts(msg.peerUin)
+        if (!row.fromMe && LocalStores.peerThread(row.peerUin) == activeThread) sendReadReceipts(row.peerUin)
     }
 
     /** A transient in-app notification banner (#11): shown at the top while the
