@@ -329,6 +329,35 @@ object Multihome {
             RcqFederation.Home(h.get("host").asString, h.get("uin").asInt)
         }
 
+    /** The homes OUR OWN published record already lists, verified against our
+     *  own signing key. Blocking — call from IO. Empty when there is no record
+     *  yet, when it does not verify, or when the island cannot be reached.
+     *
+     *  ⚠⚠ This exists because the record is an ACCOUNT-wide fact and this
+     *  install only ever knew its own local half of it. A backup island
+     *  switched on in the web (or on a second phone) is invisible here — and
+     *  the boot republish then PUT a record without it, under a fresh `ts`.
+     *  The island rejects only an OLDER ts, so the newcomer's own record wins
+     *  and the backup island quietly stops being advertised to senders: mail
+     *  keeps going to a mailbox nobody is told about any more. Reading before
+     *  publishing is what keeps one device from unpublishing another's work.
+     */
+    fun ownPublishedHomes(ownHost: String, ownUin: Int, ownSigningPubB64: String): List<RcqFederation.Home> = runCatching {
+        val req = Request.Builder()
+            .url("https://$ownHost/federation/island-record/$ownUin")
+            .header("Cache-Control", "no-cache")
+            .get()
+            .build()
+        http().newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@runCatching emptyList()
+            val doc = JsonParser.parseString(resp.body?.string() ?: "").asJsonObject
+            when (val v = RcqFederation.verifyRecord(doc, expectedIk = null, expectedSk = ownSigningPubB64)) {
+                is RcqFederation.VerifyResult.Ok -> homesOf(v.doc)
+                else -> emptyList()
+            }
+        }
+    }.getOrDefault(emptyList())
+
     /** Apply a contact's SELF-PUSHED home-island record (gossip B1): verify it
      *  is signed by [senderSigningPub] (the same Ed25519 key that signed the
      *  envelope it arrived in — binds the record to its real sender), reject a
