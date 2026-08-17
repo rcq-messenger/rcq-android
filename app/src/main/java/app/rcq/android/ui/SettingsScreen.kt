@@ -1748,22 +1748,62 @@ private fun statusText(ok: Boolean?, yes: String, no: String): String = when (ok
 @Composable
 private fun HowItWorksScreen(onBack: () -> Unit) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val faqUrl = "https://rcq.app/faq"
+    // One list drives both the screen and the clipboard, so a sixth answer
+    // cannot ship visible but uncopyable.
+    val qa = listOf(
+        R.string.how_q1 to R.string.how_a1,
+        R.string.how_q2 to R.string.how_a2,
+        R.string.how_q3 to R.string.how_a3,
+        // Circumvention and onion routing, asked for in report #572 ("в
+        // «как это работает» я бы добавил про луковое разделение знания
+        // сервера об отправителе и получателе") — in plain words, because
+        // the person asking has no reason to know what a circuit is.
+        R.string.how_q4 to R.string.how_a4,
+        R.string.how_q5 to R.string.how_a5,
+    )
+    val shareable = remember(qa) {
+        buildString {
+            appendLine(context.getString(R.string.how_title))
+            appendLine()
+            qa.forEach { (q, a) ->
+                appendLine(context.getString(q))
+                appendLine(context.getString(a))
+                appendLine()
+            }
+            append(faqUrl)
+        }
+    }
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
-        SettingsTopBar(stringResource(R.string.how_title), onBack)
+        // Second half of report #572: the person who asked for these answers
+        // also asked to be able to hand them to someone else. That makes the
+        // whole explanation the unit, not one question — five clipboard
+        // fragments would be five pastes, and answers 4 and 5 only make sense
+        // together. It sits in the top bar so a screen that is nothing but
+        // text gains no extra row and stays copyable without scrolling first.
+        SettingsTopBar(stringResource(R.string.how_title), onBack, trailing = {
+            Icon(
+                Icons.Filled.ContentCopy,
+                stringResource(R.string.how_copy),
+                tint = c.accent,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(percent = 50))
+                    .clickable {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.how_title), shareable))
+                        Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                    }
+                    .padding(6.dp)
+                    .size(22.dp),
+            )
+        })
         Column(
             Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            HowAnswer(stringResource(R.string.how_q1), stringResource(R.string.how_a1))
-            HowAnswer(stringResource(R.string.how_q2), stringResource(R.string.how_a2))
-            HowAnswer(stringResource(R.string.how_q3), stringResource(R.string.how_a3))
-            // Circumvention and onion routing, asked for in report #572 ("в
-            // «как это работает» я бы добавил про луковое разделение знания
-            // сервера об отправителе и получателе") — in plain words, because
-            // the person asking has no reason to know what a circuit is.
-            HowAnswer(stringResource(R.string.how_q4), stringResource(R.string.how_a4))
-            HowAnswer(stringResource(R.string.how_q5), stringResource(R.string.how_a5))
+            qa.forEach { (q, a) -> HowAnswer(stringResource(q), stringResource(a)) }
             SettingsGroup {
                 Text(
                     stringResource(R.string.how_more),
@@ -1771,7 +1811,7 @@ private fun HowItWorksScreen(onBack: () -> Unit) {
                     fontSize = 14.sp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { runCatching { uriHandler.openUri("https://rcq.app/faq") } }
+                        .clickable { runCatching { uriHandler.openUri(faqUrl) } }
                         .padding(horizontal = 14.dp, vertical = 14.dp),
                 )
             }

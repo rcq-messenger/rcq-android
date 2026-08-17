@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -180,6 +182,25 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             }
             Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(pluralStringResource(R.plurals.members, group.memberCount, group.memberCount), color = c.textSecondary, fontSize = 13.sp)
+            // #581: whether the group is closed was legible only to the owner,
+            // as the toggle further down, and to whoever happened to look at an
+            // invite card. Same padlock and the same "Closed group" the invite
+            // card carries, so the two surfaces do not teach two vocabularies
+            // for one setting. Stated in both directions on purpose — a missing
+            // line reads as "unknown", not as "open".
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(
+                    if (group.isClosed) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                    null,
+                    tint = c.textSecondary,
+                    modifier = Modifier.size(13.dp),
+                )
+                Text(
+                    stringResource(if (group.isClosed) R.string.gi_closed else R.string.gi_open),
+                    color = c.textSecondary,
+                    fontSize = 13.sp,
+                )
+            }
             group.description?.takeIf { it.isNotBlank() }?.let {
                 Text(it, color = c.textSecondary, fontSize = 13.sp)
             }
