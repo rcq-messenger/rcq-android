@@ -1721,6 +1721,12 @@ private fun HowItWorksScreen(onBack: () -> Unit) {
             HowAnswer(stringResource(R.string.how_q1), stringResource(R.string.how_a1))
             HowAnswer(stringResource(R.string.how_q2), stringResource(R.string.how_a2))
             HowAnswer(stringResource(R.string.how_q3), stringResource(R.string.how_a3))
+            // Circumvention and onion routing, asked for in report #572 ("в
+            // «как это работает» я бы добавил про луковое разделение знания
+            // сервера об отправителе и получателе") — in plain words, because
+            // the person asking has no reason to know what a circuit is.
+            HowAnswer(stringResource(R.string.how_q4), stringResource(R.string.how_a4))
+            HowAnswer(stringResource(R.string.how_q5), stringResource(R.string.how_a5))
             SettingsGroup {
                 Text(
                     stringResource(R.string.how_more),

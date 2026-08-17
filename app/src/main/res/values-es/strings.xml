@@ -1134,5 +1134,9 @@
     <string name="how_a2">Una isla es un servidor que guarda tu correo. RCQ no es un servidor, sino muchos independientes: el nuestro, los de otros y el tuyo si lo levantas.\n\nTu número lo emite una isla, así que el mismo número en dos islas son dos personas distintas: la dirección es el número Y la isla. Aun así, gente de islas distintas se escribe, se llama y comparte grupos.</string>
     <string name="how_q3">¿Qué hago cuando deja de funcionar?</string>
     <string name="how_a3">Primero averigua si te están bloqueando: Ajustes → Red → Diagnóstico de conexión, y ejecuta la comprobación completa CON LA VPN APAGADA.\n\nTe da una línea. Envíanosla desde Reportar un error: esa línea nos dice exactamente qué está cerrado en tu red, y sin ella adivinamos.</string>
+    <string name="how_q4">¿Qué pasa cuando mi red bloquea RCQ?</string>
+    <string name="how_a4">La app se da cuenta y lo rodea sola. No hay nada que activar ni hace falta una VPN aparte: abre un túnel hasta uno de nuestros relays y sigue funcionando.\n\nPara quien bloquea, ese tráfico parece una visita normal a un sitio normal — el mismo tipo de conexión cifrada que hace tu navegador todo el día. El relay lleva sobres sellados, así que tampoco puede leer tus mensajes.</string>
+    <string name="how_q5">¿Alguien puede saber a quién le escribo?</string>
+    <string name="how_a5">Tu isla sabe que un sobre va dirigido a alguien y no sabe que salió de ti: tu nombre no está por fuera.\n\nCon el túnel encendido, el camino de salida se reparte entre dos relays. El primero te ve y no sabe a qué isla vas; el segundo llega a la isla y no sabe quién eres. Juntar las dos mitades exige los dos, y pertenecen a personas distintas en países distintos.\n\nLo que no se puede ocultar: que usas RCQ lo ve quien controla tu red, mientras el túnel esté apagado.</string>
     <string name="how_more">Más preguntas en rcq.app/faq →</string>
 </resources>

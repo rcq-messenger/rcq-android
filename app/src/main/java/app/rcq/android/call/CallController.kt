@@ -1071,10 +1071,10 @@ class CallController(
             if (call.media == Media.VIDEO) R.string.call_hist_video else R.string.call_hist_voice,
         )
         val connected = durationMs >= 1000
-        val tail = if (connected) {
-            formatDuration(durationMs / 1000)
+        val tailRes: Int? = if (connected) {
+            null
         } else {
-            appContext.getString(
+            (
                 when {
                     // A call the user answered that never carried media is a
                     // failed connection, whatever word the far end put on it.
@@ -1096,14 +1096,27 @@ class CallController(
                         "peer_disconnected" -> R.string.call_out_disconnected
                         else -> R.string.call_out_ended
                     }
-                },
+                }
             )
         }
         val missed = isMissed(call, durationMs, reason)
+        // "Голосовой звонок · Пропущенный звонок" said звонок twice and wrapped
+        // onto two lines on a narrow phone (founder, with a screenshot of a
+        // whole column of them). The outcome already names the call when it is
+        // a missed one, so the media prefix is dropped there and kept
+        // everywhere else, where the tail is a duration or a one-word verdict.
+        val text = when (tailRes) {
+            R.string.call_out_missed -> appContext.getString(
+                if (call.media == Media.VIDEO) R.string.call_missed_video_push
+                else R.string.call_missed_push,
+            )
+            null -> "$mediaLabel · ${formatDuration(durationMs / 1000)}"
+            else -> "$mediaLabel · ${appContext.getString(tailRes)}"
+        }
         appendHistory(
             call.peerUin,
             call.outgoing,
-            "$mediaLabel · $tail",
+            text,
             missed,
             System.currentTimeMillis() - durationMs,
         )

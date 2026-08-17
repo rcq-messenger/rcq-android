@@ -4886,17 +4886,17 @@ class Session(context: Context) {
                 if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
                 if (CrossIslandStore.get(dec.senderUin, host) == null) return@runCatching
                 if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
-                    val media = appCtx.getString(
-                        if (cs.data["media"] == "video") app.rcq.android.R.string.call_hist_video
-                        else app.rcq.android.R.string.call_hist_voice,
-                    )
                     // A cross-island offer we only learned about after it went
                     // stale: genuinely missed, so it does count as unread. Its
-                    // start is the offer's own timestamp, not now.
+                    // start is the offer's own timestamp, not now. One label,
+                    // not "<media> · missed call" — see CallController.logHistory.
                     logCallHistory(
                         dec.senderUin,
                         fromMe = false,
-                        text = "$media · ${appCtx.getString(app.rcq.android.R.string.call_out_missed)}",
+                        text = appCtx.getString(
+                            if (cs.data["media"] == "video") app.rcq.android.R.string.call_missed_video_push
+                            else app.rcq.android.R.string.call_missed_push,
+                        ),
                         missed = true,
                         startedAt = cs.ts * 1000L,
                     )
