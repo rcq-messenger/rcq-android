@@ -1127,6 +1127,7 @@
     <plurals name="chat_media_sending">
         <item quantity="other">正在发送 %d 个文件…</item>
     </plurals>
+    <string name="island_rules_title">岛屿规则</string>
     <string name="how_title">这是怎么运作的</string>
     <string name="how_q1">谁能读到我发出的内容？</string>
     <string name="how_a1">只有你发给的那个人。文字在你的设备上加密，在对方设备上解密，中间的岛只是送一个它打不开的密封信封。\n\n岛能看到的：你曾在线，以及你的信封寄给了谁。它看不到的：里面写了什么。</string>

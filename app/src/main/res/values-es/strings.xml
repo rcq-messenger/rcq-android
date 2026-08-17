@@ -1129,6 +1129,7 @@
         <item quantity="one">Enviando %d archivo…</item>
         <item quantity="other">Enviando %d archivos…</item>
     </plurals>
+    <string name="island_rules_title">Reglas de la isla</string>
     <string name="how_title">Cómo funciona</string>
     <string name="how_q1">¿Quién puede leer lo que envío?</string>
     <string name="how_a1">Solo la persona a la que se lo enviaste. El texto se cifra en tu dispositivo y se descifra en el suyo, y la isla que hay en medio lleva un sobre sellado que no puede abrir.\n\nLo que la isla sí ve: que estuviste en línea y a quién iban dirigidos tus sobres. Lo que no ve: qué hay dentro.</string>

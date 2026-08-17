@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Info
@@ -428,6 +429,12 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app)) {
                     app.rcq.android.net.UpdateChecker.shareApk(context)
                 }
+                // An island that runs no report desk gets neither entry: a
+                // form that answers 403 and a screen that will always be empty
+                // are worse than an absent menu item. Flag comes from
+                // /server/info; the default is permissive.
+                val reportsOn by session.reportsEnabled.collectAsState()
+                if (reportsOn) {
                 Divider()
                 // Open on an EMPTY form, every field of it. The reset used to
                 // clear the text and the sent flag and stop there, so the
@@ -450,6 +457,7 @@ private fun SettingsRoot(
                 // next to Notifications, which is where the answer NOTIFICATION
                 // is configured, not where the answer is read (tester report).
                 SettingsRow(Icons.Outlined.Flag, stringResource(R.string.myreports_title)) { onOpen(SettingsRoute.MY_REPORTS) }
+                }
             }
 
             Spacer(Modifier.height(22.dp))
@@ -1161,23 +1169,52 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             SettingsGroup {
                 val host = session.currentServer
-                // The island's own name, asked of the island. An operator could
-                // set one and nobody ever saw it, so a self-hosted island read
-                // as a bare hostname in the one place its users look for it.
-                val islandName by produceState<String?>(initialValue = null, host) {
-                    value = if (host == RcqApi.DEFAULT_HOST) null
-                    else app.rcq.android.net.RcqApi.serverInfoOf(host)?.name?.takeIf { it.isNotBlank() }
+                // The island's own name and house rules, asked of the island.
+                // ⚠ For EVERY island including ours: the flagship has a name
+                // and a rules text set in the admin panel too, and skipping the
+                // request for the default host meant an operator could type
+                // both and see neither, anywhere. Founder asked about this
+                // twice ("когда мы уже починим BRANDING").
+                val info by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
+                    initialValue = null, host,
+                ) {
+                    value = app.rcq.android.net.RcqApi.serverInfoOf(host)
                 }
+                val islandName = info?.name?.takeIf { it.isNotBlank() }
+                val islandRules = info?.welcome?.takeIf { it.isNotBlank() }
+                var showRules by remember { mutableStateOf(false) }
                 SettingsRow(
                     Icons.Filled.Dns,
                     stringResource(R.string.pv_custom_server),
                     value = when {
-                        host == RcqApi.DEFAULT_HOST -> stringResource(R.string.pv_default)
                         islandName != null -> "$islandName · $host"
+                        host == RcqApi.DEFAULT_HOST -> stringResource(R.string.pv_default)
                         else -> host
                     },
                     onClick = onOpenCustomServer,
                 )
+                if (islandRules != null) {
+                    SettingsRow(
+                        Icons.Filled.Gavel,
+                        stringResource(R.string.island_rules_title),
+                        onClick = { showRules = true },
+                    )
+                }
+                if (showRules && islandRules != null) {
+                    RcqSheet(
+                        onDismiss = { showRules = false },
+                        title = islandName ?: host,
+                    ) {
+                        Text(
+                            islandRules,
+                            color = c.textPrimary,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .heightIn(max = 380.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
+                }
                 SettingsRow(
                     Icons.Filled.NetworkCheck,
                     stringResource(R.string.diag_title),

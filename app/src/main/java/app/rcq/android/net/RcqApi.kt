@@ -1037,6 +1037,9 @@ class RcqApi(
         val random_chat: Boolean = true,
         val hood: Boolean = true,
         val stories: Boolean = true,
+        // An island may run no report desk at all. Permissive default: an
+        // older island that does not advertise the flag still accepts them.
+        val reports: Boolean = true,
         val max_accounts_per_device: Int = 5,
     )
     data class ServerInfoResponse(
