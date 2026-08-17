@@ -282,6 +282,19 @@ class CallController(
         scope.launch {
             try {
                 val turnOk = refreshTurn(mayEngageTunnel = true)
+                // ⚠ The user may have given up while the credentials were being
+                // fetched — that wait is a network round trip and a relay probe,
+                // and on a bad network it is exactly when somebody presses the
+                // red button. Nothing cancels this coroutine, so without this
+                // check it went on to build a peer connection, open the
+                // microphone and ring the callee for a call that had already
+                // ended here: they rang out their own timeout and logged a
+                // missed call, and no call_end was ever sent because our state
+                // was Idle by then.
+                if (_state.value.info?.id != call.id) {
+                    android.util.Log.i("RCQcall", "call ${call.id.take(8)} cancelled before the offer went out")
+                    return@launch
+                }
                 // Carried over from the call the user just gave up on, and
                 // applied here rather than there: the policy is baked into the
                 // peer connection when it is created, so the only reliable way
@@ -1110,12 +1123,17 @@ class CallController(
                 // and the audit ended "turn:BLOCKED => CALLS_BLOCKED". The
                 // tunnel that carries the messages can carry the media too
                 // ([TurnTunnel]); nothing was asking it to.
+                // ⚠⚠ NEVER awaited, on either path. Bringing the transport up
+                // is unbounded work — an onion cohort probes its guard and then
+                // the whole VLESS pool before sing-box is even asked to start,
+                // and that start has no timeout of its own — and this runs
+                // BEFORE `call_offer` goes out. Waiting for it meant the callee's
+                // phone did not ring for tens of seconds while the caller looked
+                // at a silent "Calling…", which is the failure this app already
+                // has a name for (#463). The road opens behind the call: this one
+                // may still fail, the next one on this network will not.
                 if (mayEngageTunnel && rtc.relayReachable() == false) {
-                    if (waitForProbe) reachRelayThroughTunnel(creds)
-                    // Answering must never wait on this (see the note above about
-                    // the caller sitting on a ringing screen). Do it behind the
-                    // answer so the road is open for the calls after this one.
-                    else scope.launch { reachRelayThroughTunnel(creds) }
+                    scope.launch { runCatching { reachRelayThroughTunnel(creds) } }
                 }
                 if (creds.urls.isEmpty()) {
                     android.util.Log.w("RCQcall", "TURN endpoint returned no servers — STUN-only call")
