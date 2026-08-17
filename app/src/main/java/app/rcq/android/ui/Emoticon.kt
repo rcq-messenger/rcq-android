@@ -6,7 +6,6 @@ import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +42,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -232,7 +234,6 @@ private fun staticEmoticonBitmap(name: String, bytes: ByteArray): ImageBitmap? =
 /** A reaction chip under a message bubble: a small emoticon GIF when the
  *  reaction is a known KOLOBOK asset, else the raw string (plain-emoji
  *  reactions from older clients still show). */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun ReactionChip(
     asset: String,
@@ -244,15 +245,22 @@ internal fun ReactionChip(
     val c = RcqTheme.colors
     val context = LocalContext.current
     val isEmoticon = remember(asset) { Emoticons.isEmoticon(context, asset) }
+    // The pointer node outlives a recomposition, so it must not capture the
+    // first callback it ever saw (the chip's message changes as rows are reused).
+    val longClick by rememberUpdatedState(onLongClick)
     Row(
         Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(if (mine) c.accent.copy(alpha = 0.22f) else c.bgSecondary)
             .let {
+                // Tap only: the long press is a separate detector because
+                // `combinedClickable` fires it under a moving finger — see
+                // [longPressUnlessScrolled].
                 if (onClick != null || onLongClick != null) {
-                    it.combinedClickable(onClick = { onClick?.invoke() }, onLongClick = onLongClick)
+                    it.clickable { onClick?.invoke() }
                 } else it
             }
+            .longPressUnlessScrolled(enabled = onLongClick != null) { longClick?.invoke() }
             .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -270,6 +278,66 @@ internal fun ReactionChip(
         }
     }
 }
+
+/** A long press that belongs to the finger, not to the pixel under it: the
+ *  press is only ever completed while the finger stays put, and any travel
+ *  hands the gesture back to whoever is scrolling.
+ *
+ *  ★★ Report #583: scrolling the history with a finger that happened to rest on
+ *  a reaction chip threw the "who reacted" sheet up mid-scroll. `combinedClickable`
+ *  gives its long press up only once someone CONSUMES the gesture, and the list
+ *  consumes nothing until the drag crosses touch slop — a slow drag crosses it
+ *  well after the 500ms timeout, so the timeout won and the sheet flew out.
+ *  Here the same touch slop the list scrolls with also ends the press (as does a
+ *  parent claiming the gesture: SwipeToReply, the list itself), which is the web
+ *  client's press timer cancelled on move.
+ *
+ *  A finger that holds still for the timeout is still a long press. From that
+ *  moment the rest of the gesture is ours, so the lift cannot ALSO land as a tap
+ *  on the chip and toggle the reaction on the way into the sheet.
+ *
+ *  [enabled]=false leaves the chip with no detector at all: a chip with nothing
+ *  to show (Radio) must not swallow the gesture its row's own long press needs.
+ *
+ *  The action is published to accessibility services too, which `combinedClickable`
+ *  did for free — TalkBack drives the action, it cannot hold a finger still.
+ */
+private fun Modifier.longPressUnlessScrolled(enabled: Boolean, onLongPress: () -> Unit): Modifier =
+    if (!enabled) this else this
+        .semantics { onLongClick { onLongPress(); true } }
+        .pointerInput(onLongPress) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val slop = viewConfiguration.touchSlop
+                val held = try {
+                    withTimeout(viewConfiguration.longPressTimeoutMillis) {
+                        var settled = false
+                        while (!settled) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            // Lifted (an ordinary tap, which the chip's `clickable`
+                            // owns), taken by a parent, or travelling: not ours.
+                            settled = change == null || !change.pressed ||
+                                event.changes.any { it.isConsumed } ||
+                                (change.position - down.position).getDistance() > slop
+                        }
+                    }
+                    false
+                } catch (_: PointerEventTimeoutCancellationException) {
+                    true
+                }
+                if (!held) return@awaitEachGesture
+                onLongPress()
+                // The rest of the gesture is ours: the lift must not reach the
+                // chip's `clickable` and toggle the reaction behind the sheet.
+                var pressed = true
+                while (pressed) {
+                    val event = awaitPointerEvent()
+                    event.changes.forEach { it.consume() }
+                    pressed = event.changes.any { it.pressed }
+                }
+            }
+        }
 
 /** A message/caption body with inline `:asset:` emoticons rendered as small
  *  GIFs (iOS EmoticonText parity). Falls back to a plain [Text] when the body
