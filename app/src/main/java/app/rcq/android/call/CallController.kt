@@ -690,6 +690,13 @@ class CallController(
 
     private fun finishEnded(call: CallInfo, reason: String) {
         if (_state.value is State.Ended) return
+        // "answered_elsewhere" is this account's OTHER device telling us it
+        // took the call; this phone was only ringing in parallel. Nothing
+        // ended for this user — filing it as missed put a missed-call
+        // notification and an unread badge on a call they had just answered
+        // at their desk. No history row, no notification, no ended screen:
+        // the ring simply stops, which is what web/desktop already do.
+        val answeredElsewhere = reason == "answered_elsewhere"
         val duration = if (connectedSince > 0) System.currentTimeMillis() - connectedSince else 0L
         // Keep what this call managed to do, so a user who says "calls do not
         // work" can hand us the answer instead of a description. Recorded for
@@ -711,7 +718,7 @@ class CallController(
                 turnServers = rtc.turnServerCount(),
             ),
         )
-        logHistory(call, reason, duration)
+        if (!answeredElsewhere) logHistory(call, reason, duration)
         // An incoming call that rang out leaves a row in the chat and, until
         // this, nothing anywhere else: the ringing notification is cancelled as
         // the ring ends, so someone who was away from the phone learned they
@@ -728,7 +735,11 @@ class CallController(
                 video = call.media == Media.VIDEO,
             )
         }
-        _state.value = State.Ended(call, reason)
+        // Skip the Ended state entirely for answered-elsewhere: Ended is what
+        // keeps the call screen up showing "call ended" for a moment, and
+        // there is nothing to announce — going straight to Idle dismisses the
+        // ringing UI and nothing more.
+        _state.value = if (answeredElsewhere) State.Idle else State.Ended(call, reason)
         rtc.close()
         ringer.stop()
         // Tear down any full-screen incoming-call UI we raised for a backgrounded
@@ -1135,7 +1146,11 @@ class CallController(
      *  where it reads as "calls do not work" (video attached to the report). */
     private fun isMissed(call: CallInfo, durationMs: Long, reason: String): Boolean =
         durationMs < 1000 && !call.outgoing && !answered &&
-            reason !in setOf("declined", "declinedElsewhere", "busy")
+            // "answered_elsewhere": taken on the account's other device, so
+            // nothing is waiting for this user. finishEnded already short-
+            // circuits that reason before this test; excluded here too so no
+            // future caller of this test can resurrect the phantom miss.
+            reason !in setOf("declined", "declinedElsewhere", "busy", "answered_elsewhere")
 
     private fun formatDuration(secs: Long): String = "%d:%02d".format(secs / 60, secs % 60)
 
