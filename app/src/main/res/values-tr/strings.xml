@@ -820,6 +820,8 @@
     <string name="media_saved">Kaydedildi</string>
     <string name="media_saved_to">%1$s klasörüne kaydedildi</string>
     <string name="media_save_failed">Kaydedilemedi</string>
+    <string name="media_fetching">Dosya indiriliyor…</string>
+    <string name="media_fetch_failed">Dosya indirilemedi. Bağlantıyı kontrol edip tekrar deneyin.</string>
     <string name="chat_pin">Sabitle</string>
     <string name="chat_pinned_media">📎 Ek</string>
     <string name="chat_edit">Düzenle</string>

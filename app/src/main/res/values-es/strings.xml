@@ -820,6 +820,8 @@
     <string name="media_saved">Guardado</string>
     <string name="media_saved_to">Guardado en %1$s</string>
     <string name="media_save_failed">No se pudo guardar</string>
+    <string name="media_fetching">Descargando el archivo…</string>
+    <string name="media_fetch_failed">No se pudo descargar el archivo. Revisa la conexión e inténtalo otra vez.</string>
     <string name="chat_pin">Fijar</string>
     <string name="chat_pinned_media">📎 Adjunto</string>
     <string name="chat_edit">Editar</string>

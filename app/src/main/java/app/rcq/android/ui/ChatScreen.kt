@@ -408,6 +408,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // request on demand and then run the deferred save.
     val savedToast = stringResource(R.string.media_saved)
     val saveFailToast = stringResource(R.string.media_save_failed)
+    val fetchingToast = stringResource(R.string.media_fetching)
+    val fetchFailToast = stringResource(R.string.media_fetch_failed)
     val shareFailToast = stringResource(R.string.share_to_unreadable)
     val mediaFailToast = stringResource(R.string.chat_media_send_failed)
     var pendingSave by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -427,11 +429,24 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
     /** Fetch a message's decrypted media bytes, then share or save. [toGallery]
      *  routes images/video to the gallery and everything else to Downloads. */
+    /// Fetch + decrypt the attachment behind a message, then hand the bytes on.
+    ///
+    /// ⚠ Both failure paths used to be silent. A file that is not in the cache
+    /// has to come off the island first, which for the APKs people actually
+    /// send takes long enough to read as nothing happening, and a fetch that
+    /// failed outright returned without a word. Report #590 is exactly that:
+    /// video of a finger tapping Save on a received APK, and no reaction of any
+    /// kind. So: say that it started, and say if it did not finish.
     fun mediaBytes(m: ChatMessage, then: (ByteArray) -> Unit) {
         val mid = m.mediaId; val key = m.mediaKey ?: return
         if (mid == null) return
+        android.widget.Toast.makeText(context, fetchingToast, android.widget.Toast.LENGTH_SHORT).show()
         scope.launch {
-            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) }) ?: return@launch
+            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+            if (bytes == null) {
+                android.widget.Toast.makeText(context, fetchFailToast, android.widget.Toast.LENGTH_LONG).show()
+                return@launch
+            }
             then(bytes)
         }
     }

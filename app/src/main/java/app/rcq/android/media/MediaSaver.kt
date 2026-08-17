@@ -65,23 +65,50 @@ object MediaSaver {
         }
     }.getOrDefault(false)
 
-    /** Save a document / voice note into Downloads/RCQ. Returns true on success. */
-    fun saveToDownloads(context: Context, bytes: ByteArray, fileName: String, mime: String): Boolean = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, mime)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/RCQ")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
-            context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
-            values.clear(); values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            context.contentResolver.update(uri, values, null, null)
-            true
-        } else {
-            saveLegacy(context, bytes, fileName, mime, Environment.DIRECTORY_DOWNLOADS)
+    /** Save a document / voice note into Downloads/RCQ. Returns true on success.
+     *
+     *  ⚠ Two attempts, and the second one is not paranoia. MediaProvider vets
+     *  the pair (display name, mime) and REFUSES some of them outright: an
+     *  `.apk` offered as `application/vnd.android.package-archive` throws
+     *  IllegalArgumentException on insert, so "Save" on a received APK did
+     *  nothing at all and said nothing either (#590, with a video of the tap).
+     *  The bytes are the user's, they asked for them, and the mime is a label
+     *  the sender chose. So on a refusal we write the same bytes under the same
+     *  name as a plain stream, which MediaProvider accepts.
+     */
+    fun saveToDownloads(context: Context, bytes: ByteArray, fileName: String, mime: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return runCatching {
+                saveLegacy(context, bytes, fileName, mime, Environment.DIRECTORY_DOWNLOADS)
+            }.getOrDefault(false)
         }
+        if (insertIntoDownloads(context, bytes, fileName, mime)) return true
+        if (mime != OCTET && insertIntoDownloads(context, bytes, fileName, OCTET)) return true
+        return false
+    }
+
+    private const val OCTET = "application/octet-stream"
+
+    private fun insertIntoDownloads(
+        context: Context,
+        bytes: ByteArray,
+        fileName: String,
+        mime: String,
+    ): Boolean = runCatching {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/RCQ")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: return@runCatching false
+        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            ?: return@runCatching false
+        values.clear()
+        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        context.contentResolver.update(uri, values, null, null)
+        true
     }.getOrDefault(false)
 
     private fun saveLegacy(context: Context, bytes: ByteArray, fileName: String, mime: String, publicDir: String): Boolean {

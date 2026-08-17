@@ -820,6 +820,8 @@
     <string name="media_saved">Збережено</string>
     <string name="media_saved_to">Збережено в %1$s</string>
     <string name="media_save_failed">Не вдалося зберегти</string>
+    <string name="media_fetching">Завантажуємо файл…</string>
+    <string name="media_fetch_failed">Не вдалося завантажити файл. Перевірте зв’язок і спробуйте ще раз.</string>
     <string name="chat_pin">Закріпити</string>
     <string name="chat_pinned_media">📎 Вкладення</string>
     <string name="chat_edit">Змінити</string>
