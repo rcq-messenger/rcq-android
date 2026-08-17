@@ -99,6 +99,24 @@ object DeviceId {
         p.edit().putString("id", id).apply()
         return id
     }
+
+    /** Forget the install id so the next [get] mints a new one.
+     *
+     *  ⚠⚠ This is what a wipe was missing. The id names this INSTALL to the
+     *  island, which stores it on `device_tokens` next to the uin, and it lived
+     *  in its own prefs file that no wipe touched. So a duress wipe followed by
+     *  a fresh registration on the same phone handed the island a new number
+     *  wearing the erased account's name tag, and one SELECT on that column
+     *  joins the two. For the wiping PIN that is the whole feature undone.
+     *
+     *  Rotation costs nothing: deleting the account purges its token rows on
+     *  the island anyway, so there is no row left for the old id to dedupe
+     *  against. */
+    fun rotate(ctx: Context) {
+        ctx.applicationContext
+            .getSharedPreferences("rcq_device", Context.MODE_PRIVATE)
+            .edit().remove("id").apply()
+    }
 }
 
 /** Result of trying to redeem an access token a user pasted for a host. */

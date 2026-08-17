@@ -138,6 +138,14 @@ object EmbeddedDistributor {
      *  it is caught rather than allowed to crash the receiver. */
     fun ensureRunning(ctx: Context) {
         if (!isActive(ctx)) return
+        // ⚠⚠ Not during a duress session. This is called from a broadcast
+        // receiver, from the connector's own start-up binding and from the push
+        // bootstrap on every foreground pass, so stopping the service on entry
+        // is not enough on its own: any one of those would start it again
+        // moments later, and the phone the coercer is holding would be back on
+        // a live socket to our push host. The refusal belongs here, at the one
+        // door all of them go through.
+        if (app.rcq.android.security.DuressGate.isActive) return
         runCatching {
             ContextCompat.startForegroundService(
                 ctx.applicationContext,
@@ -155,6 +163,7 @@ object EmbeddedDistributor {
      *  just became the blocked one, would sit there looking healthy. */
     fun reconnectNow(ctx: Context) {
         if (!isActive(ctx)) return
+        if (app.rcq.android.security.DuressGate.isActive) return
         runCatching {
             ContextCompat.startForegroundService(
                 ctx.applicationContext,
