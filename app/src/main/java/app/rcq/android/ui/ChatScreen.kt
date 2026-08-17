@@ -1565,7 +1565,23 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     MessageAction(
                         stringResource(if (isSelf) R.string.chat_delete else R.string.chat_delete_me),
                         danger = true,
-                    ) { session.deleteLocal(m); actionMsg = null }
+                    ) {
+                        // ⚠ In Saved Messages this is the ONLY delete on offer
+                        // (`canDeleteAll` is false above — you ARE everyone
+                        // there), and it used to be a purely local erase. But a
+                        // note has not been local since #469: it ships to your
+                        // own number so every device of the account gets it. So
+                        // "Удалить" removed the note here and left it standing
+                        // on the web and on the other phone, with no reload or
+                        // restart able to catch up — report #601. The single
+                        // menu item stays; what it means now matches what the
+                        // thread actually is, and the retraction rides the same
+                        // envelope every other delete does (to my own number,
+                        // where the other devices pick it up).
+                        if (isSelf) scope.launch { runCatching { session.sendDeleteForEveryone(m) } }
+                        else session.deleteLocal(m)
+                        actionMsg = null
+                    }
                 }
             }
         }

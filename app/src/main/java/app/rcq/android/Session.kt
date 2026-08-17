@@ -4585,7 +4585,13 @@ class Session(context: Context) {
      *  granted the `delete` cap. Recipients re-check the same rule on receipt. */
     suspend fun sendDeleteForEveryone(target: ChatMessage) {
         val gid = target.groupId
-        if (!target.fromMe) {
+        // Saved Messages: the thread IS my own number, so every row in it is
+        // mine whichever side it was filed on. Notes that arrived before the
+        // #599 fix are still `fromMe = false` on disk, and without this they
+        // would fall into the moderator branch below, find no group, and return
+        // — leaving the note undeleted even locally.
+        val mine = target.fromMe || (gid == null && target.peerUin == store.uin)
+        if (!mine) {
             // Someone else's message: only a moderator may retract it, and my
             // own cap lives in the roster, so ask for it before deciding — a
             // moderator whose roster has not arrived would silently fail.
@@ -5047,11 +5053,13 @@ class Session(context: Context) {
                 is Envelope.Delete -> {
                     // Author-only: a peer can only retract their own message.
                     val t = _messages.value[dec.senderUin]?.firstOrNull { it.id == env.targetId }
-                    if (t != null && !t.fromMe) deleteInFlow(_messages, dec.senderUin, env.targetId)
+                    if (t != null && (fromOwnDevice(dec.senderUin) || !t.fromMe))
+                        deleteInFlow(_messages, dec.senderUin, env.targetId)
                 }
                 is Envelope.Edit -> {
                     val t = _messages.value[dec.senderUin]?.firstOrNull { it.id == env.targetId }
-                    if (t != null && !t.fromMe) editInFlow(_messages, dec.senderUin, env.targetId, env.text)
+                    if (t != null && (fromOwnDevice(dec.senderUin) || !t.fromMe))
+                        editInFlow(_messages, dec.senderUin, env.targetId, env.text)
                 }
                 is Envelope.ReadReceipt -> applyReadReceipt(dec.senderUin, env.targetIds)
                 is Envelope.Visit -> app.rcq.android.data.VisitStore.record(dec.senderUin, env.atEpochMillis())
@@ -5943,6 +5951,31 @@ class Session(context: Context) {
             }
         }
         mergeCrossIslandContacts()
+    }
+
+    /** True when a 1:1 envelope arrived from MY OWN number — i.e. another
+     *  device of this account, writing into Saved Messages («Заметки»).
+     *
+     *  This is what lets the author rule on `delete` / `edit` stand aside for
+     *  the notes thread. The rule compares the target's `fromMe` against the
+     *  deleter, and in Saved Messages EVERY row is `fromMe`: a note written
+     *  here is mine, and a note written on the web arrives as an ordinary
+     *  sealed envelope from my own number which [store] deliberately files as
+     *  mine (see below). So "only the author may retract this" read as "nobody
+     *  may retract this", and a note deleted on the web stayed on the phone for
+     *  ever — no reconnect or restart could heal it, because the delete
+     *  envelope was ingested, dropped and acked (report #601).
+     *
+     *  Safe for real conversations because it is not a relaxation at all: the
+     *  deleter still has to BE the author. An envelope claiming to come from my
+     *  number is sealed to my identity key and signed by my signing key or it
+     *  never got as far as this function, so "sender == me" is exactly as
+     *  trustworthy as "sender == that peer" is in every other thread. Nothing
+     *  changes for a peer thread: there `dec.senderUin` is the peer, this is
+     *  false, and the `!fromMe` rule decides on its own as before. */
+    private fun fromOwnDevice(senderUin: Int): Boolean {
+        val me = store.uin ?: return false
+        return senderUin == me
     }
 
     private fun store(msg: ChatMessage, countsUnread: Boolean = true) {
