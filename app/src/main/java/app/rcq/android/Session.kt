@@ -1544,8 +1544,19 @@ class Session(context: Context) {
             val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
             val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
             val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val homes = listOf(RcqFederation.Home(serverHost(), uin)) +
+            val mine = listOf(RcqFederation.Home(serverHost(), uin)) +
                 MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
+            // ⚠⚠ Read before publishing. The homes list belongs to the ACCOUNT,
+            // not to this install: a backup island switched on in the web, or on
+            // a second phone, is not in `MultihomeStore` here. Publishing `mine`
+            // alone put a record without it under a fresh `ts`, and since the
+            // island rejects only an OLDER ts, this device silently unpublished
+            // the other one's backup — senders stop being told the mailbox
+            // exists. Anything already in the published record and not known
+            // here is carried over untouched (we hold no credentials for it, and
+            // the record is an address list, not an authorisation).
+            val published = withContext(Dispatchers.IO) { Multihome.ownPublishedHomes(serverHost(), uin, sk) }
+            val homes = mine + published.filter { p -> mine.none { it.host.equals(p.host, true) } }
             val ts = (System.currentTimeMillis() / 1000).toInt()
             val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
             api.publishIslandRecord(doc.toString())
