@@ -1609,8 +1609,27 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
     var directOk by remember { mutableStateOf<Boolean?>(null) }
     var routeOk by remember { mutableStateOf<Boolean?>(null) }
 
+    // ⚠⚠ A duress session must not probe. `probeDirect` opens a RAW TCP+TLS
+    // socket to the real account's island, and `NetworkAudit` opens sockets to
+    // third-party control hosts on top of that — neither goes through OkHttp,
+    // so neither is stopped by `DuressGate`, which sits under the HTTP clients.
+    // Opening this screen under coercion therefore put a TLS handshake carrying
+    // the REAL island's SNI on the wire, from a session whose entire claim is
+    // that it is somebody else's phone. Same shape as the outgoing call that
+    // walked around the gate on iOS.
+    //
+    // So under duress the screen answers from what the session already claims
+    // and touches nothing: the header dot is green, so the backend is reachable
+    // and the channel is up. It is the same fiction the rest of the decoy tells,
+    // and it stays consistent with the one thing a coercer can see.
+    val duress = app.rcq.android.security.DuressGate.isActive
+
     fun run() {
         running = true; directOk = null; routeOk = null
+        if (duress) {
+            directOk = true; routeOk = true; running = false
+            return
+        }
         scope.launch {
             val host = session.currentServer
             directOk = withContext(Dispatchers.IO) { transport.probeDirect(host) }
@@ -1658,6 +1677,9 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
             // to a couple of third-party control hosts, which should never
             // happen without the user asking for it.
             Spacer(Modifier.height(4.dp))
+            // Hidden under duress rather than disabled: it opens sockets to
+            // third-party control hosts, and a dead button invites a second tap.
+            if (!duress) {
             SectionFooter(stringResource(R.string.diag_audit_hint))
             CapsuleButton(stringResource(R.string.diag_audit_run), enabled = !auditing) {
                 auditing = true; audit = null
@@ -1706,6 +1728,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                         )
                     }
                 }
+            }
             }
         }
     }
