@@ -1036,6 +1036,49 @@ class CallController(
      *  timeout; we retry it away. If TURN is genuinely unreachable we proceed
      *  STUN-only (better than refusing the call) but log loudly so it's
      *  diagnosable. @return true if real TURN servers were configured. */
+    /** The direct road to the call relay is blocked on this network. Try the
+     *  one road we know still works here: the same tunnel the messages use.
+     *
+     *  ★ Report #608 is the whole argument for this. The audit line read
+     *  `relay:12/14 front:ok ... turn:BLOCKED => CALLS_BLOCKED`: this network
+     *  lets our relays through and drops the call relay, and [TurnTunnel]
+     *  exists precisely to carry media over the former. It was only ever
+     *  consulted when the tunnel happened to be up already, so someone whose
+     *  chats worked perfectly had calls that died on the connect timeout with
+     *  nothing in the app connecting the two facts.
+     *
+     *  ⚠ Bound by the same opt-out every automatic engagement is (#588). If the
+     *  user has said "do not turn this on by itself", we do not — but we do say
+     *  why the call is about to fail, which is the one thing the app never did.
+     *
+     *  Costs a transport start plus one re-probe, so the caller decides whether
+     *  to wait for it. Returns true when the relay is reachable afterwards. */
+    private suspend fun reachRelayThroughTunnel(creds: RcqApi.TurnCreds): Boolean {
+        val transport = app.rcq.android.net.SingBoxTransport
+        if (transport.isActive) return false  // already the road we measured
+        if (!transport.mayAutoEngage(appContext)) {
+            transport.noteAutoEngageDeclined(CallDiagnostics.turnHost ?: "turn")
+            return false
+        }
+        android.util.Log.w("RCQcall", "relay unreachable directly — engaging the tunnel for calls (#608)")
+        withContext(Dispatchers.IO) {
+            runCatching {
+                app.rcq.android.net.RelayConfigStore.prime(appContext)
+                transport.start()
+            }
+        }
+        if (!transport.isActive) return false
+        // Re-point the ICE servers: setTurn is what starts the loopback listener
+        // and prepends the tunnelled URL, and the probe verdict was measured
+        // against the OTHER road, so it has to go.
+        rtc.setTurn(creds.urls, creds.username, creds.credential)
+        rtc.forgetRelayProbe()
+        rtc.probeRelay()
+        val ok = rtc.relayReachable() == true
+        android.util.Log.i("RCQcall", "relay through the tunnel: reachable=$ok")
+        return ok
+    }
+
     private suspend fun refreshTurn(waitForProbe: Boolean = true): Boolean {
         repeat(TURN_FETCH_ATTEMPTS) { attempt ->
             val creds = withContext(Dispatchers.IO) { runCatching { turn() } }.getOrNull()
@@ -1054,6 +1097,19 @@ class CallController(
                 // NEXT call.
                 if (waitForProbe && !rtc.relayProbed()) rtc.probeRelay()
                 else if (!rtc.relayProbed()) scope.launch { rtc.probeRelay() }
+                // The relay is unreachable on this network by the road we just
+                // measured. That is report #608 exactly: everything else was
+                // fine — island, directory, front, twelve of fourteen relays —
+                // and the audit ended "turn:BLOCKED => CALLS_BLOCKED". The
+                // tunnel that carries the messages can carry the media too
+                // ([TurnTunnel]); nothing was asking it to.
+                if (rtc.relayReachable() == false) {
+                    if (waitForProbe) reachRelayThroughTunnel(creds)
+                    // Answering must never wait on this (see the note above about
+                    // the caller sitting on a ringing screen). Do it behind the
+                    // answer so the road is open for the calls after this one.
+                    else scope.launch { reachRelayThroughTunnel(creds) }
+                }
                 if (creds.urls.isEmpty()) {
                     android.util.Log.w("RCQcall", "TURN endpoint returned no servers — STUN-only call")
                 }
