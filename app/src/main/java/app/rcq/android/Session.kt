@@ -404,6 +404,13 @@ class Session(context: Context) {
     private val _storiesEnabled = MutableStateFlow(true)
     val storiesEnabled: StateFlow<Boolean> = _storiesEnabled.asStateFlow()
 
+    /** Does this island run a report desk at all? A self-hoster who does not
+     *  want to answer anybody switches it off, and then the two entries that
+     *  lead there have no business being in Settings. Permissive default so an
+     *  island that predates the flag behaves as it always did. */
+    private val _reportsEnabled = MutableStateFlow(true)
+    val reportsEnabled: StateFlow<Boolean> = _reportsEnabled.asStateFlow()
+
     /** Load the server push-preference toggles (Notifications settings). */
     suspend fun loadPushPrefs(): RcqApi.PushPrefs? = runCatching { api.getPushPreferences() }.getOrNull()
 
@@ -1462,6 +1469,7 @@ class Session(context: Context) {
                 _randomEnabled.value = caps.random_chat
                 _hoodEnabled.value = caps.hood
                 _storiesEnabled.value = caps.stories
+                _reportsEnabled.value = caps.reports
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
             }
         }

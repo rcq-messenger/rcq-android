@@ -1163,6 +1163,7 @@
         <item quantity="one">Sending %d file…</item>
         <item quantity="other">Sending %d files…</item>
     </plurals>
+    <string name="island_rules_title">House rules</string>
     <string name="how_title">How this works</string>
     <string name="how_q1">Who can read what I send?</string>
     <string name="how_a1">Only the person you sent it to. The text is encrypted on your device and decrypted on theirs, and the island in between carries a sealed envelope it cannot open.\n\nWhat the island does see: that you were online, and who your envelopes were addressed to. What it does not see: what is inside them.</string>

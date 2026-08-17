@@ -1129,6 +1129,7 @@
         <item quantity="one">%d dosya gönderiliyor…</item>
         <item quantity="other">%d dosya gönderiliyor…</item>
     </plurals>
+    <string name="island_rules_title">Ada kuralları</string>
     <string name="how_title">Bu nasıl çalışıyor</string>
     <string name="how_q1">Gönderdiğimi kim okuyabilir?</string>
     <string name="how_a1">Yalnızca gönderdiğiniz kişi. Metin sizin cihazınızda şifrelenir, onunkinde çözülür; aradaki ada mühürlü bir zarf taşır ve onu açamaz.\n\nAdanın gördüğü: çevrimiçi olduğunuz ve zarflarınızın kime gittiği. Görmediği: içinde ne olduğu.</string>

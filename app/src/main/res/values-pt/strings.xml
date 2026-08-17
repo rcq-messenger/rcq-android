@@ -1129,6 +1129,7 @@
         <item quantity="one">Enviando %d arquivo…</item>
         <item quantity="other">Enviando %d arquivos…</item>
     </plurals>
+    <string name="island_rules_title">Regras da ilha</string>
     <string name="how_title">Como funciona</string>
     <string name="how_q1">Quem pode ler o que eu envio?</string>
     <string name="how_a1">Só a pessoa para quem você enviou. O texto é cifrado no seu aparelho e decifrado no dela, e a ilha no meio carrega um envelope lacrado que não consegue abrir.\n\nO que a ilha vê: que você esteve on-line e para quem seus envelopes foram endereçados. O que ela não vê: o que há dentro.</string>
