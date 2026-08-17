@@ -600,6 +600,7 @@
     <string name="stealth_shield_amber">Amber shield: the bypass is on, but data getting through it is not confirmed yet. If it stays amber, try switching the bypass off and on again from the menu.</string>
     <string name="stealth_info_body">Your network looked blocked, so RCQ is connecting through its built-in encrypted bypass. No setup needed, this turns on automatically when the direct connection fails.</string>
     <string name="connecting_stealth">Bypassing the block…</string>
+    <string name="bypass_auto_off_unreachable">Island unreachable, and \"Don\'t engage automatically\" is on, so the bypass stayed off. To go through it, turn on censorship bypass in the menu.</string>
     <string name="pv_profile_card">Profile card</string>
     <string name="pv_profile_card_desc">Who can open your full profile (city, age, about).</string>
     <string name="pv_gender_desc">Who can see your gender on your profile.</string>
@@ -726,6 +727,7 @@
     <string name="gi_post_owner">Owner only</string>
     <string name="gi_closed">Closed group</string>
     <string name="gi_closed_desc">New members can\'t self-join via search</string>
+    <string name="gi_open">Open group</string>
     <string name="gi_hide">Hide member list</string>
     <string name="gi_hide_desc">Only you see the full roster</string>
     <string name="gi_members_hidden">The member list is hidden by the owner.</string>
@@ -911,6 +913,7 @@
     <string name="group_invite_join">Join</string>
     <string name="group_invite_none">You have no groups to share.</string>
     <string name="group_join_confirm">Join this group?</string>
+    <string name="group_join_body">You will appear in its member list and start receiving its messages.</string>
     <string name="group_invite_closed_hint">Invite-only group. Ask a member to add you.</string>
     <string name="group_invite_join_failed">Couldn\'t join. The island may be unreachable or the group is invite-only.</string>
     <string name="chat_recording">Recording  %1$s</string>
@@ -1176,4 +1179,5 @@
     <string name="how_q5">Can anyone tell who I am writing to?</string>
     <string name="how_a5">Your island knows an envelope is addressed to someone, and does not know it came from you: your name is not on the outside of it.\n\nWhen the tunnel is on, the way in is split between two relays. The first one sees you and does not know which island you are reaching; the second one reaches the island and does not know who you are. Putting the two halves together takes both of them, and they belong to different people in different countries.\n\nWhat nobody can hide: the fact that you use RCQ at all is visible to whoever runs your network, unless the tunnel is on.</string>
     <string name="how_more">More questions on rcq.app/faq →</string>
+    <string name="how_copy">Copy this text</string>
 </resources>

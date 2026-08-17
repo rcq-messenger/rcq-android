@@ -596,6 +596,7 @@
     <string name="stealth_shield_amber">Щит оранжевый: обход включён, но что данные через него доходят, пока не подтверждено. Если так и останется, попробуйте выключить и включить обход в меню.</string>
     <string name="stealth_info_body">Сеть выглядела заблокированной, поэтому RCQ подключается через встроенный шифрованный обход. Настраивать ничего не нужно, он включается сам, когда прямое соединение не проходит.</string>
     <string name="connecting_stealth">Обхожу блокировку…</string>
+    <string name="bypass_auto_off_unreachable">Остров недоступен, а «Не включать автоматически» включено, поэтому обход не поднимался. Чтобы пойти через него, включите обход блокировок в меню.</string>
     <string name="pv_profile_card">Карточка профиля</string>
     <string name="pv_profile_card_desc">Кто может открыть ваш полный профиль (город, возраст, о себе).</string>
     <string name="pv_gender_desc">Кто видит ваш пол в профиле.</string>
@@ -722,6 +723,7 @@
     <string name="gi_post_owner">Только владелец</string>
     <string name="gi_closed">Закрытая группа</string>
     <string name="gi_closed_desc">Новые участники не могут вступить через поиск</string>
+    <string name="gi_open">Открытая группа</string>
     <string name="gi_hide">Скрыть список участников</string>
     <string name="gi_hide_desc">Только вы видите полный список</string>
     <string name="gi_members_hidden">Список участников скрыт владельцем.</string>
@@ -907,6 +909,7 @@
     <string name="group_invite_join">Вступить</string>
     <string name="group_invite_none">У вас нет групп, чтобы поделиться.</string>
     <string name="group_join_confirm">Войти в эту группу?</string>
+    <string name="group_join_body">Вы появитесь в списке участников и начнёте получать её сообщения.</string>
     <string name="group_invite_closed_hint">Группа только по приглашению. Попросите участника добавить вас.</string>
     <string name="group_invite_join_failed">Не удалось войти. Остров недоступен или группа только по приглашению.</string>
     <string name="chat_recording">Запись  %1$s</string>
@@ -1171,4 +1174,5 @@
     <string name="how_q5">Может ли кто-то узнать, кому я пишу?</string>
     <string name="how_a5">Ваш остров знает, что конверт кому-то адресован, и не знает, что он от вас: вашего имени снаружи нет.\n\nКогда включён туннель, путь наружу разделён между двумя релеями. Первый видит вас и не знает, до какого острова вы идёте; второй доходит до острова и не знает, кто вы. Чтобы сложить половинки, нужны оба, а они принадлежат разным людям в разных странах.\n\nЧего скрыть нельзя: сам факт, что вы пользуетесь RCQ, виден тому, кто держит вашу сеть, — пока туннель не включён.</string>
     <string name="how_more">Больше вопросов на rcq.app/faq →</string>
+    <string name="how_copy">Скопировать этот текст</string>
 </resources>
