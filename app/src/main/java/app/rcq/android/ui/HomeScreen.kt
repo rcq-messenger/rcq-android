@@ -310,6 +310,12 @@ internal fun HomeScreen(
     val collapsedOffline = "sec:offline" in sectionFlags
     val collapsedCrossIsland = "sec:ci" in sectionFlags
     val collapsedArchive = "sec:archive:open" !in sectionFlags
+    // #593: both request headers drew the same chevron as every other section
+    // and then ignored the tap ("выглядят сворачиваемыми, но не сворачиваются").
+    // They fold and persist like the rest now; the count in the header keeps
+    // saying how many are waiting while folded.
+    val collapsedRequests = "sec:req" in sectionFlags
+    val collapsedCiRequests = "sec:cireq" in sectionFlags
 
     // Unread threads float to the top (iOS parity), then by recency.
     fun byRecency(list: List<Contact>) =
@@ -474,34 +480,42 @@ internal fun HomeScreen(
                     }
                 }
                 if (pending.isNotEmpty()) {
-                    item(key = "req-h") { SectionHeader(stringResource(R.string.home_sec_requests), pending.size, collapsed = false, onToggle = {}) }
-                    items(pending, key = { "p${it.requestId}" }) { req ->
-                        PendingRow(
-                            name = req.fromNickname,
-                            fromUin = req.fromUin,
-                            onOpenProfile = onOpenPeerInfo,
-                            onAccept = { scope.launch { runCatching { session.respond(req.requestId, true) } } },
-                            onDecline = { scope.launch { runCatching { session.respond(req.requestId, false) } } },
-                        )
+                    item(key = "req-h") {
+                        SectionHeader(stringResource(R.string.home_sec_requests), pending.size, collapsedRequests, { LocalStores.setSectionFlag("sec:req", !collapsedRequests) })
+                    }
+                    if (!collapsedRequests) {
+                        items(pending, key = { "p${it.requestId}" }) { req ->
+                            PendingRow(
+                                name = req.fromNickname,
+                                fromUin = req.fromUin,
+                                onOpenProfile = onOpenPeerInfo,
+                                onAccept = { scope.launch { runCatching { session.respond(req.requestId, true) } } },
+                                onDecline = { scope.launch { runCatching { session.respond(req.requestId, false) } } },
+                            )
+                        }
                     }
                 }
                 // Variant A: cross-island message requests (consent).
                 if (ciReqs.isNotEmpty()) {
-                    item(key = "cireq-h") { SectionHeader(stringResource(R.string.home_sec_ci_requests), ciReqs.size, collapsed = false, onToggle = {}) }
-                    items(ciReqs, key = { "ci${it.uin}@${it.host}" }) { r ->
-                        // §5f rows carry the requester's own name and greeting.
-                        // The island tag stays visible either way: a cross-island
-                        // name must never be able to pass as a local contact.
-                        val address = "${r.uin}@${r.host}"
-                        CiPendingRow(
-                            tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
-                            preview = r.preview.ifEmpty {
-                                if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
-                            },
-                            onAccept = { scope.launch { runCatching { session.acceptCrossIslandRequest(r.uin, r.host) } } },
-                            onDismiss = { session.dismissCrossIslandRequest(r.uin, r.host) },
-                            onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
-                        )
+                    item(key = "cireq-h") {
+                        SectionHeader(stringResource(R.string.home_sec_ci_requests), ciReqs.size, collapsedCiRequests, { LocalStores.setSectionFlag("sec:cireq", !collapsedCiRequests) })
+                    }
+                    if (!collapsedCiRequests) {
+                        items(ciReqs, key = { "ci${it.uin}@${it.host}" }) { r ->
+                            // §5f rows carry the requester's own name and greeting.
+                            // The island tag stays visible either way: a cross-island
+                            // name must never be able to pass as a local contact.
+                            val address = "${r.uin}@${r.host}"
+                            CiPendingRow(
+                                tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
+                                preview = r.preview.ifEmpty {
+                                    if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
+                                },
+                                onAccept = { scope.launch { runCatching { session.acceptCrossIslandRequest(r.uin, r.host) } } },
+                                onDismiss = { session.dismissCrossIslandRequest(r.uin, r.host) },
+                                onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
+                            )
+                        }
                     }
                 }
 
@@ -1960,6 +1974,10 @@ private fun AddContactDialog(
     // Optional access token for adding a contact on a foreign PRIVATE (closed)
     // island — shown only when a uin@host on another island is detected.
     var ciToken by remember { mutableStateOf("") }
+    // #589: "нажал на группу в поиске и сразу вступил без спроса" — a search hit
+    // used to join on the tap. The tap now only picks the group; joining waits
+    // for the confirm sheet below.
+    var joinTarget by remember { mutableStateOf<RcqApi.GroupPreviewOut?>(null) }
 
     // Scan a contact QR right here. The https form of the link is an App Link
     // now, so a stock camera usually works too — but "usually" depends on the
@@ -2320,7 +2338,7 @@ private fun AddContactDialog(
                                 avatarMediaId = g.avatar_media_id,
                                 avatarMediaKey = g.avatar_media_key,
                             ) {
-                                scope.launch { if (session.joinGroup(g.id) != null) onOpenGroup(g.id) }
+                                joinTarget = g
                             }
                         }
                         if (searching) {
@@ -2336,6 +2354,76 @@ private fun AddContactDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // #589: joining is a membership change other people can see, so it gets a
+    // confirm. Sits OUTSIDE the sheet above (a sibling, not nested in its
+    // content) so it opens as its own window on top of the search instead of
+    // scrolling somewhere inside it. Failures now say so, too — the old one-tap
+    // join went silent when the island refused.
+    joinTarget?.let { g ->
+        GroupJoinConfirmSheet(
+            preview = g,
+            session = session,
+            onDismiss = { joinTarget = null },
+            onJoin = {
+                joinTarget = null
+                scope.launch {
+                    if (session.joinGroup(g.id) != null) onOpenGroup(g.id)
+                    else android.widget.Toast.makeText(context, context.getString(R.string.group_invite_join_failed), android.widget.Toast.LENGTH_LONG).show()
+                }
+            },
+        )
+    }
+}
+
+/** Ask before joining a group tapped in Add-window search (#589). The search
+ *  hit IS a group preview (`GET /groups/{id}/preview` shape), so the question
+ *  is asked next to what the group actually is — avatar, name, size, blurb —
+ *  rather than as a bare "are you sure". Nothing is fetched again for it. */
+@Composable
+private fun GroupJoinConfirmSheet(
+    preview: RcqApi.GroupPreviewOut,
+    session: Session,
+    onJoin: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.group_join_confirm)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            GroupAvatarMedia(preview.avatar_media_id, preview.avatar_media_key, session, 44.dp)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    preview.name?.takeIf { it.isNotBlank() } ?: "#${preview.id}",
+                    color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    pluralStringResource(R.plurals.members, preview.member_count, preview.member_count),
+                    color = c.textSecondary, fontSize = 12.sp,
+                )
+            }
+        }
+        val about = preview.description?.trim().orEmpty()
+        if (about.isNotEmpty()) {
+            SheetGap(10)
+            Text(about, color = c.textSecondary, fontSize = 13.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        }
+        SheetGap(10)
+        Text(stringResource(R.string.group_join_body), color = c.textSecondary, fontSize = 13.sp)
+        SheetGap()
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+            }
+            TextButton(onClick = onJoin) {
+                Text(stringResource(R.string.group_invite_join), color = c.accent)
             }
         }
     }
