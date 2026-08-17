@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Flag
@@ -498,6 +499,7 @@ internal fun HomeScreen(
                                 if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
                             },
                             onAccept = { scope.launch { runCatching { session.acceptCrossIslandRequest(r.uin, r.host) } } },
+                            onDismiss = { session.dismissCrossIslandRequest(r.uin, r.host) },
                             onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
                         )
                     }
@@ -1567,14 +1569,43 @@ private fun PendingRow(name: String, fromUin: Int, onOpenProfile: (Int) -> Unit,
         }
         // Tap the name to see who's adding you, before deciding (iOS parity).
         Text(name, color = c.textPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f).clickable { onOpenProfile(fromUin) }.padding(vertical = 4.dp))
-        Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.home_decline), color = c.textSecondary, modifier = Modifier.clickable(onClick = onDecline).padding(8.dp))
+        // Icons, not words. "Принять"/"Отклонить" next to a name that is
+        // itself as long as a name gets left both of them squeezed, and the
+        // cross-island row below had it worse with "Заблокировать" (founder,
+        // with a screenshot; #586). A tick and a cross are the two glyphs
+        // nobody needs a language for; the words survive as the labels a
+        // screen reader speaks.
+        RequestAction(Icons.Filled.Check, stringResource(R.string.home_accept), c.accent, onAccept)
+        RequestAction(Icons.Filled.Close, stringResource(R.string.home_decline), c.textSecondary, onDecline)
     }
 }
 
+/// One glyph-sized action on a request row: 40dp of tappable area around a
+/// 22dp icon, which is the floor for something you press by mistake at your
+/// peril.
 @Composable
-private fun CiPendingRow(tag: String, preview: String, onAccept: () -> Unit, onBlock: () -> Unit) {
+private fun RequestAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Icon(
+        icon,
+        label,
+        tint = tint,
+        modifier = Modifier.clip(CircleShape).clickable(onClick = onClick).padding(9.dp).size(22.dp),
+    )
+}
+
+@Composable
+private fun CiPendingRow(
+    tag: String,
+    preview: String,
+    onAccept: () -> Unit,
+    onDismiss: () -> Unit,
+    onBlock: () -> Unit,
+) {
     val c = RcqTheme.colors
     Row(
         Modifier.fillMaxWidth().background(c.bgPrimary).padding(horizontal = 10.dp, vertical = 8.dp),
@@ -1587,9 +1618,12 @@ private fun CiPendingRow(tag: String, preview: String, onAccept: () -> Unit, onB
             Text(tag, color = c.textPrimary, fontSize = 14.sp)
             if (preview.isNotEmpty()) Text(preview, color = c.textSecondary, fontSize = 12.sp, maxLines = 1)
         }
-        Text(stringResource(R.string.home_accept), color = c.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable(onClick = onAccept).padding(8.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.ci_block), color = c.textSecondary, modifier = Modifier.clickable(onClick = onBlock).padding(8.dp))
+        // Three, because two were not enough: accept or block left no way to
+        // say "not now" without silencing a stranger permanently (#586). The
+        // middle one just drops the request — they can write again.
+        RequestAction(Icons.Filled.Check, stringResource(R.string.home_accept), c.accent, onAccept)
+        RequestAction(Icons.Filled.Close, stringResource(R.string.home_decline), c.textSecondary, onDismiss)
+        RequestAction(Icons.Filled.Block, stringResource(R.string.ci_block), c.statusBusy, onBlock)
     }
 }
 

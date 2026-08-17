@@ -324,15 +324,26 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Bring the parked reply back with the draft it belongs to. Runs on the
     // thread's messages because the list arrives asynchronously — on the first
     // composition it can still be empty.
+    // ⚠ Once per visit, not once per message list. This effect re-runs on every
+    // change to `messages`, and SENDING changes them — so after sending a reply
+    // it ran again, found the note it was about to be cleared of, and put the
+    // quote straight back on the composer: "после отправки сообщения с
+    // цитированием эта цитата остаётся для следующего сообщения" (#582). The
+    // flag makes restoring what it says it is: bringing a parked reply back
+    // when you walk into the thread.
+    var replyRestored by remember(threadKey) { mutableStateOf(false) }
     LaunchedEffect(threadKey, messages) {
-        val parked = ChatDrafts.replyByThread[threadKey]
-        if (parked != null && replyTarget == null) {
-            replyTarget = messages.firstOrNull { it.id == parked }
+        if (replyRestored) return@LaunchedEffect
+        val parked = ChatDrafts.replyByThread[threadKey] ?: return@LaunchedEffect
+        if (replyTarget != null) return@LaunchedEffect
+        replyTarget = messages.firstOrNull { it.id == parked }
+        if (replyTarget != null) {
+            replyRestored = true
+        } else if (messages.isNotEmpty()) {
             // The message is gone (deleted, or the thread has not loaded that
             // far back). Drop the note rather than leaving it to resurface.
-            if (replyTarget == null && messages.isNotEmpty()) {
-                ChatDrafts.replyByThread.remove(threadKey)
-            }
+            ChatDrafts.replyByThread.remove(threadKey)
+            replyRestored = true
         }
     }
     // One place that records it, so no path can set the chip without parking
@@ -1353,6 +1364,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // client localizes "You" via replyMine at render time.
                     val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), if (it.fromMe) session.nickname else authorName(it)) }
                     replyTarget = null
+                    // Both, here and now. Clearing only the state left the
+                    // parked note on disk for the moment it took the effect
+                    // above to notice — long enough for it to be read back.
+                    ChatDrafts.replyByThread.remove(threadKey)
                     if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, false)
                     scope.launch {
                         runCatching {

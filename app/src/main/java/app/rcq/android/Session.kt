@@ -5508,6 +5508,19 @@ class Session(context: Context) {
         return true
     }
 
+    /** Turn a cross-island request down without blocking the person.
+     *
+     *  The row offered accept or block and nothing in between, so somebody who
+     *  simply did not want to talk right now had to either keep the row or
+     *  silence a stranger for good (#586). The quarantined messages go with the
+     *  request; the sender can write again, and it will arrive as a fresh one.
+     */
+    fun dismissCrossIslandRequest(uin: Int, host: String) {
+        val me = store.uin ?: return
+        CrossIslandRequestsStore.clear(me, uin, host)
+        refreshCiRequests()
+    }
+
     fun blockCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
         CrossIslandRequestsStore.block(me, uin, host)
