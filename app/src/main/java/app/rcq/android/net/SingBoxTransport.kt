@@ -27,10 +27,12 @@ object SingBoxTransport {
     const val LOCAL_PORT = 1089
     private const val PREFS = "rcq_singbox"
     private const val KEY_ENABLED = "enabled"
-    // User opted out of boot-time auto-engage: don't turn the tunnel on just
-    // because a direct probe failed (they route through their own VPN/proxy and
-    // don't want our sing-box stacked on top). The explicit KEY_ENABLED toggle
-    // still engages it. iOS parity ("rcq.singbox.autoDisabled").
+    // User opted out of auto-engage: don't turn the tunnel on just because a
+    // direct probe failed (they route through their own VPN/proxy and don't want
+    // our sing-box stacked on top). It binds EVERY path that engages without
+    // being asked, not only the boot one — see [mayAutoEngage] and report #588.
+    // The explicit KEY_ENABLED toggle still engages it. iOS parity
+    // ("rcq.singbox.autoDisabled").
     private const val KEY_AUTO_DISABLED = "auto_disabled"
     private const val KEY_ENTRY = "onion_entry"   // sticky onion guard (O4)
     private const val KEY_ONION_OPTIN = "onion_optin"   // legacy per-device onion opt-in (O5); migrated into KEY_MODE
@@ -369,15 +371,81 @@ object SingBoxTransport {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
     }
 
-    /** When true, the boot path must NOT auto-engage the tunnel on a failed direct
-     *  probe (the explicit [isEnabled] toggle still does). For users on their own
-     *  VPN/proxy who don't want our sing-box stacked on top. */
+    /** When true, NO automatic path may engage the tunnel on a failed direct
+     *  probe — the boot ladder, the registration/recovery engage and the
+     *  per-destination one alike (the explicit [isEnabled] toggle still does).
+     *  For users on their own VPN/proxy who don't want our sing-box stacked on
+     *  top. Read it through [mayAutoEngage] rather than directly. */
     fun autoEngageDisabled(ctx: Context): Boolean =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_DISABLED, false)
 
     fun setAutoEngageDisabled(ctx: Context, on: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_AUTO_DISABLED, on).apply()
     }
+
+    /** The single question every AUTOMATIC engage path has to ask before it
+     *  brings the tunnel up. It exists because asking it in most places was not
+     *  enough: report #588 ("включает обход, хотя стоит настройка не включать
+     *  автоматом") came from the one path that skipped the check
+     *  ([app.rcq.android.Session.ensureTransportForHost], on the registration /
+     *  recovery route), and a setting that holds on three paths out of four is
+     *  not a setting, it is a coin toss.
+     *
+     *  It deliberately says nothing about USER-initiated engaging. The Settings
+     *  and home-menu toggles, and the local-proxy switch, are the user asking
+     *  for the tunnel out loud; the opt-out is about the app deciding on its
+     *  own, so those paths must not consult this. */
+    fun mayAutoEngage(ctx: Context): Boolean = !localProxyMode() && !autoEngageDisabled(ctx)
+
+    // Rate limit for the notice below: every request against a blocked island
+    // arrives here, and the answer is the same every time.
+    @Volatile private var lastDeclinedNoticeAt = 0L
+    private const val DECLINED_NOTICE_GAP_MS = 60_000L
+
+    /** Tell the user, at most once a minute, that a host was unreachable and
+     *  the tunnel was NOT raised because they asked for exactly that.
+     *
+     *  Honouring the opt-out (#588) turns what used to be a tunnel nobody asked
+     *  for into a request that simply fails, and a failure with no reason given
+     *  is read as "the app is broken" — which is the report we would get next.
+     *  The two states a user has to be able to tell apart are "this island
+     *  cannot be reached and I turned the automatic bypass off" and "RCQ is
+     *  broken", so the notice names the setting and points at the manual
+     *  switch, which still works.
+     *
+     *  Silent when the opt-out is off (the auto-engage path handles it and
+     *  there is nothing to explain), and silent when the device has no network
+     *  at all — that failure is not about the bypass and the user knows about
+     *  it already. Safe from any thread. */
+    fun noteAutoEngageDeclined(what: String) {
+        val ctx = appCtx ?: return
+        if (!autoEngageDisabled(ctx)) return
+        android.util.Log.i("RCQfront", "$what unreachable; not engaging — the user opted out of automatic engage")
+        if (!hasNetwork(ctx)) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastDeclinedNoticeAt != 0L && now - lastDeclinedNoticeAt < DECLINED_NOTICE_GAP_MS) return
+        lastDeclinedNoticeAt = now
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            runCatching {
+                android.widget.Toast.makeText(
+                    ctx,
+                    ctx.getString(app.rcq.android.R.string.bypass_auto_off_unreachable),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    /** Does the OS believe this device is on a network at all? Airplane mode and
+     *  no signal must not be blamed on the opt-out. NET_CAPABILITY_INTERNET, not
+     *  VALIDATED: Android validates by fetching a Google host, which a network
+     *  that filters us often blocks too, and that is precisely the case the
+     *  notice is for. */
+    private fun hasNetwork(ctx: Context): Boolean = runCatching {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }.getOrDefault(true)
 
     /** Bring the tunnel up for a destination that is unreachable directly, for
      *  callers that hold no Context (CrossIslandSender). Same guards as the
@@ -388,7 +456,10 @@ object SingBoxTransport {
     fun engageForBlockedDestination(reason: String): Boolean {
         if (isActive) return true
         val ctx = appCtx ?: return false
-        if (localProxyMode() || autoEngageDisabled(ctx)) return false
+        // Declining here is the end of the road for this request: the caller
+        // throws its IOException and the send goes red with no explanation, so
+        // the reason is said out loud once (#588).
+        if (!mayAutoEngage(ctx)) { noteAutoEngageDeclined(reason); return false }
         RelayConfigStore.prime(ctx)
         val ok = start()
         if (ok) android.util.Log.i("RCQfront", "engaged the tunnel for $reason (direct route blocked)")

@@ -659,12 +659,34 @@ class Session(context: Context) {
      *  block) or the transport is already up. Blocking work (probe + sing-box
      *  start) runs off the main thread. Best-effort: a failure to start the
      *  transport just leaves the subsequent request to go direct (and fail as
-     *  before), so this never makes registration worse. */
+     *  before), so this never makes registration worse.
+     *
+     *  Bound by the user's "don't engage automatically" opt-out exactly like
+     *  the boot ladder is (#588): unreachable + opted out means the request is
+     *  left to fail, with the reason said out loud rather than swallowed. */
     private suspend fun ensureTransportForHost(host: String) = withContext(Dispatchers.IO) {
         val transport = app.rcq.android.net.SingBoxTransport
-        if (!transport.isActive && (transport.isEnabled(appCtx) || !transport.probeDirect(host))) {
-            app.rcq.android.net.RelayConfigStore.prime(appCtx)
-            transport.start()
+        if (!transport.isActive) {
+            // ⚠ Report #588 ("включает обход, хотя стоит настройка не включать
+            // автоматом") was this line: a failed probe engaged the tunnel here
+            // without ever reading "don't engage automatically", so signing up
+            // or restoring on a network that merely answered slowly turned the
+            // bypass on for a user who had switched that off — and it then
+            // stayed on for the session. The forced toggle still engages (that
+            // is the user asking); only the probe-driven half is gated, the
+            // same way [runRouteLadder] gates it.
+            val forced = transport.isEnabled(appCtx)
+            val blocked = !forced && !transport.probeDirect(host)
+            if (forced || (blocked && transport.mayAutoEngage(appCtx))) {
+                app.rcq.android.net.RelayConfigStore.prime(appCtx)
+                transport.start()
+            } else if (blocked) {
+                // The register/recover call about to run will fail against a
+                // host we already know we cannot reach. Name the reason, or the
+                // screen shows its generic error and the opt-out looks like a
+                // broken app.
+                transport.noteAutoEngageDeclined(host)
+            }
         }
         _stealthActive.value = transport.isActive
         _bypassManual.value = transport.isEnabled(appCtx)
@@ -1274,9 +1296,11 @@ class Session(context: Context) {
         // Engage the relay when the user forced it on, OR (auto-fallback) when
         // direct is unreachable AND the front didn't take over — UNLESS the user
         // opted out of auto-engage. The explicit toggle always wins; the opt-out
-        // gates only the probe-driven auto-engage.
+        // gates only the probe-driven auto-engage. The opt-out is read through
+        // [mayAutoEngage] rather than inline so that this path and every other
+        // automatic one ask the identical question (#588).
         val engage = frontHost == null && (transport.isEnabled(appCtx) ||
-            (!transport.autoEngageDisabled(appCtx) && !directOk))
+            (!directOk && transport.mayAutoEngage(appCtx)))
         if (engage && !transport.isActive) {
             // Use the freshest known relay list (last verified payload off
             // disk) before building the transport; bundled if none yet.
@@ -1290,6 +1314,15 @@ class Session(context: Context) {
                 // network is the one not using the tunnel.
                 app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
             }
+        }
+        // Island unreachable, the front did not take over, and the tunnel stayed
+        // down because the user asked us not to raise it by ourselves. That
+        // combination ends as a permanent "Connecting…", which is exactly what a
+        // broken app looks like — so it is stated instead of endured (#588).
+        // Silent when the opt-out is off, so the ordinary auto-engage is
+        // unchanged.
+        if (!directOk && frontHost == null && !transport.isActive && !transport.isEnabled(appCtx)) {
+            transport.noteAutoEngageDeclined(serverHost())
         }
         // Post-engage health check + DIRECT fallback (iOS parity, AppState
         // re-probe). The trap behind "Резерв включён, но работает только с
