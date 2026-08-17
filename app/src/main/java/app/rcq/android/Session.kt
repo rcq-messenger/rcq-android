@@ -616,6 +616,16 @@ class Session(context: Context) {
                     AccountManager.exitDecoyMode()
                     AccountManager.exitDecoySession()
                     if (started) tearDownForLock()
+                } else if (!PanicPinService.inDecoySession) {
+                    // Put the push socket back. Entering a duress session stops
+                    // it and the gate refuses to let anything restart it, and
+                    // the only other caller is `RcqApp.onCreate` — so without
+                    // this, one duress session inside a process left the real
+                    // user with push quietly dead until they restarted the app,
+                    // which is the kind of silence nobody reports as a bug and
+                    // everybody feels. Idempotent, and a no-op on ntfy or with
+                    // push switched off.
+                    runCatching { app.rcq.android.push.Push.resumeEmbedded(appCtx) }
                 }
             }
         }
@@ -2126,6 +2136,21 @@ class Session(context: Context) {
             DecoyStore.destroy(appCtx)
             wipeDecoyNamespaceStores()
         }
+        // The install id lived in its own prefs file that nothing above touches,
+        // and the island keeps it next to the uin. Left alone, the number this
+        // phone registers next arrives wearing the erased account's name tag
+        // and one SELECT joins the two — the wipe undone at the only layer that
+        // still had a thread to pull.
+        runCatching { app.rcq.android.net.DeviceId.rotate(appCtx) }
+        // The push socket and its topic are the same kind of thread. The
+        // service outlived the wipe entirely (nothing above touches it), and
+        // the topic is minted once and deliberately REUSED across
+        // re-registrations, so the account registered after a wipe would have
+        // subscribed to the erased account's push address.
+        runCatching {
+            app.rcq.android.push.embedded.EmbeddedDistributor.stop(appCtx)
+            app.rcq.android.push.embedded.EmbeddedDistributor.clear(appCtx)
+        }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
         peerIdentityCache.clear(); noV2Peers.clear(); presenceBaselineLive = false; ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
@@ -2481,6 +2506,16 @@ class Session(context: Context) {
                 android.util.Log.e("RCQ", "decoy history unavailable", it)
             }
         }
+        // ⚠⚠ The push socket is the one connection the DuressGate never saw.
+        // The gate stands in front of HTTP requests; this is a foreground
+        // SERVICE holding its own long-lived WebSocket to push.rcq.app, started
+        // by the distributor and living outside every code path above. So a
+        // duress session that presents itself as an ordinary, quiet phone kept a
+        // live connection to our infrastructure the whole time — and kept
+        // receiving wakes for the REAL account, whose notifications the decoy
+        // then had to swallow. Stopped on entry; `ensureRunning` refuses to
+        // bring it back while the gate is up.
+        runCatching { app.rcq.android.push.embedded.EmbeddedDistributor.stop(appCtx) }
         // start() must never run for this session: it would read the REAL
         // account's uin + token out of `store` and connect with them.
         started = true
