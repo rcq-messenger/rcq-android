@@ -3477,6 +3477,15 @@ class Session(context: Context) {
     /** Encrypt [env] once per member (skipping self) and POST the fan-out;
      *  flips the local bubble's delivery state. Shared by send + resend. */
     private suspend fun fanOutGroup(groupId: Int, env: Envelope, id: String) = withContext(Dispatchers.IO) {
+        // Same rule as the 1:1 path: a duress session puts nothing on the wire
+        // and shows no failure for it. A seeded decoy has no groups today, so
+        // this is unreachable — and it is here anyway, because "the decoy has
+        // no groups" is a property of the seed, not of this function, and the
+        // day that changes is not the day to rediscover the red cross.
+        if (app.rcq.android.security.DuressGate.isActive) {
+            updateGroupMsgState(groupId, id, DeliveryState.SENT)
+            return@withContext
+        }
         ensureRoster(groupId)
         // §5c: a foreign group seals AS the guest identity (the sender uin must
         // be our per-island uin so the roster resolves it; keys are identical)
@@ -4499,6 +4508,23 @@ class Session(context: Context) {
     }
 
     private suspend fun sendEnvelope(env: Envelope, id: String, toUin: Int) {
+        // ⚠⚠ A duress session sends NOTHING, and must not look like it tried.
+        //
+        // It already sent nothing — the decoy's contacts carry an empty
+        // identityKey, so `encryptFor` below threw and the row went to FAILED —
+        // but that is a RED CROSS in the thread, on the first message anyone
+        // types. "Send something" is the cheapest test a coercer can run, and
+        // the decoy failed it every time. (Our own article says the send is
+        // imitated locally; it was not, and that is how a reader found it.)
+        //
+        // Stored as SENT, which is what a message to somebody who is offline
+        // looks like forever: one tick, no error, no second tick promised. The
+        // row lives in the decoy's own encrypted database like every other
+        // message it shows, so it survives leaving the chat and coming back.
+        if (app.rcq.android.security.DuressGate.isActive) {
+            updateMessageState(id, toUin, DeliveryState.SENT)
+            return
+        }
         // Federation (F2): if this peer is a cross-island contact, resolve their
         // island and deposit there instead of the flagship. Gated strictly —
         // for every flagship peer (no cross-island entry) the path below is
