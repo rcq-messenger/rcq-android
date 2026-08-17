@@ -454,15 +454,29 @@ internal fun EmoticonText(
 private fun Modifier.longPressBeatsLinks(onLongPress: (() -> Unit)?): Modifier =
     if (onLongPress == null) this else this.pointerInput(onLongPress) {
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val slop = viewConfiguration.touchSlop
             val held = try {
                 withTimeout(viewConfiguration.longPressTimeoutMillis) {
                     // Returns as soon as the finger lifts or the gesture is
                     // cancelled — i.e. an ordinary tap, which is not ours.
+                    //
+                    // ★★ Report #583: "если медленно прокручивать диалог, зажав
+                    // палец на сообщение, где есть смайл, то вылетает шторка".
+                    // A press only had to OUTLAST the timeout, and a finger
+                    // dragging the history slowly does exactly that — so the
+                    // action sheet jumped out mid-scroll, from under the thumb,
+                    // whenever an emoticon happened to be where the finger
+                    // started. Travel past touch slop, or a change somebody
+                    // else already consumed (the list taking the scroll), ends
+                    // the press: it belongs to the finger, not to the pixel
+                    // under it. The same rule the reaction chip beside it uses.
                     var up = false
                     while (!up) {
                         val ev = awaitPointerEvent(PointerEventPass.Initial)
                         if (ev.changes.none { it.pressed }) up = true
+                        else if (ev.changes.any { it.isConsumed }) up = true
+                        else if (ev.changes.any { (it.position - down.position).getDistance() > slop }) up = true
                     }
                 }
                 false
