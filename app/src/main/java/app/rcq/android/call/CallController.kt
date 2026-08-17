@@ -281,7 +281,7 @@ class CallController(
         _state.value = State.Outgoing(call)
         scope.launch {
             try {
-                val turnOk = refreshTurn()
+                val turnOk = refreshTurn(mayEngageTunnel = true)
                 // Carried over from the call the user just gave up on, and
                 // applied here rather than there: the policy is baked into the
                 // peer connection when it is created, so the only reliable way
@@ -325,7 +325,7 @@ class CallController(
         ringer.stop()
         scope.launch {
             try {
-                val turnOk = refreshTurn(waitForProbe = false)
+                val turnOk = refreshTurn(waitForProbe = false, mayEngageTunnel = true)
                 android.util.Log.i("RCQcall", "call ${call.id.take(8)} answering media=${call.media.wire} turn=$turnOk")
                 val answerSdp = rtc.handleOffer(offer, call.media.toRtc())
                 _state.value = State.Connected(call)
@@ -1079,7 +1079,14 @@ class CallController(
         return ok
     }
 
-    private suspend fun refreshTurn(waitForProbe: Boolean = true): Boolean {
+    private suspend fun refreshTurn(
+        waitForProbe: Boolean = true,
+        /// Whether a blocked relay may bring the tunnel up (#608). Only the two
+        /// paths that are actually placing or answering a call say yes: the
+        /// background refresh on every (re)connect must not start a transport
+        /// for someone who is not calling anybody.
+        mayEngageTunnel: Boolean = false,
+    ): Boolean {
         repeat(TURN_FETCH_ATTEMPTS) { attempt ->
             val creds = withContext(Dispatchers.IO) { runCatching { turn() } }.getOrNull()
             if (creds != null) {
@@ -1103,7 +1110,7 @@ class CallController(
                 // and the audit ended "turn:BLOCKED => CALLS_BLOCKED". The
                 // tunnel that carries the messages can carry the media too
                 // ([TurnTunnel]); nothing was asking it to.
-                if (rtc.relayReachable() == false) {
+                if (mayEngageTunnel && rtc.relayReachable() == false) {
                     if (waitForProbe) reachRelayThroughTunnel(creds)
                     // Answering must never wait on this (see the note above about
                     // the caller sitting on a ringing screen). Do it behind the
