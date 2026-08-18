@@ -89,7 +89,7 @@
     <string name="news_empty">Пока новостей нет.</string>
     <string name="news_copied">Скопировано</string>
     <string name="news_has_media">С вложением</string>
-    <string name="home_menu_saved">Сохранённые сообщения</string>
+    <string name="home_menu_saved">Заметки</string>
     <string name="home_menu_add_account">Добавить аккаунт</string>
     <string name="home_menu_manage_accounts">Управление аккаунтами</string>
 
@@ -787,7 +787,7 @@
     <string name="chat_unread_divider">Непрочитанные сообщения</string>
     <string name="chat_show_more">Показать полностью</string>
     <string name="chat_typing">печатает…</string>
-    <string name="chat_saved_title">Избранное</string>
+    <string name="chat_saved_title">Заметки</string>
     <string name="chat_saved_subtitle">Заметки для себя</string>
     <!-- Stories -->
     <string name="story_you">Вы</string>
