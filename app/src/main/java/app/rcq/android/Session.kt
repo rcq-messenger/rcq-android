@@ -4580,7 +4580,16 @@ class Session(context: Context) {
         }
         try {
             val payload = encryptFor(toUin, env)
-            val resp = withRetry { api.sendSealed(toUin, payload) }
+            // ⚠ A NOTE goes out as "carbon", not "message" (#599). It is
+            // addressed to our own number, which is what puts it on our other
+            // devices, and the island cannot tell it from a stranger's letter —
+            // sealed sender means it never learns who sent what — so it pushed
+            // it and the phone rang for something its owner had just typed.
+            // "carbon" is already outside the island's pushable set and already
+            // routed live by every client, so this needs no new wire type and
+            // nothing in the field has to update to understand it.
+            val etype = if (toUin == store.uin) "carbon" else "message"
+            val resp = withRetry { api.sendSealed(toUin, payload, envelopeType = etype) }
             updateMessageState(id, toUin, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
             // Multihoming v1: best-effort sealed copy into the peer's OTHER home
             // islands; no-op (cached record lookup only) for single-homed peers.
