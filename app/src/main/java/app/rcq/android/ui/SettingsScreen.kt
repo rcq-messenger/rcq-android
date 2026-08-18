@@ -460,6 +460,51 @@ private fun SettingsRoot(
                 }
             }
 
+            // The island this account lives on, in its own words, in the same
+            // place iOS and the desktop put it. It lived only inside Settings →
+            // Network, folded into the row that CHANGES the server, and the
+            // founder went looking for it in the root list and did not find it.
+            // The two jobs are different: this card says where you are, that row
+            // is for moving somewhere else.
+            Spacer(Modifier.height(22.dp))
+            SectionLabel(stringResource(R.string.settings_sec_island))
+            SettingsGroup {
+                val islandHost = session.currentServer
+                val islandInfo by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
+                    initialValue = null, islandHost,
+                ) {
+                    value = app.rcq.android.net.RcqApi.serverInfoOf(islandHost)
+                }
+                val islandName = islandInfo?.name?.takeIf { it.isNotBlank() }
+                val islandRules = islandInfo?.welcome?.takeIf { it.isNotBlank() }
+                var showIslandRules by remember { mutableStateOf(false) }
+                SettingsRow(
+                    Icons.Filled.Dns,
+                    islandName ?: islandHost,
+                    // The host repeats under a name and nowhere else: two lines
+                    // saying the same host is one line of noise.
+                    value = if (islandName != null) islandHost else null,
+                ) {}
+                if (islandRules != null) {
+                    Divider()
+                    SettingsRow(Icons.Filled.Gavel, stringResource(R.string.island_rules_title)) {
+                        showIslandRules = true
+                    }
+                }
+                if (showIslandRules && islandRules != null) {
+                    RcqSheet(onDismiss = { showIslandRules = false }, title = islandName ?: islandHost) {
+                        Text(
+                            islandRules,
+                            color = c.textPrimary,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .heightIn(max = 380.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_account))
             // UIN shop — only on servers that advertise it (api.rcq.app);
@@ -1181,8 +1226,6 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     value = app.rcq.android.net.RcqApi.serverInfoOf(host)
                 }
                 val islandName = info?.name?.takeIf { it.isNotBlank() }
-                val islandRules = info?.welcome?.takeIf { it.isNotBlank() }
-                var showRules by remember { mutableStateOf(false) }
                 SettingsRow(
                     Icons.Filled.Dns,
                     stringResource(R.string.pv_custom_server),
@@ -1193,28 +1236,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     },
                     onClick = onOpenCustomServer,
                 )
-                if (islandRules != null) {
-                    SettingsRow(
-                        Icons.Filled.Gavel,
-                        stringResource(R.string.island_rules_title),
-                        onClick = { showRules = true },
-                    )
-                }
-                if (showRules && islandRules != null) {
-                    RcqSheet(
-                        onDismiss = { showRules = false },
-                        title = islandName ?: host,
-                    ) {
-                        Text(
-                            islandRules,
-                            color = c.textPrimary,
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .heightIn(max = 380.dp)
-                                .verticalScroll(rememberScrollState()),
-                        )
-                    }
-                }
+                // The rules row moved to the root list, next to the island's
+                // name. What stays here is the name inside the row above, which
+                // is the useful half on a screen about CHANGING the server.
                 SettingsRow(
                     Icons.Filled.NetworkCheck,
                     stringResource(R.string.diag_title),
