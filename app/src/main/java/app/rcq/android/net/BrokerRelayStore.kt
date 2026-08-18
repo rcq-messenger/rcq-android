@@ -52,6 +52,28 @@ object BrokerRelayStore {
     private const val KEY_PRIVATE = "private_tags"
     private const val KEY_VERDICT = "key_verdict"
     private const val REPORT_INTERVAL_MS = 60 * 60 * 1000L  // at most hourly
+
+    /** How the route ended up last time it was settled — the half a TCP probe
+     *  cannot answer.
+     *
+     *  ★ A reachability vote says "the port answered". DPI usually lets the TCP
+     *  handshake through and kills the connection at the TLS/Reality stage, so
+     *  a fleet can read fully reachable while carrying nobody — which is
+     *  exactly why the relay share falling from 68% to 20% could not be
+     *  explained from probes alone. Session already works this out for its own
+     *  routing; this is where it is left for the next report to carry.
+     *
+     *  In memory on purpose: it describes THIS run's network, and a stale value
+     *  restored from disk on a different network would be a lie. */
+    @Volatile
+    private var lastOutcome: String? = null
+
+    /** Called by Session once the route is settled. One of the closed set the
+     *  island accepts (broker.py `_TRANSPORT_OUTCOMES`); anything else is
+     *  dropped there, so keep the two in step. */
+    fun noteTransportOutcome(outcome: String) {
+        lastOutcome = outcome
+    }
     private const val PROBE_TIMEOUT_MS = 2500
     private const val MAX_PROBE = 20
     private val gson = Gson()
@@ -210,7 +232,11 @@ object BrokerRelayStore {
                 })
             }
             if (reports.size() == 0) return
-            val payload = JsonObject().apply { add("reports", reports) }
+            val payload = JsonObject().apply {
+                add("reports", reports)
+                // What the route actually did, if this run has settled one yet.
+                lastOutcome?.let { addProperty("transport", it) }
+            }
             val postClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
             postClient.newCall(
                 Request.Builder().url("https://$BROKER_HOST/broker/reachability")
