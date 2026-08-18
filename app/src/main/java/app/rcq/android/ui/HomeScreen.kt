@@ -2558,7 +2558,11 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<Int>) -> Unit, onDismiss: () -> Unit) {
+// ⚠⚠ Hands back CONTACTS, not bare uins. A uin alone does not say which island
+// its owner lives on, and the same number belongs to a different person on
+// every island — so a list of numbers is exactly the wrong thing to carry out
+// of a picker that can show both kinds of row.
+private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<Contact>) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     var name by remember { mutableStateOf("") }
     val selected = remember { mutableStateMapOf<Int, Boolean>() }
@@ -2610,7 +2614,8 @@ private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<I
                 TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
-                val members = selected.filterValues { it }.keys.toList()
+                val picked = selected.filterValues { it }.keys.toSet()
+                val members = contacts.filter { it.uin in picked }
                 val ok = name.isNotBlank()
                 TextButton(enabled = ok, onClick = { onCreate(name.trim(), members) }) {
                     Text(stringResource(R.string.home_create), color = if (ok) c.accent else c.textSecondary)
