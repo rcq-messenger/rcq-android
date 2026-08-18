@@ -3101,8 +3101,13 @@ class Session(context: Context) {
 
     /** §5c: media in a group lives on the GROUP's island — upload there (the
      *  guest client for foreign groups; own api otherwise). */
+    // Same rule as the 1:1 upload below: a duress session puts no blob on any
+    // island. Unreachable while a seeded decoy has no groups, and here for the
+    // same reason its sibling in `fanOutGroup` is.
     private suspend fun uploadBlobForGroup(groupId: Int, blob: ByteArray): RcqApi.UploadResponse =
-        groupCtx(groupId).api.uploadBlob(blob, ::reportUpload)
+        if (app.rcq.android.security.DuressGate.isActive)
+            RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), blob.size)
+        else groupCtx(groupId).api.uploadBlob(blob, ::reportUpload)
 
     fun group(id: Int): RcqGroup? = _groups.value.firstOrNull { it.id == id }
 
@@ -4206,6 +4211,19 @@ class Session(context: Context) {
      *  survives our island dying), plus a best-effort copy on our island for
      *  carbons + re-fetch. Mirrors web-chat media.ts uploadBlob. */
     private suspend fun uploadBlobFor(toUin: Int, blob: ByteArray): RcqApi.UploadResponse {
+        // ⚠⚠ A duress session uploads nothing, to any island. Both branches
+        // below walk somewhere it must not go: the own-island one is an OkHttp
+        // call, so the gate throws and the row lands FAILED — the red cross we
+        // just took out of the text path, back again for a photo — and the
+        // cross-island one is `CrossIslandSender.depositBlob`, which is not an
+        // `api` call and the gate never saw.
+        //
+        // A client-minted id and no network. The bubble is built from the id we
+        // return and the blob is already on this device, so the picture renders
+        // in the decoy exactly like a sent one; the send path marks it SENT.
+        if (app.rcq.android.security.DuressGate.isActive) {
+            return RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), blob.size)
+        }
         val ci = CrossIslandStore.findByUin(toUin) ?: return api.uploadBlob(blob, ::reportUpload)
         return withContext(Dispatchers.IO) {
             val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
