@@ -3717,6 +3717,9 @@ class Session(context: Context) {
                     if (t != null && t.senderUin == dec.senderUin) editInFlow(_groupMessages, groupId, env.targetId, env.text)
                 }
                 is Envelope.ReadReceipt -> Unit  // group read receipts not surfaced per-message
+                // Same for delivery: a group message has as many recipients as
+                // it has members, and one tick cannot stand for all of them.
+                is Envelope.DeliveredReceipt -> Unit
                 is Envelope.Visit -> Unit        // visits are 1:1 only
                 is Envelope.SecureScreen -> Unit // secure mode is 1:1 only
                 is Envelope.ScreenshotTaken -> Unit
@@ -4795,6 +4798,27 @@ class Session(context: Context) {
         scope.launch { sendControl(peer, Envelope.readReceipt(ids)) }
     }
 
+    /** Inbound DELIVERY receipt: flip our own sent messages from SENT to
+     *  DELIVERED once [peer]'s device reports holding them.
+     *
+     *  ⚠ Never downgrades. A READ receipt can arrive first (they had the chat
+     *  open when it landed), and a delivery receipt for the same id must not
+     *  walk the bubble back a state. */
+    private fun applyDeliveredReceipt(peer: Int, ids: List<String>) {
+        val idSet = ids.toHashSet()
+        val cur = _messages.value.toMutableMap()
+        val list = cur[peer] ?: return
+        var changed = false
+        val updated = list.map { m ->
+            if (m.fromMe && m.state == DeliveryState.SENT && idSet.contains(m.id)) {
+                changed = true
+                db.updateState(m.id, DeliveryState.DELIVERED)
+                m.copy(state = DeliveryState.DELIVERED)
+            } else m
+        }
+        if (changed) { cur[peer] = updated; _messages.value = cur }
+    }
+
     /** Inbound read receipt: flip our own sent messages to READ once [peer]
      *  reports seeing them. Only touches `fromMe` bubbles. */
     private fun applyReadReceipt(peer: Int, ids: List<String>) {
@@ -4829,6 +4853,14 @@ class Session(context: Context) {
     private fun envelopeTypeFor(env: Envelope): String = when (env) {
         is Envelope.Delete -> "delete"
         is Envelope.ReadReceipt -> "read"
+        // ⚠ Deliberately labelled "read" on the OUTER envelope, not a new type.
+        // The outer label decides two things: whether the island pushes (it does
+        // not for "read") and whether a client routes the packet live. A brand
+        // new label would be routed by nobody until every client in the field
+        // updated, which for a receipt means the tick stays broken for exactly
+        // the people whose clients are oldest. The INNER kind is "delivered" and
+        // that is what carries the meaning.
+        is Envelope.DeliveredReceipt -> "read"
         is Envelope.Reaction -> "reaction"
         is Envelope.Edit -> "edit"
         is Envelope.Visit -> "visit"
@@ -5170,6 +5202,7 @@ class Session(context: Context) {
                         editInFlow(_messages, dec.senderUin, env.targetId, env.text)
                 }
                 is Envelope.ReadReceipt -> applyReadReceipt(dec.senderUin, env.targetIds)
+        is Envelope.DeliveredReceipt -> applyDeliveredReceipt(dec.senderUin, env.targetIds)
                 is Envelope.Visit -> app.rcq.android.data.VisitStore.record(dec.senderUin, env.atEpochMillis())
                 is Envelope.SecureScreen ->
                     // Peer toggled per-conversation secure mode — mirror it so
@@ -6112,6 +6145,23 @@ class Session(context: Context) {
         if (countsUnread) bumpUnreadIfInbound(row, LocalStores.peerThread(row.peerUin))
         // Arrived into the open thread → ack it immediately with a receipt.
         if (!row.fromMe && LocalStores.peerThread(row.peerUin) == activeThread) sendReadReceipts(row.peerUin)
+        // And tell the sender it ARRIVED, whether or not anybody opened it.
+        //
+        // ⚠ This is the only way the second tick can ever catch up. The island
+        // decides "delivered" once, at send time, from whether a socket of ours
+        // was live at that instant — so everything written while we were offline
+        // kept one tick forever, even after we came back and read it. Sealed
+        // sender means the island cannot correct itself later: it does not know
+        // who sent the row it just handed us. Only this device knows, so only
+        // this device can say.
+        //
+        // 1:1 only. A group message has as many recipients as members and one
+        // tick cannot mean all of them; the phones have never claimed otherwise.
+        if (!row.fromMe && row.groupId == null && row.peerUin != store.uin) {
+            scope.launch {
+                runCatching { sendControl(row.peerUin, Envelope.deliveredReceipt(listOf(row.id))) }
+            }
+        }
     }
 
     /** A transient in-app notification banner (#11): shown at the top while the

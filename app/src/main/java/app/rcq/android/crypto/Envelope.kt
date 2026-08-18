@@ -45,6 +45,19 @@ sealed interface Envelope {
      *  the messages [targetIds]. The original sender flips those bubbles
      *  to READ. */
     data class ReadReceipt(val targetIds: List<String>) : Envelope
+    /** Receiver → sender: "these arrived on my device". Flips the sender's
+     *  bubbles from SENT to DELIVERED.
+     *
+     *  ⚠ Why this exists at all: the second tick used to be decided ONCE, by
+     *  the island's answer to the send ("was a socket of theirs live at this
+     *  instant"), and never caught up. Three messages written while the peer
+     *  was offline kept one tick forever, and the fourth, sent a minute after
+     *  they came back, got two — which is exactly what a tester reported.
+     *
+     *  The island cannot fix it: a deposit is unauthenticated and sealed, so it
+     *  never learns who sent what and has nobody to tell. Only the recipient's
+     *  own client knows, so only it can say so. */
+    data class DeliveredReceipt(val targetIds: List<String>) : Envelope
     /** File attachment (iOS kind "file"). Like [Photo] the bytes live in an
      *  out-of-band encrypted blob; [fileName]/[mime]/[sizeBytes] describe it
      *  for the bubble. */
@@ -254,6 +267,10 @@ sealed interface Envelope {
             addProperty("kind", "read")
             add("targetIDs", JsonArray().apply { targetIds.forEach { add(it) } })
         }.toString().toByteArray(Charsets.UTF_8)
+        is DeliveredReceipt -> JsonObject().apply {
+            addProperty("kind", "delivered")
+            add("targetIDs", JsonArray().apply { targetIds.forEach { add(it) } })
+        }.toString().toByteArray(Charsets.UTF_8)
         is File -> JsonObject().apply {
             addProperty("kind", "file")
             addProperty("id", id)
@@ -418,6 +435,8 @@ sealed interface Envelope {
 
         fun readReceipt(targetIds: List<String>): ReadReceipt = ReadReceipt(targetIds)
 
+        fun deliveredReceipt(targetIds: List<String>): DeliveredReceipt = DeliveredReceipt(targetIds)
+
         fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?): File =
             File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption)
 
@@ -515,6 +534,9 @@ sealed interface Envelope {
                     text = obj.get("text")?.asString.orEmpty(),
                 )
                 "read" -> ReadReceipt(
+                    obj.getAsJsonArray("targetIDs")?.mapNotNull { it.asString } ?: emptyList(),
+                )
+                "delivered" -> DeliveredReceipt(
                     obj.getAsJsonArray("targetIDs")?.mapNotNull { it.asString } ?: emptyList(),
                 )
                 "file" -> File(
