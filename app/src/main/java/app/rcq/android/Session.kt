@@ -5269,6 +5269,21 @@ class Session(context: Context) {
     private suspend fun drainQueue() {
         if (duressViewUp) return   // acking the real account's queue from the decoy view loses it
         CrashReporter.crumb(appCtx, "drain_queue")
+        // ── poison-row guard (#616) ──
+        // A native crash inside ingest (libsignal decrypt dies with a signal,
+        // there is no JVM exception to catch) kills the process BEFORE the ack,
+        // so the exact same row comes back on the next launch and the app
+        // crash-loops until the queue's 30-day TTL. Mark the row about to be
+        // ingested with a SYNCHRONOUS write (commit, not apply — an async write
+        // is lost in the very crash it exists to record); a marker still present
+        // at the next drain means we died inside that row. Two deaths and the
+        // row is acked away unread: losing one envelope beats losing the app.
+        val guard = appCtx.getSharedPreferences("rcq_drain_guard", android.content.Context.MODE_PRIVATE)
+        guard.getString("attempt", null)?.let { dead ->
+            val strikes = guard.getInt("strikes:$dead", 0) + 1
+            guard.edit().putInt("strikes:$dead", strikes).remove("attempt").commit()
+            android.util.Log.w("RCQdrain", "previous drain died inside queue row $dead (strike $strikes)")
+        }
         // ack=1 protocol: the server holds each row until we confirm we ingested
         // it. Collect the ids that made it through ingest, then ack them; a lost
         // response (this fetch's or the ack's) leaves the rows on the server for
@@ -5289,13 +5304,28 @@ class Session(context: Context) {
         asBacklog {
             rows.forEach { q ->
                 val payload = q.payload ?: return@forEach
+                val rowKey = (if (q.group_id != null) "g" else "d") + ":" + q.id
+                if (guard.getInt("strikes:$rowKey", 0) >= 2) {
+                    // The marker (not this code) proved the row fatal twice.
+                    // Ack it so the server stops redelivering the poison.
+                    android.util.Log.w("RCQdrain", "queue row $rowKey skipped after 2 fatal attempts")
+                    CrashReporter.crumb(appCtx, "drain_skip_poison")
+                    if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
+                    return@forEach
+                }
+                guard.edit().putString("attempt", rowKey).commit()
                 when {
                     q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id)
                     q.group_id != null -> ingestGroup(payload, q.group_id)
                     else -> ingest(payload)
                 }
+                // Survived — a stale strike from an interrupted PREVIOUS run
+                // (the between-rows window marks the row already ingested)
+                // must not accumulate toward the skip threshold.
+                if (guard.contains("strikes:$rowKey")) guard.edit().remove("strikes:$rowKey").apply()
                 if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
             }
+            guard.edit().remove("attempt").commit()
         }
         // Best-effort ack. If it fails the server redelivers next drain and the
         // UUID dedupe collapses the repeat, so we never lose and never double.

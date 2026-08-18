@@ -74,6 +74,21 @@ class RcqApi(
         return proxiedClient ?: client.newBuilder().proxy(p).build().also { proxiedClient = it }
     }
 
+    /** A media-sized twin of whatever client the route ladder picked: same
+     *  route, pool and dispatcher, but the whole-call ceiling fits a real file
+     *  on a slow uplink. The general 30 s [OkHttpClient.callTimeout] is right
+     *  for JSON and was killing every upload that could not finish in half a
+     *  minute — "с ПК на смартфон отправляется, а наоборот нет" (#613): the
+     *  browser has no such ceiling, the phone did. Progress is still policed
+     *  per operation by read/write timeouts, so a genuinely dead transfer
+     *  fails in about a minute, not in ten. */
+    private fun mediaClient(base: OkHttpClient): OkHttpClient =
+        base.newBuilder()
+            .callTimeout(10, TimeUnit.MINUTES)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+
     /**
      * Execute against the best route for THIS host: direct while that works,
      * through the circumvention tunnel once the direct route to this specific
@@ -1333,7 +1348,7 @@ private class ProgressBody(
             .build()
         val b = Request.Builder().url("$baseUrl/media/upload").post(body)
         token?.let { b.header("Authorization", "Bearer $it") }
-        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
+        viaBestRoute { mediaClient(it).newCall(b.build()).execute() }.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw IOException("upload HTTP ${resp.code}: ${text.take(200)}")
             gson.fromJson(text, UploadResponse::class.java)
@@ -1349,7 +1364,7 @@ private class ProgressBody(
             .build()
         val b = Request.Builder().url("$baseUrl/media/$mediaId").put(body)
         token?.let { b.header("Authorization", "Bearer $it") }
-        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
+        viaBestRoute { mediaClient(it).newCall(b.build()).execute() }.use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw IOException("deposit HTTP ${resp.code}: ${text.take(200)}")
             gson.fromJson(text, UploadResponse::class.java)
@@ -1358,7 +1373,7 @@ private class ProgressBody(
 
     suspend fun getBlob(mediaId: String): ByteArray = withContext(Dispatchers.IO) {
         val req = Request.Builder().url("$baseUrl/media/$mediaId").get().build()
-        viaBestRoute { it.newCall(req).execute() }.use { resp ->
+        viaBestRoute { mediaClient(it).newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("download HTTP ${resp.code}")
             resp.body?.bytes() ?: throw IOException("empty blob")
         }
