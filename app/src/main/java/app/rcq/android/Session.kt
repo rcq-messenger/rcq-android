@@ -3141,9 +3141,29 @@ class Session(context: Context) {
     }
     fun groupName(id: Int): String = group(id)?.name ?: "Group $id"
 
-    suspend fun createGroup(name: String, memberUins: List<Int>): RcqGroup {
-        val g = mapGroup(api.createGroup(name, memberUins))
+    /// ⚠⚠ Takes CONTACTS, not uins, and splits them by island.
+    ///
+    /// A cross-island contact's uin is their number on THEIR island. Sending it
+    /// to ours as a member meant one of two things, and both were wrong: our
+    /// island answered "no such user" and the screen reported the invitee had
+    /// switched invitations off (a setting we cannot see by construction), or —
+    /// worse — a DIFFERENT person happened to hold that number here and got
+    /// added to the group instead. Same shape as the cross-island call that
+    /// rang a stranger with the same number.
+    ///
+    /// Adding them properly already existed for an EXISTING group
+    /// ([addCrossIslandGroupMember]: mint a shadow uin for their KEY on the
+    /// group's island, add that, then send them the invite link). It was simply
+    /// never wired into creation. Now it is: the group is created with the
+    /// same-island members, and each cross-island one is added afterwards
+    /// through the path that knows what it is doing.
+    suspend fun createGroup(name: String, members: List<Contact>): RcqGroup {
+        val g = mapGroup(api.createGroup(name, members.filter { it.host == null }.map { it.uin }))
         upsertGroup(g)
+        for (m in members.filter { it.host != null }) {
+            val card = CrossIslandStore.findByUin(m.uin) ?: continue
+            runCatching { addCrossIslandGroupMember(g.id, card) }
+        }
         return g
     }
 
