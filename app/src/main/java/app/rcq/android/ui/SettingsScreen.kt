@@ -471,20 +471,28 @@ private fun SettingsRoot(
             SettingsGroup {
                 val islandHost = session.currentServer
                 val islandInfo by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
-                    initialValue = null, islandHost,
+                    initialValue = serverInfoCache[islandHost], islandHost,
                 ) {
-                    value = app.rcq.android.net.RcqApi.serverInfoOf(islandHost)
+                    app.rcq.android.net.RcqApi.serverInfoOf(islandHost)?.let {
+                        serverInfoCache[islandHost] = it
+                        value = it
+                    }
                 }
                 val islandName = islandInfo?.name?.takeIf { it.isNotBlank() }
                 val islandRules = islandInfo?.welcome?.takeIf { it.isNotBlank() }
                 var showIslandRules by remember { mutableStateOf(false) }
+                // The chevron promised a tap and the tap did nothing — "стоит
+                // значок '>', значит что-то должно появиться, но ничего не
+                // происходит" (#619). The island's name now opens its own card
+                // (the rules sheet); with nothing to show it stops pretending.
                 SettingsRow(
                     Icons.Filled.Dns,
                     islandName ?: islandHost,
                     // The host repeats under a name and nowhere else: two lines
                     // saying the same host is one line of noise.
                     value = if (islandName != null) islandHost else null,
-                ) {}
+                    chevron = islandRules != null,
+                ) { if (islandRules != null) showIslandRules = true }
                 if (islandRules != null) {
                     Divider()
                     SettingsRow(Icons.Filled.Gavel, stringResource(R.string.island_rules_title)) {
@@ -620,11 +628,21 @@ private fun SettingsRoot(
                     bugError?.let { Text(it, color = Color(0xFFE5484D), fontSize = 13.sp) }
                     RcqField(
                         value = bugText,
-                        onValueChange = { if (it.length <= session.bugReportTextLimit) bugText = it },
+                        // take(), not reject: refusing the whole edit made a long
+                        // PASTE look like the field was broken, and the author
+                        // trimmed "наугад" (#618). Keep the head, show the meter.
+                        onValueChange = { bugText = it.take(session.bugReportTextLimit) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = false,
                         minLines = 3,
                         placeholder = stringResource(R.string.bug_report_placeholder),
+                    )
+                    Text(
+                        "${bugText.length} / ${session.bugReportTextLimit}",
+                        color = if (session.bugReportTextLimit - bugText.length < 50) Color(0xFFE5484D) else c.textSecondary,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     // Attachments (#28): up to 3 photos/videos, thumbnails
                     // with a remove (×); only uploaded on send.
@@ -1220,10 +1238,17 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 // request for the default host meant an operator could type
                 // both and see neither, anywhere. Founder asked about this
                 // twice ("когда мы уже починим BRANDING").
+                // Seeded from the last answer so the row paints instantly on
+                // re-entry; the round-trip only refreshes it. Without the seed
+                // the island name blinked in seconds late on a slow network
+                // and the screen read as broken (#619).
                 val info by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
-                    initialValue = null, host,
+                    initialValue = serverInfoCache[host], host,
                 ) {
-                    value = app.rcq.android.net.RcqApi.serverInfoOf(host)
+                    app.rcq.android.net.RcqApi.serverInfoOf(host)?.let {
+                        serverInfoCache[host] = it
+                        value = it
+                    }
                 }
                 val islandName = info?.name?.takeIf { it.isNotBlank() }
                 SettingsRow(
@@ -3364,8 +3389,12 @@ private fun Divider() {
     Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 48.dp).background(RcqTheme.colors.divider))
 }
 
+/** Last /server/info answer per host — process-lifetime, tiny, lets the
+ *  network screen paint the island's name instantly on re-entry (#619). */
+private val serverInfoCache = mutableMapOf<String, app.rcq.android.net.RcqApi.ServerInfoResponse>()
+
 @Composable
-private fun SettingsRow(icon: ImageVector, label: String, value: String? = null, destructive: Boolean = false, onClick: () -> Unit) {
+private fun SettingsRow(icon: ImageVector, label: String, value: String? = null, destructive: Boolean = false, chevron: Boolean = true, onClick: () -> Unit) {
     val c = RcqTheme.colors
     val tint = if (destructive) Color(0xFFE5484D) else c.accent
     Row(
@@ -3375,8 +3404,20 @@ private fun SettingsRow(icon: ImageVector, label: String, value: String? = null,
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
         Text(label, color = if (destructive) Color(0xFFE5484D) else c.textPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
-        if (value != null) Text(value, color = c.textSecondary, fontSize = 14.sp)
-        Icon(Icons.Filled.ChevronRight, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+        // ⚠ The value MUST carry a weight too, or a long one ("RCQ Exodus ·
+        // api.rcq.app") is measured at full intrinsic width first and the
+        // weighted label is left a one-character column — on a narrow screen
+        // "Свой сервер" rendered VERTICALLY, letter per line (#619). Split the
+        // row instead and let the value ellipsize; fill=false keeps a short
+        // value from hogging its half.
+        if (value != null) {
+            Text(
+                value, color = c.textSecondary, fontSize = 14.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        if (chevron) Icon(Icons.Filled.ChevronRight, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
     }
 }
 

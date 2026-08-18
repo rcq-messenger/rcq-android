@@ -163,12 +163,24 @@ internal object AddSheet {
     val open = mutableStateOf(false)
     val query = mutableStateOf("")
 
+    /** The results the sheet last showed, keyed by the query that produced
+     *  them. A trip into a search hit's profile DISPOSES the sheet composable,
+     *  and only the query used to survive — the return re-ran the whole search
+     *  over an empty list and said "Поиск…" for a query that had not changed
+     *  (#615). The list rides out here with it. */
+    var resultsFor: String? = null
+    var users: List<app.rcq.android.net.RcqApi.UserInfo> = emptyList()
+    var groups: List<app.rcq.android.net.RcqApi.GroupPreviewOut> = emptyList()
+
     /** Leave the search for good: the user got where they were going (opened a
      *  chat, sent a request) or dismissed it. Backing out of a profile
      *  deliberately does NOT call this. */
     fun close() {
         open.value = false
         query.value = ""
+        resultsFor = null
+        users = emptyList()
+        groups = emptyList()
     }
 }
 
@@ -1967,9 +1979,16 @@ private fun AddContactDialog(
     // Hoisted out of composition so a trip to a search result's profile and
     // back does not wipe what was typed (see AddSheet).
     var query by AddSheet.query
-    var users by remember { mutableStateOf<List<RcqApi.UserInfo>>(emptyList()) }
-    var groups by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
+    // Seeded from AddSheet so the trip to a profile and back lands on the
+    // results that were already found, not on "Поиск…" over an empty list.
+    val restored = AddSheet.resultsFor != null && AddSheet.resultsFor == query.trim()
+    var users by remember { mutableStateOf(if (restored) AddSheet.users else emptyList()) }
+    var groups by remember { mutableStateOf(if (restored) AddSheet.groups else emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    // The query whose results are currently on screen — the search effect
+    // relaunches on every re-entry into composition and must not re-run for
+    // a query it already answered (#615).
+    var lastSearched by remember { mutableStateOf(if (restored) AddSheet.resultsFor else null) }
     var sentTo by remember { mutableStateOf<Set<Int>>(emptySet()) }
     // Optional access token for adding a contact on a foreign PRIVATE (closed)
     // island — shown only when a uin@host on another island is detected.
@@ -2023,7 +2042,9 @@ private fun AddContactDialog(
         // result set, and the 300 ms debounce below is what actually protects
         // it — the two-character floor only protected us from names we told
         // people they could have.
-        if (q.isEmpty() || GroupLinkParser.parse(q) != null) { users = emptyList(); groups = emptyList(); searching = false; return@LaunchedEffect }
+        if (q.isEmpty() || GroupLinkParser.parse(q) != null) { users = emptyList(); groups = emptyList(); searching = false; lastSearched = null; AddSheet.resultsFor = null; return@LaunchedEffect }
+        // Same query, results already on screen: nothing to search (#615).
+        if (q == lastSearched && (users.isNotEmpty() || groups.isNotEmpty())) { searching = false; return@LaunchedEffect }
         // `#911` means THAT number and nothing else. Plain `911` still runs the
         // fuzzy search, which is what you want when you half-remember a number
         // or are looking for a name — the two intents needed separate syntax
@@ -2036,6 +2057,8 @@ private fun AddContactDialog(
             users = listOfNotNull(session.lookupUin(exact)).filter { it.uin != session.uin }
             groups = emptyList()
             searching = false
+            lastSearched = q
+            AddSheet.resultsFor = q; AddSheet.users = users; AddSheet.groups = groups
             return@LaunchedEffect
         }
         searching = true
@@ -2045,6 +2068,8 @@ private fun AddContactDialog(
         // way (join only via invite link); iOS already hides them (#11).
         groups = session.searchGroups(q).filter { !it.is_closed }
         searching = false
+        lastSearched = q
+        AddSheet.resultsFor = q; AddSheet.users = users; AddSheet.groups = groups
     }
 
     // A sheet, not a centred dialog: Add is a search surface with a keyboard,
