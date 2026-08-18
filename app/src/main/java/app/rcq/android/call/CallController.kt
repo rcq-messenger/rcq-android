@@ -279,6 +279,26 @@ class CallController(
         val call = CallInfo(UUID.randomUUID().toString(), peerUin, nameFor(peerUin), media, outgoing = true)
         startedAtMs = System.currentTimeMillis()
         _state.value = State.Outgoing(call)
+        // ⚠⚠ A duress session rings and gives up, and puts NOTHING on the wire.
+        //
+        // Everything below this walks around the gate. `refreshTurn` may engage
+        // the tunnel, which opens a raw TCP socket to our TURN host, and
+        // `createOffer` is not an API call at all: it gathers ICE, i.e. UDP
+        // straight at our STUN/TURN from a phone whose whole claim is that it
+        // is somebody else's. `DuressGate` sits under the HTTP clients and sees
+        // neither. Same hole iOS had until this morning.
+        //
+        // Ringback plus the existing ring timeout is what a phone with no
+        // network looks like from the outside, and it is the one ending that
+        // needs no explaining. ★ A button that visibly does nothing is itself
+        // evidence, so the call has to LOOK placed.
+        if (app.rcq.android.security.DuressGate.isActive) {
+            scope.launch {
+                ringer.startRingback()
+                armRingTimeout(call)
+            }
+            return
+        }
         scope.launch {
             try {
                 val turnOk = refreshTurn(mayEngageTunnel = true)
