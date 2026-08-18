@@ -1352,6 +1352,12 @@ class Session(context: Context) {
         // open network does fall back — it's a censorship aid, moot when
         // direct works.
         var routeOk = false
+        // Set by whichever fallback below actually fires. ⚠ It cannot be
+        // derived at the end instead: both fallbacks call transport.stop(), so
+        // by then "the tunnel was up and carried nothing" is indistinguishable
+        // from "never needed a tunnel" — which is the one distinction this
+        // whole measurement exists to make.
+        var fallbackTaken: String? = null
         if (transport.isActive) {
             // Probe the live route once: it tells the shield whether the tunnel
             // actually carries traffic (read-only /health through the proxy; safe
@@ -1363,6 +1369,7 @@ class Session(context: Context) {
             val droppable = !routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx)
             if (droppable && transport.probeDirect(serverHost())) {
                 android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
+                fallbackTaken = "fell_to_direct"
                 transport.stop()
                 api = newApi()
                 socket = newSocket()
@@ -1379,6 +1386,7 @@ class Session(context: Context) {
                 // Same gating as the direct fallback above: never under the
                 // user's own local proxy, never under an explicit onion opt-in.
                 android.util.Log.i("RCQfront", "tunnel and direct both dead — routing via $FRONT_HOST")
+                fallbackTaken = "fell_to_front"
                 transport.stop()
                 frontHost = FRONT_HOST
                 api = newApi()
@@ -1386,6 +1394,20 @@ class Session(context: Context) {
                 app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
             }
         }
+        // What this network let us do, for the island's per-region counters.
+        // The two fallbacks above have already spoken for themselves; this
+        // names the outcomes that end here. A tunnel that is up and carrying
+        // is the only good one — the rest are the shapes of a blocked network,
+        // and telling them apart is the whole point (a reachability probe
+        // cannot, it only ever sees whether a port answered).
+        app.rcq.android.net.BrokerRelayStore.noteTransportOutcome(
+            fallbackTaken ?: when {
+                transport.isActive && routeOk -> "tunnel_ok"
+                transport.isActive -> "tunnel_dead"
+                frontHost != null -> "fell_to_front"
+                else -> "direct_ok"
+            },
+        )
         _stealthActive.value = transport.isActive
         _bypassManual.value = transport.isEnabled(appCtx)
         _routeVerified.value = transport.isActive && routeOk
