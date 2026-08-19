@@ -13,6 +13,7 @@ import app.rcq.android.MainActivity
 import app.rcq.android.R
 import app.rcq.android.call.IncomingCallActivity
 import app.rcq.android.call.IncomingCallStore
+import app.rcq.android.crypto.SignalStoreDb
 import app.rcq.android.data.AccountManager
 import app.rcq.android.data.SecureStore
 import app.rcq.android.net.RcqApi
@@ -701,6 +702,24 @@ object Push {
         val acctId = toUin?.let { u ->
             AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
         } ?: app.rcq.android.data.AccountManager.activeId.value
+
+        // A fan-out copy addressed to one of the account's OTHER installs. The
+        // push server wakes every install for every copy — it cannot know which
+        // one holds the ratchet that opens which — so the addressee shows it
+        // and the rest stay quiet. Without this a phone beside a desktop raises
+        // a second generic "New message" for every single message, since the
+        // two copies are different ciphertexts and nothing else can tell them
+        // apart. An id we cannot resolve leaves the wake alone: a banner too
+        // many is a nuisance, a banner too few is a message the user never
+        // learns about.
+        val toDev = json.get("toDev")?.takeIf { !it.isJsonNull }?.asInt
+        if (toDev != null && acctId != null) {
+            val mine = runCatching {
+                val db = SignalStoreDb(ctx, acctId)
+                try { db.loadDeviceId() } finally { db.close() }
+            }.getOrNull()
+            if (mine != null && mine != toDev) return
+        }
 
         // A fully muted group is decided before the envelope is touched at all:
         // there is nothing the plaintext could change about the answer, and the

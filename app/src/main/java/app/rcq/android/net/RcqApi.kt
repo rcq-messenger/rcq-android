@@ -208,6 +208,11 @@ class RcqApi(
         val one_time_prekey_count: Int,
         val target_count: Int,
         val signed_prekey_age_seconds: Int?,
+        // Identity key currently published in the PRIMARY slot — how an
+        // install tells "that bundle is mine" from "another install of this
+        // account owns it". Null on an account with no bundle, and on an
+        // island too old to report it.
+        val signal_identity_key: String? = null,
     )
     /** Peer's published bundle for session establishment (PQXDH). */
     data class PeerBundle(
@@ -217,7 +222,28 @@ class RcqApi(
         val signed_prekey: SignedPreKeyDto,
         val kyber_prekey: KyberPreKeyDto,
         val one_time_prekey: OneTimePreKeyDto?,
+        // X25519 key the OUTER sealed-sender layer of a copy for THIS device
+        // has to be sealed to. The account's messaging key for the primary; a
+        // secondary install registers one of its own, and a copy sealed to the
+        // account key instead is one it cannot open. Null on an island too old
+        // to report it.
+        val sealed_sender_pub: String? = null,
     )
+    /** A SECONDARY device's bundle: the primary shape plus the two fields only
+     *  a non-primary install has to name for itself. */
+    data class DeviceBundleBody(
+        val signal_identity_key: String,
+        val registration_id: Int,
+        val signed_prekey: SignedPreKeyDto,
+        val kyber_prekey: KyberPreKeyDto,
+        val one_time_prekeys: List<OneTimePreKeyDto>,
+        val label: String,
+        val sealed_sender_pub: String,
+    )
+    /** The libsignal device id the SERVER assigned; never self-asserted. */
+    data class DeviceRegistered(val device_id: Int = 0)
+    data class PeerDeviceRow(val device_id: Int = 0, val label: String? = null)
+    data class PeerDevices(val uin: Int = 0, val devices: List<PeerDeviceRow> = emptyList())
 
     /** Upload the full prekey bundle (POST /keys/bundle → 204). */
     suspend fun uploadKeysBundle(body: KeysBundleBody) = withContext(Dispatchers.IO) {
@@ -231,9 +257,27 @@ class RcqApi(
     suspend fun keysStatus(): KeysStatus = withContext(Dispatchers.IO) {
         get("/keys/me/status", authed = true, KeysStatus::class.java)
     }
+    /** Register this install as a SECONDARY device of the account and take the
+     *  id the server hands back (>= 2). 404 on an island whose key store has
+     *  the single primary slot and nothing else. */
+    suspend fun registerDevice(body: DeviceBundleBody): DeviceRegistered = withContext(Dispatchers.IO) {
+        post("/keys/devices", gson.toJson(body), authed = true, DeviceRegistered::class.java)
+    }
+    /** Replenish a secondary device's one-time prekey pool (→ 204). */
+    suspend fun replenishDevicePrekeys(deviceId: Int, body: PrekeysBody) = withContext(Dispatchers.IO) {
+        postNoContent("/keys/devices/$deviceId/prekeys", gson.toJson(body), authed = true)
+    }
     /** Fetch a peer's bundle to establish a v=2 session. */
     suspend fun fetchPeerBundle(uin: Int): PeerBundle = withContext(Dispatchers.IO) {
         get("/keys/$uin/bundle", authed = true, PeerBundle::class.java)
+    }
+    /** Every device of [uin] a sender has to reach, the primary included. */
+    suspend fun fetchPeerDevices(uin: Int): PeerDevices = withContext(Dispatchers.IO) {
+        get("/keys/$uin/devices", authed = true, PeerDevices::class.java)
+    }
+    /** One device's bundle, for the session that belongs to that device. */
+    suspend fun fetchPeerDeviceBundle(uin: Int, deviceId: Int): PeerBundle = withContext(Dispatchers.IO) {
+        get("/keys/$uin/devices/$deviceId/bundle", authed = true, PeerBundle::class.java)
     }
 
     // ── Federation Layer B (F1): self-signed home-island record ──
@@ -513,14 +557,27 @@ class RcqApi(
 
     // ── 1:1 send (rcq-spec 6.2.1) ────────────────────────────────────
 
-    data class SendRequest(val to_uin: Int, val envelope_type: String, val payload: String)
+    data class SendRequest(
+        val to_uin: Int,
+        val envelope_type: String,
+        val payload: String,
+        // Which of the recipient's devices this ciphertext was encrypted for.
+        // Gson omits it when null, which is the legacy "any device" shape a
+        // v=1 seal keeps using and an older island only knows how to route.
+        val to_device_id: Int? = null,
+    )
     data class SendResponse(val delivered: Boolean = false, val queued: Boolean = false)
 
-    suspend fun sendSealed(toUin: Int, payloadB64: String, envelopeType: String = "message"): SendResponse =
+    suspend fun sendSealed(
+        toUin: Int,
+        payloadB64: String,
+        envelopeType: String = "message",
+        toDeviceId: Int? = null,
+    ): SendResponse =
         withContext(Dispatchers.IO) {
             post(
                 "/messages/sealed",
-                gson.toJson(SendRequest(toUin, envelopeType, payloadB64)),
+                gson.toJson(SendRequest(toUin, envelopeType, payloadB64, toDeviceId)),
                 authed = false, // sealed-sender is anonymous by design
                 SendResponse::class.java,
             )
@@ -569,6 +626,9 @@ class RcqApi(
         val payload: String?,
         val received_at: String?,
         val group_id: Int? = null,
+        // The device this copy was encrypted for; null = a legacy sender's
+        // copy, addressed to the account rather than to one of its installs.
+        val to_device_id: Int? = null,
     )
 
     /** Fetch the offline queue with `ack=1`: the server returns rows WITHOUT
@@ -578,17 +638,30 @@ class RcqApi(
      *  connection, NAT reset) advanced the server cursor and the messages were
      *  gone — the "изредка теряются сообщения" reports. Now a lost response
      *  means no ack, so the server redelivers; the client dedupes by envelope
-     *  UUID. Matches the iOS drain. */
-    suspend fun drainQueue(): List<QueuedEnvelope> = withContext(Dispatchers.IO) {
-        get("/messages/queue?ack=1", authed = true, Array<QueuedEnvelope>::class.java).toList()
+     *  UUID. Matches the iOS drain.
+     *
+     *  [deviceId] is the CALLER's own libsignal device: the island answers with
+     *  the rows addressed to it plus every row addressed to no device in
+     *  particular, so two installs of one account stop draining each other's
+     *  copies. An island that does not know the parameter ignores it and
+     *  answers exactly as before. */
+    suspend fun drainQueue(deviceId: Int = 1): List<QueuedEnvelope> = withContext(Dispatchers.IO) {
+        get("/messages/queue?ack=1&dev=$deviceId", authed = true, Array<QueuedEnvelope>::class.java).toList()
     }
 
     data class QueueAckIn(val direct_ids: List<Int>, val group_ids: List<Int>)
 
-    /** Advance this device's drain cursor past the rows it has persisted. */
-    suspend fun ackQueue(directIds: List<Int>, groupIds: List<Int>) = withContext(Dispatchers.IO) {
+    /** Advance this device's drain cursor past the rows it has persisted.
+     *
+     *  ⚠ [deviceId] MUST be the one [drainQueue] asked with. The cursor moves
+     *  over the contiguous prefix of the rows this device was SERVED, and the
+     *  island works out what it served from `dev`: ask under another id and
+     *  the fan-out copies of a sibling install count as rows we failed to ack,
+     *  the prefix stops at the first of them, and the cursor never moves
+     *  again. */
+    suspend fun ackQueue(directIds: List<Int>, groupIds: List<Int>, deviceId: Int = 1) = withContext(Dispatchers.IO) {
         if (directIds.isEmpty() && groupIds.isEmpty()) return@withContext
-        sendNoResult("POST", "/messages/queue/ack", gson.toJson(QueueAckIn(directIds, groupIds)), authed = true)
+        sendNoResult("POST", "/messages/queue/ack?dev=$deviceId", gson.toJson(QueueAckIn(directIds, groupIds)), authed = true)
     }
 
     // ── contacts (rcq-spec 4) ────────────────────────────────────────

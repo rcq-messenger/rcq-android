@@ -223,11 +223,15 @@ object Multihome {
      *  copy existed, but once that copy was gone (a disappearing message
      *  expired, the thread was cleared) each pass re-inserted the message and
      *  played the receive tone again — "о-оу" every half minute for one old
-     *  message. Best effort: a lost ack just means one more redelivery. */
-    private suspend fun ack(api: RcqApi, rows: List<RcqApi.QueuedEnvelope>) {
+     *  message. Best effort: a lost ack just means one more redelivery.
+     *
+     *  [deviceId] must be the one the drain asked with: the island computes the
+     *  acked prefix over the rows it served THAT device, and a mismatch wedges
+     *  the cursor at the first row it thinks we skipped. */
+    private suspend fun ack(api: RcqApi, rows: List<RcqApi.QueuedEnvelope>, deviceId: Int) {
         val direct = rows.filter { it.group_id == null }.map { it.id }
         val group = rows.filter { it.group_id != null }.map { it.id }
-        runCatching { api.ackQueue(direct, group) }
+        runCatching { api.ackQueue(direct, group, deviceId) }
     }
 
     /** Drain every backup mailbox, feeding each payload to [onPayload] (the
@@ -236,11 +240,18 @@ object Multihome {
     /** The handler gets each row's payload plus its group_id and the home's
      *  host: if a backup island ALSO hosts a group we joined (§5c — same
      *  identity, same mailbox there), group rows arrive through this drain and
-     *  must be filed under the local alias, not the raw remote group id. */
+     *  must be filed under the local alias, not the raw remote group id.
+     *
+     *  [deviceId] is our libsignal device, passed to drain AND ack so the two
+     *  agree. It is a HOME-island fact: on a backup mailbox we hold a separate
+     *  alias with no published bundle, so everything spooled there is an
+     *  unaddressed v=1 copy that any `dev` is served. What matters is that both
+     *  calls name the same one. */
     suspend fun drainBackupQueues(
         ownUin: Int,
         signingPriv: ByteArray,
         signingPub: ByteArray,
+        deviceId: Int = 1,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
@@ -248,17 +259,17 @@ object Multihome {
                 val api = RcqApi("https://${home.host}")
                 api.setToken(home.jwt)
                 val rows = try {
-                    api.drainQueue()
+                    api.drainQueue(deviceId)
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
                         val fresh = recoverOn(home.host, signingPriv, signingPub) ?: return@runCatching
                         MultihomeStore.updateCreds(ownUin, home.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)
-                        api.drainQueue()
+                        api.drainQueue(deviceId)
                     } else throw e
                 }
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
-                ack(api, rows)
+                ack(api, rows, deviceId)
             }.onFailure {
                 android.util.Log.w("RCQfed", "multihome drain ${home.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
@@ -271,6 +282,7 @@ object Multihome {
     suspend fun drainVisitedQueues(
         signingPriv: ByteArray,
         signingPub: ByteArray,
+        deviceId: Int = 1,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (v in VisitedIslandsStore.list()) {
@@ -278,17 +290,17 @@ object Multihome {
                 val api = RcqApi("https://${v.host}")
                 api.setToken(v.jwt)
                 val rows = try {
-                    api.drainQueue()
+                    api.drainQueue(deviceId)
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
                         val fresh = recoverOn(v.host, signingPriv, signingPub) ?: return@runCatching
                         VisitedIslandsStore.updateCreds(v.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)
-                        api.drainQueue()
+                        api.drainQueue(deviceId)
                     } else throw e
                 }
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
-                ack(api, rows)
+                ack(api, rows, deviceId)
             }.onFailure {
                 android.util.Log.w("RCQfed", "visited drain ${v.host}: ${it.javaClass.simpleName}: ${it.message}")
             }

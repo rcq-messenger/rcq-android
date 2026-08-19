@@ -1,5 +1,6 @@
 package app.rcq.android.crypto
 
+import android.util.Log
 import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.InvalidKeyIdException
@@ -43,6 +44,74 @@ class SignalStores(private val db: SignalStoreDb) :
 
     fun storeLocalIdentity(uin: Int, identityKeyPair: IdentityKeyPair, registrationId: Int) {
         db.storeLocalIdentity(uin, identityKeyPair.serialize(), registrationId)
+    }
+
+    /** Which libsignal device of the account this install is (1 = the one
+     *  holding the primary bundle), or null while it is still unresolved.
+     *  Persisted here so it survives restarts alongside the ratchet state it
+     *  belongs to. */
+    fun deviceId(): Int? = db.loadDeviceId()
+
+    fun storeDeviceId(deviceId: Int) = db.storeDeviceId(deviceId)
+
+    /** One-time pre-keys of [poolDevice]'s pool still unspent locally. Every
+     *  one a peer consumed was removed by the ratchet on receipt, so this
+     *  tracks what the server can still hand out for a device whose pool it
+     *  does not report.
+     *
+     *  Counted per POOL, not per table: an install that started as the primary
+     *  and later registered as a secondary keeps the primary's keys (messages
+     *  already sealed against them still have to open), and counting those
+     *  towards the new pool is what leaves a secondary at "plenty left"
+     *  forever while its published pool drains to nothing. */
+    fun preKeyCount(poolDevice: Int): Int = db.countPreKeysInPool(poolDevice)
+
+    /** Store a one-time pre-key whose public half goes to [poolDevice]'s
+     *  published pool. */
+    fun storePreKeyInPool(id: Int, record: PreKeyRecord, poolDevice: Int) =
+        db.putPreKey(id, record.serialize(), poolDevice)
+
+    /** Record which pool [ids] were published to, once the server has answered
+     *  which device this install is. */
+    fun assignPreKeyPool(ids: List<Int>, poolDevice: Int) = db.setPreKeyPool(ids, poolDevice)
+
+    /** The X25519 key an envelope for [uin]'s device [deviceId] must be
+     *  ECIES-sealed to, or null if we have never seen that device's bundle.
+     *  Only SECONDARY devices are kept here — device 1's outer key is the
+     *  account identity key every contact row already carries. */
+    fun peerDeviceOuterKey(uin: Int, deviceId: Int): ByteArray? =
+        db.blobByAddress("device_outer_keys", "outer_key", "$uin:$deviceId")
+
+    fun storePeerDeviceOuterKey(uin: Int, deviceId: Int, outerKey: ByteArray) =
+        db.putBlobByAddress("device_outer_keys", "outer_key", "$uin:$deviceId", outerKey)
+
+    /**
+     * Archive the current state of every session: each record still opens
+     * messages already in flight, but has no sending chain left, so the next
+     * send builds a fresh one. Used when this install turns out NOT to hold
+     * the account's primary slot — its sessions were seeded under device 1 on
+     * every peer, which is not the address our messages now name.
+     */
+    fun archiveAllSessions() {
+        var failed = 0
+        for (address in db.allAddresses("sessions")) {
+            val blob = db.blobByAddress("sessions", "record", address) ?: continue
+            // Guarded per row. One record libsignal refuses to parse (a blob
+            // half-written, or from a version this build does not know) used to
+            // abort the whole sweep, leaving every session after it with a live
+            // sending chain under an address the peer stopped answering — the
+            // caller has already persisted the new device id by then, so there
+            // is no second pass to fix it.
+            runCatching {
+                val record = SessionRecord(blob)
+                record.archiveCurrentState()
+                db.putBlobByAddress("sessions", "record", address, record.serialize())
+            }.onFailure {
+                failed++
+                Log.w("RCQsignal", "session $address could not be archived: ${it.javaClass.simpleName}")
+            }
+        }
+        if (failed > 0) Log.w("RCQsignal", "$failed of the account's sessions were left unarchived")
     }
 
     /** Drop all libsignal state (re-bootstrap on UIN drift / server wipe). */
@@ -99,7 +168,7 @@ class SignalStores(private val db: SignalStoreDb) :
     }
 
     override fun storePreKey(id: Int, record: PreKeyRecord) =
-        db.putRecordByInt("prekeys", "prekey_id", id, record.serialize())
+        db.putPreKey(id, record.serialize(), poolDevice = null)
 
     override fun containsPreKey(id: Int): Boolean = db.containsInt("prekeys", "prekey_id", id)
 

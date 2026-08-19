@@ -500,6 +500,12 @@ class Session(context: Context) {
     // switch (a peer may publish a bundle later; we re-probe next session).
     private val noV2Peers = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
+    // uin -> (fetched at, that account's libsignal device ids). A v=2 send
+    // asks for the list on every message and it only changes when somebody
+    // links or drops an install, so it is held briefly rather than per send.
+    private val peerDeviceCache =
+        java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<Int>>>()
+
     // True once a LIVE contact refresh has established real presence for this
     // profile. Until then any apparent online/offline transition is an artefact
     // of the disk-cached roster (which forces everyone offline), not something
@@ -930,9 +936,10 @@ class Session(context: Context) {
         // Rotate the libsignal identity too (upload-first; throws on failure so
         // the UI can ask the user to retry). This is what changes the safety
         // number that warns contacts.
-        SignalBootstrap.rebootstrap(signalStores, api, resp.uin)
+        SignalBootstrap.rebootstrap(signalStores, api, resp.uin, identityPub())
         // Old sessions/cache referenced the previous identity — drop them.
         peerIdentityCache.clear()
+        peerDeviceCache.clear()
         app.rcq.android.crypto.RecoveryPhrase.encode(seed, appCtx)
     }
 
@@ -998,7 +1005,7 @@ class Session(context: Context) {
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
-        noV2Peers.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false
         ackedReads.clear()
         lastVisitAt.clear()
         _contacts.value = emptyList()
@@ -1554,7 +1561,7 @@ class Session(context: Context) {
         // Ensure our libsignal prekey bundle is published so peers can start
         // v=2 sessions with us. Best-effort: failure leaves us on v=1.
         scope.launch {
-            runCatching { store.uin?.let { SignalBootstrap.ensureBootstrapped(signalStores, api, it) } }
+            runCatching { store.uin?.let { SignalBootstrap.ensureBootstrapped(signalStores, api, it, identityPub()) } }
                 .onFailure { android.util.Log.w("RCQsignal", "bootstrap failed: ${it.javaClass.simpleName}: ${it.message}") }
             // Federation F1: publish our signed home-island record now that the
             // libsignal identity exists. Best-effort; never throws upward.
@@ -1788,7 +1795,7 @@ class Session(context: Context) {
         }
         withContext(Dispatchers.IO) {
             // Marked per row, not around the whole sweep — see drainQueue.
-            Multihome.drainBackupQueues(uin, sp, pp) { payload, groupId, host ->
+            Multihome.drainBackupQueues(uin, sp, pp, myDeviceId()) { payload, groupId, host ->
                 asBacklog {
                     // A group row in a BACKUP mailbox = that island also hosts a
                     // group we joined (§5c, same identity = same mailbox) — file it
@@ -1811,7 +1818,7 @@ class Session(context: Context) {
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
         withContext(Dispatchers.IO) {
-            Multihome.drainVisitedQueues(sp, pp) { payload, groupId, host ->
+            Multihome.drainVisitedQueues(sp, pp, myDeviceId()) { payload, groupId, host ->
                 asBacklog {
                     if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
                     else ingest(payload)
@@ -2174,7 +2181,7 @@ class Session(context: Context) {
             app.rcq.android.push.embedded.EmbeddedDistributor.clear(appCtx)
         }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
-        peerIdentityCache.clear(); noV2Peers.clear(); presenceBaselineLive = false; ackedReads.clear()
+        peerIdentityCache.clear(); noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false; ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _stories.value = emptyList(); _devices.value = null
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
@@ -2822,8 +2829,9 @@ class Session(context: Context) {
         val env = Envelope.text(text)
         appendRandom(ChatMessage(env.id, peer, fromMe = true, body = text, sentAt = System.currentTimeMillis(), state = DeliveryState.SENDING))
         try {
-            val payload = encryptFor(peer, env)
-            val resp = withRetry { api.sendSealed(peer, payload) }
+            val resp = sendSealedCopies(peer, encryptFor(peer, env)) {
+                updateRandomState(env.id, DeliveryState.FAILED)
+            }
             updateRandomState(env.id, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
         } catch (e: Exception) {
             updateRandomState(env.id, DeliveryState.FAILED)
@@ -2895,7 +2903,12 @@ class Session(context: Context) {
         val myIdentity = SignalSession.ownIdentity(signalStores) ?: return null
         var peer = SignalSession.pinnedIdentity(signalStores, uin)
         if (peer == null) {
-            runCatching { SignalSession.ensureSession(signalStores, api, uin) }
+            // Named, not left to the legacy route: /keys/{uin}/bundle is
+            // deliberately 404 for an account with a linked install, and the
+            // number would then be unavailable for exactly the people most
+            // likely to want it. The pinned identity is the PRIMARY's either
+            // way (that is the address it is stored under).
+            runCatching { SignalSession.ensureSession(signalStores, api, uin, SealedSender.PRIMARY_DEVICE_ID) }
             peer = SignalSession.pinnedIdentity(signalStores, uin)
         }
         if (peer == null) return null
@@ -2926,8 +2939,7 @@ class Session(context: Context) {
         lastVisitAt[uin]?.let { if (now - it < 3_600_000L) return }
         lastVisitAt[uin] = now
         runCatching {
-            val payload = encryptFor(uin, Envelope.visit(now))
-            api.sendSealed(uin, payload, envelopeType = "visit")
+            sendSealedCopies(uin, encryptFor(uin, Envelope.visit(now)), envelopeType = "visit")
         }.onFailure { lastVisitAt.remove(uin) }
     }
 
@@ -3899,7 +3911,7 @@ class Session(context: Context) {
             app.rcq.android.data.VisitStore.wipe()
         }
         peerIdentityCache.clear()
-        noV2Peers.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false
         ackedReads.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -4163,7 +4175,7 @@ class Session(context: Context) {
         store.updateAccount(newUin, token)
         api.setToken(token)
         peerIdentityCache.clear()
-        noV2Peers.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false
         ackedReads.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -4537,12 +4549,30 @@ class Session(context: Context) {
         sendEnvelope(env, msg.id, msg.peerUin)
     }
 
+    /** One sealed ciphertext and the recipient install it was encrypted for.
+     *  A null [deviceId] is the unaddressed copy every island has always
+     *  routed to all of an account's devices. */
+    private data class SealedCopy(val deviceId: Int?, val payload: String)
+
+    /** The sealed copies of one envelope plus whether they cover EVERY install
+     *  the recipient runs. A device we could not seal to is a device that will
+     *  never see this message, and a send that reports "delivered" over it is
+     *  the same silent loss as not sending at all — only harder to notice. */
+    private data class SealedFanout(val copies: List<SealedCopy>, val complete: Boolean)
+
     /**
      * Encrypt [env] to [toUin], negotiating v=2 forward secrecy: when we've
      * bootstrapped a libsignal identity AND a session with the peer exists or
      * can be established, send v=2 (Double Ratchet); otherwise fall back to
      * v=1, which every account supports. Any v=2 failure degrades to v=1
      * rather than breaking the send — v=2 is strictly additive.
+     *
+     * A v=2 ratchet belongs to ONE PAIR of devices, so the peer gets one copy
+     * per install they run: each is a separate session and a separate
+     * ciphertext, addressed with [SealedCopy.deviceId]. v=1 seals to the
+     * account's messaging key, which every install of the account holds, so it
+     * stays a single unaddressed copy — and so does a peer whose island has no
+     * device registry to ask.
      *
      * Called ONCE per logical send (not inside [withRetry]) so a retry resends
      * the identical ciphertext bytes. That is required for ratchet
@@ -4551,13 +4581,56 @@ class Session(context: Context) {
      * always safe (the recipient dedups), whereas re-encrypting would advance
      * the ratchet on each attempt.
      */
-    private suspend fun encryptFor(toUin: Int, env: Envelope): String {
+    private suspend fun encryptFor(toUin: Int, env: Envelope): SealedFanout {
         val me = store.uin ?: error("not registered")
         val recipientPub = recipientKey(toUin)
-        if (v2OutboundEnabled && signalStores.hasLocalIdentity() && toUin !in noV2Peers) {
-            if (SignalSession.ensureSession(signalStores, api, toUin)) {
+        // Our own id has to be KNOWN before a ratchet may carry it: the
+        // recipient files the session under the id the message names, so
+        // sending as the primary and turning out to be a secondary a moment
+        // later strands every session we seeded meanwhile. v=1 seals to the
+        // account key that every install of the account holds, so it is the
+        // right thing to send while the answer is still outstanding.
+        val mine = myDeviceIdOrNull()
+        if (v2OutboundEnabled && mine != null && signalStores.hasLocalIdentity() && toUin !in noV2Peers) {
+            val devices = peerDevices(toUin)
+            if (devices == null) {
+                // The island never said which installs this peer runs. Guessing
+                // "one" is what loses the message: a v=2 copy is opened by the
+                // one device it was sealed to and by nobody else, so a peer
+                // with a second install would hear nothing on it. v=1 seals to
+                // the account key every install holds, so the send falls
+                // through to it rather than claiming a fan-out it never made.
+                android.util.Log.w("RCQsignal", "device list for $toUin unavailable; sending v1")
+            } else if (devices.isNotEmpty()) {
+                val copies = devices.mapNotNull { dev ->
+                    if (!SignalSession.ensureSession(signalStores, api, toUin, dev)) return@mapNotNull null
+                    runCatching {
+                        SealedCopy(dev, SignalSession.encrypt(signalStores, env, recipientPub, toUin, me, dev, mine))
+                    }.onFailure {
+                        android.util.Log.w("RCQsignal", "v2 encrypt failed for $toUin/$dev: ${it.message}")
+                    }.getOrNull()
+                }
+                if (copies.isNotEmpty()) {
+                    if (copies.size != devices.size) {
+                        android.util.Log.w(
+                            "RCQsignal",
+                            "fan-out to $toUin covers ${copies.size} of ${devices.size} devices",
+                        )
+                    }
+                    return SealedFanout(copies, copies.size == devices.size)
+                }
+                // Not one of their devices could be sealed to: same situation
+                // as a peer with no bundle at all.
+                noV2Peers.add(toUin)
+            } else if (SignalSession.ensureSession(signalStores, api, toUin)) {
                 runCatching {
-                    return SignalSession.encrypt(signalStores, env, recipientPub, toUin, me)
+                    // The island ANSWERED that it keeps no device registry, so
+                    // this peer has the one install every island has always
+                    // had: the single unaddressed copy reaches all of it.
+                    return SealedFanout(
+                        listOf(SealedCopy(null, SignalSession.encrypt(signalStores, env, recipientPub, toUin, me, ownDeviceId = mine))),
+                        complete = true,
+                    )
                 }.onFailure {
                     android.util.Log.w("RCQsignal", "v2 encrypt failed for $toUin, falling back to v1: ${it.message}")
                 }
@@ -4567,7 +4640,147 @@ class Session(context: Context) {
                 noV2Peers.add(toUin)
             }
         }
-        return SealedSender.encryptV1(env, recipientPub, me, signingPriv(), signingPub(), serverHost())
+        // v=1 seals to the account's messaging key, which every install of the
+        // account holds: one copy, and it reaches all of them.
+        return SealedFanout(
+            listOf(SealedCopy(null, SealedSender.encryptV1(env, recipientPub, me, signingPriv(), signingPub(), serverHost()))),
+            complete = true,
+        )
+    }
+
+    /**
+     * POST one sealed copy per recipient device. Aggregate result: `queued`
+     * once any copy was stored, `delivered` only when the fan-out was WHOLE —
+     * every install sealed to and every copy accepted — and one of them landed
+     * in a live socket. A partial fan-out reports the weaker state on purpose:
+     * the message did reach somebody, so failing the whole send would be a lie
+     * too, but a device that got no copy is one this send never delivered to
+     * and the tick above the bubble must not say otherwise.
+     *
+     * Throws only when EVERY copy failed — a peer with a phone online and a
+     * desktop that is gone has still been written to. A copy that failed while
+     * others got through is NOT dropped: it goes to [retryMissedCopies], and if
+     * even that gives up, [onCopiesLost] runs so the row can go red. An install
+     * that never receives the message and never will is an ordinary failed
+     * send, and the user is the only one who can still fix it (by resending).
+     */
+    private suspend fun sendSealedCopies(
+        toUin: Int,
+        fanout: SealedFanout,
+        envelopeType: String = "message",
+        onCopiesLost: (() -> Unit)? = null,
+    ): RcqApi.SendResponse {
+        var delivered = false
+        var queued = false
+        var sent = 0
+        var last: Exception? = null
+        val missed = ArrayList<SealedCopy>()
+        for (c in fanout.copies) {
+            try {
+                val resp = withRetry { api.sendSealed(toUin, c.payload, envelopeType, c.deviceId) }
+                delivered = delivered || resp.delivered
+                queued = queued || resp.queued
+                sent++
+            } catch (e: Exception) {
+                last = e
+                // A device that has been revoked answers 404. Drop the cached
+                // list so the next send addresses only the ones still there —
+                // and do not chase a copy for an install that no longer exists.
+                if (c.deviceId != null && e.message?.startsWith("HTTP 404") == true) {
+                    peerDeviceCache.remove(toUin)
+                } else {
+                    missed.add(c)
+                }
+            }
+        }
+        if (sent == 0) throw last ?: IllegalStateException("nothing sent to $toUin")
+        val whole = fanout.complete && sent == fanout.copies.size
+        if (!whole) {
+            android.util.Log.w("RCQsignal", "partial fan-out to $toUin: $sent of ${fanout.copies.size} copies posted")
+        }
+        if (missed.isNotEmpty()) retryMissedCopies(toUin, missed, envelopeType, onCopiesLost)
+        return RcqApi.SendResponse(delivered && whole, queued)
+    }
+
+    /**
+     * Post the copies a send could not place, in the background, with widening
+     * gaps. The ciphertext is reused byte for byte: re-encrypting would advance
+     * the ratchet, while a repeat of the same blob is free (the recipient dedups
+     * by envelope id) — so the only cost of trying again is the request itself.
+     *
+     * [onLost] runs when a copy has outlived every round. It is the last word
+     * on that message for the install it was addressed to, so the caller uses
+     * it to fail the row rather than leave a message showing SENT that one of
+     * the recipient's devices will never see.
+     */
+    private fun retryMissedCopies(
+        toUin: Int,
+        copies: List<SealedCopy>,
+        envelopeType: String,
+        onLost: (() -> Unit)?,
+    ) {
+        scope.launch(Dispatchers.IO) {
+            var pending = copies
+            repeat(COPY_RETRY_ROUNDS) { round ->
+                delay(COPY_RETRY_BASE_MS * (round + 1))
+                val still = ArrayList<SealedCopy>(pending.size)
+                for (c in pending) {
+                    try {
+                        api.sendSealed(toUin, c.payload, envelopeType, c.deviceId)
+                    } catch (e: Exception) {
+                        // 404 = that install has been revoked meanwhile. There
+                        // is nobody left to miss this copy, so it is dropped
+                        // instead of counted as lost.
+                        if (c.deviceId != null && e.message?.startsWith("HTTP 404") == true) {
+                            peerDeviceCache.remove(toUin)
+                        } else {
+                            still.add(c)
+                        }
+                    }
+                }
+                pending = still
+                if (pending.isEmpty()) return@launch
+            }
+            android.util.Log.w("RCQsignal", "gave up on ${pending.size} copies to $toUin")
+            onLost?.invoke()
+        }
+    }
+
+    /** Which install of this account we are, or null while [SignalBootstrap]
+     *  has not yet got the answer out of the server. Null is not the same as
+     *  "the primary": the two are told apart wherever guessing wrong would
+     *  destroy the other install's mail. */
+    private fun myDeviceIdOrNull(): Int? = runCatching { signalStores.deviceId() }.getOrNull()
+
+    /** This install's own libsignal device id, reading an unresolved one as
+     *  the primary — the id every build in the field asserts and the one the
+     *  island assumes when nothing says otherwise. */
+    private fun myDeviceId(): Int = myDeviceIdOrNull() ?: SealedSender.PRIMARY_DEVICE_ID
+
+    /** The libsignal devices of [uin], briefly cached. EMPTY when the island
+     *  answered that it has no device registry, which is the caller's signal to
+     *  send exactly one unaddressed copy the way it always has; NULL when it
+     *  did not answer at all, which is not the same thing and must not be read
+     *  as "one install".
+     *  Our OWN device is left out of our own list: a carbon is for the other
+     *  installs, not for the one composing it. */
+    private suspend fun peerDevices(uin: Int): List<Int>? {
+        val now = System.currentTimeMillis()
+        peerDeviceCache[uin]?.let { (at, devices) -> if (now - at < PEER_DEVICES_TTL_MS) return devices }
+        val self = if (uin == store.uin) myDeviceId() else null
+        val answered = try {
+            api.fetchPeerDevices(uin).devices.map { it.device_id }
+        } catch (e: Exception) {
+            // 404 IS an answer: the island has no device registry and never
+            // will within the TTL. Anything else — a timeout, a dead relay —
+            // is not, and remembering it would hold this peer on the
+            // single-copy fallback while one of their installs hears nothing.
+            if (e.message?.startsWith("HTTP 404") != true) return null
+            emptyList()
+        }
+        val devices = answered.filter { it > 0 && it != self }.sorted()
+        peerDeviceCache[uin] = now to devices
+        return devices
     }
 
     private suspend fun sendEnvelope(env: Envelope, id: String, toUin: Int) {
@@ -4604,7 +4817,7 @@ class Session(context: Context) {
             return
         }
         try {
-            val payload = encryptFor(toUin, env)
+            val fanout = encryptFor(toUin, env)
             // ⚠ A NOTE goes out as "carbon", not "message" (#599). It is
             // addressed to our own number, which is what puts it on our other
             // devices, and the island cannot tell it from a stranger's letter —
@@ -4614,7 +4827,14 @@ class Session(context: Context) {
             // routed live by every client, so this needs no new wire type and
             // nothing in the field has to update to understand it.
             val etype = if (toUin == store.uin) "carbon" else "message"
-            val resp = withRetry { api.sendSealed(toUin, payload, envelopeType = etype) }
+            val resp = sendSealedCopies(toUin, fanout, envelopeType = etype) {
+                // One of the peer's installs was never written to, and no round
+                // of retries changed that: that install will never see this
+                // message. Shown as an ordinary failed send — red cross, and a
+                // resend available — because the user is now the only one who
+                // can get it there.
+                updateMessageState(id, toUin, DeliveryState.FAILED)
+            }
             updateMessageState(id, toUin, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
             // Multihoming v1: best-effort sealed copy into the peer's OTHER home
             // islands; no-op (cached record lookup only) for single-homed peers.
@@ -4897,8 +5117,7 @@ class Session(context: Context) {
      *  from this device and needs to know whether anyone else heard. */
     private suspend fun sendControl(toUin: Int, env: Envelope): Boolean =
         runCatching {
-            val payload = encryptFor(toUin, env)
-            withRetry { api.sendSealed(toUin, payload, envelopeType = envelopeTypeFor(env)) }
+            sendSealedCopies(toUin, encryptFor(toUin, env), envelopeType = envelopeTypeFor(env))
         }.isSuccess
 
     /** Message kinds we mirror to the user's other devices via a carbon.
@@ -4920,8 +5139,7 @@ class Session(context: Context) {
         val me = store.uin ?: return
         runCatching {
             val carbon = Envelope.Carbon(to = toPeer, gid = toGroup, env = inner)
-            val payload = encryptFor(me, carbon)
-            withRetry { api.sendSealed(me, payload, envelopeType = "carbon") }
+            sendSealedCopies(me, encryptFor(me, carbon), envelopeType = "carbon")
         }
     }
 
@@ -5322,10 +5540,31 @@ class Session(context: Context) {
         // message that merely overlapped a drain was filed as backlog and lost
         // its sound (#480). Marking only the ingest keeps the counter honest:
         // it is raised exactly while backlog is being written.
-        val rows = api.drainQueue()
+        val mine = myDeviceIdOrNull()
+        // The id the island served this drain under. The ack has to name the
+        // SAME one: it advances the cursor over the contiguous prefix of what
+        // this device was handed, and a mismatched `dev` puts a sibling's copy
+        // in that prefix as a row we never acked — the cursor then stops there
+        // for good and the queue never moves again.
+        val drainDev = mine ?: SealedSender.PRIMARY_DEVICE_ID
+        val rows = api.drainQueue(drainDev)
         asBacklog {
             rows.forEach { q ->
                 val payload = q.payload ?: return@forEach
+                val toDev = q.to_device_id
+                if (toDev != null && toDev != mine) {
+                    // Somebody else's copy: it was sealed to another install's
+                    // ratchet, so it can never open here. Ack it away instead
+                    // of retrying it forever — the addressee drains its own.
+                    // While our own id is unresolved there is no telling those
+                    // two apart, and acking away the primary's copy is the
+                    // very loss this exists to stop: leave the row alone, the
+                    // next drain knows which install it is asking for.
+                    if (mine != null) {
+                        if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
+                    }
+                    return@forEach
+                }
                 val rowKey = (if (q.group_id != null) "g" else "d") + ":" + q.id
                 if (guard.getInt("strikes:$rowKey", 0) >= 2) {
                     // The marker (not this code) proved the row fatal twice.
@@ -5351,7 +5590,7 @@ class Session(context: Context) {
         }
         // Best-effort ack. If it fails the server redelivers next drain and the
         // UUID dedupe collapses the repeat, so we never lose and never double.
-        runCatching { api.ackQueue(directIds, groupIds) }
+        runCatching { api.ackQueue(directIds, groupIds, drainDev) }
         CrashReporter.crumb(appCtx, "drain_done")
     }
 
@@ -6008,7 +6247,15 @@ class Session(context: Context) {
             in SEALED_WS_TYPES -> {
                 val payload = obj.get("payload")?.asString
                 val gid = obj.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
-                if (payload != null) {
+                // Live delivery is NOT filtered per device: every socket of the
+                // account sees every copy of a fanned-out message, and only the
+                // install it was sealed to holds the session that opens it.
+                // An unresolved id tries anyway rather than dropping what may
+                // be our own copy — a live packet has no queue row to come
+                // back from, and a copy that is not ours simply fails to open.
+                val mine = myDeviceIdOrNull()
+                val toDev = obj.get("to_device_id")?.takeIf { !it.isJsonNull }?.asInt
+                if (payload != null && (toDev == null || mine == null || toDev == mine)) {
                     if (gid != null) ingestGroup(payload, gid) else ingest(payload)
                 }
             }
@@ -6560,5 +6807,16 @@ class Session(context: Context) {
         /** Un-openable broadcasts held per kid / distinct kids held. */
         const val HELD_GMSG_CAP = 64
         const val HELD_GMSG_KIDS = 16
+        /** How long a peer's libsignal device list is reused before it is
+         *  asked for again. Short: a device linked on the other side has to
+         *  start receiving without the sender restarting. */
+        const val PEER_DEVICES_TTL_MS = 5 * 60_000L
+        /** Background rounds a sealed copy that no attempt could place gets
+         *  before the message it belongs to is failed, and the gap before the
+         *  first of them (it widens by that much each round). Long enough to
+         *  outlive a tunnel switch or a relay dropping out; short enough that
+         *  the red cross still arrives while the user is looking at the chat. */
+        const val COPY_RETRY_ROUNDS = 3
+        const val COPY_RETRY_BASE_MS = 5_000L
     }
 }

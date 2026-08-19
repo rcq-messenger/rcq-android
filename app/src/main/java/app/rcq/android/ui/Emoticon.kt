@@ -110,9 +110,68 @@ internal object Emoticons {
         "diablo" to "Devil", "bomb" to "Bomb", "girl_angel" to "Angel", "hang1" to "Hang",
     )
 
-    /** The full pickable set the customise sheet offers: the original palette
-     *  plus the extra koloboks. Order = palette first, then extras. */
-    val fullSet: List<String> = palette.map { it.first } + extraKoloboks
+    /** The "standart" Kolobok set (258 glyphs), bundled on every client.
+     *
+     *  A plain list, not 258 hand-written pairs: the display name is mechanical
+     *  and the three clients MUST agree on this set exactly — a `:code:` missing
+     *  here renders as raw text on Android and nowhere else.
+     *
+     *  Additive on purpose: the older set stays bundled even where this one has
+     *  no replacement, because those codes are already in people's history. */
+    val standardPack: List<String> = listOf(
+        "acute", "aggressive", "agree", "aikido", "air_kiss", "alcoholic", "angel",
+        "assassin", "bad", "banned", "beach", "beee", "beta", "big_boss", "black_eye",
+        "blind", "blum2", "blum3", "blush2", "boast", "boredom", "brunette", "buba",
+        "buba_phone", "butcher", "censored", "clapping", "comando", "cray", "cray2",
+        "crazy", "crazy_pilot", "curtsey", "dance", "dance2", "dance3", "dance4",
+        "dash1", "dash2", "dash3", "declare", "ded_moroz", "ded_snegurochka",
+        "ded_snegurochka2", "dinamo", "dirol", "dntknw", "don-t_mention", "download",
+        "drinks", "dwarf", "elf", "facepalm", "fan_1", "fans", "feminist",
+        "feminist_en", "first_move", "flirt", "focus", "fool", "friends", "gamer1",
+        "gamer2", "gamer3", "gamer4", "girl_blum", "girl_blum2", "girl_cray",
+        "girl_cray2", "girl_cray3", "girl_crazy", "girl_dance", "girl_drink1",
+        "girl_drink2", "girl_drink3", "girl_drink4", "girl_haha", "girl_hide",
+        "girl_hospital", "girl_impossible", "girl_in_love", "girl_mad",
+        "girl_prepare_fish", "girl_sad", "girl_sigh", "girl_smile",
+        "girl_to_take_umbrage", "girl_to_take_umbrage2", "girl_wacko", "girl_werewolf",
+        "girl_wink", "girl_witch", "give_heart", "give_rose", "good", "good2", "good3",
+        "heat", "help", "hi", "hunter", "hysteric", "i-m_so_happy", "ireful1",
+        "ireful2", "ireful3", "jester", "king", "king2", "kiss", "kiss2", "kiss3",
+        "laugh1", "laugh2", "laugh3", "lazy", "lazy2", "lazy3", "locomotive", "mail1",
+        "mamba", "man_in_love", "mda", "meeting", "moil", "morpheus", "mosking",
+        "music", "music2", "nea", "negative", "neo", "new_russian", "nhl", "nhl2",
+        "nhl3", "nhl_checking", "nhl_crach", "nhl_fight", "no2", "offtopic", "ok",
+        "on_the_quiet", "on_the_quiet2", "orc", "padonak", "paint", "paint2", "paint3",
+        "paladin", "pardon", "parting", "parting2", "party", "patsak", "phi", "pilot",
+        "pioneer", "pioneer_smoke", "pleasantry", "pogranichnik", "polling", "popcorm1",
+        "popcorm2", "prankster", "prankster2", "preved", "protest", "punish", "punish2",
+        "queen", "rabbi", "rap", "read", "resent", "rofl", "russian", "sad", "santa",
+        "santa2", "santa3", "sarcasm", "sarcastic", "sarcastic_blum", "sarcastic_hand",
+        "scare", "scare2", "scenic", "sclerosis", "scout", "scout_en", "scratch_one-s_head", "search", "secret", "shablon_01", "shablon_02", "shablon_03",
+        "shablon_04", "shout", "slow", "slow_en", "smile3", "smoke", "snegurochka",
+        "snooks", "sorry", "sorry2", "spartak", "spruce_up", "stinker", "stop",
+        "sun_bespectacled", "superman", "superman2", "superstition", "swoon", "swoon2",
+        "take_example", "taunt", "tease", "telephone", "tender", "thank_you",
+        "thank_you2", "this", "to_babruysk", "to_become_senile", "to_clue",
+        "to_keep_order", "to_pick_ones_nose", "to_pick_ones_nose2",
+        "to_pick_ones_nose3", "to_pick_ones_nose_eat", "to_take_umbrage", "tommy",
+        "training1", "triniti", "umnik", "umnik2", "vampire", "victory", "vinsent",
+        "wacko", "wacko2", "warning", "warning2", "whistle", "whistle2", "whistle3",
+        "wild", "wink3", "wizard", "yahoo", "yes2", "yes3", "yes4", "yu"
+    )
+
+    /** "to_pick_ones_nose" -> "To pick ones nose". Standard pack only; the
+     *  curated palette above keeps its hand-written names. */
+    private fun displayName(asset: String): String =
+        asset.replace('_', ' ').replace('-', ' ').replaceFirstChar { it.uppercase() }
+
+    /** The full pickable set the customise sheet offers: the original palette,
+     *  then the extra koloboks, then the standard pack. */
+    val fullSet: List<String> = (palette.map { it.first } + extraKoloboks + standardPack).distinct()
+
+    /** Display name for any bundled asset. */
+    fun nameOf(asset: String): String =
+        palette.firstOrNull { it.first == asset }?.second ?: displayName(asset)
 
     /** Asset names that have a `:code:` (for tokenizing message bodies) — the
      *  WHOLE bundled set, so a `:viannen_03:` from a peer renders too. */
@@ -132,6 +191,27 @@ internal object Emoticons {
     }
 
     fun isEmoticon(context: Context, name: String): Boolean = bytes(context, name) != null
+
+    private val aspects = HashMap<String, Float>()
+
+    /** Width / height of [name] from the GIF header, 1f when unknown.
+     *
+     *  The set is not square — glyphs run from 20x20 to 38x27 — so a square
+     *  inline box shrinks the wide ones to fit and a line of smileys comes out
+     *  uneven. Callers size by HEIGHT and take the width from here, which is
+     *  what iOS does. The logical screen size lives in bytes 6..9 of every GIF,
+     *  little-endian, so this costs a lookup in the already-cached blob. */
+    fun aspect(context: Context, name: String): Float {
+        synchronized(aspects) { aspects[name]?.let { return it } }
+        val b = bytes(context, name)
+        val a = if (b != null && b.size >= 10) {
+            val w = (b[6].toInt() and 0xFF) or ((b[7].toInt() and 0xFF) shl 8)
+            val h = (b[8].toInt() and 0xFF) or ((b[9].toInt() and 0xFF) shl 8)
+            if (w > 0 && h > 0) w.toFloat() / h.toFloat() else 1f
+        } else 1f
+        synchronized(aspects) { aspects[name] = a }
+        return a
+    }
 
     /** A run of a tokenized message body: literal text or an emoticon. */
     sealed interface Token {
@@ -412,6 +492,7 @@ internal fun EmoticonText(
     // even type). The resolvers are remember()'d by the caller, so this only
     // rebuilds when the body or a resolver actually changes. animate=false also
     // renders a static first frame (no AnimatedImageDrawable churn).
+    val context = LocalContext.current
     val (annotated, inline) = remember(body, mentionNick, mentionMatch, onMentionClick, accent) {
         val inlineMap = HashMap<String, InlineTextContent>()
         val ann = buildAnnotatedString {
@@ -429,7 +510,16 @@ internal fun EmoticonText(
                             // them, so even the IME-recompose storm never re-decodes
                             // (the old OOM) — no per-cell decoder. Bounded by the
                             // LazyColumn (only visible rows compose).
-                            Placeholder(width = 1.45.em, height = 1.45.em, placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter),
+                            // Height is fixed, width follows the glyph's own
+                            // aspect: the set is not square (20x20 to 38x27), and
+                            // a square box shrank the wide ones to fit, so a line
+                            // of smileys came out visibly uneven. iOS sizes the
+                            // same way.
+                            Placeholder(
+                                width = (1.45f * Emoticons.aspect(context, asset)).em,
+                                height = 1.45.em,
+                                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                            ),
                         ) { AnimatedEmoticon(asset, Modifier.fillMaxSize()) }
                     }
                 }
