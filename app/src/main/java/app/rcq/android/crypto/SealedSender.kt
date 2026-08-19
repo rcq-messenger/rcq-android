@@ -45,6 +45,12 @@ object SealedSender {
     private const val WIRE_V1 = 1
     private const val WIRE_V2 = 2
 
+    /** libsignal device id of the install that owns an account's PRIMARY key
+     *  bundle. It is the only id the wire ever leaves implicit: a v=2 inner
+     *  JSON without `dev` comes from device 1, which is what every build in
+     *  the field sends and the only thing they know how to read. */
+    const val PRIMARY_DEVICE_ID = 1
+
     class DecryptException(message: String) : Exception(message)
 
     data class Decrypted(
@@ -59,8 +65,16 @@ object SealedSender {
     /** A v=2 envelope after the outer ECIES is peeled but before the inner
      *  libsignal ciphertext is run through the Double Ratchet. [kind] is
      *  "prekey" (a PreKeySignalMessage that establishes the inbound session)
-     *  or "signal" (a SignalMessage on an existing session). */
-    data class UnwrappedV2(val senderUin: Int, val kind: String, val msgBytes: ByteArray)
+     *  or "signal" (a SignalMessage on an existing session).
+     *  [senderDeviceId] names WHICH install of [senderUin] holds the other end
+     *  of the ratchet — a session belongs to one pair of devices, so it is
+     *  half of the protocol address the ciphertext must be run against. */
+    data class UnwrappedV2(
+        val senderUin: Int,
+        val kind: String,
+        val msgBytes: ByteArray,
+        val senderDeviceId: Int = PRIMARY_DEVICE_ID,
+    )
 
     fun encryptV1(
         envelope: Envelope,
@@ -194,12 +208,15 @@ object SealedSender {
     /** Wrap an already-serialized libsignal ciphertext in the v=2 outer
      *  ECIES, addressed to [recipientIdentityPub] (the peer's X25519
      *  messaging identity key, same one v=1 uses). [kind] is "prekey" or
-     *  "signal". Byte-compatible with iOS `encryptStage3`. */
+     *  "signal". [ownDeviceId] is the install this ratchet belongs to, so the
+     *  recipient can address the right session. Byte-compatible with iOS
+     *  `encryptStage3`. */
     fun wrapV2(
         libsignalBytes: ByteArray,
         kind: String,
         recipientIdentityPub: ByteArray,
         ownUin: Int,
+        ownDeviceId: Int = PRIMARY_DEVICE_ID,
     ): String {
         val gen = X25519KeyPairGenerator().apply {
             init(X25519KeyGenerationParameters(SecureRandom()))
@@ -214,6 +231,9 @@ object SealedSender {
             addProperty("from", ownUin)
             addProperty("kind", kind)
             addProperty("msg", b64(libsignalBytes))
+            // Left out for the primary: an older peer reads this JSON without
+            // knowing the key, and its absence already means device 1 there.
+            if (ownDeviceId != PRIMARY_DEVICE_ID) addProperty("dev", ownDeviceId)
         }.toString().toByteArray(Charsets.UTF_8)
 
         val combined = aeadSeal(aeadKey, aad = ephPub, plaintext = inner)
@@ -253,7 +273,8 @@ object SealedSender {
         val from = obj.get("from")?.asInt ?: throw DecryptException("missing sender")
         val kind = obj.get("kind")?.asString ?: throw DecryptException("missing kind")
         val msg = unb64(obj.get("msg").asString)
-        return UnwrappedV2(senderUin = from, kind = kind, msgBytes = msg)
+        val dev = obj.get("dev")?.takeIf { !it.isJsonNull }?.asInt ?: PRIMARY_DEVICE_ID
+        return UnwrappedV2(senderUin = from, kind = kind, msgBytes = msg, senderDeviceId = dev)
     }
 
     /** Peek the outer wire version (1 or 2) without decrypting, so the

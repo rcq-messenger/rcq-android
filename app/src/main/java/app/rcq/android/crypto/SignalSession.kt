@@ -35,41 +35,114 @@ import org.signal.libsignal.protocol.state.PreKeyBundle
  */
 object SignalSession {
     private const val TAG = "RCQsignal"
-    // libsignal uses a per-account single device; we always address device 1
-    // (matching iOS `ProtocolAddress(name:deviceId:1)`).
-    private const val DEVICE_ID = 1
+    // A Double Ratchet session belongs to ONE PAIR of devices, so the address
+    // carries the peer's install, not just their account. Device 1 is the
+    // install holding the account's primary bundle; every other install of the
+    // same account registers separately and gets an id of its own.
+    private const val DEVICE_ID = SealedSender.PRIMARY_DEVICE_ID
 
-    private fun addressOf(uin: Int) = SignalProtocolAddress(uin.toString(), DEVICE_ID)
+    private fun addressOf(uin: Int, deviceId: Int = DEVICE_ID) =
+        SignalProtocolAddress(uin.toString(), deviceId)
+
+    /** A session record we can ENCRYPT on. A record whose current state was
+     *  archived still opens what is already in flight, but has no sending
+     *  chain and has to be rebuilt before the next send. */
+    private fun usableSession(stores: SignalStores, addr: SignalProtocolAddress): Boolean =
+        stores.loadSession(addr)?.hasSenderChain() == true
 
     // ── STEP 4: session establishment (X3DH / PQXDH) ─────────────────
 
     /**
-     * Idempotent session establishment for [uin]. If a libsignal session
-     * already exists locally, returns immediately. Otherwise fetches the
-     * peer's pre-key bundle (consuming one one-time pre-key on the server)
-     * and runs [SessionBuilder.process] to seed a SessionRecord. Suspends on
-     * the HTTP fetch; call once before the first v=2 encrypt to a peer.
+     * Idempotent session establishment with device [deviceId] of [uin]. If a
+     * libsignal session already exists locally, returns immediately. Otherwise
+     * fetches that device's pre-key bundle (consuming one one-time pre-key on
+     * the server) and runs [SessionBuilder.process] to seed a SessionRecord.
+     * Suspends on the HTTP fetch; call once before the first v=2 encrypt to a
+     * device.
+     *
+     * A SECONDARY device is also fetched for when a session already exists but
+     * its OUTER key does not: a session seeded from that device's own
+     * PreKeySignalMessage never went past a bundle, and without the outer key
+     * there is nothing to seal its copy to.
+     *
+     * A null [deviceId] means the caller could not enumerate the peer's
+     * installs (an island with no device registry, or a lookup that failed):
+     * the account's single published bundle is fetched by the legacy route and
+     * addressed as the primary, exactly as before per-device bundles existed.
+     * A named device always goes through the per-device route, the primary
+     * included — the legacy route is deliberately 404 for an account that has
+     * a QR-linked web session, so that a sender too old to fan out drops to
+     * v=1 instead of sealing to one install of two.
      *
      * Returns true if a usable session exists afterwards, false if the peer
      * has no bundle / the fetch failed — in which case the caller stays on
      * v=1. Never throws for the "no bundle" case; the API layer's error is
      * caught and reported as false.
      */
-    suspend fun ensureSession(stores: SignalStores, api: RcqApi, uin: Int): Boolean {
-        val addr = addressOf(uin)
+    suspend fun ensureSession(
+        stores: SignalStores,
+        api: RcqApi,
+        uin: Int,
+        deviceId: Int? = null,
+    ): Boolean {
+        val target = deviceId ?: DEVICE_ID
+        val addr = addressOf(uin, target)
         // Fast path: existing session. The lock keeps the ratchet read-modify-
         // write atomic against a concurrent encrypt/decrypt on the same account
         // (see [encrypt]/[decrypt]); it is never held across the network fetch.
-        synchronized(stores) { if (stores.loadSession(addr) != null) return true }
+        val haveSession = synchronized(stores) { usableSession(stores, addr) }
+        val needsOuterKey = target != DEVICE_ID && stores.peerDeviceOuterKey(uin, target) == null
+        if (haveSession && !needsOuterKey) return true
         val bundle = try {
-            api.fetchPeerBundle(uin)
+            fetchBundle(api, uin, deviceId)
         } catch (e: Exception) {
             // No published bundle (peer hasn't bootstrapped v=2) or a transient
-            // error: stay on v=1.
-            Log.d(TAG, "no v2 bundle for $uin (${e.javaClass.simpleName}); using v1")
+            // error: stay on v=1 / leave this device out of the fan-out.
+            Log.d(TAG, "no v2 bundle for $uin/$deviceId (${e.javaClass.simpleName}); using v1")
             return false
         }
-        return establishSession(stores, bundle)
+        if (bundle.uin != uin) {
+            // The answer names somebody else (or nobody, which reads as 0).
+            // A session seeded under that name would take every message to
+            // this peer with it, so refuse and let the caller use v=1.
+            Log.w(TAG, "bundle for $uin/$deviceId came back naming ${bundle.uin}; ignoring")
+            return false
+        }
+        rememberOuterKey(stores, bundle, target)
+        if (needsOuterKey && stores.peerDeviceOuterKey(uin, target) == null) {
+            // An island too old to publish per-device outer keys. Guessing the
+            // account key here is what makes a copy this install can never
+            // open, so the device drops out of the fan-out instead.
+            Log.w(TAG, "device $uin/$target published no sealed-sender key; skipping it")
+            return false
+        }
+        if (haveSession) return true
+        return establishSession(stores, bundle, target)
+    }
+
+    private suspend fun fetchBundle(api: RcqApi, uin: Int, deviceId: Int?): RcqApi.PeerBundle {
+        if (deviceId == null) return api.fetchPeerBundle(uin)
+        return try {
+            api.fetchPeerDeviceBundle(uin, deviceId)
+        } catch (e: Exception) {
+            // The per-device route is the one to ask — the legacy route is
+            // deliberately 404 for an account that has a second install — but
+            // an island too old to have it 404s every device. Only the primary
+            // has somewhere to fall back to; a secondary that island does not
+            // know about has no bundle there at all.
+            if (deviceId != DEVICE_ID) throw e
+            api.fetchPeerBundle(uin)
+        }
+    }
+
+    /** Keep the OUTER (sealed-sender) key of a peer's secondary device. Device
+     *  1 is not kept: its outer key is the account identity key the caller
+     *  already holds for v=1. */
+    private fun rememberOuterKey(stores: SignalStores, bundle: RcqApi.PeerBundle, deviceId: Int) {
+        if (deviceId == DEVICE_ID) return
+        val outer = bundle.sealed_sender_pub?.let { runCatching { b64d(it) }.getOrNull() } ?: return
+        if (outer.isEmpty()) return
+        stores.storePeerDeviceOuterKey(bundle.uin, deviceId, outer)
     }
 
     /**
@@ -78,13 +151,17 @@ object SignalSession {
      * in tests with a locally-built bundle, and as a seam for a future
      * session warm-up. Returns true if a session exists afterwards.
      */
-    fun establishSession(stores: SignalStores, bundle: RcqApi.PeerBundle): Boolean {
-        val addr = addressOf(bundle.uin)
+    fun establishSession(
+        stores: SignalStores,
+        bundle: RcqApi.PeerBundle,
+        deviceId: Int = DEVICE_ID,
+    ): Boolean {
+        val addr = addressOf(bundle.uin, deviceId)
         return try {
-            val preKeyBundle = buildPreKeyBundle(bundle)
+            val preKeyBundle = buildPreKeyBundle(bundle, deviceId)
             synchronized(stores) {
                 // Another sender may have established it while we fetched.
-                if (stores.loadSession(addr) != null) return true
+                if (usableSession(stores, addr)) return true
                 // SessionBuilder takes the four non-Kyber stores (the initiator
                 // never consults its own Kyber store — it uses the peer's Kyber
                 // pub from the bundle).
@@ -97,7 +174,7 @@ object SignalSession {
         }
     }
 
-    private fun buildPreKeyBundle(b: RcqApi.PeerBundle): PreKeyBundle {
+    private fun buildPreKeyBundle(b: RcqApi.PeerBundle, deviceId: Int): PreKeyBundle {
         val identityKey = IdentityKey(b64d(b.signal_identity_key))
         val signedPub = ECPublicKey(b64d(b.signed_prekey.publicKey))
         val signedSig = b64d(b.signed_prekey.signature)
@@ -107,7 +184,7 @@ object SignalSession {
         return if (opk != null) {
             PreKeyBundle(
                 b.registration_id,
-                DEVICE_ID,
+                deviceId,
                 opk.id,
                 ECPublicKey(b64d(opk.publicKey)),
                 b.signed_prekey.id,
@@ -125,7 +202,7 @@ object SignalSession {
             Log.i(TAG, "bundle for ${b.uin} had no OPK; establishing without one")
             PreKeyBundle(
                 b.registration_id,
-                DEVICE_ID,
+                deviceId,
                 PreKeyBundle.NULL_PRE_KEY_ID,
                 null,
                 b.signed_prekey.id,
@@ -144,9 +221,16 @@ object SignalSession {
     /**
      * Encrypt [envelope] to [recipientUin] over the established libsignal
      * session, then wrap the ratchet ciphertext in the v=2 outer ECIES
-     * addressed to [recipientMessagingPub] (the peer's X25519 messaging
-     * identity key — the same key v=1 uses; distinct from the libsignal
-     * identity key inside the ratchet). [ensureSession] must have run first.
+     * addressed to the recipient DEVICE's outer key: [recipientMessagingPub]
+     * (the peer's X25519 messaging identity key — the same key v=1 uses;
+     * distinct from the libsignal identity key inside the ratchet) for the
+     * primary, and the key that install published for itself for a secondary.
+     * [ensureSession] must have run first.
+     *
+     * Throws when a secondary's outer key is unknown. Sealing to the account
+     * key instead would hand that install a copy it can never open, which from
+     * the outside is exactly the silent loss the fan-out exists to stop — so
+     * the device is skipped, never guessed at.
      *
      * libsignal emits a self-contained PreKeySignalMessage ("prekey") on
      * every send until the peer replies, then switches to SignalMessage
@@ -160,8 +244,14 @@ object SignalSession {
         recipientMessagingPub: ByteArray,
         recipientUin: Int,
         ownUin: Int,
+        recipientDeviceId: Int = DEVICE_ID,
+        ownDeviceId: Int = DEVICE_ID,
     ): String {
-        val addr = addressOf(recipientUin)
+        val addr = addressOf(recipientUin, recipientDeviceId)
+        val outerPub =
+            if (recipientDeviceId == DEVICE_ID) recipientMessagingPub
+            else stores.peerDeviceOuterKey(recipientUin, recipientDeviceId)
+                ?: error("no sealed-sender key for $recipientUin/$recipientDeviceId")
         val (kind, libsignalBytes) = synchronized(stores) {
             val cipher = SessionCipher(stores, stores, stores, stores, stores, addr)
             val ciphertext: CiphertextMessage = cipher.encrypt(envelope.toJsonBytes())
@@ -172,7 +262,7 @@ object SignalSession {
             }
             k to ciphertext.serialize()
         }
-        return SealedSender.wrapV2(libsignalBytes, kind, recipientMessagingPub, ownUin)
+        return SealedSender.wrapV2(libsignalBytes, kind, outerPub, ownUin, ownDeviceId)
     }
 
     /**
@@ -188,7 +278,7 @@ object SignalSession {
         ownIdentityPub: ByteArray,
     ): SealedSender.Decrypted {
         val u = SealedSender.unwrapV2(payloadB64, ownIdentityPriv, ownIdentityPub)
-        val addr = addressOf(u.senderUin)
+        val addr = addressOf(u.senderUin, u.senderDeviceId)
         val plain: ByteArray = synchronized(stores) {
             val cipher = SessionCipher(stores, stores, stores, stores, stores, addr)
             try {
@@ -208,11 +298,11 @@ object SignalSession {
                 // session can't complete. Drop it so the next PreKeySignalMessage
                 // rebuilds cleanly. Mirrors iOS decryptV2's missingSignedPreKey
                 // handling.
-                Log.w(TAG, "v2 decrypt InvalidKeyId from ${u.senderUin}; dropping session to allow rebuild")
+                Log.w(TAG, "v2 decrypt InvalidKeyId from ${u.senderUin}/${u.senderDeviceId}; dropping session to allow rebuild")
                 stores.deleteSession(addr)
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "v2 decrypt failed from ${u.senderUin} (kind=${u.kind}): ${e.javaClass.simpleName}: ${e.message}")
+                Log.w(TAG, "v2 decrypt failed from ${u.senderUin}/${u.senderDeviceId} (kind=${u.kind}): ${e.javaClass.simpleName}: ${e.message}")
                 throw e
             }
         }
