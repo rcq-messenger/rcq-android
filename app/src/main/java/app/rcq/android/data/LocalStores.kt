@@ -288,10 +288,23 @@ object LocalStores {
         // Stored as comma-joined asset names (asset names never contain commas).
         // Panel: absent/"" → empty (the CTA shows). Reactions: absent → the
         // default six; "" → the user deliberately cleared them all.
-        _panelEmojis.value = prefs.getString(K_PANEL_EMOJI, "")!!.split(",").filter { it.isNotBlank() }
-        _reactionEmojis.value = prefs.getString(K_REACTION_EMOJI, null)
+        //
+        // Both filtered against the CURRENT pack: a set curated before a pack
+        // was retired keeps its asset names, and a name with no glyph behind
+        // it drew as bare text in the picker (2026-08-20, the day the old pack
+        // left). A reaction set the retirement emptied falls back to the
+        // defaults — that emptiness is not the user's "cleared them all".
+        val valid = app.rcq.android.ui.Emoticons.fullSet.toSet()
+        _panelEmojis.value = prefs.getString(K_PANEL_EMOJI, "")!!.split(",")
+            .filter { it.isNotBlank() && it in valid }
+        val storedReactions = prefs.getString(K_REACTION_EMOJI, null)
             ?.split(",")?.filter { it.isNotBlank() }
-            ?: DEFAULT_REACTION_EMOJIS
+        val liveReactions = storedReactions?.filter { it in valid }
+        _reactionEmojis.value = when {
+            storedReactions == null -> DEFAULT_REACTION_EMOJIS
+            liveReactions!!.isEmpty() && storedReactions.isNotEmpty() -> DEFAULT_REACTION_EMOJIS
+            else -> liveReactions
+        }
     }
 
     /** Point the per-account flows at [accountId]'s slots and reload them.
