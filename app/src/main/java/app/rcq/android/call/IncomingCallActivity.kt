@@ -217,27 +217,48 @@ class IncomingCallActivity : ComponentActivity() {
      *  and either of those reaching onStop first would otherwise re-post a
      *  notification for a call that is already over. */
     override fun onStop() {
+        // Cleared before super: the process-lifecycle ON_STOP is dispatched from
+        // inside it, and CallController must already see the surface as down.
+        IncomingCallStore.fsiSurfaceActive = false
         super.onStop()
         if (isFinishing) return
         val p = IncomingCallStore.pending ?: return
         if (p.callId != callId) return
         ringer?.stop()
-        Push.showIncomingCall(
-            this,
-            com.google.gson.JsonObject().apply {
-                addProperty("call_id", p.callId)
-                addProperty("from_uin", p.fromUin)
-                addProperty("sdp", p.sdp)
-                addProperty("media", p.media)
-                addProperty("nickname", p.nickname)
-            },
-        )
+        // Deferred, not immediate: a MIUI keyguard dismiss bounces this activity
+        // stop/start, and posting here meant a moment of the AUDIBLE call channel
+        // (the screen is unlocked by now) that onStart cancelled milliseconds
+        // later — the post/cancel race left the system ringtone playing next to
+        // the Ringer (report #638). A real departure survives the delay; the
+        // bounce cancels the runnable in onStart before it fires.
+        val appCtx = applicationContext
+        val repost = Runnable {
+            if (IncomingCallStore.pending?.callId != p.callId) return@Runnable
+            Push.showIncomingCall(
+                appCtx,
+                com.google.gson.JsonObject().apply {
+                    addProperty("call_id", p.callId)
+                    addProperty("from_uin", p.fromUin)
+                    addProperty("sdp", p.sdp)
+                    addProperty("media", p.media)
+                    addProperty("nickname", p.nickname)
+                },
+            )
+        }
+        pendingRepost = repost
+        repostHandler.postDelayed(repost, REPOST_DELAY_MS)
     }
 
     /** Coming back to the screen takes the notification down again, so the two
      *  never ring together. */
     override fun onStart() {
+        // Set before super: the process-lifecycle ON_START is dispatched from
+        // inside it, and CallController's foreground handoff must already see
+        // that this surface owns the ring (report #638).
+        IncomingCallStore.fsiSurfaceActive = true
         super.onStart()
+        pendingRepost?.let { repostHandler.removeCallbacks(it) }
+        pendingRepost = null
         val p = IncomingCallStore.pending ?: return
         if (p.callId != callId || isFinishing) return
         Push.cancelCallNotification(this)
@@ -246,6 +267,14 @@ class IncomingCallActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        IncomingCallStore.fsiSurfaceActive = false
+        if (isFinishing) {
+            // Answered, declined, or dismissed — a parked re-post would revive a
+            // notification for a call that is already over. A non-finishing
+            // destroy keeps it: the ring must still follow the person out.
+            pendingRepost?.let { repostHandler.removeCallbacks(it) }
+            pendingRepost = null
+        }
         window.decorView.removeCallbacks(watchdog)
         if (receiverRegistered) runCatching { unregisterReceiver(cancelReceiver) }
         ringer?.stop()
@@ -253,6 +282,12 @@ class IncomingCallActivity : ComponentActivity() {
     }
 
     companion object {
+        /** Survives the MIUI stop/start bounce even if the system recreates the
+         *  activity between the two: any instance's onStart cancels it. */
+        private val repostHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        private var pendingRepost: Runnable? = null
+        private const val REPOST_DELAY_MS = 800L
+
         const val ACTION_CANCEL = "app.rcq.android.CALL_CANCELLED"
         /** Answer pressed on the ringing notification (as opposed to on this
          *  screen, which may never have been shown at all). */

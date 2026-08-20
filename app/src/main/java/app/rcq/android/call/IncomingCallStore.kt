@@ -34,6 +34,14 @@ object IncomingCallStore {
     var pending: Pending? = null
         private set
 
+    /** True while [IncomingCallActivity] is started — the full-screen surface
+     *  owns the ring for that stretch. [CallController]'s foreground handoff
+     *  must not start its own Ringer over it: the surface itself flips the
+     *  process to "foreground", and MIUI additionally bounces it stop/start on
+     *  keyguard dismiss, which played two ringtones at once (report #638). */
+    @Volatile
+    var fsiSurfaceActive = false
+
     private val _acceptedCallId = MutableStateFlow<String?>(null)
 
     /** The call id the user accepted on the full-screen UI, or null. Observable
