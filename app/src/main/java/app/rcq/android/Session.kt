@@ -87,12 +87,13 @@ sealed interface RandomState {
  *  offline-queue drain — that was the bug where a reaction, read receipt or
  *  edit from iOS (which has always typed its control envelopes) reached an
  *  online Android peer minutes late, on reconnect. */
-/** Flip to true once v0.76+ (the first build that ingests every sealed type on
- *  the live socket, see [SEALED_WS_TYPES]) is the common case in the field.
- *  Until then control envelopes keep going out labelled "message": older
- *  Android peers would otherwise not apply a reaction, edit or
- *  delete-for-everyone until their next reconnect. */
-private const val TYPED_CONTROL_SENDS = false
+/** Control envelopes go out under their REAL type. Flipped for 0.133: v0.76
+ *  (the first build that ingests every sealed type on the live socket, see
+ *  [SEALED_WS_TYPES]) has been the common case for weeks, and an untyped
+ *  receipt is one a peer's silence probe cannot attribute to a device —
+ *  it cleared nothing, so a healthy phone read as a dead install
+ *  (fan-out live test 2026-08-20). */
+private const val TYPED_CONTROL_SENDS = true
 
 /** Frame types that carry a sealed envelope on the live socket. Anything not
  *  listed is dropped in silence, which is why the list has to cover every type
