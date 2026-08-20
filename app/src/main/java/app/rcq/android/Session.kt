@@ -507,6 +507,25 @@ class Session(context: Context) {
     private val peerDeviceCache =
         java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<Int>>>()
 
+    // ── Silence probe: notice a peer whose install was replaced under us ──
+    // A replaced install (re-claimed slot, reinstall, phrase restore onto a
+    // new machine) is INVISIBLE from the sending side: the island takes every
+    // copy sealed to the session the peer no longer holds, the receipt simply
+    // never comes, and an established session means the bundle is not read
+    // again for hours. Sustained silence IS the signal: if this side keeps
+    // sending and that DEVICE has answered nothing — no receipt, no message,
+    // nothing naming it — the next send rebuilds its session outright (fresh
+    // bundle + X3DH). Tracked PER DEVICE, exactly like the web (a peer's
+    // phone answering promptly says nothing about their dead browser); the
+    // web's live test 2026-08-20 is the reference implementation. Keys are
+    // "uin:deviceId"; in-memory on purpose — restart amnesia just means the
+    // first send after a relaunch arms the timers afresh.
+    private val awaitingReplySince = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lastSilenceProbeAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private val peerSilenceMs = 2 * 60_000L
+    private val silenceProbeMinIntervalMs = 30 * 60_000L
+
     // True once a LIVE contact refresh has established real presence for this
     // profile. Until then any apparent online/offline transition is an artefact
     // of the disk-cached roster (which forces everyone offline), not something
@@ -1006,7 +1025,7 @@ class Session(context: Context) {
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         lastVisitAt.clear()
         _contacts.value = emptyList()
@@ -2182,7 +2201,7 @@ class Session(context: Context) {
             app.rcq.android.push.embedded.EmbeddedDistributor.clear(appCtx)
         }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
-        peerIdentityCache.clear(); noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false; ackedReads.clear()
+        peerIdentityCache.clear(); noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _stories.value = emptyList(); _devices.value = null
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
@@ -3912,7 +3931,7 @@ class Session(context: Context) {
             app.rcq.android.data.VisitStore.wipe()
         }
         peerIdentityCache.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -4176,7 +4195,7 @@ class Session(context: Context) {
         store.updateAccount(newUin, token)
         api.setToken(token)
         peerIdentityCache.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -4613,10 +4632,39 @@ class Session(context: Context) {
                 // through to it rather than claiming a fan-out it never made.
                 android.util.Log.w("RCQsignal", "device list for $toUin unavailable; sending v1")
             } else if (devices.isNotEmpty()) {
+                val now = System.currentTimeMillis()
+                // The silence probe is for PEERS, never our own carbon: rebuilding
+                // one of our OWN linked sessions (a web device) on silence would
+                // re-key a session that install is actively using, and our own
+                // devices have their own ways to recover. A carbon to our uin
+                // still fans out v=2, it just never arms or trips the probe.
+                val probePeer = toUin != me
                 val copies = devices.mapNotNull { dev ->
-                    if (!SignalSession.ensureSession(signalStores, api, toUin, dev)) return@mapNotNull null
+                    // The silence probe (see awaitingReplySince): a device that
+                    // has answered NOTHING for two minutes of active sending
+                    // gets a fresh bundle + X3DH instead of another copy on a
+                    // possibly dead session. Throttled per device; an unchanged
+                    // peer (merely offline) just costs one prekey exchange and
+                    // reads both the old backlog and the new session fine.
+                    val probeKey = "$toUin:$dev"
+                    val waitingSince = if (probePeer) awaitingReplySince[probeKey] else null
+                    val probe = waitingSince != null && now - waitingSince > peerSilenceMs &&
+                        now - (lastSilenceProbeAt[probeKey] ?: 0L) > silenceProbeMinIntervalMs
+                    val sessionReady = if (probe) {
+                        lastSilenceProbeAt[probeKey] = now
+                        SignalSession.rebuildSession(signalStores, api, toUin, dev) ||
+                            SignalSession.ensureSession(signalStores, api, toUin, dev)
+                    } else {
+                        SignalSession.ensureSession(signalStores, api, toUin, dev)
+                    }
+                    if (!sessionReady) return@mapNotNull null
                     runCatching {
                         SealedCopy(dev, SignalSession.encrypt(signalStores, env, recipientPub, toUin, me, dev, mine))
+                    }.onSuccess {
+                        // Armed AFTER a successful seal: from here this device
+                        // owes us SOMETHING (a receipt at least), and hearing
+                        // nothing for long enough is what triggers the probe.
+                        if (probePeer) awaitingReplySince.putIfAbsent(probeKey, now)
                     }.onFailure {
                         android.util.Log.w("RCQsignal", "v2 encrypt failed for $toUin/$dev: ${it.message}")
                     }.getOrNull()
@@ -6777,10 +6825,22 @@ class Session(context: Context) {
      *  ECIES path. Shared by 1:1 and group ingest so a v=2 message decrypts
      *  wherever it lands. Synchronous (no network on either path). */
     private fun decryptInbound(payloadB64: String): SealedSender.Decrypted =
-        if (SealedSender.wireVersion(payloadB64) == 2) {
+        (if (SealedSender.wireVersion(payloadB64) == 2) {
             SignalSession.decrypt(signalStores, payloadB64, identityPriv(), identityPub())
         } else {
             SealedSender.decryptV1(payloadB64, identityPriv(), identityPub())
+        }).also { d ->
+            // Any decrypted envelope NAMING its device — a message, a receipt,
+            // anything — proves that install can talk to us: its silence probe
+            // stands down. v=1 names no device and clears nothing (crediting
+            // the primary for a copy that may have come from a sibling is
+            // exactly the confusion that kept a dead device unhealed on the
+            // web). Both delivery paths (live socket, queue drain) come
+            // through here, so this is the one place to listen.
+            val dev = d.senderDeviceId
+            if (dev != null && d.senderUin != store.uin) {
+                awaitingReplySince.remove("${d.senderUin}:$dev")
+            }
         }
 
     /** Surface a failed inbound decrypt instead of swallowing it. A v=2

@@ -60,6 +60,10 @@ object SealedSender {
         /** The sender's island host if they included it (v=1 `from_host`); null
          *  for pre-`from_host` senders and all v=2 (same-island). Drives Variant A. */
         val senderHost: String? = null,
+        /** WHICH install of the sender produced this envelope: the v=2 protocol
+         *  address names it, v=1 names no device at all. Feeds the silence
+         *  probe — an envelope that does not name its device clears nothing. */
+        val senderDeviceId: Int? = null,
     )
 
     /** A v=2 envelope after the outer ECIES is peeled but before the inner

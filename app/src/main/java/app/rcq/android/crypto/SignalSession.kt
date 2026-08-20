@@ -174,6 +174,34 @@ object SignalSession {
         }
     }
 
+    /**
+     * Tear the session with [uin]/[deviceId] down and X3DH it again from a
+     * FRESH bundle, trusting nothing held locally — not the session, not the
+     * cached outer key, not the recorded identity (it may itself have been
+     * read only after the peer's install was replaced). The silence probe's
+     * one move: from any wrong state, a rebuild is what works. The store's
+     * TOFU accepts the (possibly changed) identity and flags it, which is the
+     * existing identity-change warning doing its job.
+     */
+    suspend fun rebuildSession(
+        stores: SignalStores,
+        api: RcqApi,
+        uin: Int,
+        deviceId: Int,
+    ): Boolean {
+        val bundle = try {
+            fetchBundle(api, uin, deviceId)
+        } catch (e: Exception) {
+            Log.w(TAG, "silence-probe rebuild: no bundle for $uin/$deviceId (${e.javaClass.simpleName})")
+            return false
+        }
+        if (bundle.uin != uin) return false
+        rememberOuterKey(stores, bundle, deviceId)
+        synchronized(stores) { stores.deleteSession(addressOf(uin, deviceId)) }
+        Log.w(TAG, "silence probe: fresh X3DH with $uin/$deviceId")
+        return establishSession(stores, bundle, deviceId)
+    }
+
     private fun buildPreKeyBundle(b: RcqApi.PeerBundle, deviceId: Int): PreKeyBundle {
         val identityKey = IdentityKey(b64d(b.signal_identity_key))
         val signedPub = ECPublicKey(b64d(b.signed_prekey.publicKey))
@@ -308,7 +336,7 @@ object SignalSession {
         }
         // v=2 carries no separate signing pub — the ratchet authenticates the
         // sender — so report an empty one (ingest never reads it).
-        return SealedSender.Decrypted(u.senderUin, Envelope.fromJsonBytes(plain), ByteArray(0))
+        return SealedSender.Decrypted(u.senderUin, Envelope.fromJsonBytes(plain), ByteArray(0), senderDeviceId = u.senderDeviceId)
     }
 
     private fun b64d(s: String): ByteArray = Base64.decode(s, Base64.NO_WRAP)
