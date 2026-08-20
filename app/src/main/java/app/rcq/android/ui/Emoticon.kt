@@ -83,7 +83,7 @@ internal object Emoticons {
     /** Default reactions when the user hasn't customised their set (mirrors the
      *  historical fixed list). The user can now pick up to 6 of their own in the
      *  emoji-customise sheet; see LocalStores.reactionEmojis. */
-    val defaultReactions = listOf("good", "give_heart", "biggrin", "shok", "cray", "mad")
+    val defaultReactions = listOf("good", "give_heart", "laugh1", "scare", "cray", "ireful1")
 
     /** Extra koloboks (from the full Kolobok library) the user can pick into
      *  their panel / reactions, on top of the original set below. Asset names
@@ -167,7 +167,16 @@ internal object Emoticons {
 
     /** The full pickable set the customise sheet offers: the original palette,
      *  then the extra koloboks, then the standard pack. */
-    val fullSet: List<String> = (palette.map { it.first } + extraKoloboks + standardPack).distinct()
+    /** What the customise sheet OFFERS: the current pack, and only it. The older
+     *  set stays bundled and stays tokenizable (see [codes]) so a `:smile:` sent
+     *  last week still draws a smiley instead of turning into raw text — but it
+     *  is not offered any more, or the grid would mix two drawing styles. */
+    val fullSet: List<String> = standardPack
+
+    /** Every asset that has a `:code:`, INCLUDING the retired set: a body is
+     *  tokenized against this, never against what the picker offers. */
+    private val tokenizable: List<String> =
+        (standardPack + palette.map { it.first } + extraKoloboks).distinct()
 
     /** Display name for any bundled asset. */
     fun nameOf(asset: String): String =
@@ -175,7 +184,7 @@ internal object Emoticons {
 
     /** Asset names that have a `:code:` (for tokenizing message bodies) — the
      *  WHOLE bundled set, so a `:viannen_03:` from a peer renders too. */
-    private val codes: Set<String> = fullSet.toSet()
+    private val codes: Set<String> = tokenizable.toSet()
 
     private val cache = HashMap<String, ByteArray?>()
 
