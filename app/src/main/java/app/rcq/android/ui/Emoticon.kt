@@ -85,31 +85,6 @@ internal object Emoticons {
      *  emoji-customise sheet; see LocalStores.reactionEmojis. */
     val defaultReactions = listOf("good", "give_heart", "laugh1", "scare", "cray", "ireful1")
 
-    /** Extra koloboks (from the full Kolobok library) the user can pick into
-     *  their panel / reactions, on top of the original set below. Asset names
-     *  are the `:code:` wire form and MUST be bundled identically on iOS+Android. */
-    val extraKoloboks = listOf(
-        "Cherna_01", "FinouCat_02", "Koshechka_06", "Laie_74", "Mauridia_02",
-        "Rulezzz_03", "WhiteVoid_1", "d_clock", "kirtsun_05", "l_girl_kiss",
-        "l_lovers", "l_teddy", "snoozer_likelinux_man", "viannen_03", "viannen_06",
-        "viannen_09", "viannen_35", "viannen_48", "viannen_76", "viannen_88",
-    )
-
-    /** The original composer palette: (asset, display name), Kolobok ICQ "set 14".
-     *  Codes are the `:asset:` form; must match the iOS `Emoticons.entries`. */
-    val palette: List<Pair<String, String>> = listOf(
-        "smile" to "Happy", "biggrin" to "Laughing", "lol" to "LOL", "rofl" to "ROFL",
-        "good" to "Thumbs Up", "give_heart" to "Heart", "man_in_love" to "In Love", "give_rose" to "Rose",
-        "kiss" to "Kiss", "kiss3" to "Smooch", "air_kiss" to "Air Kiss", "blush" to "Embarrassed",
-        "i_am_so_happy" to "So Happy", "dance" to "Dancing", "music" to "Music", "cool" to "Cool",
-        "gamer" to "Gamer", "drinks" to "Cheers", "hi" to "Hi", "bye2" to "Bye",
-        "blum1" to "Tongue", "mocking" to "Teasing", "crazy" to "Crazy", "wacko1" to "Wacko",
-        "nea" to "Pensive", "scratch_one-s_head" to "Thinking", "unknown" to "Dunno", "shok" to "Shocked",
-        "sad" to "Sad", "cray" to "Crying", "pardon" to "Pardon", "sorry" to "Sorry",
-        "mad" to "Angry", "ireful" to "Furious", "shout" to "Shouting", "bad" to "Sick",
-        "diablo" to "Devil", "bomb" to "Bomb", "girl_angel" to "Angel", "hang1" to "Hang",
-    )
-
     /** The "standart" Kolobok set (258 glyphs), bundled on every client.
      *
      *  A plain list, not 258 hand-written pairs: the display name is mechanical
@@ -175,12 +150,10 @@ internal object Emoticons {
 
     /** Every asset that has a `:code:`, INCLUDING the retired set: a body is
      *  tokenized against this, never against what the picker offers. */
-    private val tokenizable: List<String> =
-        (standardPack + palette.map { it.first } + extraKoloboks).distinct()
+    private val tokenizable: List<String> = standardPack
 
     /** Display name for any bundled asset. */
-    fun nameOf(asset: String): String =
-        palette.firstOrNull { it.first == asset }?.second ?: displayName(asset)
+    fun nameOf(asset: String): String = displayName(asset)
 
     /** Asset names that have a `:code:` (for tokenizing message bodies) — the
      *  WHOLE bundled set, so a `:viannen_03:` from a peer renders too. */
