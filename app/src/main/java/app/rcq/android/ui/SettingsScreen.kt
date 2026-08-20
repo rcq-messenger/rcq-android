@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.ScrollState
@@ -481,18 +482,18 @@ private fun SettingsRoot(
                 val islandName = islandInfo?.name?.takeIf { it.isNotBlank() }
                 val islandRules = islandInfo?.welcome?.takeIf { it.isNotBlank() }
                 var showIslandRules by remember { mutableStateOf(false) }
-                // The chevron promised a tap and the tap did nothing — "стоит
-                // значок '>', значит что-то должно появиться, но ничего не
-                // происходит" (#619). The island's name now opens its own card
-                // (the rules sheet); with nothing to show it stops pretending.
+                // Purely informational: which island this account lives on.
+                // No chevron and no tap — the rules line below is the one door
+                // to the sheet, and a second tappable row opening the same
+                // sheet read as a promise of something more (founder, 20.08).
                 SettingsRow(
                     Icons.Filled.Dns,
                     islandName ?: islandHost,
                     // The host repeats under a name and nowhere else: two lines
                     // saying the same host is one line of noise.
                     value = if (islandName != null) islandHost else null,
-                    chevron = islandRules != null,
-                ) { if (islandRules != null) showIslandRules = true }
+                    chevron = false,
+                ) { }
                 if (islandRules != null) {
                     Divider()
                     SettingsRow(Icons.Filled.Gavel, stringResource(R.string.island_rules_title)) {
@@ -3407,14 +3408,17 @@ private fun SettingsRow(icon: ImageVector, label: String, value: String? = null,
         // ⚠ The value MUST carry a weight too, or a long one ("RCQ Exodus ·
         // api.rcq.app") is measured at full intrinsic width first and the
         // weighted label is left a one-character column — on a narrow screen
-        // "Свой сервер" rendered VERTICALLY, letter per line (#619). Split the
-        // row instead and let the value ellipsize; fill=false keeps a short
-        // value from hogging its half.
+        // "Свой сервер" rendered VERTICALLY, letter per line (#619).
+        //
+        // And the weight must FILL, pinning the text to the slot's END:
+        // fill=false left the row's slack AFTER the chevron, so a short value
+        // ("0.132 ›") sat mid-row while every neighbouring chevron hugged the
+        // edge (founder, 20.08). A long value still ellipsizes in its half.
         if (value != null) {
             Text(
                 value, color = c.textSecondary, fontSize = 14.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f).wrapContentWidth(Alignment.End),
             )
         }
         if (chevron) Icon(Icons.Filled.ChevronRight, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
