@@ -7,8 +7,7 @@ Censorship circumvention is built into the app rather than left to the user.
 - Site and downloads: <https://rcq.app>
 - Latest release: [the releases page](../../releases/latest) (`rcq-universal.apk`
   plus per-ABI builds; the same files are mirrored at <https://rcq.app/android/>
-  for networks where GitHub is throttled). Deliberately not a number here — the
-  one that used to be written out sat at v0.75 through seventeen releases.
+  for networks where GitHub is throttled).
 - Protocol spec: <https://github.com/rcq-messenger/rcq-spec>
 - Reference server: <https://github.com/rcq-messenger/rcq-server-ref>
 - iOS client: <https://github.com/rcq-messenger/rcq-ios>
