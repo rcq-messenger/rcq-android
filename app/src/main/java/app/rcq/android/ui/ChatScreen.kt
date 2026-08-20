@@ -400,7 +400,52 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // being written out as plaintext for whatever player happens to be
     // installed to open (see VideoViewer.kt).
     var fullscreenVideo by remember { mutableStateOf<ByteArray?>(null) }
-    val listState = rememberLazyListState()
+
+    // ---- Rows + unread anchor, computed BEFORE the list state exists. ----
+    // The list used to be created blank (index 0), compose a frame or two at
+    // the OLDEST message, and only then jump to the unread divider or the
+    // bottom — the first thing anyone saw on opening a chat was the top of its
+    // history sliding away (smoothness audit item 2). None of this depends on
+    // the list state, so it moved above it: the state is born already pointing
+    // at the right row and there is nothing to jump over.
+    val thisThread = if (isGroup) app.rcq.android.data.LocalStores.groupThread(groupId!!) else app.rcq.android.data.LocalStores.peerThread(peer!!)
+    // Snapshot the unread count at open (before openThread clears it) so we can
+    // mark where reading left off — an "Unread messages" divider, Telegram-style.
+    val initialUnread = remember(target) { app.rcq.android.data.LocalStores.unread.value[thisThread] ?: 0 }
+    // Pin the divider to the message reading stopped at, by id. Deriving it as
+    // `size - unread` on every size change slid the marker DOWN as new messages
+    // arrived, so it always sat N-from-the-end instead of staying where the
+    // user left off.
+    // Count back over INBOUND messages only. Your own cannot be unread, and
+    // counting raw positions put the divider inside the unread block whenever
+    // you had sent anything after them: reported as "непрочитанных 5, три
+    // видно, четвёртое вылезло, пятое дальше".
+    val unreadAnchorId = remember(target, messages.isNotEmpty()) {
+        if (initialUnread < 1) null
+        else {
+            var left = initialUnread
+            var id: String? = null
+            for (i in messages.indices.reversed()) {
+                if (messages[i].fromMe) continue
+                left--
+                if (left == 0) { id = messages[i].id; break }
+            }
+            id
+        }
+    }
+    val firstUnreadIndex = remember(messages, unreadAnchorId) {
+        unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
+    }
+    val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
+    // Only the FIRST composition's rows matter here: with history already in
+    // memory the state starts at the divider/bottom directly. An initially
+    // empty thread keeps index 0 and the LaunchedEffect below does the jump
+    // once rows exist — same behaviour as before, minus the visible hop.
+    val initialListIndex = remember(target) {
+        if (rows.isEmpty()) 0
+        else rows.indexOfFirst { it is ChatRow.Unread }.let { u -> if (u >= 0) u else rows.lastIndex }
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialListIndex)
 
     // Share / save media to device (report #6 — Android couldn't share/download
     // a photo/video; iOS already could). Save uses scoped MediaStore on API 29+
@@ -704,7 +749,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 
     // Mark this thread active+read while open; clear again on a new
     // message arriving here is handled in Session.bumpUnreadIfInbound.
-    val thisThread = if (isGroup) app.rcq.android.data.LocalStores.groupThread(groupId!!) else app.rcq.android.data.LocalStores.peerThread(peer!!)
+    // (`thisThread` itself is declared up with the rows block.)
     // Latest snapshot for the mention-seen mark on exit (onDispose otherwise
     // captures the messages value from when the effect was first set up).
     val msgsForMentionSeen by androidx.compose.runtime.rememberUpdatedState(messages)
@@ -737,34 +782,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         )
     }
 
-    // Snapshot the unread count at open (before openThread clears it) so we can
-    // mark where reading left off — an "Unread messages" divider, Telegram-style.
-    val initialUnread = remember(target) { app.rcq.android.data.LocalStores.unread.value[thisThread] ?: 0 }
-    // Pin the divider to the message reading stopped at, by id. Deriving it as
-    // `size - unread` on every size change slid the marker DOWN as new messages
-    // arrived, so it always sat N-from-the-end instead of staying where the
-    // user left off.
-    // Count back over INBOUND messages only. Your own cannot be unread, and
-    // counting raw positions put the divider inside the unread block whenever
-    // you had sent anything after them: reported as "непрочитанных 5, три
-    // видно, четвёртое вылезло, пятое дальше".
-    val unreadAnchorId = remember(target, messages.isNotEmpty()) {
-        if (initialUnread < 1) null
-        else {
-            var left = initialUnread
-            var id: String? = null
-            for (i in messages.indices.reversed()) {
-                if (messages[i].fromMe) continue
-                left--
-                if (left == 0) { id = messages[i].id; break }
-            }
-            id
-        }
-    }
-    val firstUnreadIndex = remember(messages, unreadAnchorId) {
-        unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
-    }
-    val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
+    // (initialUnread / unreadAnchorId / firstUnreadIndex / rows are declared up
+    // with the list state, which is born pointing at the unread divider.)
     var didInitialScroll by remember(target) { mutableStateOf(false) }
     var highlightId by remember(target) { mutableStateOf<String?>(null) }
     // #1 reply-jump return: the scroll position the user was at when they tapped
