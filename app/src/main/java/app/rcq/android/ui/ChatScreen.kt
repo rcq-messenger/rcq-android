@@ -866,18 +866,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     KeyboardScrollEffect(listState, rows.size)
 
     // Jump to (and briefly flash) the message a reply quotes — iOS parity (#3).
-    val onTapReply: (String) -> Unit = { rid ->
-        val idx = rows.indexOfFirst { r ->
-            (r is ChatRow.Single && r.m.id == rid) || (r is ChatRow.Album && r.items.any { it.id == rid })
-        }
-        if (idx >= 0) {
-            // Remember where we jumped FROM so the down-arrow returns here, not to
-            // the bottom of the chat (report — "стрелка кидает в конец").
-            replyReturnIndex = listState.firstVisibleItemIndex
-            replyReturnOffset = listState.firstVisibleItemScrollOffset
-            scope.launch { listState.animateScrollToItem(idx) }
-            highlightId = rid
-            scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
+    //
+    // ⚠ Reads `rows` through rememberUpdatedState and is itself remembered: a
+    // lambda that closed over `rows` directly was a NEW object on every list
+    // change, travelled into every visible MessageBubble as a parameter, and
+    // defeated strong skipping — one receipt or reaction repainted every bubble
+    // on screen. The handler only needs the rows that exist at TAP time.
+    val rowsForJump by rememberUpdatedState(rows)
+    val onTapReply: (String) -> Unit = remember(target) {
+        { rid ->
+            val idx = rowsForJump.indexOfFirst { r ->
+                (r is ChatRow.Single && r.m.id == rid) || (r is ChatRow.Album && r.items.any { it.id == rid })
+            }
+            if (idx >= 0) {
+                // Remember where we jumped FROM so the down-arrow returns here, not to
+                // the bottom of the chat (report — "стрелка кидает в конец").
+                replyReturnIndex = listState.firstVisibleItemIndex
+                replyReturnOffset = listState.firstVisibleItemScrollOffset
+                scope.launch { listState.animateScrollToItem(idx) }
+                highlightId = rid
+                scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
+            }
         }
     }
 
