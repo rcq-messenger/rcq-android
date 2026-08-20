@@ -188,6 +188,12 @@
     <string name="backup_island_promoted">Основной остров теперь %1$s</string>
     <string name="backup_island_err_unreachable">Остров недоступен. Ничего не изменено.</string>
     <string name="linked_devices_hint">Браузеры, подключённые к вашему аккаунту. Чтобы подключить, откройте chat.rcq.app, выберите «Connect phone», нажмите «Сканировать QR» ниже и наведите на код.</string>
+    <string name="linked_devices_slots_title">Ключи устройств</string>
+    <string name="linked_devices_slots_hint">Каждая установка этого аккаунта со своими ключами шифрования. Вход по фразе восстановления появляется здесь.</string>
+    <string name="linked_devices_slots_primary">Основное устройство</string>
+    <string name="linked_devices_slots_unnamed">Без имени</string>
+    <string name="linked_devices_slots_this">это устройство</string>
+    <string name="linked_devices_web_title">Веб-сессии</string>
     <string name="linked_devices_empty">Нет подключённых браузеров.</string>
     <string name="linked_devices_error">Не удалось загрузить список устройств.</string>
     <string name="linked_devices_scan">Сканировать QR</string>
