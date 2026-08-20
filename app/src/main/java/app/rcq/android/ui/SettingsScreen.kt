@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Inventory2
@@ -2534,6 +2535,11 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
     val devices by session.devices.collectAsState() // null = loading
     var failed by remember { mutableStateOf(false) }
     var showHow by remember { mutableStateOf(false) }
+    // #643: the account's key slots — every install with encryption keys of
+    // its own, the one list a recovery-phrase login cannot stay out of.
+    // Read-only in v1 (revoking a slot is a key operation, designed apart).
+    var slots by remember { mutableStateOf<List<app.rcq.android.net.RcqApi.PeerDeviceRow>?>(null) }
+    var ownSlot by remember { mutableStateOf<Int?>(null) }
 
     // In-app QR scanner: decode chat.rcq.app's connect-phone QR and feed it into
     // the same WebLinkRequest confirm flow a deep link uses. Removes the reliance
@@ -2558,6 +2564,12 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
     suspend fun reload() {
         failed = false
         runCatching { session.refreshDevices() }.onFailure { failed = true }
+        // Best-effort beside the registry: an island too old for per-device
+        // keys 404s here, and that just leaves the section out.
+        runCatching { session.keySlots() }.onSuccess { (list, own) ->
+            slots = list
+            ownSlot = own
+        }
     }
     LaunchedEffect(Unit) { reload() }
 
@@ -2592,6 +2604,55 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
             }
         }
         Spacer(Modifier.height(8.dp))
+        // Key slots first: short, read-only, and the security-relevant list.
+        // The (scrolling) web-session registry below keeps the rest of the
+        // screen.
+        slots?.takeIf { it.isNotEmpty() }?.let { list ->
+            Text(
+                stringResource(R.string.linked_devices_slots_title).uppercase(),
+                color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            Text(
+                stringResource(R.string.linked_devices_slots_hint),
+                color = c.textSecondary, fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            Spacer(Modifier.height(4.dp))
+            list.forEach { d ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        if (d.device_id == 1) Icons.Filled.Smartphone else Icons.Filled.Computer,
+                        null, tint = c.accent, modifier = Modifier.size(22.dp),
+                    )
+                    Text(
+                        when {
+                            d.device_id == 1 -> stringResource(R.string.linked_devices_slots_primary)
+                            !d.label.isNullOrBlank() -> d.label
+                            else -> stringResource(R.string.linked_devices_slots_unnamed)
+                        },
+                        color = c.textPrimary, fontSize = 14.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (ownSlot != null && d.device_id == ownSlot) {
+                        Text(
+                            stringResource(R.string.linked_devices_slots_this),
+                            color = c.accent, fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.linked_devices_web_title).uppercase(),
+                color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         when (val list = devices) {
             // Nothing loaded yet: the spinner while the first read is in
             // flight, the error state once it has failed. The list stays null

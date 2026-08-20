@@ -4537,6 +4537,16 @@ class Session(context: Context) {
         runCatching { refreshDevices() }
     }
 
+    /** The account's own KEY SLOTS: every install holding encryption keys of
+     *  its own — the phone, browsers, the console client. Distinct from the
+     *  QR-link registry above, and the one list a recovery-phrase login
+     *  cannot stay out of (#643). Second half is OUR slot id, for the "this
+     *  device" marker. Throws on failure (screen shows its error state). */
+    suspend fun keySlots(): Pair<List<RcqApi.PeerDeviceRow>, Int?> = withContext(Dispatchers.IO) {
+        val me = store.uin ?: return@withContext emptyList<RcqApi.PeerDeviceRow>() to null
+        api.fetchPeerDevices(me).devices.sortedBy { it.device_id } to myDeviceIdOrNull()
+    }
+
     /** Retry a previously-failed outgoing message (same UUID, so no dup). */
     suspend fun resend(msg: ChatMessage) {
         if (!msg.fromMe || msg.state != DeliveryState.FAILED) return
