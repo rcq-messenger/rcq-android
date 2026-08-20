@@ -222,6 +222,12 @@ class CallController(
         val offer = pendingRemoteOffer ?: return
         if (foreground) {
             if (!_incomingViaFsi.value) return
+            // The full-screen ring surface flips the process to "foreground" all
+            // by itself, and MIUI bounces it stop/start on keyguard dismiss.
+            // While that surface is up it owns the ring — starting ours as well
+            // played two ringtones over each other (report #638). Leave the
+            // handoff armed; the surface's own paths take it from here.
+            if (app.rcq.android.call.IncomingCallStore.fsiSurfaceActive) return
             _incomingViaFsi.value = false
             app.rcq.android.push.Push.cancelCallNotification(appContext)
             ringer.startIncoming()
