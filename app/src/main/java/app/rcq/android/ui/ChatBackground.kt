@@ -157,6 +157,31 @@ internal fun chatChrome(): RcqColors {
     return wallpaperChrome(bg, remember { LocalStores.chatBgFile(context) })
 }
 
+/**
+ * Foregrounds for the chat HEADER, which stands on neither surface alone: it
+ * has a translucent `bgSecondary` fill OVER the wallpaper top, so what its
+ * text actually sits on is the BLEND of the two. Reading the theme was #648
+ * ("при смене цвета фона на светлый не видно имя контакта"): dark theme +
+ * light wallpaper blends to a mid grey, and the theme's near-white title
+ * washed out on it. [fillAlpha] must match the header's own fill alpha.
+ * No wallpaper → the fill stands on the theme background and the theme is
+ * simply right.
+ */
+@Composable
+internal fun chatHeaderChrome(fillAlpha: Float): RcqColors {
+    val bg by LocalStores.chatBackground.collectAsState()
+    val context = LocalContext.current
+    val top = wallpaperTopColor(bg, remember { LocalStores.chatBgFile(context) })
+    val c = RcqTheme.colors
+    if (top == null) return c
+    val blended = Color(
+        red = c.bgSecondary.red * fillAlpha + top.red * (1 - fillAlpha),
+        green = c.bgSecondary.green * fillAlpha + top.green * (1 - fillAlpha),
+        blue = c.bgSecondary.blue * fillAlpha + top.blue * (1 - fillAlpha),
+    )
+    return rcqColorsFor(blended.needsLightChrome())
+}
+
 @Composable
 private fun wallpaperChrome(bg: String, file: java.io.File): RcqColors {
     val top = wallpaperTopColor(bg, file)
