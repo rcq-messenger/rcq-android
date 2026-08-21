@@ -1057,6 +1057,7 @@
     <string name="myreports_closed">Звернення закрито. Якщо повторилося, напишіть нове.</string>
     <string name="myreports_send_error">Не надіслалося. Спробуйте ще раз.</string>
     <string name="burn_failed">Не вдалося дістатися сервера, тож нічого не видалено. Акаунт цілий. Спробуй ще раз, коли буде зв\'язок.</string>
+    <string name="account_burned_elsewhere">Акаунт було спалено з іншого пристрою. Локальні дані видалено.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d нотатка</item>
         <item quantity="few">%d нотатки</item>

@@ -427,6 +427,7 @@ private fun RcqApp(session: Session) {
         if (state is UiState.Registered && !locked) session.start()
     }
 
+
     // Push-woken incoming call: the user already tapped Accept on the
     // lock-screen IncomingCallActivity. Once the WS is connected, feed the
     // parked offer into the live CallController and accept it — that's the only
@@ -469,6 +470,17 @@ private fun RcqApp(session: Session) {
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
         showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
+    }
+
+    // #655: the island said the active account no longer exists (burned from
+    // another device) — Session already wiped it locally and hot-swapped;
+    // this moves the UI to wherever that landed and says why out loud.
+    LaunchedEffect(Unit) {
+        session.accountLost.collect { ev ->
+            resetNav()
+            state = ev.nextUin?.let { UiState.Registered(it) } ?: UiState.Onboarding
+            Toast.makeText(context, context.getString(R.string.account_burned_elsewhere), Toast.LENGTH_LONG).show()
+        }
     }
 
     // Kept for "Try again": retrying after a transient failure must re-use the

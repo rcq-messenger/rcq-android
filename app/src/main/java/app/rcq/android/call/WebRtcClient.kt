@@ -231,6 +231,18 @@ class WebRtcClient(private val appContext: Context) {
      *  call placed right after it is not left waiting. */
     private val RELAY_PROBE_TIMEOUT_MS = 4000L
 
+    /** Through the engaged tunnel the allocation crosses phone → local SOCKS →
+     *  VLESS relay → coturn over TCP, and on a throttled RU mobile link that
+     *  regularly needs more than 4s. Timing out early was the quiet way calls
+     *  lost their only viable path: `relayUsable=false` waived relay-only, the
+     *  call went out on ALL with host candidates useless behind CGNAT and no
+     *  srflx (STUN is UDP to a blocked address) — 35s later "connection
+     *  failed", the exact shape of reports #653/#662. */
+    private val RELAY_PROBE_TIMEOUT_TUNNEL_MS = 12_000L
+
+    private fun probeTimeoutMs(): Long =
+        if (app.rcq.android.net.SingBoxTransport.isActive) RELAY_PROBE_TIMEOUT_TUNNEL_MS else RELAY_PROBE_TIMEOUT_MS
+
     private suspend fun measureRelayReachable(
         servers: List<PeerConnection.IceServer>,
     ): Boolean = withContext(Dispatchers.IO) {
@@ -276,7 +288,7 @@ class WebRtcClient(private val appContext: Context) {
                 override fun onSetSuccess() {}
                 override fun onSetFailure(err: String?) {}
             }, offer)
-            withTimeoutOrNull(RELAY_PROBE_TIMEOUT_MS) { seen.await() } ?: false
+            withTimeoutOrNull(probeTimeoutMs()) { seen.await() } ?: false
         } finally {
             runCatching { probe.close() }
         }

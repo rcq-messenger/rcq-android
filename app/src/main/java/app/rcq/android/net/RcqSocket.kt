@@ -65,17 +65,20 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private var token: String = ""
     private var onEvent: (type: String, obj: JsonObject) -> Unit = { _, _ -> }
     private var onState: (Boolean) -> Unit = {}
+    private var onAuthRejected: () -> Unit = {}
 
     fun connect(
         uin: Int,
         token: String,
         onEvent: (type: String, obj: JsonObject) -> Unit,
         onState: (connected: Boolean) -> Unit = {},
+        onAuthRejected: () -> Unit = {},
     ) {
         this.uin = uin
         this.token = token
         this.onEvent = onEvent
         this.onState = onState
+        this.onAuthRejected = onAuthRejected
         shouldStayConnected = true
         open()
     }
@@ -151,6 +154,13 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
                 if (gen != generation) return
                 believedConnected = false
                 onState(false)
+                // The island refused this session outright (revoked device,
+                // stale token, or a BURNED account — #655: a burned account's
+                // session reconnected forever, silently, while its sealed
+                // sends still went out). The caller decides which of those it
+                // is; the socket keeps its ordinary backoff meanwhile so a
+                // transient mis-refusal costs nothing.
+                if (code == CLOSE_AUTH_REJECTED) onAuthRejected()
                 scheduleReconnect(superseded = code == CLOSE_SUPERSEDED)
             }
         })
@@ -228,6 +238,9 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         // with exactly this). Not a network failure — retrying it fast is
         // fighting a decision the server already made.
         private const val CLOSE_SUPERSEDED = 4000
+        /** The server's "this session is not welcome" close: bad/expired
+         *  token, revoked device, or an account that no longer exists. */
+        private const val CLOSE_AUTH_REJECTED = 4401
 
         // Long and jittered on purpose: two evicted peers must not come back
         // in step, or they simply resume evicting each other in lockstep.

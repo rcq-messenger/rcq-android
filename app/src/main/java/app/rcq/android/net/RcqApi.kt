@@ -335,6 +335,22 @@ class RcqApi(
         post("/auth/recover", gson.toJson(req), authed = false, RegisterResponse::class.java)
     }
 
+    /** POST /auth/refresh — mint a fresh session token for a NAMED uin by
+     *  proving the signing key (same challenge dance as recover, without
+     *  recover's oldest-account tie-break). Unauthenticated on purpose: it is
+     *  the probe that tells a 4401'd session whether the account still exists
+     *  at all — `identity_not_found` here means BURNED, not expired (#655). */
+    data class RefreshRequest(
+        val uin: Int,
+        val signing_key: String,
+        val challenge: String,
+        val signature: String,
+        val device_id: String?,
+    )
+    suspend fun refreshSession(req: RefreshRequest): RegisterResponse = withContext(Dispatchers.IO) {
+        post("/auth/refresh", gson.toJson(req), authed = false, RegisterResponse::class.java)
+    }
+
     /** Rotate the long-term identity keys for the current (authed) account in
      *  place (POST /auth/reissue). UIN unchanged; returns a fresh token. */
     suspend fun reissue(req: ReissueRequest): RegisterResponse = withContext(Dispatchers.IO) {
