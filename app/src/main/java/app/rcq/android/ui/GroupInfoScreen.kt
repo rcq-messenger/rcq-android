@@ -4,8 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -158,51 +156,80 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     val ownMember = group.members.firstOrNull { it.uin == ownUin }
     val canManageMembers = isOwner || (ownMember?.permissions?.contains("members") == true)
 
-    Column(Modifier.fillMaxSize().background(c.bgPrimary).verticalScroll(rememberScrollState())) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent, modifier = Modifier.size(26.dp).clickable(onClick = onBack))
-            Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.gi_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            if (isOwner) {
-                Icon(Icons.Filled.Edit, stringResource(R.string.gi_rename), tint = c.accent, modifier = Modifier.size(22.dp).clickable { showRename = true })
+    // Owner first, then admins, then everyone else (stable within a rank).
+    val sortedMembers = remember(group.members) {
+        group.members.sortedBy { when (it.role) { "owner" -> 0; "admin" -> 1; else -> 2 } }
+    }
+    val previewLimit = 8
+    val q = memberSearch.trim().lowercase()
+    val searching = q.isNotEmpty()
+    val filtered = if (searching) sortedMembers.filter { it.nickname.lowercase().contains(q) || it.uin.toString().contains(q) } else sortedMembers
+    val visibleMembers = if (searching || showAllMembers || filtered.size <= previewLimit) filtered else filtered.take(previewLimit)
+    val hiddenCount = if (searching) 0 else (sortedMembers.size - visibleMembers.size).coerceAtLeast(0)
+    val bigGroup = sortedMembers.size > previewLimit
+
+    // ONE top-level LazyColumn for the whole screen (#650). Third layout here;
+    // the arc, so the next rework does not walk the same circle: (1) the roster
+    // was a weight(1f) LazyColumn below the header, and the tall owner-settings
+    // block starved it to ~0px, hiding the roster and the delete button from
+    // the owner; (2) the fix made the whole screen a plain verticalScroll
+    // Column, which cannot be starved but composes EVERY member row eagerly,
+    // so "show all" or a member search on a 2000-member group built 2000+ rows
+    // in one frame (#650's open delay); (3) now the whole screen IS the lazy
+    // list: header/settings blocks are one item each, member rows are
+    // items(key = uin), so only on-screen rows compose and the header still
+    // scrolls away with the list. With exactly one vertical scroller nothing
+    // can starve, and there is no nested vertical scrolling (a Compose crash)
+    // to dodge.
+    LazyColumn(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent, modifier = Modifier.size(26.dp).clickable(onClick = onBack))
+                Spacer(Modifier.width(12.dp))
+                Text(stringResource(R.string.gi_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                if (isOwner) {
+                    Icon(Icons.Filled.Edit, stringResource(R.string.gi_rename), tint = c.accent, modifier = Modifier.size(22.dp).clickable { showRename = true })
+                }
             }
         }
 
-        Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(contentAlignment = Alignment.BottomEnd) {
-                Box(Modifier.then(if (isOwner) Modifier.clickable { avatarPicker.launch("image/*") } else Modifier)) {
-                    GroupAvatar(group, session, 72.dp, glyphSize = 40.dp, animated = true)
-                }
-                if (isOwner) {
-                    Box(Modifier.size(26.dp).clip(CircleShape).background(c.accent).clickable { avatarPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.CameraAlt, stringResource(R.string.gi_change_avatar), tint = Color.White, modifier = Modifier.size(15.dp))
+        item {
+            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Box(Modifier.then(if (isOwner) Modifier.clickable { avatarPicker.launch("image/*") } else Modifier)) {
+                        GroupAvatar(group, session, 72.dp, glyphSize = 40.dp, animated = true)
+                    }
+                    if (isOwner) {
+                        Box(Modifier.size(26.dp).clip(CircleShape).background(c.accent).clickable { avatarPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.CameraAlt, stringResource(R.string.gi_change_avatar), tint = Color.White, modifier = Modifier.size(15.dp))
+                        }
                     }
                 }
-            }
-            Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(pluralStringResource(R.plurals.members, group.memberCount, group.memberCount), color = c.textSecondary, fontSize = 13.sp)
-            // #581: whether the group is closed was legible only to the owner,
-            // as the toggle further down, and to whoever happened to look at an
-            // invite card. Same padlock and the same "Closed group" the invite
-            // card carries, so the two surfaces do not teach two vocabularies
-            // for one setting. Stated in both directions on purpose — a missing
-            // line reads as "unknown", not as "open".
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Icon(
-                    if (group.isClosed) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                    null,
-                    tint = c.textSecondary,
-                    modifier = Modifier.size(13.dp),
-                )
-                Text(
-                    stringResource(if (group.isClosed) R.string.gi_closed else R.string.gi_open),
-                    color = c.textSecondary,
-                    fontSize = 13.sp,
-                )
-            }
-            group.description?.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = c.textSecondary, fontSize = 13.sp)
+                Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(pluralStringResource(R.plurals.members, group.memberCount, group.memberCount), color = c.textSecondary, fontSize = 13.sp)
+                // #581: whether the group is closed was legible only to the owner,
+                // as the toggle further down, and to whoever happened to look at an
+                // invite card. Same padlock and the same "Closed group" the invite
+                // card carries, so the two surfaces do not teach two vocabularies
+                // for one setting. Stated in both directions on purpose — a missing
+                // line reads as "unknown", not as "open".
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(
+                        if (group.isClosed) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                        null,
+                        tint = c.textSecondary,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        stringResource(if (group.isClosed) R.string.gi_closed else R.string.gi_open),
+                        color = c.textSecondary,
+                        fontSize = 13.sp,
+                    )
+                }
+                group.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, color = c.textSecondary, fontSize = 13.sp)
+                }
             }
         }
 
@@ -211,22 +238,24 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         // up the field); tap opens the scrollable sheet with clickable mentions/
         // URLs + group join-cards. Owners ALSO get the editable row in Settings.
         group.pinnedText?.takeIf { it.isNotBlank() }?.let { pin ->
-            PinnedAnnouncement(
-                session = session,
-                pin = pin,
-                members = group.members,
-                ownUin = ownUin,
-                groupHost = session.groupHost(group.id),
-                onOpenPeerInfo = onOpenPeerInfo,
-                onOpenGroup = onOpenGroup,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp),
-                textColor = c.textPrimary,
-                iconTint = c.accent,
-            )
+            item {
+                PinnedAnnouncement(
+                    session = session,
+                    pin = pin,
+                    members = group.members,
+                    ownUin = ownUin,
+                    groupHost = session.groupHost(group.id),
+                    onOpenPeerInfo = onOpenPeerInfo,
+                    onOpenGroup = onOpenGroup,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp),
+                    textColor = c.textPrimary,
+                    iconTint = c.accent,
+                )
+            }
         }
 
         // Notifications (#11) — every member: All / Mentions only / None.
-        run {
+        item {
             val mutedSet by LocalStores.muted.collectAsState()
             val mentionsSet by LocalStores.mentionsOnly.collectAsState()
             val thread = LocalStores.groupThread(groupId)
@@ -255,109 +284,105 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         }
 
         if (isOwner) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.gi_settings), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                // Pinned message — opens an editor dialog.
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).clickable { showPin = true }.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(Icons.Filled.PushPin, null, tint = c.accent, modifier = Modifier.size(18.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.gi_pinned), color = c.textPrimary, fontSize = 15.sp)
-                        Text(group.pinnedText?.takeIf { it.isNotBlank() } ?: stringResource(R.string.gi_none), color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.gi_settings), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    // Pinned message — opens an editor dialog.
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).clickable { showPin = true }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Filled.PushPin, null, tint = c.accent, modifier = Modifier.size(18.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.gi_pinned), color = c.textPrimary, fontSize = 15.sp)
+                            Text(group.pinnedText?.takeIf { it.isNotBlank() } ?: stringResource(R.string.gi_none), color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Icon(Icons.Filled.Edit, null, tint = c.textSecondary, modifier = Modifier.size(16.dp))
                     }
-                    Icon(Icons.Filled.Edit, null, tint = c.textSecondary, modifier = Modifier.size(16.dp))
-                }
-                // Who can post.
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.gi_who_post), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgPrimary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        listOf("all" to stringResource(R.string.vis_everyone), "owner_only" to stringResource(R.string.gi_post_owner)).forEach { (key, label) ->
-                            val sel = group.postPolicy == key
-                            Box(
-                                Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
-                                    .clickable { if (!sel) scope.launch { runCatching { session.patchGroup(groupId, postPolicy = key) } } }.padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center,
-                            ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 13.sp) }
+                    // Who can post.
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.gi_who_post), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgPrimary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            listOf("all" to stringResource(R.string.vis_everyone), "owner_only" to stringResource(R.string.gi_post_owner)).forEach { (key, label) ->
+                                val sel = group.postPolicy == key
+                                Box(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
+                                        .clickable { if (!sel) scope.launch { runCatching { session.patchGroup(groupId, postPolicy = key) } } }.padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 13.sp) }
+                            }
                         }
                     }
-                }
-                GroupToggleRow(stringResource(R.string.gi_closed), stringResource(R.string.gi_closed_desc), group.isClosed) { v -> scope.launch { runCatching { session.patchGroup(groupId, isClosed = v) } } }
-                GroupToggleRow(stringResource(R.string.gi_hide), stringResource(R.string.gi_hide_desc), group.membersHidden) { v -> scope.launch { runCatching { session.patchGroup(groupId, membersHidden = v) } } }
-            }
-        }
-
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.gi_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            // Any member can add to an OPEN group (you could equally share the
-            // link; the server already allows it, gated only by the invitee's
-            // own invite policy + the owner's block list). A CLOSED group locks
-            // adds to the owner / members-moderator.
-            if (!group.isClosed || canManageMembers) {
-                Row(Modifier.clip(RoundedCornerShape(percent = 50)).clickable { showAddMember = true }.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.Filled.PersonAdd, null, tint = c.accent, modifier = Modifier.size(16.dp))
-                    Text(stringResource(R.string.home_bar_add), color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    GroupToggleRow(stringResource(R.string.gi_closed), stringResource(R.string.gi_closed_desc), group.isClosed) { v -> scope.launch { runCatching { session.patchGroup(groupId, isClosed = v) } } }
+                    GroupToggleRow(stringResource(R.string.gi_hide), stringResource(R.string.gi_hide_desc), group.membersHidden) { v -> scope.launch { runCatching { session.patchGroup(groupId, membersHidden = v) } } }
                 }
             }
         }
 
-        // Owner first, then admins, then everyone else (stable within a rank).
-        val sortedMembers = remember(group.members) {
-            group.members.sortedBy { when (it.role) { "owner" -> 0; "admin" -> 1; else -> 2 } }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.gi_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                // Any member can add to an OPEN group (you could equally share the
+                // link; the server already allows it, gated only by the invitee's
+                // own invite policy + the owner's block list). A CLOSED group locks
+                // adds to the owner / members-moderator.
+                if (!group.isClosed || canManageMembers) {
+                    Row(Modifier.clip(RoundedCornerShape(percent = 50)).clickable { showAddMember = true }.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(Icons.Filled.PersonAdd, null, tint = c.accent, modifier = Modifier.size(16.dp))
+                        Text(stringResource(R.string.home_bar_add), color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
-        val previewLimit = 8
-        val q = memberSearch.trim().lowercase()
-        val searching = q.isNotEmpty()
-        val filtered = if (searching) sortedMembers.filter { it.nickname.lowercase().contains(q) || it.uin.toString().contains(q) } else sortedMembers
-        val visibleMembers = if (searching || showAllMembers || filtered.size <= previewLimit) filtered else filtered.take(previewLimit)
-        val hiddenCount = if (searching) 0 else (sortedMembers.size - visibleMembers.size).coerceAtLeast(0)
-        val bigGroup = sortedMembers.size > previewLimit
+
         // Owner hid the roster: non-owners see a notice instead of the member
         // list (iOS parity — GroupInfoView does the same `membersHidden && !owner`
         // gate). The member COUNT above still shows; only the per-member rows are
         // withheld. Client-side hide for now (the server still sends the list);
         // server redaction is the deeper privacy follow-up.
         if (group.membersHidden && !isOwner) {
-            Text(
-                stringResource(R.string.gi_members_hidden),
-                color = c.textSecondary, fontSize = 13.sp,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-        } else
-        // Plain Column (not a weight(1f) LazyColumn): the whole screen is now
-        // verticalScroll-able, and a weight(1f) lazy list inside that got
-        // starved to ~0px by the tall owner-settings block + per-member perm
-        // chips, hiding the roster + delete button from the owner.
-        Column(Modifier.fillMaxWidth()) {
+            item {
+                Text(
+                    stringResource(R.string.gi_members_hidden),
+                    color = c.textSecondary, fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+        } else {
             // Search field — only on a group big enough to warrant it.
             if (bigGroup) {
-                RcqField(
-                    value = memberSearch,
-                    onValueChange = { memberSearch = it },
-                    placeholder = stringResource(R.string.gi_member_search),
-                    leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.textSecondary, modifier = Modifier.size(18.dp)) },
-                    trailingIcon = {
-                        if (memberSearch.isNotEmpty()) Icon(Icons.Filled.Close, stringResource(R.string.common_close), tint = c.textSecondary, modifier = Modifier.size(18.dp).clickable { memberSearch = "" })
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
+                item {
+                    RcqField(
+                        value = memberSearch,
+                        onValueChange = { memberSearch = it },
+                        placeholder = stringResource(R.string.gi_member_search),
+                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.textSecondary, modifier = Modifier.size(18.dp)) },
+                        trailingIcon = {
+                            if (memberSearch.isNotEmpty()) Icon(Icons.Filled.Close, stringResource(R.string.common_close), tint = c.textSecondary, modifier = Modifier.size(18.dp).clickable { memberSearch = "" })
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
             }
             // Collapse control at the TOP (no need to scroll to the bottom to fold).
             if (showAllMembers && !searching && bigGroup) {
-                Row(
-                    Modifier.fillMaxWidth().clickable { showAllMembers = false }.padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(Icons.Filled.ExpandLess, null, tint = c.accent, modifier = Modifier.size(20.dp))
-                    Text(stringResource(R.string.gi_members_collapse), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { showAllMembers = false }.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(Icons.Filled.ExpandLess, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                        Text(stringResource(R.string.gi_members_collapse), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
             if (searching && filtered.isEmpty()) {
-                Text(stringResource(R.string.gi_members_no_matches), color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                item {
+                    Text(stringResource(R.string.gi_members_no_matches), color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
             }
-            visibleMembers.forEach { m ->
+            items(visibleMembers, key = { it.uin }) { m ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
                     Row(
                         Modifier.fillMaxWidth().clickable(enabled = m.uin != ownUin) { onOpenPeerInfo(m.uin) },
@@ -425,12 +450,14 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 }
             }
             if (hiddenCount > 0 && !showAllMembers) {
-                Row(
-                    Modifier.fillMaxWidth().clickable { showAllMembers = true }.padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(Icons.Filled.ExpandMore, null, tint = c.accent, modifier = Modifier.size(20.dp))
-                    Text(stringResource(R.string.gi_members_show_all, hiddenCount), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { showAllMembers = true }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(Icons.Filled.ExpandMore, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                        Text(stringResource(R.string.gi_members_show_all, hiddenCount), color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -438,33 +465,37 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         // Copy group link — EVERY member (parity with iOS Manage section). The
         // link always carries the host (§5c) so it works from any island; paste
         // it into a chat or a pinned announcement to surface a tappable join card.
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                .clip(RoundedCornerShape(10.dp)).background(c.bgSecondary)
-                .clickable {
-                    val (rid, host) = session.groupShareRef(groupId)
-                    val link = GroupLinkParser.canonicalUrl(rid, host)
-                    (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(android.content.ClipData.newPlainText("group link", link))
-                    linkCopied = true
-                    scope.launch { delay(1600); linkCopied = false }
-                }.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(if (linkCopied) Icons.Filled.Check else Icons.Filled.Link, null, tint = c.accent, modifier = Modifier.size(18.dp))
-            Text(
-                stringResource(if (linkCopied) R.string.gi_link_copied else R.string.gi_copy_link),
-                color = if (linkCopied) c.accent else c.textPrimary, fontSize = 15.sp,
-            )
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp)).background(c.bgSecondary)
+                    .clickable {
+                        val (rid, host) = session.groupShareRef(groupId)
+                        val link = GroupLinkParser.canonicalUrl(rid, host)
+                        (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                            .setPrimaryClip(android.content.ClipData.newPlainText("group link", link))
+                        linkCopied = true
+                        scope.launch { delay(1600); linkCopied = false }
+                    }.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(if (linkCopied) Icons.Filled.Check else Icons.Filled.Link, null, tint = c.accent, modifier = Modifier.size(18.dp))
+                Text(
+                    stringResource(if (linkCopied) R.string.gi_link_copied else R.string.gi_copy_link),
+                    color = if (linkCopied) c.accent else c.textPrimary, fontSize = 15.sp,
+                )
+            }
         }
 
-        Box(
-            Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x14E5484D)).clickable { confirmDestructive = true }.padding(vertical = 14.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(if (isOwner) Icons.Filled.Delete else Icons.AutoMirrored.Filled.ExitToApp, null, tint = Color(0xFFE5484D), modifier = Modifier.size(18.dp))
-                Text(stringResource(if (isOwner) R.string.gi_delete else R.string.gi_leave), color = Color(0xFFE5484D), fontWeight = FontWeight.SemiBold)
+        item {
+            Box(
+                Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x14E5484D)).clickable { confirmDestructive = true }.padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(if (isOwner) Icons.Filled.Delete else Icons.AutoMirrored.Filled.ExitToApp, null, tint = Color(0xFFE5484D), modifier = Modifier.size(18.dp))
+                    Text(stringResource(if (isOwner) R.string.gi_delete else R.string.gi_leave), color = Color(0xFFE5484D), fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
