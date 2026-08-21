@@ -155,13 +155,17 @@ object SignalSession {
         stores: SignalStores,
         bundle: RcqApi.PeerBundle,
         deviceId: Int = DEVICE_ID,
+        force: Boolean = false,
     ): Boolean {
         val addr = addressOf(bundle.uin, deviceId)
         return try {
             val preKeyBundle = buildPreKeyBundle(bundle, deviceId)
             synchronized(stores) {
                 // Another sender may have established it while we fetched.
-                if (usableSession(stores, addr)) return true
+                // [force] is the silence probe replacing a session it has
+                // decided is dead — the whole point there is to run the
+                // handshake again over one that still looks usable.
+                if (!force && usableSession(stores, addr)) return true
                 // SessionBuilder takes the four non-Kyber stores (the initiator
                 // never consults its own Kyber store — it uses the peer's Kyber
                 // pub from the bundle).
@@ -232,9 +236,19 @@ object SignalSession {
             Log.i(TAG, "silence probe: $uin/$deviceId unchanged; session kept")
             return ProbeResult.UNCHANGED
         }
-        synchronized(stores) { stores.deleteSession(addr) }
+        // ⚠ NOT deleteSession + establish. libsignal's own handshake ARCHIVES
+        // the session it replaces (SessionRecord.promote_state), and archived
+        // states still decrypt: whatever that device sealed to the old session
+        // before it vanished — a message in flight, a queued backlog — keeps
+        // opening. Deleting first would throw exactly that away, which is the
+        // loss this probe exists to prevent. `force` is what makes the
+        // handshake run over a session that still looks usable.
         Log.w(TAG, "silence probe: identity changed behind $uin/$deviceId — fresh X3DH")
-        return if (establishSession(stores, bundle, deviceId)) ProbeResult.REBUILT else ProbeResult.UNREACHABLE
+        return if (establishSession(stores, bundle, deviceId, force = true)) {
+            ProbeResult.REBUILT
+        } else {
+            ProbeResult.UNREACHABLE
+        }
     }
 
     private fun buildPreKeyBundle(b: RcqApi.PeerBundle, deviceId: Int): PreKeyBundle {
