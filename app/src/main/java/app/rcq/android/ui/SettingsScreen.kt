@@ -2604,72 +2604,86 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        // Key slots first: short, read-only, and the security-relevant list.
-        // The (scrolling) web-session registry below keeps the rest of the
-        // screen.
-        slots?.takeIf { it.isNotEmpty() }?.let { list ->
-            Text(
-                stringResource(R.string.linked_devices_slots_title).uppercase(),
-                color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-            Text(
-                stringResource(R.string.linked_devices_slots_hint),
-                color = c.textSecondary, fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            Spacer(Modifier.height(4.dp))
-            list.forEach { d ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(
-                        if (d.device_id == 1) Icons.Filled.Smartphone else Icons.Filled.Computer,
-                        null, tint = c.accent, modifier = Modifier.size(22.dp),
-                    )
-                    Text(
-                        when {
-                            d.device_id == 1 -> stringResource(R.string.linked_devices_slots_primary)
-                            !d.label.isNullOrBlank() -> d.label
-                            else -> stringResource(R.string.linked_devices_slots_unnamed)
-                        },
-                        color = c.textPrimary, fontSize = 14.sp,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (ownSlot != null && d.device_id == ownSlot) {
+        // ⚠ ONE scrolling list for both sections. The key slots used to sit
+        // in the outer (non-scrolling) Column: an account with a handful of
+        // installs then pushed the web-session rows — and their Disconnect
+        // buttons — off the bottom of a short screen, unreachable.
+        val slotList = slots.orEmpty()
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (slotList.isNotEmpty()) {
+                item(key = "slots-header") {
+                    Column {
                         Text(
-                            stringResource(R.string.linked_devices_slots_this),
-                            color = c.accent, fontSize = 12.sp,
+                            stringResource(R.string.linked_devices_slots_title).uppercase(),
+                            color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                        Text(
+                            stringResource(R.string.linked_devices_slots_hint),
+                            color = c.textSecondary, fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+                items(slotList, key = { "slot-${it.device_id}" }) { d ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            if (d.device_id == 1) Icons.Filled.Smartphone else Icons.Filled.Computer,
+                            null, tint = c.accent, modifier = Modifier.size(22.dp),
+                        )
+                        Text(
+                            when {
+                                d.device_id == 1 -> stringResource(R.string.linked_devices_slots_primary)
+                                !d.label.isNullOrBlank() -> d.label
+                                else -> stringResource(R.string.linked_devices_slots_unnamed)
+                            },
+                            color = c.textPrimary, fontSize = 14.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (ownSlot != null && d.device_id == ownSlot) {
+                            Text(
+                                stringResource(R.string.linked_devices_slots_this),
+                                color = c.accent, fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+                item(key = "web-header") {
+                    Column {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(R.string.linked_devices_web_title).uppercase(),
+                            color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.linked_devices_web_title).uppercase(),
-                color = c.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-        when (val list = devices) {
-            // Nothing loaded yet: the spinner while the first read is in
-            // flight, the error state once it has failed. The list stays null
-            // on failure so a later refresh still fills it in, instead of
-            // being frozen as a convincing-looking "no devices".
-            null -> if (failed) {
-                LinkedDevicesPlaceholder(stringResource(R.string.linked_devices_error))
-            } else {
-                Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = c.accent, modifier = Modifier.size(28.dp))
+            when (val list = devices) {
+                // Nothing loaded yet: the spinner while the first read is in
+                // flight, the error state once it has failed. The list stays
+                // null on failure so a later refresh still fills it in,
+                // instead of being frozen as a convincing-looking "no devices".
+                null -> item(key = "web-state") {
+                    if (failed) {
+                        LinkedDevicesPlaceholder(stringResource(R.string.linked_devices_error))
+                    } else {
+                        Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = c.accent, modifier = Modifier.size(28.dp))
+                        }
+                    }
                 }
-            }
-            else -> if (list.isEmpty()) {
-                LinkedDevicesPlaceholder(stringResource(R.string.linked_devices_empty))
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(list, key = { it.device_id }) { d ->
+                else -> if (list.isEmpty()) {
+                    item(key = "web-empty") {
+                        LinkedDevicesPlaceholder(stringResource(R.string.linked_devices_empty))
+                    }
+                } else {
+                    items(list, key = { "web-${it.device_id}" }) { d ->
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,

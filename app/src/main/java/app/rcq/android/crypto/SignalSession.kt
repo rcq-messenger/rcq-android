@@ -174,32 +174,67 @@ object SignalSession {
         }
     }
 
+    /** What a silence probe found when it re-read a peer device's bundle. */
+    enum class ProbeResult {
+        /** The bundle could not be read — nothing was touched. */
+        UNREACHABLE,
+
+        /** The peer still publishes the identity our session was built on, so
+         *  the session is fine and their silence means something else (they
+         *  are offline, or asleep). Only the outer key was refreshed. */
+        UNCHANGED,
+
+        /** The identity behind that device changed — the install we shared a
+         *  ratchet with is gone — and the session was rebuilt. */
+        REBUILT,
+    }
+
     /**
-     * Tear the session with [uin]/[deviceId] down and X3DH it again from a
-     * FRESH bundle, trusting nothing held locally — not the session, not the
-     * cached outer key, not the recorded identity (it may itself have been
-     * read only after the peer's install was replaced). The silence probe's
-     * one move: from any wrong state, a rebuild is what works. The store's
-     * TOFU accepts the (possibly changed) identity and flags it, which is the
-     * existing identity-change warning doing its job.
+     * Re-read [uin]/[deviceId]'s bundle and rebuild the session ONLY if the
+     * identity behind it actually changed.
+     *
+     * ⚠ Deliberately NOT an unconditional rebuild. Dropping a session destroys
+     * our RECEIVING chains too: anything that device already sealed to it — a
+     * message in flight, a whole offline backlog waiting in the queue — stops
+     * decrypting, and the drain acks those rows away. Doing that on a hunch
+     * every time a peer is quiet turns a probe meant to RECOVER messages into
+     * one that loses them, and a peer whose client answers in v=1 (every phone
+     * that has not flipped v2 outbound yet) is quiet by that definition
+     * forever. A changed identity key is the one signal that the session is
+     * genuinely dead, and it is exactly what a replaced install publishes.
+     *
+     * The residual case — a dead session behind an UNCHANGED identity — is not
+     * silently accepted: it is logged, and the peer's next message re-keys
+     * this side through its own prekey material.
      */
-    suspend fun rebuildSession(
+    suspend fun probeSession(
         stores: SignalStores,
         api: RcqApi,
         uin: Int,
         deviceId: Int,
-    ): Boolean {
+    ): ProbeResult {
         val bundle = try {
             fetchBundle(api, uin, deviceId)
         } catch (e: Exception) {
-            Log.w(TAG, "silence-probe rebuild: no bundle for $uin/$deviceId (${e.javaClass.simpleName})")
-            return false
+            Log.w(TAG, "silence probe: no bundle for $uin/$deviceId (${e.javaClass.simpleName})")
+            return ProbeResult.UNREACHABLE
         }
-        if (bundle.uin != uin) return false
+        if (bundle.uin != uin) return ProbeResult.UNREACHABLE
+        // The outer (sealed-sender) key is refreshed either way: it is the one
+        // thing that can go stale without the ratchet noticing, and replacing
+        // it costs the peer nothing.
         rememberOuterKey(stores, bundle, deviceId)
-        synchronized(stores) { stores.deleteSession(addressOf(uin, deviceId)) }
-        Log.w(TAG, "silence probe: fresh X3DH with $uin/$deviceId")
-        return establishSession(stores, bundle, deviceId)
+        val addr = addressOf(uin, deviceId)
+        val pinned = synchronized(stores) { stores.getIdentity(addr) }
+        val published = runCatching { IdentityKey(b64d(bundle.signal_identity_key)) }.getOrNull()
+            ?: return ProbeResult.UNREACHABLE
+        if (pinned != null && pinned == published) {
+            Log.i(TAG, "silence probe: $uin/$deviceId unchanged; session kept")
+            return ProbeResult.UNCHANGED
+        }
+        synchronized(stores) { stores.deleteSession(addr) }
+        Log.w(TAG, "silence probe: identity changed behind $uin/$deviceId — fresh X3DH")
+        return if (establishSession(stores, bundle, deviceId)) ProbeResult.REBUILT else ProbeResult.UNREACHABLE
     }
 
     private fun buildPreKeyBundle(b: RcqApi.PeerBundle, deviceId: Int): PreKeyBundle {

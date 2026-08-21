@@ -1495,6 +1495,14 @@ class Session(context: Context) {
                     // already kicked the initial load.
                     if (everConnected) syncGraph()
                     everConnected = true
+                    // The silence probe measures how long a PEER has been quiet,
+                    // and a socket that was down measures nothing: their replies
+                    // may be sitting in the queue this reconnect is about to
+                    // drain. Counting our own offline stretch as their silence
+                    // is how the first send after coming back would probe (and,
+                    // on a changed identity, re-key) against a backlog that was
+                    // sealed to the session we still hold. Start the clocks over.
+                    awaitingReplySince.clear()
                     // Connection is back — auto-resend anything stuck in FAILED
                     // (transient network/relay death) so the user doesn't have to
                     // tap each red error by hand.
@@ -4633,37 +4641,50 @@ class Session(context: Context) {
                 android.util.Log.w("RCQsignal", "device list for $toUin unavailable; sending v1")
             } else if (devices.isNotEmpty()) {
                 val now = System.currentTimeMillis()
-                // The silence probe is for PEERS, never our own carbon: rebuilding
-                // one of our OWN linked sessions (a web device) on silence would
-                // re-key a session that install is actively using, and our own
-                // devices have their own ways to recover. A carbon to our uin
-                // still fans out v=2, it just never arms or trips the probe.
-                val probePeer = toUin != me
+                // Who may arm the silence probe at all.
+                //
+                // ⚠ PEERS only, never our own carbon: probing one of our OWN
+                // linked sessions would re-read a bundle for an install we are
+                // not waiting on.
+                //
+                // ⚠ And only for an envelope that EARNS an answer — a stored
+                // message, which the recipient receipts back. A read receipt,
+                // a reaction, an edit or a visit owes nothing in return, and
+                // since every message we RECEIVE makes us send a receipt of
+                // our own, arming on those made "armed and never cleared" the
+                // steady state of every conversation.
+                val probePeer = toUin != me && isCarbonable(env)
                 val copies = devices.mapNotNull { dev ->
                     // The silence probe (see awaitingReplySince): a device that
                     // has answered NOTHING for two minutes of active sending
-                    // gets a fresh bundle + X3DH instead of another copy on a
-                    // possibly dead session. Throttled per device; an unchanged
-                    // peer (merely offline) just costs one prekey exchange and
-                    // reads both the old backlog and the new session fine.
+                    // gets its bundle re-read, and its session rebuilt only if
+                    // the identity behind it CHANGED (SignalSession.probeSession
+                    // explains why a blind rebuild loses messages). Throttled
+                    // per device, so a quiet peer costs one bundle read every
+                    // half hour and nothing else.
                     val probeKey = "$toUin:$dev"
                     val waitingSince = if (probePeer) awaitingReplySince[probeKey] else null
-                    val probe = waitingSince != null && now - waitingSince > peerSilenceMs &&
+                    val probeDue = waitingSince != null && now - waitingSince > peerSilenceMs &&
                         now - (lastSilenceProbeAt[probeKey] ?: 0L) > silenceProbeMinIntervalMs
-                    val sessionReady = if (probe) {
-                        lastSilenceProbeAt[probeKey] = now
-                        SignalSession.rebuildSession(signalStores, api, toUin, dev) ||
-                            SignalSession.ensureSession(signalStores, api, toUin, dev)
-                    } else {
-                        SignalSession.ensureSession(signalStores, api, toUin, dev)
+                    if (probeDue) {
+                        val result = SignalSession.probeSession(signalStores, api, toUin, dev)
+                        // The throttle is spent on a probe that actually READ
+                        // something. An unreachable island must not buy the
+                        // peer half an hour of not being checked.
+                        if (result != SignalSession.ProbeResult.UNREACHABLE) {
+                            lastSilenceProbeAt[probeKey] = now
+                        }
+                        // A rebuilt session starts a fresh conversation with
+                        // that install: the old clock is meaningless.
+                        if (result == SignalSession.ProbeResult.REBUILT) awaitingReplySince.remove(probeKey)
                     }
-                    if (!sessionReady) return@mapNotNull null
+                    if (!SignalSession.ensureSession(signalStores, api, toUin, dev)) return@mapNotNull null
                     runCatching {
                         SealedCopy(dev, SignalSession.encrypt(signalStores, env, recipientPub, toUin, me, dev, mine))
                     }.onSuccess {
                         // Armed AFTER a successful seal: from here this device
-                        // owes us SOMETHING (a receipt at least), and hearing
-                        // nothing for long enough is what triggers the probe.
+                        // owes us a receipt, and hearing nothing for long
+                        // enough is what makes the probe worth running.
                         if (probePeer) awaitingReplySince.putIfAbsent(probeKey, now)
                     }.onFailure {
                         android.util.Log.w("RCQsignal", "v2 encrypt failed for $toUin/$dev: ${it.message}")
