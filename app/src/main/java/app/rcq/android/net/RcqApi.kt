@@ -242,7 +242,15 @@ class RcqApi(
     )
     /** The libsignal device id the SERVER assigned; never self-asserted. */
     data class DeviceRegistered(val device_id: Int = 0)
-    data class PeerDeviceRow(val device_id: Int = 0, val label: String? = null)
+    /** [signal_identity_key] is the libsignal identity that device currently
+     *  publishes. Null on an island too old to send it. Reading it here costs
+     *  nothing; reading it from a BUNDLE consumes one of the peer's one-time
+     *  prekeys, which is why the silence probe compares this instead. */
+    data class PeerDeviceRow(
+        val device_id: Int = 0,
+        val label: String? = null,
+        val signal_identity_key: String? = null,
+    )
     data class PeerDevices(val uin: Int = 0, val devices: List<PeerDeviceRow> = emptyList())
 
     /** Upload the full prekey bundle (POST /keys/bundle → 204). */
