@@ -187,6 +187,7 @@ import app.rcq.android.model.UserStatus
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -437,15 +438,29 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
     }
     val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
+    // Where reading stopped last time (founder batch item 13a, iOS parity):
+    // (rows-from-end, first-visible pixel offset), or null when the thread was
+    // last left at the bottom. The unread divider WINS over it; from-the-END
+    // so rows growing above the anchor leave it pointing at the same message.
+    val savedPos = remember(target) { app.rcq.android.data.LocalStores.chatPosition(thisThread) }
     // Only the FIRST composition's rows matter here: with history already in
-    // memory the state starts at the divider/bottom directly. An initially
-    // empty thread keeps index 0 and the LaunchedEffect below does the jump
-    // once rows exist — same behaviour as before, minus the visible hop.
-    val initialListIndex = remember(target) {
-        if (rows.isEmpty()) 0
-        else rows.indexOfFirst { it is ChatRow.Unread }.let { u -> if (u >= 0) u else rows.lastIndex }
+    // memory the state starts at the divider/saved-position/bottom directly.
+    // An initially empty thread keeps index 0 and the LaunchedEffect below
+    // does the jump once rows exist, same behaviour as before, minus the
+    // visible hop.
+    val initialListPos = remember(target) {
+        val u = rows.indexOfFirst { it is ChatRow.Unread }
+        when {
+            rows.isEmpty() -> 0 to 0
+            u >= 0 -> u to 0
+            savedPos != null -> (rows.lastIndex - savedPos.first).coerceIn(0, rows.lastIndex) to savedPos.second
+            else -> rows.lastIndex to 0
+        }
     }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialListIndex)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialListPos.first,
+        initialFirstVisibleItemScrollOffset = initialListPos.second,
+    )
 
     // Share / save media to device (report #6 — Android couldn't share/download
     // a photo/video; iOS already could). Save uses scoped MediaStore on API 29+
@@ -785,6 +800,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // (initialUnread / unreadAnchorId / firstUnreadIndex / rows are declared up
     // with the list state, which is born pointing at the unread divider.)
     var didInitialScroll by remember(target) { mutableStateOf(false) }
+    // 13a: the position saver below stays disarmed until the open jumps have
+    // settled. Armed too early it records the restore scroll as if the user
+    // made it, and its at-the-bottom sentinel fires on the unmeasured first
+    // frames and clears the very position the open is about to restore.
+    var positionSaveArmed by remember(target) { mutableStateOf(false) }
     var highlightId by remember(target) { mutableStateOf<String?>(null) }
     // #1 reply-jump return: the scroll position the user was at when they tapped
     // a reply quote. While set, the jump-down arrow takes them BACK here (where
@@ -796,11 +816,26 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // animation) — the old animateScroll-on-every-size-change was the "mota к
     // последнему / eats resources" complaint (#1).
     LaunchedEffect(rows.size) {
-        if (rows.isEmpty() || didInitialScroll) return@LaunchedEffect
+        if (rows.isEmpty()) return@LaunchedEffect
+        if (didInitialScroll) {
+            // A rows change cancelled the run below mid-settle; the jump is
+            // done, so make sure the saver still gets armed.
+            positionSaveArmed = true
+            return@LaunchedEffect
+        }
         didInitialScroll = true
         val u = rows.indexOfFirst { it is ChatRow.Unread }
         if (u >= 0) {
             listState.scrollToItem(u)
+            positionSaveArmed = true
+            return@LaunchedEffect
+        }
+        // 13a: reopen where reading stopped. Bottom anchoring is not needed
+        // here: the anchor is the FIRST visible row + offset, and scrollToItem
+        // pins an item top, which holds through the header/composer settling.
+        if (savedPos != null) {
+            listState.scrollToItem((rows.lastIndex - savedPos.first).coerceIn(0, rows.lastIndex), savedPos.second)
+            positionSaveArmed = true
             return@LaunchedEffect
         }
         listState.scrollToItem(rows.lastIndex.coerceAtLeast(0))
@@ -821,6 +856,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // measure how far that is.
             listState.scrollBy(1_000_000f)
         }
+        positionSaveArmed = true
     }
 
     // Reaction-jump on open: if someone reacted to one of my messages while I was
@@ -880,6 +916,32 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
         val nearBottom = lastVisible >= info.totalItemsCount - 3
         if (last.fromMe || nearBottom) listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+    }
+    // 13a: persist where reading stopped. The resting scroll position, written
+    // debounced to prefs (per thread, per account) as rows-from-end + offset;
+    // resting at the bottom clears the entry instead, so a chat read to the
+    // end opens at the newest message again. The armed read lives INSIDE
+    // snapshotFlow, so the settled position is evaluated once right when
+    // saving arms even if the user never scrolls after that.
+    // ⚠ Keyed on [target] alone, never on the armed flag or anything this
+    // effect writes: an effect keyed on state it changes itself restarts and
+    // cancels its own work mid-flight (the LaunchedEffect key race).
+    LaunchedEffect(target) {
+        snapshotFlow {
+            if (!positionSaveArmed) return@snapshotFlow null
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@snapshotFlow null
+            Triple(
+                info.totalItemsCount - 1 - listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                lastVisible >= info.totalItemsCount - 1,
+            )
+        }.collectLatest { pos ->
+            val (fromEnd, offset, atBottom) = pos ?: return@collectLatest
+            delay(300)
+            if (atBottom) app.rcq.android.data.LocalStores.clearChatPosition(thisThread)
+            else app.rcq.android.data.LocalStores.saveChatPosition(thisThread, fromEnd, offset)
+        }
     }
     // Keep the latest message visible when the keyboard opens (report #29).
     KeyboardScrollEffect(listState, rows.size)
