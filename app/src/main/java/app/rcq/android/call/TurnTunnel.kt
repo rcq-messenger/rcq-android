@@ -35,6 +35,10 @@ object TurnTunnel {
     /** Enough for both ends of a call plus the reachability probe, with room to
      *  spare; each is a short-lived pair of pump threads. */
     private const val MAX_CONNECTIONS = 8
+    /** Matches the tunnel budget the relay probe already uses: through SOCKS →
+     *  VLESS relay → coturn over TCP a throttled link regularly needs more
+     *  than a few seconds, and a too-short probe condemns a working leg. */
+    private const val LEG_PROBE_TIMEOUT_MS = 12_000
 
     private val pool = Executors.newCachedThreadPool { r ->
         Thread(r, "rcq-turn-tunnel").apply { isDaemon = true }
@@ -45,8 +49,16 @@ object TurnTunnel {
     @Volatile private var upstreamHost: String? = null
 
     /** `turn:` URL to hand WebRTC, or null when the tunnel is not carrying
-     *  calls (transport off, no TURN host known yet, or the listener failed). */
+     *  calls (transport off, no TURN host known yet, the listener failed, or
+     *  the leg through the tunnel carries no TURN, see [ensureRunning]). */
     @Volatile private var url: String? = null
+
+    /** The host whose tunnel leg was last measured, and the verdict. One
+     *  measurement per engaged tunnel + host, so a dead leg is not re-probed
+     *  (its timeout re-waited) on every credential refresh; forgotten when the
+     *  transport goes away, because the verdict belongs to that road. */
+    @Volatile private var probedHost: String? = null
+    @Volatile private var probedLegOk = false
 
     /** The URL to use INSTEAD of the island's, or null to use the island's.
      *
@@ -55,15 +67,35 @@ object TurnTunnel {
     fun activeUrl(): String? = if (SingBoxTransport.isActive) url else null
 
     /** Point the tunnel at the relay the island handed out, and make sure a
-     *  listener is up. Cheap to call repeatedly — it only acts on a change. */
+     *  listener is up. Cheap to call repeatedly: it only acts on a change (a
+     *  change costs one leg probe, blocking up to [LEG_PROBE_TIMEOUT_MS];
+     *  call off-main). */
     @Synchronized
     fun ensureRunning(turnHost: String?) {
         if (!SingBoxTransport.isActive || turnHost.isNullOrBlank()) {
+            probedHost = null
             stop()
             return
         }
         if (running.get() && upstreamHost == turnHost && server?.isClosed == false) return
+        if (turnHost == probedHost && !probedLegOk) return   // measured dead on this tunnel; stay inactive
         stop()
+        // ★ Prove the leg BEFORE arming. The listener coming up says nothing
+        // about the road behind it: a relay that filters the TURN host accepts
+        // the SOCKS request and returns no bytes, and arming on that leg handed
+        // WebRTC a loopback relay that could not carry a call, and the relay probe
+        // then timed out against it and relay-only was waived. Armed only on a
+        // STUN Binding Success through the tunnel; on failure stay inactive, so
+        // call setup falls back to the island's own URLs exactly as it does
+        // with no tunnel at all.
+        if (turnHost != probedHost) {
+            probedHost = turnHost
+            probedLegOk = legCarriesTurn(turnHost)
+        }
+        if (!probedLegOk) {
+            android.util.Log.w("RCQturn", "tunnel leg to $turnHost:$TURN_TCP_PORT carries no TURN; not arming")
+            return
+        }
         upstreamHost = turnHost
         val srv = runCatching {
             // Loopback only. Nothing outside this device may use us as an open
@@ -86,6 +118,31 @@ object TurnTunnel {
         url = null
         runCatching { server?.close() }
         server = null
+    }
+
+    /** One STUN Binding round trip to the relay THROUGH the tunnel: the same
+     *  road, asked the same way [bridge] will ask it (by name; see the
+     *  UNRESOLVED note there). A relay that filters the TURN host still opens
+     *  the SOCKS connection, so only bytes coming back count as a leg. */
+    private fun legCarriesTurn(host: String): Boolean {
+        val proxy = SingBoxTransport.proxy() ?: return false
+        return runCatching {
+            Socket(proxy).use { s ->
+                s.connect(InetSocketAddress.createUnresolved(host, TURN_TCP_PORT), LEG_PROBE_TIMEOUT_MS)
+                s.soTimeout = LEG_PROBE_TIMEOUT_MS
+                val txid = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+                val req = java.nio.ByteBuffer.allocate(20)
+                    .putShort(0x0001)          // Binding Request
+                    .putShort(0)               // length
+                    .putInt(0x2112A442)        // magic cookie
+                    .put(txid)
+                    .array()
+                s.getOutputStream().apply { write(req); flush() }
+                val buf = ByteArray(64)
+                val n = s.getInputStream().read(buf)
+                n >= 2 && (((buf[0].toInt() and 0xff) shl 8) or (buf[1].toInt() and 0xff)) == 0x0101
+            }
+        }.getOrDefault(false)
     }
 
     private fun acceptLoop(srv: ServerSocket) {
