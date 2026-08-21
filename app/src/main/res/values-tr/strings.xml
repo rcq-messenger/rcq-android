@@ -1057,6 +1057,7 @@
     <string name="myreports_closed">Bu bildirim kapandı. Yine olduysa yenisini açın.</string>
     <string name="myreports_send_error">Gönderilemedi. Tekrar deneyin.</string>
     <string name="burn_failed">Sunucuya ulaşılamadı, bu yüzden hiçbir şey silinmedi. Hesabına dokunulmadı. Bağlantın olduğunda tekrar dene.</string>
+    <string name="account_burned_elsewhere">Bu hesap başka bir cihazdan yakıldı. Yerel veriler silindi.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d not</item>
         <item quantity="other">%d not</item>

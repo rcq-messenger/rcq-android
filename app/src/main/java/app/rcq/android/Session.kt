@@ -48,7 +48,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -1567,6 +1569,7 @@ class Session(context: Context) {
                     calls.prewarmRelayPath()
                 }
             },
+            onAuthRejected = ::onSocketAuthRejected,
         )
         syncGraph()
     }
@@ -4001,6 +4004,15 @@ class Session(context: Context) {
             }
             return store.uin
         }
+        return eraseActiveAccountLocally(burnedId)
+    }
+
+    /** The local half of a burn: wipe the ACTIVE account's storage, drop it
+     *  from the roster, and hot-swap onto the next account (returning its
+     *  UIN) or fall back to the onboarding state (null). Shared between the
+     *  user-initiated [burnAccount] and the #655 path, where the ISLAND says
+     *  the account no longer exists and there is no server call left to make. */
+    private suspend fun eraseActiveAccountLocally(burnedId: String?): Int? {
         socket.disconnect()
         if (burnedId != null) {
             SecureStore.wipeAccount(appCtx, burnedId)
@@ -4049,6 +4061,62 @@ class Session(context: Context) {
             VisitedIslandsStore.bindAccount(null)
             null
         }
+    }
+
+    /** #655: the island said this account no longer exists — the ACTIVE
+     *  account was wiped locally. `nextUin` is the account the session
+     *  hot-swapped onto, or null for onboarding. MainActivity collects this
+     *  to move the UI; the wipe itself already happened down here. */
+    data class AccountLost(val uin: Int, val nextUin: Int?)
+    private val _accountLost = MutableSharedFlow<AccountLost>(extraBufferCapacity = 1)
+    val accountLost: SharedFlow<AccountLost> = _accountLost
+
+    @Volatile private var lastBurnProbeAt = 0L
+
+    /** The socket was refused with 4401. Could be three different things —
+     *  expired token, revoked device, burned account — and only a probe can
+     *  tell them apart. Throttled: the socket keeps redialing on its backoff
+     *  and every redial would land here. */
+    private fun onSocketAuthRejected() {
+        // Never from a duress view: `store` is the real account's and a probe
+        // outcome must not tear anything down while a coercer is watching.
+        if (duressViewUp) return
+        val now = System.currentTimeMillis()
+        if (now - lastBurnProbeAt < BURN_PROBE_THROTTLE_MS) return
+        lastBurnProbeAt = now
+        scope.launch { runCatching { probeBurnedAccount() } }
+    }
+
+    /** #655 — the burned account that kept talking. Burning bumps the uin
+     *  epoch, so every token dies (WS 4401, drains 401) — but /messages/sealed
+     *  is anonymous by design, so a client that shrugs 4401 off and reconnects
+     *  forever KEEPS SENDING from an account the server already erased. The
+     *  probe is /auth/refresh: prove our signing key for our own uin. A fresh
+     *  token back means the token was merely stale — adopt it and redial. A
+     *  clean `identity_not_found` means the account row is GONE (burned from
+     *  another device): wipe locally, exactly like a self-burn minus the
+     *  server call, and tell the UI. Any other failure (offline, 5xx) means
+     *  nothing and changes nothing. */
+    private suspend fun probeBurnedAccount() {
+        val me = store.uin ?: return
+        val spubB64 = Base64.encodeToString(signingPub(), Base64.NO_WRAP)
+        val fresh = try {
+            val challenge = api.recoverChallenge(spubB64).challenge
+            val signature = app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv(), challenge)
+            api.refreshSession(RcqApi.RefreshRequest(me, spubB64, challenge, signature, DeviceId.get(appCtx)))
+        } catch (e: Exception) {
+            if (e.message?.contains("identity_not_found") == true) {
+                android.util.Log.w("RCQburn", "island no longer knows #$me — wiping the local copy (#655)")
+                val next = eraseActiveAccountLocally(AccountManager.activeId.value)
+                _accountLost.tryEmit(AccountLost(me, next))
+            }
+            return
+        }
+        // Alive after all — the token had merely rotted. Adopt + redial.
+        store.updateToken(fresh.token)
+        api.setToken(fresh.token)
+        socket.disconnect()
+        connectAndSync(me, fresh.token)
     }
 
     /** Local-only delete of a NON-active account (iOS ManageAccountsSheet):
@@ -6996,6 +7064,9 @@ class Session(context: Context) {
          *  again. Longer than the socket's own max backoff (30s) so ordinary
          *  blips are handled where they belong. */
         const val OFFLINE_RELADDER_MS = 90_000L
+        /** Floor between two burned-account probes (#655): the socket redials
+         *  on its backoff and every 4401 close would otherwise probe again. */
+        const val BURN_PROBE_THROTTLE_MS = 60_000L
         /** Floor between two ladder runs. A ladder walk costs up to three
          *  probes of several seconds each, and on a network that is down for
          *  everyone it would otherwise repeat every minute forever. */

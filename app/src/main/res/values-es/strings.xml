@@ -1057,6 +1057,7 @@
     <string name="myreports_closed">Este informe está cerrado. Si vuelve a pasar, abre uno nuevo.</string>
     <string name="myreports_send_error">No se pudo enviar. Inténtalo otra vez.</string>
     <string name="burn_failed">No se pudo contactar con el servidor, así que no se borró nada. Tu cuenta está intacta. Inténtalo de nuevo cuando tengas conexión.</string>
+    <string name="account_burned_elsewhere">Esta cuenta fue quemada desde otro dispositivo. Sus datos locales se han borrado.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d nota</item>
         <item quantity="other">%d notas</item>

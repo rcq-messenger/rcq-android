@@ -1057,6 +1057,7 @@
     <string name="myreports_closed">这条反馈已关闭。如果又出现了，请新提一条。</string>
     <string name="myreports_send_error">没能发送，请再试一次。</string>
     <string name="burn_failed">没能连上服务器，所以什么都没有删除，你的账号原封不动。等有网络时再试一次。</string>
+    <string name="account_burned_elsewhere">此账号已在其他设备上销毁。本地数据已清除。</string>
     <plurals name="saved_notes">
         <item quantity="other">%d 条备忘</item>
     </plurals>
