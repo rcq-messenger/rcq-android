@@ -123,6 +123,20 @@ object RelayConfigStore {
     var frontHost: String = DEFAULT_FRONT
         private set
 
+    /** True when [host] names a known CDN front of the flagship: a ROAD to the
+     *  island, never an island. Covers the compiled-in name and whatever the
+     *  signed config moved the front to. Multihoming must ask this everywhere
+     *  it meets a host, because a front registered as a "backup home" is the
+     *  flagship's own mailbox by another name: the redundancy it promises is
+     *  fiction, and its drain pulls the account's REAL queue through the front
+     *  on a recover-minted token (founder's #911 carried exactly this phantom,
+     *  along with 24 other accounts). */
+    fun isFrontHost(host: String?): Boolean {
+        if (host.isNullOrBlank()) return false
+        val h = host.trim().lowercase()
+        return h == frontHost.trim().lowercase() || h == DEFAULT_FRONT
+    }
+
     /** Front for SUBSCRIBING to the push server, from the signed config.
      *
      *  ⚠ Only the subscribe leg. The endpoint we hand the island
