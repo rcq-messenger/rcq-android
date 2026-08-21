@@ -532,16 +532,23 @@ class Session(context: Context) {
     // that happened, and must stay silent. See refreshContacts() and #422.
     private var presenceBaselineLive = false
 
-    // v=2 (libsignal Double Ratchet) OUTBOUND is disabled: Android's libsignal
-    // (0.86.5) and iOS's (0.93.1) don't interop on the v=2 wire yet, so a v=2
-    // message sent to an iOS peer can't be decrypted there — it surfaces as a
-    // generic "Message" push, never lands in the chat, and the sender stays on
-    // one checkmark (no delivery ack). Until the cross-device path is verified
-    // we send v=1 (sealed sender, ECIES) for every 1:1 — still E2E, the same
-    // crypto groups already use. INBOUND v=2 is still decrypted (a peer that
-    // sends us v=2 keeps working). Flip back to true to re-enable v=2 sending
-    // once Android↔iOS v=2 is confirmed on a real device.
-    private val v2OutboundEnabled = false
+    // v=2 (libsignal Double Ratchet) OUTBOUND, i.e. forward secrecy on the 1:1
+    // messages this phone SENDS. Off since May behind one unanswered question:
+    // Android's libsignal and iOS's are different versions, and nobody had put
+    // a v=2 message from one in front of the other. Answered on 2026-08-21 —
+    // a message each way between a real Android build and a real iOS build,
+    // against production, decrypted and rendered on both sides — so it is on.
+    //
+    // What it changes: a 1:1 message is sealed per recipient DEVICE over the
+    // Double Ratchet instead of once to the account's long-term key, which is
+    // what makes yesterday's messages unreadable if today's keys are taken.
+    // Groups (sender keys) and INBOUND were already v=2 and are untouched. A
+    // peer with no libsignal bundle still gets the v=1 envelope, so nobody
+    // falls off the wire.
+    //
+    // It also wakes the silence probe (see awaitingReplySince): only a v=2
+    // send can arm it, so until now it was dormant code.
+    private val v2OutboundEnabled = true
     // media_id -> decrypted plaintext bytes (sender seeds it; receiver caches).
     // Decrypted media blobs, BOUNDED so an image-heavy chat can't grow the
     // cache without limit — that unbounded growth was an OOM risk on low-RAM
