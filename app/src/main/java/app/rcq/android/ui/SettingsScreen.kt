@@ -2632,8 +2632,20 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        // The glyph follows the LABEL, not the slot index
+                        // (founder batch 21.08, item 12: the iPhone on slot 2
+                        // wore a laptop). The island names slot 1 "primary"
+                        // with no platform in it, so the primary slot falls
+                        // back to a phone - a guess, and what it most often is.
+                        val slotLabel = (d.label ?: "").lowercase()
                         Icon(
-                            if (d.device_id == 1) Icons.Filled.Smartphone else Icons.Filled.Computer,
+                            when {
+                                listOf("desktop", "mac", "windows", "linux").any { it in slotLabel } -> Icons.Filled.Computer
+                                listOf("web", "chrome", "safari", "firefox", "browser").any { it in slotLabel } -> Icons.Filled.Language
+                                listOf("iphone", "ipod", "android", "phone").any { it in slotLabel } -> Icons.Filled.Smartphone
+                                d.device_id == 1 -> Icons.Filled.Smartphone
+                                else -> Icons.Filled.Computer
+                            },
                             null, tint = c.accent, modifier = Modifier.size(22.dp),
                         )
                         Text(
