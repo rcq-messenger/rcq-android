@@ -523,6 +523,15 @@ class Session(context: Context) {
     private val awaitingReplySince = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastSilenceProbeAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    // "uin:deviceId" -> the libsignal identity that device published the last
+    // time we read the (free) device list. The silence probe compares against
+    // THIS instead of re-reading a bundle: a bundle read consumes one of the
+    // peer's one-time prekeys, and a probe that spends one every half hour to
+    // hear "nothing changed" drains a pool that only refills while its owner
+    // is online — leaving every later X3DH with that account without its
+    // one-time secret. The probe would erode what it exists to protect.
+    private val peerDeviceIdentity = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     private val peerSilenceMs = 2 * 60_000L
     private val silenceProbeMinIntervalMs = 30 * 60_000L
 
@@ -1471,6 +1480,11 @@ class Session(context: Context) {
                 // blip (the socket's own backoff handles those) from a network
                 // that has started blocking us and needs the whole route
                 // ladder walked again.
+                // How long this reconnect was actually offline, measured before
+                // the marker is cleared — the silence probe shifts its clocks by
+                // exactly this much (see below).
+                val offlineGapMs =
+                    if (up && offlineSince != 0L) android.os.SystemClock.elapsedRealtime() - offlineSince else 0L
                 offlineSince = if (up) 0L else
                     (offlineSince.takeIf { it != 0L } ?: android.os.SystemClock.elapsedRealtime())
                 // The primary answered: whatever the backup drain thought, we
@@ -1503,13 +1517,22 @@ class Session(context: Context) {
                     if (everConnected) syncGraph()
                     everConnected = true
                     // The silence probe measures how long a PEER has been quiet,
-                    // and a socket that was down measures nothing: their replies
-                    // may be sitting in the queue this reconnect is about to
-                    // drain. Counting our own offline stretch as their silence
-                    // is how the first send after coming back would probe (and,
-                    // on a changed identity, re-key) against a backlog that was
-                    // sealed to the session we still hold. Start the clocks over.
-                    awaitingReplySince.clear()
+                    // and a stretch when THIS side had no socket measures
+                    // nothing: their replies may be sitting in the queue this
+                    // reconnect is about to drain.
+                    //
+                    // ⚠ So the clocks are PUSHED FORWARD by the gap, not reset.
+                    // Resetting looked equivalent and is not: a link that
+                    // redials more than once every two minutes — a phone in a
+                    // tunnel, a flapping VPN, two installs evicting each other
+                    // — would rearm every clock before any of them could reach
+                    // the threshold, and the probe would never fire again for
+                    // exactly the users whose sessions are most likely dead.
+                    if (offlineGapMs > 0) {
+                        for ((k, armedAt) in awaitingReplySince) {
+                            awaitingReplySince[k] = armedAt + offlineGapMs
+                        }
+                    }
                     // Connection is back — auto-resend anything stuck in FAILED
                     // (transient network/relay death) so the user doesn't have to
                     // tap each red error by hand.
@@ -4674,7 +4697,9 @@ class Session(context: Context) {
                     val probeDue = waitingSince != null && now - waitingSince > peerSilenceMs &&
                         now - (lastSilenceProbeAt[probeKey] ?: 0L) > silenceProbeMinIntervalMs
                     if (probeDue) {
-                        val result = SignalSession.probeSession(signalStores, api, toUin, dev)
+                        val result = SignalSession.probeSession(
+                            signalStores, api, toUin, dev, peerDeviceIdentity["$toUin:$dev"],
+                        )
                         // The throttle is spent on a probe that actually READ
                         // something. An unreachable island must not buy the
                         // peer half an hour of not being checked.
@@ -4856,7 +4881,9 @@ class Session(context: Context) {
         peerDeviceCache[uin]?.let { (at, devices) -> if (now - at < PEER_DEVICES_TTL_MS) return devices }
         val self = if (uin == store.uin) myDeviceId() else null
         val answered = try {
-            api.fetchPeerDevices(uin).devices.map { it.device_id }
+            val rows = api.fetchPeerDevices(uin).devices
+            for (r in rows) r.signal_identity_key?.let { ik -> peerDeviceIdentity["$uin:${r.device_id}"] = ik }
+            rows.map { it.device_id }
         } catch (e: Exception) {
             // 404 IS an answer: the island has no device registry and never
             // will within the TTL. Anything else — a timeout, a dead relay —

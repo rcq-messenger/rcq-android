@@ -216,7 +216,32 @@ object SignalSession {
         api: RcqApi,
         uin: Int,
         deviceId: Int,
+        publishedIdentity: String?,
     ): ProbeResult {
+        // ⚠ The comparison comes FIRST, and it is free: [publishedIdentity] is
+        // what the device list said this install publishes. Reading a bundle
+        // instead would consume one of the peer's one-time prekeys every time,
+        // and "unchanged" is the answer almost every time — a peer whose client
+        // replies in v=1 never clears the probe at all, so it would re-fire for
+        // them every half hour forever. Draining that pool leaves every later
+        // X3DH with the account without its one-time secret, which is the exact
+        // property this probe exists to defend.
+        val pinned = synchronized(stores) { stores.getIdentity(addressOf(uin, deviceId)) }
+        val published = publishedIdentity?.let { runCatching { IdentityKey(b64d(it)) }.getOrNull() }
+        if (published == null) {
+            // An island too old to publish identities in the device list. We
+            // will not spend a prekey to guess; the peer's own next message
+            // re-keys us through its prekey material.
+            Log.i(TAG, "silence probe: $uin/$deviceId — island published no identity; nothing done")
+            return ProbeResult.UNREACHABLE
+        }
+        if (pinned != null && pinned == published) {
+            Log.i(TAG, "silence probe: $uin/$deviceId unchanged; session kept")
+            return ProbeResult.UNCHANGED
+        }
+        // The identity behind that device really did change (or we hold none):
+        // the install we shared a ratchet with is gone, and a bundle read —
+        // with the prekey it costs — is now the right thing to spend.
         val bundle = try {
             fetchBundle(api, uin, deviceId)
         } catch (e: Exception) {
@@ -224,18 +249,7 @@ object SignalSession {
             return ProbeResult.UNREACHABLE
         }
         if (bundle.uin != uin) return ProbeResult.UNREACHABLE
-        // The outer (sealed-sender) key is refreshed either way: it is the one
-        // thing that can go stale without the ratchet noticing, and replacing
-        // it costs the peer nothing.
         rememberOuterKey(stores, bundle, deviceId)
-        val addr = addressOf(uin, deviceId)
-        val pinned = synchronized(stores) { stores.getIdentity(addr) }
-        val published = runCatching { IdentityKey(b64d(bundle.signal_identity_key)) }.getOrNull()
-            ?: return ProbeResult.UNREACHABLE
-        if (pinned != null && pinned == published) {
-            Log.i(TAG, "silence probe: $uin/$deviceId unchanged; session kept")
-            return ProbeResult.UNCHANGED
-        }
         // ⚠ NOT deleteSession + establish. libsignal's own handshake ARCHIVES
         // the session it replaces (SessionRecord.promote_state), and archived
         // states still decrypt: whatever that device sealed to the old session
