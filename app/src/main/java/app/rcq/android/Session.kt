@@ -4720,6 +4720,17 @@ class Session(context: Context) {
         api.fetchPeerDevices(me).devices.sortedBy { it.device_id } to myDeviceIdOrNull()
     }
 
+    /** Retire one of the account's key slots (пункт 13). Throws on failure;
+     *  a cooldown refusal surfaces as an IOException whose message carries
+     *  the island's `revoke_cooldown` body for the screen to name. */
+    suspend fun revokeKeySlot(deviceId: Int) = api.revokeKeySlot(deviceId)
+
+    /** Bumped when the island announces `device_slot_revoked` (a key slot of
+     *  this account was retired, here or on another device), so the Linked
+     *  Devices screen re-reads the slot list while it is on screen. */
+    private val _keySlotsChanged = MutableStateFlow(0)
+    val keySlotsChanged: StateFlow<Int> = _keySlotsChanged.asStateFlow()
+
     /** Retry a previously-failed outgoing message (same UUID, so no dup). */
     suspend fun resend(msg: ChatMessage) {
         if (!msg.fromMe || msg.state != DeliveryState.FAILED) return
@@ -5653,6 +5664,20 @@ class Session(context: Context) {
                 refreshCiRequests()
                 return@runCatching
             }
+            // The same consent gate for OUR OWN island, opt-in (Privacy:
+            // strangers go to requests). host "" marks a same-island row in
+            // the shared store. Returning here also skips store() below on
+            // purpose: a held message must not send the delivery receipt that
+            // would confirm to a stranger that it landed in front of a human.
+            // The active random-chat peer is exempt; matching with them IS
+            // the invitation.
+            if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin &&
+                dec.senderUin != activeRandomPeer && shouldQuarantineStranger(dec.senderUin, dec.envelope)
+            ) {
+                CrossIslandRequestsStore.hold(meUin, dec.senderUin, "", payloadB64, ciPreview(dec.envelope))
+                refreshCiRequests()
+                return@runCatching
+            }
             // A thread the user deleted comes back when its peer writes again.
             if (dec.senderUin != meUin) LocalStores.clearRemoved(dec.senderUin)
             val now = System.currentTimeMillis()
@@ -6211,6 +6236,37 @@ class Session(context: Context) {
         else -> ""
     }
 
+    /** Should this decrypted same-island 1:1 envelope go to the requests list
+     *  instead of the chat? Opt-in per account (Privacy) and mirrors web-chat's
+     *  stranger-requests.ts policy exactly. Only CONTENT kinds are held:
+     *  control traffic from an unknown sender (reactions, receipts, edits,
+     *  typing, visits) has no message of ours to belong to, so it falls
+     *  through and no-ops instead of opening a request row. */
+    private fun shouldQuarantineStranger(senderUin: Int, env: Envelope): Boolean {
+        if (!LocalStores.strangerQuarantineEnabled()) return false
+        val content = env is Envelope.Text || env is Envelope.Photo || env is Envelope.Video ||
+            env is Envelope.File || env is Envelope.Voice || env is Envelope.Location
+        if (!content) return false
+        if (LocalStores.isAllowedStranger(senderUin)) return false
+        if (isSameIslandContact(senderUin)) return false
+        // I wrote to them first, so their reply is invited, whatever the list says.
+        if (_messages.value[senderUin].orEmpty().any { it.fromMe }) return false
+        return true
+    }
+
+    /** Roster membership for the quarantine gate. When there is no roster to
+     *  consult AT ALL (live list empty and the offline cache never written)
+     *  FAIL OPEN: treat everyone as known rather than eat messages blind.
+     *  Same-island only: a cross-island contact can share the bare number
+     *  with a local stranger (see [LocalStores.aliasKey]). */
+    private fun isSameIslandContact(uin: Int): Boolean {
+        val live = _contacts.value
+        if (live.isNotEmpty()) return live.any { it.uin == uin && it.host.isNullOrBlank() }
+        val json = LocalStores.cachedContactsJson() ?: return true
+        val cached = runCatching { profileGson.fromJson(json, Array<Contact>::class.java) }.getOrNull() ?: return true
+        return cached.any { it.uin == uin && it.host.isNullOrBlank() }
+    }
+
     /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
      *  chat list (the send path still routes them by [CrossIslandStore] host). */
     private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
@@ -6244,6 +6300,18 @@ class Session(context: Context) {
      *  was accepted, so the pending row stays instead of vanishing. */
     suspend fun acceptCrossIslandRequest(uin: Int, host: String): Boolean {
         val me = store.uin ?: return false
+        // A SAME-ISLAND stranger (host "", the opt-in Privacy quarantine): no
+        // key card to fetch, no §5f accept to deposit. Accepting means "let
+        // this person talk": remember the allowance so their future messages
+        // flow, then re-ingest what they already wrote. The re-ingested
+        // payloads pass the gate now, land in a normal thread and only then
+        // send their delivery receipts.
+        if (host.isEmpty()) {
+            LocalStores.allowStranger(uin)
+            CrossIslandRequestsStore.clear(me, uin, "")?.msgs?.forEach { ingest(it.payload) }
+            refreshCiRequests()
+            return true
+        }
         if (addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT) == CiAdd.FAILED) return false
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload) }
         mergeCrossIslandContacts()
@@ -6543,6 +6611,9 @@ class Session(context: Context) {
             "device_linked", "device_revoked" -> {
                 if (_devices.value != null) scope.launch { runCatching { refreshDevices() } }
             }
+            // A KEY SLOT was retired (пункт 13), possibly from another session
+            // of this account. Just nudge the screen that shows the list.
+            "device_slot_revoked" -> _keySlotsChanged.value++
             "typing" -> {
                 val from = obj.get("from_uin")?.asInt
                 val active = obj.get("active")?.asBoolean ?: false

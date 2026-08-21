@@ -48,7 +48,7 @@
     <string name="home_bar_settings">Налаштування</string>
     <!-- Home: sections -->
     <string name="home_sec_requests">Запити</string>
-    <string name="home_sec_ci_requests">Запити на листування (інші острови)</string>
+    <string name="home_sec_ci_requests">Запити на листування</string>
     <string name="home_sec_groups">Групи</string>
     <string name="home_sec_favorites">Обрані</string>
     <string name="home_sec_online">У мережі</string>
@@ -175,6 +175,17 @@
     <string name="backup_island_promoted">Головний острів тепер %1$s</string>
     <string name="backup_island_err_unreachable">Острів недоступний. Нічого не змінено.</string>
     <string name="linked_devices_hint">Браузери, підключені до твого акаунта. Щоб підключити ще один, відкрий chat.rcq.app, обери «Підключити телефон», натисни «Сканувати QR» нижче і наведи камеру на код.</string>
+    <string name="linked_devices_slots_title">Ключі пристроїв</string>
+    <string name="linked_devices_slots_hint">Кожна інсталяція цього акаунта зі своїми ключами шифрування. Вхід за фразою відновлення з’являється тут.</string>
+    <string name="linked_devices_slots_primary">Основний пристрій</string>
+    <string name="linked_devices_slots_unnamed">Без назви</string>
+    <string name="linked_devices_slots_this">цей пристрій</string>
+    <string name="linked_devices_web_title">Веб-сесії</string>
+    <string name="linked_devices_revoke">Відкликати</string>
+    <string name="linked_devices_revoke_title">Відкликати цей слот ключів?</string>
+    <string name="linked_devices_revoke_body">Повідомлення більше не шифруватимуться для цього слота, а його ключі перестануть працювати. Інсталяції, що ним користується, доведеться підключитися заново.</string>
+    <string name="linked_devices_revoke_cooldown">Нова сесія не може одразу відкликати старіші. Спробуйте через %1$d год.</string>
+    <string name="linked_devices_revoke_failed">Не вдалося відкликати слот.</string>
     <string name="linked_devices_empty">Жодного браузера не підключено.</string>
     <string name="linked_devices_error">Не вдалося завантажити підключені пристрої.</string>
     <string name="linked_devices_scan">Сканувати QR</string>
@@ -585,6 +596,8 @@
     <string name="pv_receipts_desc">Хто бачить твої сині галочки. Якщо вимкнути, ти теж не бачитимеш чужих.</string>
     <string name="pv_screen_security">Блокувати знімки екрана</string>
     <string name="pv_screen_security_desc">Блокує знімки і запис екрана, а також ховає застосунок у списку нещодавніх. Наполеглива людина все одно може сфотографувати екран іншим пристроєм.</string>
+    <string name="pv_strangers">Незнайомці в запити</string>
+    <string name="pv_strangers_desc">Повідомлення не з контактів чекають у запитах, доки ви їх не приймете. Якщо ви написали людині першою, її відповідь надійде як зазвичай.</string>
     <string name="pv_hall_of_fame">Зала слави</string>
     <string name="pv_hall_of_fame_desc">Дозволити розглядати тебе для публічної Зали слави на rcq.app. Лише нік і UIN, і лише якщо схвалять. Вимкнути можна будь-коли.</string>
     <string name="pv_hof_add_image">Додати зображення / GIF</string>

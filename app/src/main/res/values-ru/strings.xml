@@ -56,7 +56,7 @@
 
     <!-- Home: sections -->
     <string name="home_sec_requests">Запросы</string>
-    <string name="home_sec_ci_requests">Запросы на общение (другие острова)</string>
+    <string name="home_sec_ci_requests">Запросы на переписку</string>
     <string name="home_sec_groups">Группы</string>
     <string name="home_sec_favorites">Избранное</string>
     <string name="home_sec_online">В сети</string>
@@ -193,6 +193,11 @@
     <string name="linked_devices_slots_primary">Основное устройство</string>
     <string name="linked_devices_slots_unnamed">Без имени</string>
     <string name="linked_devices_slots_this">это устройство</string>
+    <string name="linked_devices_revoke">Отозвать</string>
+    <string name="linked_devices_revoke_title">Отозвать этот слот ключей?</string>
+    <string name="linked_devices_revoke_body">Сообщения перестанут шифроваться для этого слота, а его ключи перестанут работать. Установке, которая им пользуется, придётся подключиться заново.</string>
+    <string name="linked_devices_revoke_cooldown">Новая сессия не может сразу отзывать более старые. Попробуйте через %1$d ч.</string>
+    <string name="linked_devices_revoke_failed">Не получилось отозвать слот.</string>
     <string name="linked_devices_web_title">Веб-сессии</string>
     <string name="linked_devices_empty">Нет подключённых браузеров.</string>
     <string name="linked_devices_error">Не удалось загрузить список устройств.</string>
@@ -612,6 +617,8 @@
     <string name="pv_receipts_desc">Кто видит ваши галочки прочтения. Если выключить, вы не увидите чужие.</string>
     <string name="pv_screen_security">Запрет скриншотов</string>
     <string name="pv_screen_security_desc">Блокирует скриншоты и запись экрана, прячет приложение в списке недавних. Решительный человек всё равно может сфотографировать экран другим устройством.</string>
+    <string name="pv_strangers">Незнакомцы в запросы</string>
+    <string name="pv_strangers_desc">Сообщения не из контактов ждут в запросах, пока вы их не примете. Если вы написали человеку первым, его ответ придёт как обычно.</string>
     <string name="pv_hall_of_fame">Зал славы</string>
     <string name="pv_hall_of_fame_desc">Разрешить рассматривать вас для публичного зала славы на rcq.app. Только ник и UIN, и только если одобрят. Можно выключить в любой момент.</string>
     <string name="pv_hof_add_image">Добавить картинку / GIF</string>

@@ -517,13 +517,22 @@ internal fun HomeScreen(
                             // §5f rows carry the requester's own name and greeting.
                             // The island tag stays visible either way: a cross-island
                             // name must never be able to pass as a local contact.
-                            val address = "${r.uin}@${r.host}"
+                            // host "" = a same-island stranger from the Privacy
+                            // quarantine: a plain #uin, not a dangling "@".
+                            val address = if (r.host.isEmpty()) "#${r.uin}" else "${r.uin}@${r.host}"
                             CiPendingRow(
                                 tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
                                 preview = r.preview.ifEmpty {
                                     if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
                                 },
-                                onAccept = { scope.launch { runCatching { session.acceptCrossIslandRequest(r.uin, r.host) } } },
+                                onAccept = {
+                                    scope.launch {
+                                        // Accepting a same-island stranger releases their
+                                        // held messages into a normal thread; open it.
+                                        runCatching { session.acceptCrossIslandRequest(r.uin, r.host) }
+                                            .onSuccess { ok -> if (ok && r.host.isEmpty()) onOpenChat(r.uin) }
+                                    }
+                                },
                                 onDismiss = { session.dismissCrossIslandRequest(r.uin, r.host) },
                                 onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
                             )
