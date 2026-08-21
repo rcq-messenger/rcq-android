@@ -137,6 +137,15 @@ object LocalStores {
     private val _mentionSeenAt = MutableStateFlow<Map<Int, Long>>(emptyMap())
     val mentionSeenAt: StateFlow<Map<Int, Long>> = _mentionSeenAt.asStateFlow()
 
+    /** Where reading stopped, per thread (founder batch item 13a, iOS parity):
+     *  the resting scroll position of an open chat as "rows from the end" +
+     *  first-visible pixel offset. Distance from the END so history growing
+     *  above does not move the anchor. An entry exists only for threads left
+     *  ABOVE the bottom; reading to the bottom clears it, so those chats keep
+     *  opening at the newest message. Plain map, no flow: read once on chat
+     *  open, nothing observes it. */
+    private var _chatPos: Map<String, Pair<Int, Int>> = emptyMap()
+
     /** Presence "stay online for N hours after exit" window: the epoch-millis
      *  moment that window EXPIRES, or null when the feature is off. Local-only
      *  affordance anchored when the user enables/changes it in Privacy
@@ -339,6 +348,7 @@ object LocalStores {
             _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
             _mentionSeenAt.value = emptyMap()
+            _chatPos = emptyMap()
             _presenceWindow.value = null
             _secureThreads.value = emptySet()
             _aliases.value = emptyMap()
@@ -366,6 +376,7 @@ object LocalStores {
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
         _mentionSeenAt.value = loadMentionSeen(pk(K_MENTION_SEEN))
+        _chatPos = loadChatPos(pk(K_CHAT_POS))
         _presenceWindow.value = prefs.getLong(pk(K_PRES_WIN), 0L).takeIf { it > 0L }
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
     }
@@ -711,6 +722,39 @@ object LocalStores {
             g to v
         }.toMap()
 
+    // ── chat scroll position (per thread) ────────────────────────────
+    /** The saved reading position for [thread], as (rows-from-end, pixel
+     *  offset), or null when the thread was last left at the bottom. */
+    fun chatPosition(thread: String): Pair<Int, Int>? = _chatPos[thread]
+
+    fun saveChatPosition(thread: String, rowsFromEnd: Int, offsetPx: Int) {
+        if (acct == null) return
+        val entry = rowsFromEnd to offsetPx
+        if (_chatPos[thread] == entry) return
+        _chatPos = _chatPos + (thread to entry)
+        persistChatPos()
+    }
+
+    /** The user read to the bottom: this chat opens at the newest message again. */
+    fun clearChatPosition(thread: String) {
+        if (acct == null || _chatPos[thread] == null) return
+        _chatPos = _chatPos - thread
+        persistChatPos()
+    }
+
+    private fun persistChatPos() =
+        prefs.edit().putStringSet(pk(K_CHAT_POS), _chatPos.map { "${it.key}=${it.value.first}:${it.value.second}" }.toSet()).apply()
+
+    private fun loadChatPos(key: String): Map<String, Pair<Int, Int>> =
+        prefs.getStringSet(key, emptySet())!!.mapNotNull { entry ->
+            val i = entry.lastIndexOf('=')
+            if (i <= 0) return@mapNotNull null
+            val v = entry.substring(i + 1).split(':')
+            val dist = v.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+            val off = v.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+            entry.substring(0, i) to (dist to off)
+        }.toMap()
+
     // ── reaction / mention home-row inboxes ──────────────────────────
     fun markReaction(thread: String) = addTo(_reactionInbox, K_REACT_INBOX, thread)
     fun clearReaction(thread: String) = removeFrom(_reactionInbox, K_REACT_INBOX, thread)
@@ -844,7 +888,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -870,6 +914,7 @@ object LocalStores {
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_MENTION_INBOX = "mention_inbox"
     private const val K_MENTION_SEEN = "mention_seen_at"
+    private const val K_CHAT_POS = "chat_scroll_pos"
     private const val K_ALIAS = "contact_aliases"
     private const val K_ANIM_AVATARS = "animate_avatars"
     private const val K_SWIPE_SIDE = "swipe_reply_side"
