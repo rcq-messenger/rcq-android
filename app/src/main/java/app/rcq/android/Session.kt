@@ -3834,16 +3834,21 @@ class Session(context: Context) {
                 is Envelope.Reaction -> addGroupReaction(groupId, env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
                     // Honor the delete if the deleter is the message author OR a
-                    // group moderator: the owner, or a member the owner granted
-                    // the `delete` cap. We can check this because sealed sender
-                    // still reveals the decrypted deleter (dec.senderUin) and we
-                    // have the cached roster with everyone's permissions.
+                    // group moderator: the owner, an ADMIN, or a member the owner
+                    // granted the `delete` cap (founder batch 21.08, item 3; web
+                    // precedent: incoming-store.ts groupModerator). The wire is
+                    // unchanged — the same delete envelope the author's own
+                    // retract fans out — the RECEIVER decides whether this sender
+                    // may. We can check because sealed sender still reveals the
+                    // decrypted deleter (dec.senderUin); the owner is read off
+                    // the group row itself (the roster can be absent, #650), an
+                    // admin needs the cached roster. An OLDER client ignores a
+                    // foreign delete and keeps the message — nothing breaks, it
+                    // just stays there. 1:1 deletes remain author-only.
                     val t = _groupMessages.value[groupId]?.firstOrNull { it.id == env.targetId }
                     if (t != null) {
-                        val g = group(groupId)
                         val byAuthor = t.senderUin == dec.senderUin
-                        val byModerator = g?.members?.firstOrNull { it.uin == dec.senderUin }
-                            ?.canDelete(g.ownerUin) == true
+                        val byModerator = group(groupId)?.moderator(dec.senderUin) == true
                         if (byAuthor || byModerator) deleteInFlow(_groupMessages, groupId, env.targetId)
                     }
                 }
@@ -5091,8 +5096,11 @@ class Session(context: Context) {
     }
 
     /** Retract [target] for everyone (iOS delete-for-everyone). Allowed for the
-     *  author, OR (in a group) a moderator: the owner / a member the owner
-     *  granted the `delete` cap. Recipients re-check the same rule on receipt. */
+     *  author, OR (in a group) a moderator: the owner, an admin, or a member
+     *  the owner granted the `delete` cap (founder batch 21.08, item 3; web
+     *  precedent: Chat.tsx deleteAsModerator). Recipients re-check the same
+     *  rule on receipt, so this button grants nothing the group did not
+     *  already grant. */
     suspend fun sendDeleteForEveryone(target: ChatMessage) {
         val gid = target.groupId
         // Saved Messages: the thread IS my own number, so every row in it is
@@ -5112,8 +5120,7 @@ class Session(context: Context) {
             ensureRoster(gid)
             val g = group(gid)
             val me = store.uin
-            val canModerate = g != null && me != null &&
-                (g.members.firstOrNull { it.uin == me }?.canDelete(g.ownerUin) == true)
+            val canModerate = g != null && me != null && g.moderator(me)
             if (!canModerate) return
         }
         val env = Envelope.delete(target.id)

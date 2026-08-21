@@ -1528,14 +1528,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 
     actionMsg?.let { m ->
         // "Delete for everyone" is offered for your own message, OR (in a group)
-        // when you're a moderator: the owner, or a member granted the `delete`
-        // cap. Recipients re-check the same rule on receipt.
+        // when you're a moderator: the owner, an admin, or a member granted the
+        // `delete` cap (founder batch 21.08, item 3; web precedent: Chat.tsx
+        // canModerate). Recipients re-check the same rule on receipt.
         // Saved (notes to self) has no "everyone" — you ARE everyone there, and
         // offering both "delete for everyone" and "delete for me" on your own
         // note only asks the user to decide something meaningless. Reported by
         // vss: "У кого «всех»? Надо один пункт просто Удалить."
-        val canDeleteAll = !isSelf && (m.fromMe ||
-            (group != null && group.members.firstOrNull { it.uin == ownUin }?.canDelete(group.ownerUin) == true))
+        val canDeleteAll = !isSelf && (m.fromMe || (group != null && group.moderator(ownUin)))
         // A sheet, not a centre dialog: this is the most-used menu in the app and
         // it belongs under the thumb, next to the message it acts on (iOS has
         // had it as a sheet from the start; on Android everything was a centred
