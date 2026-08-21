@@ -865,6 +865,7 @@
     <string name="media_fetch_failed">Не удалось скачать файл. Проверьте связь и попробуйте ещё раз.</string>
     <string name="chat_pin">Закрепить</string>
     <string name="chat_pinned_media">📎 Вложение</string>
+    <string name="chat_pin_failed">Не получилось закрепить сообщение.</string>
     <string name="chat_edit">Изменить</string>
     <string name="chat_retry">Повторить</string>
     <string name="chat_delete_all">Удалить у всех</string>

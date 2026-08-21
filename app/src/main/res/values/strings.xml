@@ -869,6 +869,7 @@
     <string name="media_fetch_failed">Could not fetch the file. Check the connection and try again.</string>
     <string name="chat_pin">Pin</string>
     <string name="chat_pinned_media">📎 Attachment</string>
+    <string name="chat_pin_failed">Could not pin that message.</string>
     <string name="chat_edit">Edit</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_delete_all">Delete for everyone</string>

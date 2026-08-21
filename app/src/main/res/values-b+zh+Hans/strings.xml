@@ -837,6 +837,7 @@
     <string name="media_fetch_failed">没能下载文件。检查一下网络再试。</string>
     <string name="chat_pin">置顶</string>
     <string name="chat_pinned_media">📎 附件</string>
+    <string name="chat_pin_failed">无法置顶这条消息。</string>
     <string name="chat_edit">编辑</string>
     <string name="chat_retry">重试</string>
     <string name="chat_delete_all">为所有人删除</string>
