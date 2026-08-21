@@ -22,8 +22,14 @@ data class GroupMember(
     val avatarMediaKey: String? = null,
 ) {
     val presence: UserStatus get() = UserStatus.from(status)
-    /** True if this member may delete anyone's message (owner OR `delete` cap). */
-    fun canDelete(ownerUin: Int): Boolean = uin == ownerUin || "delete" in permissions
+    /** True if this member may delete anyone's message: the owner, an ADMIN,
+     *  or a member the owner granted the `delete` cap. Role "admin" joined the
+     *  rule in founder batch 21.08, item 3 ("админ не может удалить чужое
+     *  сообщение") — the web shipped it first (incoming-store.ts
+     *  groupModerator / Chat.tsx canModerate); the granted cap stays so
+     *  existing delete-moderators keep the power they were given. */
+    fun canDelete(ownerUin: Int): Boolean =
+        uin == ownerUin || role == "admin" || "delete" in permissions
     /** True if this member may manage group info — pin, rename, etc. (owner OR
      *  `info` cap). Used to gate pinning a message from the chat. */
     fun canManageInfo(ownerUin: Int): Boolean = uin == ownerUin || "info" in permissions
@@ -61,6 +67,16 @@ data class RcqGroup(
     /** Broadcast mode (owner_only) is enforced client-side; the server
      *  can't see who's posting under sealed sender. */
     fun canPost(ownUin: Int): Boolean = postPolicy != "owner_only" || ownUin == ownerUin
+
+    /** May [uin] retract OTHER people's messages here (founder batch 21.08,
+     *  item 3; web precedent: incoming-store.ts groupModerator)? The owner
+     *  may — checked off the group row itself, because the chat list is
+     *  fetched without rosters (#650) and [members] can legitimately be
+     *  empty. An admin / delete-cap member needs the cached roster; their
+     *  delete arriving before any roster was cached is simply ignored, same
+     *  as on an old client that never knew the rule. */
+    fun moderator(uin: Int): Boolean =
+        uin == ownerUin || members.firstOrNull { it.uin == uin }?.canDelete(ownerUin) == true
 
     fun memberName(uin: Int): String =
         members.firstOrNull { it.uin == uin }?.nickname ?: "$uin"
