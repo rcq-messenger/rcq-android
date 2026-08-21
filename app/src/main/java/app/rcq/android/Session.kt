@@ -3264,7 +3264,14 @@ class Session(context: Context) {
         rosterFetched.add(id)
         val merged = cached.copy(members = full.members, memberCount = full.memberCount)
         _groups.value = _groups.value.map { if (it.id == id) merged else it }
-        runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
+        // #650: the fetch/parse above already runs on IO inside RcqApi, but this
+        // disk snapshot serializes EVERY group, and a roster can carry 2000+
+        // members with two base64 keys each. Callers sit on the main thread
+        // (the info and chat screens' LaunchedEffect), so keep the megabytes of
+        // Gson work off it; the StateFlow above is published either way.
+        withContext(Dispatchers.Default) {
+            runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
+        }
         return merged
     }
     fun groupName(id: Int): String = group(id)?.name ?: "Group $id"
