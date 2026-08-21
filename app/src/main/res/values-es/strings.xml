@@ -837,6 +837,7 @@
     <string name="media_fetch_failed">No se pudo descargar el archivo. Revisa la conexión e inténtalo otra vez.</string>
     <string name="chat_pin">Fijar</string>
     <string name="chat_pinned_media">📎 Adjunto</string>
+    <string name="chat_pin_failed">No se pudo fijar el mensaje.</string>
     <string name="chat_edit">Editar</string>
     <string name="chat_retry">Reintentar</string>
     <string name="chat_delete_all">Eliminar para todos</string>

@@ -1636,12 +1636,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // there (a chat pin or the settings-entered text — one slot).
                     if (group != null && group.members.firstOrNull { it.uin == ownUin }?.canManageInfo(group.ownerUin) == true) {
                         val pinFallback = stringResource(R.string.chat_pinned_media)
+                        val pinFailToast = stringResource(R.string.chat_pin_failed)
                         MessageAction(stringResource(R.string.chat_pin)) {
-                            val text = m.body.ifBlank { pinFallback }
+                            // ⚠ The island's slot is 500 chars (GroupPatchIn.pinned_text) and a
+                            // longer body is refused BEFORE the row is written. Unclamped, the
+                            // optimistic swap below showed the new pin until the next refresh put
+                            // the old one back: a pin that looked like it worked and did nothing.
+                            val body = m.body.ifBlank { pinFallback }
+                            val text = if (body.length > 500) body.take(499) + "…" else body
+                            val previous = group.pinnedText
                             // Optimistic + instant: replace the displayed pin now,
                             // then PATCH (the response reconciles it).
                             session.applyPinnedTextLocally(group.id, text)
-                            scope.launch { runCatching { session.patchGroup(group.id, pinnedText = text) } }
+                            scope.launch {
+                                runCatching { session.patchGroup(group.id, pinnedText = text) }
+                                    .onFailure {
+                                        session.applyPinnedTextLocally(group.id, previous ?: "")
+                                        android.widget.Toast.makeText(context, pinFailToast, android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                            }
                             actionMsg = null
                         }
                     }

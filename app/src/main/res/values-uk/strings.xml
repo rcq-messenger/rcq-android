@@ -837,6 +837,7 @@
     <string name="media_fetch_failed">Не вдалося завантажити файл. Перевірте зв’язок і спробуйте ще раз.</string>
     <string name="chat_pin">Закріпити</string>
     <string name="chat_pinned_media">📎 Вкладення</string>
+    <string name="chat_pin_failed">Не вдалося закріпити повідомлення.</string>
     <string name="chat_edit">Змінити</string>
     <string name="chat_retry">Повторити</string>
     <string name="chat_delete_all">Видалити в усіх</string>
