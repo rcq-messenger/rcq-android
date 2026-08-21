@@ -57,7 +57,7 @@
 
     <!-- Home: sections -->
     <string name="home_sec_requests">Requests</string>
-    <string name="home_sec_ci_requests">Requests to connect (other islands)</string>
+    <string name="home_sec_ci_requests">Message requests</string>
     <string name="home_sec_groups">Groups</string>
     <string name="home_sec_favorites">Favorites</string>
     <string name="home_sec_online">Online</string>
@@ -194,6 +194,11 @@
     <string name="linked_devices_slots_primary">Primary device</string>
     <string name="linked_devices_slots_unnamed">Unnamed</string>
     <string name="linked_devices_slots_this">this device</string>
+    <string name="linked_devices_revoke">Revoke</string>
+    <string name="linked_devices_revoke_title">Revoke this key slot?</string>
+    <string name="linked_devices_revoke_body">Messages will no longer be encrypted for this slot, and its keys stop working. The install using it will need to be linked again.</string>
+    <string name="linked_devices_revoke_cooldown">A fresh session must wait before revoking older ones. Try again in %1$d h.</string>
+    <string name="linked_devices_revoke_failed">Could not revoke this slot.</string>
     <string name="linked_devices_web_title">Web sessions</string>
     <string name="linked_devices_empty">No browsers are connected.</string>
     <string name="linked_devices_error">Couldn\'t load linked devices.</string>
@@ -616,6 +621,8 @@
     <string name="pv_receipts_desc">Who sees your blue ticks. Turning this off hides theirs too.</string>
     <string name="pv_screen_security">Block screenshots</string>
     <string name="pv_screen_security_desc">Blocks screenshots and screen recording, and hides the app in the recent-apps switcher. A determined person can still photograph the screen with another device.</string>
+    <string name="pv_strangers">Strangers go to requests</string>
+    <string name="pv_strangers_desc">Messages from people outside your contacts wait in Requests until you accept them. If you wrote to someone first, their reply comes through as usual.</string>
     <string name="pv_hall_of_fame">Hall of Fame</string>
     <string name="pv_hall_of_fame_desc">Allow being considered for the public Hall of Fame at rcq.app. Only your nickname and UIN, and only if approved. You can turn this off any time.</string>
     <string name="pv_hof_add_image">Add image / GIF</string>

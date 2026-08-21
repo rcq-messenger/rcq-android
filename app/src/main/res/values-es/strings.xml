@@ -48,7 +48,7 @@
     <string name="home_bar_settings">Ajustes</string>
     <!-- Home: sections -->
     <string name="home_sec_requests">Solicitudes</string>
-    <string name="home_sec_ci_requests">Solicitudes para conectar (otras islas)</string>
+    <string name="home_sec_ci_requests">Solicitudes de mensajes</string>
     <string name="home_sec_groups">Grupos</string>
     <string name="home_sec_favorites">Favoritos</string>
     <string name="home_sec_online">En línea</string>
@@ -175,6 +175,17 @@
     <string name="backup_island_promoted">La isla principal ahora es %1$s</string>
     <string name="backup_island_err_unreachable">La isla no está accesible. No se ha cambiado nada.</string>
     <string name="linked_devices_hint">Navegadores conectados a tu cuenta. Para conectar uno, abre chat.rcq.app, elige Conectar teléfono, toca Escanear QR aquí abajo y apunta al código.</string>
+    <string name="linked_devices_slots_title">Claves de dispositivos</string>
+    <string name="linked_devices_slots_hint">Cada instalación de esta cuenta con sus propias claves de cifrado. Un inicio de sesión con la frase de recuperación aparece aquí.</string>
+    <string name="linked_devices_slots_primary">Dispositivo principal</string>
+    <string name="linked_devices_slots_unnamed">Sin nombre</string>
+    <string name="linked_devices_slots_this">este dispositivo</string>
+    <string name="linked_devices_web_title">Sesiones web</string>
+    <string name="linked_devices_revoke">Revocar</string>
+    <string name="linked_devices_revoke_title">¿Revocar esta ranura de claves?</string>
+    <string name="linked_devices_revoke_body">Los mensajes dejarán de cifrarse para esta ranura y sus claves dejarán de funcionar. La instalación que la usa tendrá que vincularse de nuevo.</string>
+    <string name="linked_devices_revoke_cooldown">Una sesión nueva debe esperar antes de revocar otras más antiguas. Inténtalo en %1$d h.</string>
+    <string name="linked_devices_revoke_failed">No se pudo revocar la ranura.</string>
     <string name="linked_devices_empty">No hay ningún navegador conectado.</string>
     <string name="linked_devices_error">No se pudieron cargar los dispositivos vinculados.</string>
     <string name="linked_devices_scan">Escanear QR</string>
@@ -585,6 +596,8 @@
     <string name="pv_receipts_desc">Quién ve tus marcas azules. Si lo desactivas, tampoco ves las suyas.</string>
     <string name="pv_screen_security">Bloquear las capturas de pantalla</string>
     <string name="pv_screen_security_desc">Bloquea las capturas y la grabación de pantalla, y esconde la app en el selector de apps recientes. Alguien empeñado siempre puede fotografiar la pantalla con otro dispositivo.</string>
+    <string name="pv_strangers">Desconocidos a solicitudes</string>
+    <string name="pv_strangers_desc">Los mensajes de personas fuera de tus contactos esperan en Solicitudes hasta que los aceptes. Si escribiste tú primero, su respuesta llega como siempre.</string>
     <string name="pv_hall_of_fame">Salón de la fama</string>
     <string name="pv_hall_of_fame_desc">Permite que te tengan en cuenta para el Salón de la fama público de rcq.app. Solo tu apodo y tu UIN, y solo si te aprueban. Puedes desactivarlo cuando quieras.</string>
     <string name="pv_hof_add_image">Añadir imagen / GIF</string>

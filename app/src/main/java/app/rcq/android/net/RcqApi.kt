@@ -287,6 +287,14 @@ class RcqApi(
     suspend fun fetchPeerDeviceBundle(uin: Int, deviceId: Int): PeerBundle = withContext(Dispatchers.IO) {
         get("/keys/$uin/devices/$deviceId/bundle", authed = true, PeerBundle::class.java)
     }
+    /** Retire one of MY key slots (POST /keys/devices/{id}/revoke, 204):
+     *  senders stop fanning out to it and its one-time prekeys are gone.
+     *  Slot 1 is refused server-side (that is the primary bundle); a young
+     *  linked session gets 403 {code:"revoke_cooldown", wait_seconds} for
+     *  anything older than itself. */
+    suspend fun revokeKeySlot(deviceId: Int) = withContext(Dispatchers.IO) {
+        postNoContent("/keys/devices/$deviceId/revoke", "{}", authed = true)
+    }
 
     // ── Federation Layer B (F1): self-signed home-island record ──
     data class IslandRecordPutResp(val ok: Boolean = false, val ts: Long = 0)

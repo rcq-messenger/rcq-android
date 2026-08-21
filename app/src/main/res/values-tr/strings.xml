@@ -48,7 +48,7 @@
     <string name="home_bar_settings">Ayarlar</string>
     <!-- Home: sections -->
     <string name="home_sec_requests">İstekler</string>
-    <string name="home_sec_ci_requests">Bağlanma istekleri (diğer adalar)</string>
+    <string name="home_sec_ci_requests">Mesaj istekleri</string>
     <string name="home_sec_groups">Gruplar</string>
     <string name="home_sec_favorites">Favoriler</string>
     <string name="home_sec_online">Çevrimiçi</string>
@@ -175,6 +175,17 @@
     <string name="backup_island_promoted">Ana ada artık %1$s</string>
     <string name="backup_island_err_unreachable">Adaya erişilemiyor. Hiçbir şey değişmedi.</string>
     <string name="linked_devices_hint">Hesabına bağlı tarayıcılar. Bir tane bağlamak için chat.rcq.app adresini aç, Telefonu bağla\'yı seç, aşağıdaki QR tara\'ya dokun ve kodu göster.</string>
+    <string name="linked_devices_slots_title">Cihaz anahtarları</string>
+    <string name="linked_devices_slots_hint">Bu hesabın kendi şifreleme anahtarlarına sahip her kurulumu. Kurtarma ifadesiyle yapılan giriş burada görünür.</string>
+    <string name="linked_devices_slots_primary">Birincil cihaz</string>
+    <string name="linked_devices_slots_unnamed">Adsız</string>
+    <string name="linked_devices_slots_this">bu cihaz</string>
+    <string name="linked_devices_web_title">Web oturumları</string>
+    <string name="linked_devices_revoke">İptal et</string>
+    <string name="linked_devices_revoke_title">Bu anahtar yuvası iptal edilsin mi?</string>
+    <string name="linked_devices_revoke_body">Mesajlar artık bu yuva için şifrelenmeyecek ve anahtarları çalışmayı bırakacak. Onu kullanan kurulumun yeniden bağlanması gerekecek.</string>
+    <string name="linked_devices_revoke_cooldown">Yeni bir oturum daha eskilerini hemen iptal edemez. %1$d sa. sonra deneyin.</string>
+    <string name="linked_devices_revoke_failed">Yuva iptal edilemedi.</string>
     <string name="linked_devices_empty">Bağlı tarayıcı yok.</string>
     <string name="linked_devices_error">Bağlı cihazlar yüklenemedi.</string>
     <string name="linked_devices_scan">QR tara</string>
@@ -585,6 +596,8 @@
     <string name="pv_receipts_desc">Mavi tiklerini kimler görür. Bunu kapatmak onlarınkini de gizler.</string>
     <string name="pv_screen_security">Ekran görüntüsünü engelle</string>
     <string name="pv_screen_security_desc">Ekran görüntüsünü ve ekran kaydını engeller, uygulamayı son uygulamalar ekranında gizler. Kararlı biri yine de ekranı başka bir cihazla fotoğraflayabilir.</string>
+    <string name="pv_strangers">Yabancılar isteklere düşsün</string>
+    <string name="pv_strangers_desc">Kişilerinizde olmayanların mesajları siz kabul edene kadar İstekler bölümünde bekler. Önce siz yazdıysanız yanıtı doğrudan gelir.</string>
     <string name="pv_hall_of_fame">Şöhret Salonu</string>
     <string name="pv_hall_of_fame_desc">rcq.app adresindeki herkese açık Şöhret Salonu için değerlendirilmeye izin ver. Yalnızca takma adın ve UIN\'in, yalnızca onaylanırsa. Bunu istediğin zaman kapatabilirsin.</string>
     <string name="pv_hof_add_image">Görsel / GIF ekle</string>

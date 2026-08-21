@@ -48,7 +48,7 @@
     <string name="home_bar_settings">设置</string>
     <!-- Home: sections -->
     <string name="home_sec_requests">好友请求</string>
-    <string name="home_sec_ci_requests">好友请求（其他岛）</string>
+    <string name="home_sec_ci_requests">消息请求</string>
     <string name="home_sec_groups">群组</string>
     <string name="home_sec_favorites">星标</string>
     <string name="home_sec_online">在线</string>
@@ -175,6 +175,17 @@
     <string name="backup_island_promoted">主岛现在是 %1$s</string>
     <string name="backup_island_err_unreachable">岛不可达。没有做任何更改。</string>
     <string name="linked_devices_hint">已连接到你账号的浏览器。要连接一个，请打开 chat.rcq.app，选择“连接手机”，点下面的“扫描 QR”，对准页面上的码。</string>
+    <string name="linked_devices_slots_title">设备密钥</string>
+    <string name="linked_devices_slots_hint">此账号每个持有自己加密密钥的安装。用恢复短语登录的会话也会出现在这里。</string>
+    <string name="linked_devices_slots_primary">主设备</string>
+    <string name="linked_devices_slots_unnamed">未命名</string>
+    <string name="linked_devices_slots_this">本设备</string>
+    <string name="linked_devices_web_title">网页会话</string>
+    <string name="linked_devices_revoke">撤销</string>
+    <string name="linked_devices_revoke_title">撤销该密钥槽位？</string>
+    <string name="linked_devices_revoke_body">消息将不再为该槽位加密，其密钥也会失效。使用它的安装需要重新连接。</string>
+    <string name="linked_devices_revoke_cooldown">新会话暂时不能撤销更早的会话，请在 %1$d 小时后重试。</string>
+    <string name="linked_devices_revoke_failed">无法撤销该槽位。</string>
     <string name="linked_devices_empty">没有已连接的浏览器。</string>
     <string name="linked_devices_error">无法加载已连接设备。</string>
     <string name="linked_devices_scan">扫描 QR</string>
@@ -585,6 +596,8 @@
     <string name="pv_receipts_desc">谁能看到你的蓝色对勾。关闭后，你也看不到别人的。</string>
     <string name="pv_screen_security">禁止截屏</string>
     <string name="pv_screen_security_desc">禁止截屏和录屏，并在最近任务列表中隐藏应用。有心的人仍然可以用另一台设备拍摄屏幕。</string>
+    <string name="pv_strangers">陌生人进入请求</string>
+    <string name="pv_strangers_desc">联系人以外的消息会先进入请求列表，等待你接受。若是你先给对方写信，对方的回复会照常送达。</string>
     <string name="pv_hall_of_fame">名人堂</string>
     <string name="pv_hall_of_fame_desc">允许将你列入 rcq.app 上公开名人堂的候选。只显示昵称和 UIN，且需要通过审核。你可以随时关闭。</string>
     <string name="pv_hof_add_image">添加图片 / GIF</string>

@@ -80,6 +80,18 @@ object LocalStores {
     private val _blocked = MutableStateFlow<Set<Int>>(emptySet())
     val blocked: StateFlow<Set<Int>> = _blocked.asStateFlow()
 
+    /** Opt-in same-island stranger quarantine (Privacy): messages from people
+     *  outside the contacts wait in the requests list instead of opening a
+     *  chat. Device-local like [_blocked]: the mailbox itself stays open
+     *  (sealed sender), this only decides where THIS install files a
+     *  stranger's first message. Mirrors web-chat's stranger-requests.ts. */
+    private val _strangerQuarantine = MutableStateFlow(false)
+    val strangerQuarantine: StateFlow<Boolean> = _strangerQuarantine.asStateFlow()
+
+    /** Strangers the user Accepted from the requests list. Accepting means
+     *  their FUTURE messages flow too, so the allowance persists here. */
+    private val _allowedStrangers = MutableStateFlow<Set<Int>>(emptySet())
+
     /** Peers whose island answered "no such number" after a send failed — i.e.
      *  they burned the account. Discovered lazily, never polled: asking the
      *  server periodically whether each of your contacts still exists is
@@ -319,6 +331,8 @@ object LocalStores {
             _locked.value = emptySet()
             _removed.value = emptySet()
             _blocked.value = emptySet()
+            _strangerQuarantine.value = false
+            _allowedStrangers.value = emptySet()
             _gonePeers.value = emptySet()
             _unread.value = emptyMap()
             _reactionInbox.value = emptySet()
@@ -344,6 +358,8 @@ object LocalStores {
         _locked.value = prefs.getStringSet(pk(K_LOCKED), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
+        _strangerQuarantine.value = prefs.getBoolean(pk(K_STRANGER_Q), false)
+        _allowedStrangers.value = prefs.getStringSet(pk(K_STRANGER_ALLOW), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadUnread(pk(K_UNREAD))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
@@ -494,6 +510,20 @@ object LocalStores {
         if (acct == null || on == (uin in _blocked.value)) return
         _blocked.value = if (on) _blocked.value + uin else _blocked.value - uin
         prefs.edit().putStringSet(pk(K_BLOCKED), _blocked.value.map(Int::toString).toSet()).apply()
+    }
+
+    fun strangerQuarantineEnabled() = _strangerQuarantine.value
+    fun setStrangerQuarantine(on: Boolean) {
+        if (acct == null) return
+        _strangerQuarantine.value = on
+        prefs.edit().putBoolean(pk(K_STRANGER_Q), on).apply()
+    }
+
+    fun isAllowedStranger(uin: Int) = uin in _allowedStrangers.value
+    fun allowStranger(uin: Int) {
+        if (acct == null || uin in _allowedStrangers.value) return
+        _allowedStrangers.value = _allowedStrangers.value + uin
+        prefs.edit().putStringSet(pk(K_STRANGER_ALLOW), _allowedStrangers.value.map(Int::toString).toSet()).apply()
     }
 
     fun setFontScale(scale: Float) {
@@ -814,7 +844,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 
@@ -825,6 +855,8 @@ object LocalStores {
     private const val K_LOCKED = "locked"
     private const val K_REMOVED = "removed"
     private const val K_BLOCKED = "blocked"
+    private const val K_STRANGER_Q = "strangers_quarantine"
+    private const val K_STRANGER_ALLOW = "strangers_allowed"
     private const val K_GONE = "gone_peers"
     private const val K_THEME = "theme_mode"
     private const val K_CHAT_BG = "chat_background"

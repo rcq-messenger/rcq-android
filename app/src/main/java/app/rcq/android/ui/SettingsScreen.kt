@@ -1156,6 +1156,23 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
                 )
             }
 
+            // Same-island stranger quarantine (device-local, per account, like
+            // the web client's Privacy switch): the mailbox itself stays open
+            // (sealed sender), this decides where THIS install files a
+            // stranger's first message.
+            val strangers by app.rcq.android.data.LocalStores.strangerQuarantine.collectAsState()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_strangers), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_strangers_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = strangers,
+                    onCheckedChange = { app.rcq.android.data.LocalStores.setStrangerQuarantine(it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
+
             // Hall of Fame opt-in + optional public avatar. Just consent to be
             // considered; the founder curates who actually appears on rcq.app/hof.
             // Hidden on self-hosted islands (a flagship-only surface) — gated on
@@ -2537,9 +2554,12 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
     var showHow by remember { mutableStateOf(false) }
     // #643: the account's key slots — every install with encryption keys of
     // its own, the one list a recovery-phrase login cannot stay out of.
-    // Read-only in v1 (revoking a slot is a key operation, designed apart).
     var slots by remember { mutableStateOf<List<app.rcq.android.net.RcqApi.PeerDeviceRow>?>(null) }
     var ownSlot by remember { mutableStateOf<Int?>(null) }
+    // Пункт 13: the slot the revoke confirm sheet is up for, and the one in
+    // flight. Any slot that is neither the primary nor OUR OWN can be retired.
+    var revokeAsk by remember { mutableStateOf<Int?>(null) }
+    var revoking by remember { mutableStateOf<Int?>(null) }
 
     // In-app QR scanner: decode chat.rcq.app's connect-phone QR and feed it into
     // the same WebLinkRequest confirm flow a deep link uses. Removes the reliance
@@ -2571,7 +2591,35 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
             ownSlot = own
         }
     }
-    LaunchedEffect(Unit) { reload() }
+    // Keyed on the slot-revoke announce (пункт 13): a slot retired from any
+    // session of the account refreshes the list while it is on screen. The
+    // initial value covers the first load.
+    val slotsTick by session.keySlotsChanged.collectAsState()
+    LaunchedEffect(slotsTick) { reload() }
+
+    /** Retire a key slot. The island's cooldown 403 (a young linked session
+     *  revoking something older than itself) becomes the human sentence it
+     *  means, with the hours left. */
+    fun revokeSlot(deviceId: Int) {
+        if (revoking != null) return
+        revoking = deviceId
+        scope.launch {
+            runCatching { session.revokeKeySlot(deviceId) }
+                .onSuccess { slots = slots?.filterNot { it.device_id == deviceId } }
+                .onFailure { e ->
+                    val msg = e.message.orEmpty()
+                    if ("revoke_cooldown" in msg) {
+                        val secs = Regex("\"wait_seconds\"\\s*:\\s*(\\d+)").find(msg)
+                            ?.groupValues?.get(1)?.toLongOrNull() ?: 86400L
+                        val hours = maxOf(1L, (secs + 3599L) / 3600L)
+                        Toast.makeText(context, context.getString(R.string.linked_devices_revoke_cooldown, hours), Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, context.getString(R.string.linked_devices_revoke_failed), Toast.LENGTH_SHORT).show()
+                    }
+                }
+            revoking = null
+        }
+    }
 
     if (showHow) {
         // Instructions, nothing to choose: the sheet's own last row closes it.
@@ -2581,6 +2629,22 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
             body = stringResource(R.string.linked_devices_connect_steps),
             actions = emptyList(),
             cancelLabel = stringResource(R.string.common_close),
+        )
+    }
+
+    // Second step of the revoke: the row button arms this sheet (пункт 13).
+    revokeAsk?.let { slotId ->
+        RcqAskSheet(
+            onDismiss = { revokeAsk = null },
+            title = stringResource(R.string.linked_devices_revoke_title),
+            body = stringResource(R.string.linked_devices_revoke_body),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.linked_devices_revoke),
+                    destructive = true,
+                    onClick = { revokeAsk = null; revokeSlot(slotId) },
+                ),
+            ),
         )
     }
 
@@ -2662,6 +2726,19 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
                                 stringResource(R.string.linked_devices_slots_this),
                                 color = c.accent, fontSize = 12.sp,
                             )
+                        }
+                        // Пункт 13: retire a slot that is neither the primary
+                        // nor our own. First tap arms the confirm sheet above.
+                        if (d.device_id != 1 && d.device_id != ownSlot) {
+                            TextButton(
+                                onClick = { revokeAsk = d.device_id },
+                                enabled = revoking == null,
+                            ) {
+                                Text(
+                                    if (revoking == d.device_id) "…" else stringResource(R.string.linked_devices_revoke),
+                                    color = Color(0xFFE5484D), fontSize = 13.sp,
+                                )
+                            }
                         }
                     }
                 }
