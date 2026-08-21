@@ -940,7 +940,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
-        // Header.
+        // Header. Its fill is translucent, so with a wallpaper set the title
+        // stands on a BLEND of the fill and the wallpaper top — the
+        // foregrounds follow that blend, not the theme (#648: dark theme +
+        // light wallpaper washed the near-white title out on a mid grey).
+        val hc = chatHeaderChrome(fillAlpha = 0.6f)
         Row(
             Modifier.fillMaxWidth().background(c.bgSecondary.copy(alpha = 0.6f))
                 .clickable(enabled = !isSelf) { if (isGroup) groupId?.let(onOpenGroupInfo) else peer?.let(onOpenPeerInfo) }
@@ -948,14 +952,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent,
+                Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = hc.accent,
                 modifier = Modifier.size(26.dp).clip(CircleShape).clickable(onClick = onBack),
             )
             Spacer(Modifier.width(6.dp))
             if (isGroup) {
                 GroupAvatar(group, session, 28.dp, animated = true)
             } else if (isSelf) {
-                Icon(Icons.Filled.Bookmark, null, tint = c.accent, modifier = Modifier.size(26.dp))
+                Icon(Icons.Filled.Bookmark, null, tint = hc.accent, modifier = Modifier.size(26.dp))
             } else {
                 val isCrossIsland = peerContact?.host != null ||
                     (peerContact == null && CrossIslandStore.findByUin(peer ?: 0) != null)
@@ -974,7 +978,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     isSelf -> stringResource(R.string.chat_saved_title)
                     else -> session.contactName(peer ?: 0)
                 }
-                Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = hc.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = when {
                     isGroup -> {
                         // The count, not the roster's size: the roster arrives a
@@ -991,7 +995,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(peerContact.lastSeen, context))
                     else -> stringResource(peerContact.presence.labelRes).lowercase()
                 }
-                Text(sub, color = if (isTyping) c.accent else c.textSecondary, fontSize = 12.sp)
+                Text(sub, color = if (isTyping) hc.accent else hc.textSecondary, fontSize = 12.sp)
             }
             // Calling somebody was two taps and a menu you had to know about.
             // The web client has always had the phone and the camera straight
@@ -1003,13 +1007,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             val canCall = !isGroup && !isSelf && peer != null && peerContact?.callable != false
             if (canCall) {
                 Icon(
-                    Icons.Filled.Call, stringResource(R.string.call_voice_cd), tint = c.accent,
+                    Icons.Filled.Call, stringResource(R.string.call_voice_cd), tint = hc.accent,
                     modifier = Modifier.size(24.dp).clip(CircleShape)
                         .clickable { placeCall(app.rcq.android.call.CallController.Media.AUDIO) },
                 )
                 Spacer(Modifier.width(14.dp))
                 Icon(
-                    Icons.Filled.Videocam, stringResource(R.string.call_video_cd), tint = c.accent,
+                    Icons.Filled.Videocam, stringResource(R.string.call_video_cd), tint = hc.accent,
                     modifier = Modifier.size(24.dp).clip(CircleShape)
                         .clickable { placeCall(app.rcq.android.call.CallController.Media.VIDEO) },
                 )
@@ -1017,9 +1021,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
             // Everything else stays in the overflow menu. Own click consumes
             // the tap so the header's open-info click doesn't also fire.
+            // (The menu ITSELF renders on a Material surface — its rows keep
+            // the theme's `c` colours; only the trigger sits on the blend.)
             Box {
                 Icon(
-                    Icons.Filled.MoreVert, stringResource(R.string.chat_menu_cd), tint = c.accent,
+                    Icons.Filled.MoreVert, stringResource(R.string.chat_menu_cd), tint = hc.accent,
                     modifier = Modifier.size(24.dp).clip(CircleShape).clickable { chatMenu = true },
                 )
                 DropdownMenu(expanded = chatMenu, onDismissRequest = { chatMenu = false }) {
@@ -2808,6 +2814,19 @@ private fun DateDividerRow(label: String) {
 private fun UnreadDividerRow(count: Int = 0) {
     val c = RcqTheme.colors
     val label = stringResource(R.string.chat_unread_divider) + if (count > 0) " ($count)" else ""
+    val onWallpaper = LocalStores.chatBackground.collectAsState().value.isNotEmpty()
+    if (onWallpaper) {
+        // Same treatment as the date divider right above: bare accent text and
+        // hairlines wash out on a wallpaper (#648 — a light wallpaper made the
+        // marker unreadable), so the label rides a contrast pill instead.
+        Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text(
+                label, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 3.dp),
+            )
+        }
+        return
+    }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.accent.copy(alpha = 0.5f)))
         Text(label, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
