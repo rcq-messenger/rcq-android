@@ -5142,6 +5142,11 @@ class Session(context: Context) {
             val sent = runCatching {
                 if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
             }.getOrDefault(false)
+            // Mirror the retraction to our OWN other devices (the fan-out
+            // skips self); foreign groups excluded, same guard as sendEdit.
+            if (sent && (gid == null || gid >= 0)) {
+                sendMessageCarbon(env, toPeer = if (gid == null) target.peerUin else null, toGroup = gid)
+            }
             if (!sent) {
                 // Nothing left the device after the retries, so the message is
                 // still on everyone else's screen and only gone from mine. Put
@@ -5186,6 +5191,10 @@ class Session(context: Context) {
         // that started it.
         scope.launch {
             if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
+            // Mirror to our OWN other devices — the fan-out above skips self.
+            // Same foreign-group guard as fanOutGroup: an alias id (< 0) is
+            // meaningless on another of our devices.
+            if (gid == null || gid >= 0) sendMessageCarbon(env, toPeer = if (gid == null) target.peerUin else null, toGroup = gid)
         }
     }
 
@@ -5285,10 +5294,15 @@ class Session(context: Context) {
         }.isSuccess
 
     /** Message kinds we mirror to the user's other devices via a carbon.
-     *  Reactions sync through their own self-echo; control/poll don't sync. */
+     *  Reactions sync through their own self-echo; poll/receipts don't sync.
+     *  Edit and Delete joined 2026-08-21: the group fan-out skips self by
+     *  design, so without a carbon an edit made here never reached the
+     *  account's other devices — the founder edited on the desktop and this
+     *  phone kept the old text forever (and vice versa). */
     private fun isCarbonable(env: Envelope): Boolean = when (env) {
         is Envelope.Text, is Envelope.Photo, is Envelope.Video,
-        is Envelope.Voice, is Envelope.File, is Envelope.Location -> true
+        is Envelope.Voice, is Envelope.File, is Envelope.Location,
+        is Envelope.Edit, is Envelope.Delete -> true
         else -> false
     }
 
@@ -5655,6 +5669,12 @@ class Session(context: Context) {
                 is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
                 is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
                 is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
+                // Control carbons: an edit/retraction made on ANOTHER of our
+                // devices targets a row this device already has — apply it,
+                // never file it as a new message. The carbon is authenticated
+                // as our own account at the call site, so no authority check.
+                is Envelope.Edit -> editInFlow(_groupMessages, gid, inner.targetId, inner.text)
+                is Envelope.Delete -> deleteInFlow(_groupMessages, gid, inner.targetId)
                 else -> Unit
             }
         } else if (to != null) {
@@ -5665,6 +5685,8 @@ class Session(context: Context) {
                 is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), expiresAt = expiryFor(inner.ttl, now)))
                 is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
                 is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Edit -> editInFlow(_messages, to, inner.targetId, inner.text)
+                is Envelope.Delete -> deleteInFlow(_messages, to, inner.targetId)
                 else -> Unit
             }
         }
