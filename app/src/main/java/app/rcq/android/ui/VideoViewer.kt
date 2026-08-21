@@ -109,6 +109,9 @@ internal fun FullscreenVideoViewer(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
+        // #656: playback used to obey the normal screen timeout, so a clip
+        // longer than it went dark mid-watch. Same helper the call screen uses.
+        KeepScreenOn()
         val player = remember(bytes) { MediaPlayer() }
         var prepared by remember(bytes) { mutableStateOf(false) }
         var playing by remember(bytes) { mutableStateOf(false) }
