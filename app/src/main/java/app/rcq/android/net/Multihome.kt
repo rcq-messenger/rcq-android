@@ -90,7 +90,10 @@ object Multihome {
         auto: Boolean = false,
     ): MultihomeStore.Home {
         val host = normalizeHost(hostInput) ?: throw IllegalArgumentException("invalid_host")
-        if (host == ownHost) throw IllegalArgumentException("primary_island")
+        // The front is the flagship by another road: "adding" it registers a
+        // second mailbox on the island this account already lives on. Same
+        // refusal as the primary, because that is what it is.
+        if (host == ownHost || RelayConfigStore.isFrontHost(host)) throw IllegalArgumentException("primary_island")
         if (MultihomeStore.list(ownUin).any { it.host == host }) throw IllegalArgumentException("already_added")
 
         val creds = recoverOn(host, signingPriv, signingPub) ?: run {
@@ -169,7 +172,7 @@ object Multihome {
      *  same accepted simplification as the deposit path. Blocking — call from IO. */
     fun autoPickHost(ownHost: String, exclude: Set<String>): String? = runCatching {
         val islands = signedIslands() ?: return@runCatching null
-        islands.firstOrNull { it != ownHost && it !in exclude && healthy(it) }
+        islands.firstOrNull { it != ownHost && it !in exclude && !RelayConfigStore.isFrontHost(it) && healthy(it) }
     }.getOrNull()
 
     /** Raw response bytes (the exact bytes the signature covers), or null. */
@@ -195,6 +198,10 @@ object Multihome {
      *  equal-or-newer record is already there. */
     suspend fun publishToBackups(ownUin: Int, signingPriv: ByteArray, signingPub: ByteArray, docJson: String) {
         for (home in MultihomeStore.list(ownUin)) {
+            // A phantom front row PUTs to our own island, which the session's
+            // authed api already covered (and the island rejects any record
+            // naming its front anyway).
+            if (RelayConfigStore.isFrontHost(home.host)) continue
             runCatching {
                 val api = RcqApi("https://${home.host}")
                 api.setToken(home.jwt)
@@ -255,6 +262,12 @@ object Multihome {
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
+            // ⚠ A phantom front home is OUR OWN island by another road: this
+            // drain would pull the account's REAL queue through the front on a
+            // recover-minted token and then ack the rows away from the primary
+            // cursor, behind the back of the main drain the session runs on.
+            // Never drain the real queue through a front.
+            if (RelayConfigStore.isFrontHost(home.host)) continue
             runCatching {
                 val api = RcqApi("https://${home.host}")
                 api.setToken(home.jwt)
@@ -472,7 +485,12 @@ object Multihome {
     ): Int {
         return try {
             if (peerIdentityKeyB64.isNullOrEmpty() || peerSigningKeyB64.isNullOrEmpty()) return 0
-            val extra = resolvePeerHomesCached(ownHost, peerUin, peerSigningKeyB64).filter { it.host != ownHost }
+            // A front in a PEER's record (25 flagship accounts carried one) is
+            // our own island by another road: depositing "extra" copies there
+            // just doubles the rows in the queue the primary send already
+            // reached.
+            val extra = resolvePeerHomesCached(ownHost, peerUin, peerSigningKeyB64)
+                .filter { it.host != ownHost && !RelayConfigStore.isFrontHost(it.host) }
             if (extra.isEmpty()) return 0
 
             val recipientPub = Base64.decode(peerIdentityKeyB64, Base64.NO_WRAP)

@@ -1084,6 +1084,24 @@ class Session(context: Context) {
         // delay on launch). db is opened there BEFORE connectAndSync, which is
         // the only ingest path that writes to it.
         loadCachedRoster()
+        // Drop any stored "backup home" that is really the front or the
+        // primary island itself. The front is the flagship by another road, so
+        // such a row promises redundancy it cannot deliver, and the 30-second
+        // drain loop below would pull the account's REAL queue through it on a
+        // recover-minted token (founder's #911 carried exactly this phantom).
+        // Every add/pick/publish path refuses fronts now, so this only cleans
+        // up what older builds let in. Runs before the drain loop starts, so
+        // the phantom's drain ends THIS session and not the next one, and
+        // before refreshBackupHomes() so Settings never shows the row. No
+        // extra republish needed: start() reaches publishHomeIslandRecord()
+        // via connectAndSync -> syncGraph, which assembles the record from
+        // this store, so senders stop being told about the phantom too.
+        MultihomeStore.list(uin)
+            .filter { it.host.equals(serverHost(), true) || RelayConfigStore.isFrontHost(it.host) }
+            .forEach {
+                android.util.Log.w("RCQfed", "scrubbing phantom backup home ${it.host}")
+                MultihomeStore.remove(uin, it.host)
+            }
         refreshBackupHomes()
         refreshCiRequests()
         // Keep the server's push-suppression list in lock-step with the local
@@ -1627,6 +1645,18 @@ class Session(context: Context) {
         }
     }
 
+    /** Every home this account lives on as far as THIS install knows: the
+     *  primary island first, then the stored backups. Fronts and duplicates of
+     *  the primary are dropped even if the store still carries one (see the
+     *  scrub in [start]): the island now REJECTS any record naming its own
+     *  front, so one phantom row would cost the whole publish, legitimate
+     *  homes included. */
+    private fun ownRecordHomes(uin: Int): List<RcqFederation.Home> =
+        listOf(RcqFederation.Home(serverHost(), uin)) +
+            MultihomeStore.list(uin)
+                .filterNot { it.host.equals(serverHost(), true) || RelayConfigStore.isFrontHost(it.host) }
+                .map { RcqFederation.Home(it.host, it.uin) }
+
     /** Federation Layer B (F1): build + publish this account's signed home-island
      *  record — the primary island plus any backup homes (multihoming v1). The
      *  same signed record is PUT to every home so senders can resolve it from
@@ -1641,8 +1671,7 @@ class Session(context: Context) {
             val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
             val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
             val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val mine = listOf(RcqFederation.Home(serverHost(), uin)) +
-                MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
+            val mine = ownRecordHomes(uin)
             // ⚠⚠ Read before publishing. The homes list belongs to the ACCOUNT,
             // not to this install: a backup island switched on in the web, or on
             // a second phone, is not in `MultihomeStore` here. Publishing `mine`
@@ -1652,8 +1681,16 @@ class Session(context: Context) {
             // exists. Anything already in the published record and not known
             // here is carried over untouched (we hold no credentials for it, and
             // the record is an address list, not an authorisation).
+            //
+            // Untouched with one exception: a front in the published record is
+            // the phantom old builds left behind (they stamped the road,
+            // cdn.rcq.app, instead of the island). Carrying it forward would
+            // re-publish the very row the scrub in [start] removes, forever.
             val published = withContext(Dispatchers.IO) { Multihome.ownPublishedHomes(serverHost(), uin, sk) }
-            val homes = mine + published.filter { p -> mine.none { it.host.equals(p.host, true) } }
+            val homes = mine + published.filter { p ->
+                mine.none { it.host.equals(p.host, true) } &&
+                    !p.host.equals(serverHost(), true) && !RelayConfigStore.isFrontHost(p.host)
+            }
             val ts = (System.currentTimeMillis() / 1000).toInt()
             val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
             api.publishIslandRecord(doc.toString())
@@ -1678,8 +1715,7 @@ class Session(context: Context) {
             val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
             val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
             val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val homes = listOf(RcqFederation.Home(serverHost(), uin)) +
-                MultihomeStore.list(uin).map { RcqFederation.Home(it.host, it.uin) }
+            val homes = ownRecordHomes(uin)
             val ts = (System.currentTimeMillis() / 1000).toInt()
             val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
             val env = Envelope.HomeRecord(doc)
