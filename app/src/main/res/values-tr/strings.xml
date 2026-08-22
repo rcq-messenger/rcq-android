@@ -611,7 +611,7 @@
     <string name="pv_relay_calls_desc">Arama sesini ve görüntüsünü rölemizden geçirir, böylece karşı taraf IP adresini hiç öğrenmez. Bunu kapatmak arama kalitesini artırabilir ama adresini gösterir.</string>
     <string name="pv_relays_section">RCQ röleleri</string>
     <string name="relay_what_is">Röle nedir?</string>
-    <string name="pv_obfuscated">Uygulamayı RCQ rölelerinden geçir</string>
+    <string name="pv_obfuscated">Uygulamayı RCQ röleleri üzerinden geçir</string>
     <string name="pv_obfuscated_desc">Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Bir sonraki açılışta geçerli olur. RCQ\'nun engellendiği yerlerde ayrıca tek yol budur.</string>
     <string name="pv_obf_auto_disable">Röleleri kendiliğinden açma</string>
     <string name="pv_obf_auto_disable_desc">Uygulama varsayılan olarak adaya doğrudan ulaşamazsa röleleri kendiliğinden açar. Trafiğini kendi VPN\'inden ya da vekil sunucundan geçiriyorsan bunu aç, böylece bizim taşıyıcımız seninkinin üstüne binmez.</string>

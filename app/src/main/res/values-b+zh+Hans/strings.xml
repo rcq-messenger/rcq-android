@@ -581,12 +581,12 @@
     <string name="presence_countdown_lt1m">&lt;1 分钟</string>
     <string name="presence_info_title">离开后继续显示在线</string>
     <string name="presence_info_body">关闭应用后，你会在这段时间内继续显示为在线。可在“设置”→“隐私与网络”中修改。</string>
-    <string name="stealth_info_title">经中继</string>
+    <string name="stealth_info_title">走中继</string>
     <string name="stealth_info_body_manual">你在菜单里自己打开了 RCQ 中继。流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。开启期间，应用不会尝试直连。在同一个菜单里可以关闭。</string>
-    <string name="stealth_shield_green">绿色盾牌：已确认经中继的流量能到达岛。</string>
+    <string name="stealth_shield_green">绿色盾牌：已确认走中继的流量能到达岛。</string>
     <string name="stealth_shield_amber">橙色盾牌：中继已开启，但数据能否通过还未确认。如果一直是橙色，试着在菜单里把中继关掉再打开。</string>
     <string name="stealth_info_body">应用正在走 RCQ 中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。因为直连没通，它自己启用了，无需任何设置。</string>
-    <string name="connecting_stealth">正在经中继连接…</string>
+    <string name="connecting_stealth">正在走中继连接…</string>
     <string name="pv_profile_card">资料卡</string>
     <string name="pv_profile_card_desc">谁可以打开你的完整个人资料（城市、年龄、简介）。</string>
     <string name="pv_gender_desc">谁可以在你的个人资料上看到性别。</string>
@@ -646,7 +646,7 @@
     <!-- Connection diagnostics -->
     <string name="diag_title">连接诊断</string>
     <string name="diag_transport">线路</string>
-    <string name="diag_mode_tunnel">经中继</string>
+    <string name="diag_mode_tunnel">走中继</string>
     <string name="diag_mode_direct">直连</string>
     <string name="diag_backend_direct">服务器，直连</string>
     <string name="diag_backend_route">服务器，当前线路</string>
