@@ -109,6 +109,29 @@ class SecureStore(context: Context, accountId: String) {
      *  stay intact). */
     fun wipe() = wipeKeys(prefs, p)
 
+    /// Remember what each room is called, so a wake can name it without the
+    /// island having to.
+    ///
+    /// ⚠ The push payload stopped carrying `group_name` on 2026-08-22: it was
+    /// travelling in the clear to Apple, to the UnifiedPush distributor and
+    /// through Cloudflare, which meant a third party learned the names of the
+    /// rooms a person belongs to and when each of them is busy. iOS could
+    /// afford to drop it because it already kept its own name cache; Android
+    /// read the field and nothing else, so every group wake became "New group
+    /// message" with no room. This is that cache.
+    ///
+    /// It lives here rather than in prefs or the message database for two
+    /// reasons: this file is EncryptedSharedPreferences, so room names are not
+    /// sitting in the clear on a seized phone, and the push receiver can open
+    /// it headless, which it cannot do with the SQLCipher database while the
+    /// app is locked behind a PIN.
+    fun cacheGroupNames(names: Map<Int, String>) {
+        if (names.isEmpty()) return
+        prefs.edit().apply {
+            for ((id, name) in names) putString("$p$K_GNAME$id", name)
+        }.apply()
+    }
+
     companion object {
         private const val FILE = "rcq.identity.v1"
         private const val K_UIN = "uin"
@@ -118,6 +141,8 @@ class SecureStore(context: Context, accountId: String) {
         private const val K_SIGN_PRIV = "signing_private"
         private const val K_SERVER = "server_host"
         private const val K_SEED = "recovery_seed"
+        // Prefix, not a key: one entry per room id (see cacheGroupNames).
+        private const val K_GNAME = "gname."
         private val STRING_KEYS = listOf(K_TOKEN, K_NICK, K_ID_PRIV, K_SIGN_PRIV, K_SERVER, K_SEED)
 
         private fun openPrefs(context: Context): SharedPreferences {
@@ -137,6 +162,12 @@ class SecureStore(context: Context, accountId: String) {
             val e = prefs.edit()
             (STRING_KEYS + K_UIN).forEach { e.remove(prefix + it) }
             e.remove(prefix + K_MSGDB_ENC)
+            // ⚠ The room-name cache is a PREFIX, not a fixed key, so a burn
+            // that only removes the named slots would leave the names of every
+            // room the account belonged to behind it. A record outliving the
+            // thing it describes is the exact shape the 22.08 metadata audit
+            // spent its day deleting; do not let one back in through here.
+            prefs.all.keys.filter { it.startsWith(prefix + K_GNAME) }.forEach { e.remove(it) }
             e.apply()
         }
 
@@ -185,6 +216,13 @@ class SecureStore(context: Context, accountId: String) {
             val key = "$accountId.$K_UIN"
             return if (prefs.contains(key)) prefs.getInt(key, 0) else null
         }
+
+        /** The cached name of a room, for a headless push wake. Null when the
+         *  account has never listed that room, which is the honest fallback:
+         *  the notification says a group message arrived without saying which
+         *  group, exactly as it does for an account that has not synced yet. */
+        fun peekGroupName(context: Context, accountId: String, groupId: Int): String? =
+            openPrefs(context).getString("$accountId.$K_GNAME$groupId", null)
 
         /** Read another account's nickname without making it active. */
         fun peekNickname(context: Context, accountId: String): String? =
