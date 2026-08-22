@@ -632,8 +632,13 @@ private fun RcqApp(session: Session) {
         val activeRoomNow by session.audioRooms.activeRoomId.collectAsState()
         // Not over the PIN lock (its tap would be swallowed there and the
         // padding would shift the lock screen), same rule as the call overlay.
+        // And never while a 1:1 call is up, full screen or minimised: the
+        // call outranks the room (single-busy), and the full-screen call
+        // screen is an overlay this strip used to be drawn on top of.
+        val callStateNow by session.calls.state.collectAsState()
         val roomBarVisible = activeRoomNow != null && !showAudioRooms &&
-            state is UiState.Registered && !locked
+            state is UiState.Registered && !locked &&
+            callStateNow is app.rcq.android.call.CallController.State.Idle
         // A chat opened from a banner or a notification lands ON TOP of the
         // room screen, and the strip must be there to get back; with
         // showAudioRooms still set it would not be. Opening a chat leaves the
@@ -846,10 +851,11 @@ private fun RcqApp(session: Session) {
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
-        // Same strip, same place, for a room left behind. A call outranks it:
-        // the two cannot both be live (single-busy), and if they ever are, the
-        // call is the one with a countdown running.
-        if (roomBarVisible && !(callVisible && callMinimized)) {
+        // Same strip, same place, for a room left behind. A call outranks it
+        // (roomBarVisible is false while any call is up): the two cannot both
+        // be live (single-busy), and if they ever are, the call is the one
+        // with a countdown running.
+        if (roomBarVisible) {
             app.rcq.android.ui.MinimizedRoomBar(
                 controller = session.audioRooms,
                 onOpen = { showAudioRooms = true },

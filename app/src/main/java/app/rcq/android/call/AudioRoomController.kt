@@ -163,6 +163,20 @@ class AudioRoomController(
         }
     }
 
+    /** The socket came back after a drop. The island forgets a member whose
+     *  socket has been gone for a minute and tells the OTHERS; we were never
+     *  told, so the strip kept saying "you are in the room" over a room we
+     *  were no longer in, with nobody able to hear us. Announce ourselves
+     *  again: the island's `room_enter` is idempotent (still inside → the
+     *  roster; evicted → re-added and the others dial us again; room gone or
+     *  full → `room_enter_rejected`, which tears the room down here). Found in
+     *  review before 0.142. */
+    fun onSocketUp() {
+        val id = _activeRoomId.value ?: return
+        if (enterJob?.isActive == true) return   // the first entry is still on its way
+        send(JsonObject().apply { addProperty("type", "room_enter"); addProperty("room_id", id) })
+    }
+
     fun exit() {
         val id = _activeRoomId.value ?: return
         send(JsonObject().apply { addProperty("type", "room_leave"); addProperty("room_id", id) })
