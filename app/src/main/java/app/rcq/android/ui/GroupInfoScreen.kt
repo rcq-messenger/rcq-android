@@ -156,9 +156,33 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     val ownMember = group.members.firstOrNull { it.uin == ownUin }
     val canManageMembers = isOwner || (ownMember?.permissions?.contains("members") == true)
 
-    // Owner first, then admins, then everyone else (stable within a rank).
+    // Owner first, then admins, then everyone else. Within a rank: whoever is
+    // online, then by name.
+    //
+    // ⚠ "Stable within a rank" was not an order at all. `sortedBy` keeps the
+    // order the roster arrived in, the roster query has no ORDER BY, and the
+    // rows behind it were inserted from an unordered set, so the tail of a big
+    // group looked shuffled and moved between openings (#688). A name is what
+    // people scan for, and who is here now is what they scan for first.
     val sortedMembers = remember(group.members) {
-        group.members.sortedBy { when (it.role) { "owner" -> 0; "admin" -> 1; else -> 2 } }
+        group.members.sortedWith(
+            compareBy<app.rcq.android.model.GroupMember> {
+                when (it.role) { "owner" -> 0; "admin" -> 1; else -> 2 }
+            }
+                .thenBy {
+                    // Away and do-not-disturb are here too; invisible and
+                    // offline are not, and neither is a member the server
+                    // declines to report a presence for.
+                    when (it.presence) {
+                        app.rcq.android.model.UserStatus.ONLINE -> 0
+                        app.rcq.android.model.UserStatus.AWAY,
+                        app.rcq.android.model.UserStatus.DND -> 1
+                        else -> 2
+                    }
+                }
+                .thenBy { it.nickname.lowercase() }
+                .thenBy { it.uin },
+        )
     }
     val previewLimit = 8
     val q = memberSearch.trim().lowercase()

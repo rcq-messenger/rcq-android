@@ -445,12 +445,18 @@ private fun SettingsRoot(
                 // сообщения о баге показывает ранее приложенный опять
                 // прикрепленный файл"). The error line and the in-flight flag
                 // are stale for the same reason.
+                // ⚠ The draft is NOT cleared here any more. The sheet closes on
+                // a swipe, a scrim tap or Back, none of which the user means as
+                // "throw this away", and reopening then showed an empty form:
+                // an hour of writing gone, more than once, to the person who
+                // writes us the most (#685). What must be cleared is the
+                // transient state of the LAST send; the text and the pictures
+                // are cleared when a report actually goes out, and by Cancel,
+                // which is the button that means it.
                 SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) {
-                    bugText = ""
                     bugSent = false
                     bugSending = false
                     bugError = null
-                    bugAttachments = emptyList()
                     showBugReport = true
                 }
                 Divider()
@@ -695,7 +701,14 @@ private fun SettingsRoot(
                         bugSending = false
                         bugError = null
                         when (result) {
-                            Session.BugReportResult.SENT -> bugSent = true
+                            Session.BugReportResult.SENT -> {
+                                // Sent, so the draft has served its purpose and
+                                // must not come back attached to the next report
+                                // (#519).
+                                bugSent = true
+                                bugText = ""
+                                bugAttachments = emptyList()
+                            }
                             // Say WHY. Silently returning the button to
                             // its idle state read as "the app is broken"
                             // and produced a quarter of an hour of retries.
@@ -710,7 +723,17 @@ private fun SettingsRoot(
                         }
                     }
                 }
-                TextButton(onClick = { showBugReport = false }, modifier = Modifier.fillMaxWidth()) {
+                // Cancel is the one exit that means "drop it": the swipe and the
+                // scrim keep the draft for the next open (#685).
+                TextButton(
+                    onClick = {
+                        bugText = ""
+                        bugAttachments = emptyList()
+                        bugError = null
+                        showBugReport = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
             }
