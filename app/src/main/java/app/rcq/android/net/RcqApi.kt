@@ -547,7 +547,9 @@ class RcqApi(
         val cls: Int? = null,
         // A deposit that must WAKE a closed app (a §5d call wake) rides
         // `envelope_type "message"` with `ring:true`; the island honours it and
-        // keeps the quieter type. Gson omits it on an ordinary send.
+        // keeps the quieter type. An island too old to know the flag still
+        // gets the legacy "call" type beside it (CrossIslandSender.peerHonoursRing).
+        // Gson omits it on an ordinary send.
         val ring: Boolean? = null,
     )
     data class SendResponse(val delivered: Boolean = false, val queued: Boolean = false)
@@ -1132,6 +1134,14 @@ class RcqApi(
         // older island that does not advertise the flag still accepts them.
         val reports: Boolean = true,
         val max_accounts_per_device: Int = 5,
+        // The ONE flag whose safe default is false. It was born together with
+        // the `ring` field of a sealed deposit (Stage 2 of the core-metadata
+        // plan, server 2026.08.22.15): an island that does not advertise it is
+        // an island that does not know `ring`, and a call deposited there as a
+        // plain "message" never wakes a closed app. A sender reads this before
+        // a waking call and falls back to the legacy "call" type when it is
+        // anything but true. See CrossIslandSender.peerHonoursRing.
+        val envelope_class: Boolean = false,
     )
     data class ServerInfoResponse(
         val name: String = "",

@@ -307,6 +307,21 @@ class CallController(
         }
         scope.launch {
             try {
+                // A cross-island offer first asks the peer island whether it
+                // honours `ring` (CrossIslandSender.peerHonoursRing, a bounded
+                // fetch that is memoised per host). Ask now, beside the TURN
+                // refresh, rather than inside the offer deposit: the answer is
+                // in memory by the time the offer is built, so the probe costs
+                // the press-to-ringback path nothing. Same-island peers skip it.
+                // Never awaited, and nothing of it may escape: this is a child
+                // of the coroutine placing the call, and a child's exception
+                // would cancel the parent, i.e. the call itself.
+                launch(Dispatchers.IO) {
+                    runCatching {
+                        app.rcq.android.net.CrossIslandStore.findByUin(peerUin)
+                            ?.let { app.rcq.android.net.CrossIslandSender.prewarmRing(it.host) }
+                    }
+                }
                 val turnOk = refreshTurn(mayEngageTunnel = true)
                 // ⚠ The user may have given up while the credentials were being
                 // fetched — that wait is a network round trip and a relay probe,

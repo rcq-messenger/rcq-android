@@ -238,11 +238,38 @@ class Session(context: Context) {
         depositCallSignal(ci, me, Envelope.callSignal("call_ice", callId, mapOf("candidates" to arr.toString())))
     }
 
+    /** Tail of the deposit chain per call id (see [depositCallSignal]). */
+    private val ciCallDepositTails = HashMap<String, kotlinx.coroutines.Job>()
+
+    /** Deposit one cross-island call signal, IN EMIT ORDER per call.
+     *
+     *  Each signal used to be its own free-running coroutine, and the order they
+     *  landed in the peer island's queue was whatever the network made of it.
+     *  That was a narrow race while every deposit cost the same one POST, but
+     *  the waking offer now first asks the peer island whether it honours
+     *  `ring` (CrossIslandSender.peerHonoursRing, up to 5 s on a slow or old
+     *  island, longer when the tunnel engages), while the ICE batch that
+     *  follows it 350 ms later asks nothing. Unordered, the candidates reached
+     *  the callee first, and a callee drops `call_ice` for a call it has not
+     *  been offered yet, so the call sat in "connecting". So: each deposit
+     *  waits for the previous one of the same call before it goes out. Only
+     *  the first signal of a call ever pays the probe; the rest hit the memo. */
     private fun depositCallSignal(ci: CrossIslandStore.Contact, me: Int, env: Envelope) {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                CrossIslandSender.deliverCall(ci, env, me, signingPriv(), signingPub(), serverHost())
-            }.onFailure { android.util.Log.e("RCQcall", "cross-island signal failed: ${it.message}") }
+        val callId = (env as? Envelope.CallSignal)?.cid ?: ""
+        synchronized(ciCallDepositTails) {
+            val prev = ciCallDepositTails[callId]
+            val job = scope.launch(Dispatchers.IO) {
+                prev?.join()
+                runCatching {
+                    CrossIslandSender.deliverCall(ci, env, me, signingPriv(), signingPub(), serverHost())
+                }.onFailure { android.util.Log.e("RCQcall", "cross-island signal failed: ${it.message}") }
+            }
+            ciCallDepositTails[callId] = job
+            job.invokeOnCompletion {
+                synchronized(ciCallDepositTails) {
+                    if (ciCallDepositTails[callId] === job) ciCallDepositTails.remove(callId)
+                }
+            }
         }
     }
 
