@@ -739,12 +739,15 @@ class Session(context: Context) {
         // onboarding, but until now only a REGISTERED session ever consumed it:
         // a person who tapped a friend's link, installed, and signed up landed
         // with an empty contact list and the invite silently dropped. The
-        // server has recorded exactly zero referrals in the project's life,
-        // and this is why — not a missing mechanism, an unreached one.
+        // server recorded exactly zero referrals in the project's life, and
+        // this is why: not a missing mechanism, an unreached one.
         //
         // Naming the inviter here makes the server connect the pair on both
-        // sides as part of registration (routers/referrals.record_referral), so
-        // the account exists with someone in it rather than nobody.
+        // sides as part of registration, so the account exists with someone in
+        // it rather than nobody. The referrals router and its genealogy table
+        // are gone (they kept a permanent record of who recruited whom, for no
+        // reader); the pair-connect that mattered lives on as
+        // `routers/auth._connect_inviter` and this call still reaches it.
         //
         // Flagship + same-island only: a referral to an account on another
         // island is not something this island can verify or connect.
