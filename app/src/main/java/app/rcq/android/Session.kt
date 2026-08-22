@@ -1439,7 +1439,7 @@ class Session(context: Context) {
             } else if (droppable && flagship && transport.probeDirect(FRONT_HOST)) {
                 // Tunnel dead AND direct dead — the state where this install has
                 // nothing left. The front was skipped on the way in because the
-                // the relays were engaged, and that is right while they work:
+                // relays were engaged, and that is right while they work:
                 // a relay hides the user's address from the island, the front
                 // does not. But an engaged tunnel that carries nothing is not
                 // privacy, it is an app that does not open, and the front is

@@ -35,7 +35,7 @@
     <string name="onboard_federation_title">No single owner</string>
     <string name="onboard_federation_body">RCQ isn\'t one company\'s server. Every server is an independent island, and anyone can run one. Your account lives on the island you pick, and you keep your number if you move.</string>
     <string name="onboard_relay_kicker">RCQ RELAYS</string>
-    <string name="onboard_relay_title">The island never sees your address</string>
+    <string name="onboard_relay_title">The island does not see your address</string>
     <string name="onboard_relay_body">Traffic goes through our relays instead of straight to the island: the island does not see your address, and the network between you and the island does not see that you are using RCQ. The relays are community-run. Where RCQ is blocked, this is also the only way through.</string>
 
     <string name="onboard_server_label">Server</string>
