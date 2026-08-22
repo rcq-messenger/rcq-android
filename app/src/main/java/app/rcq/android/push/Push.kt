@@ -686,8 +686,22 @@ object Push {
         val envType = str("envType") ?: "message"
         if (envType != "message" && envType != "gmsg") return
 
-        val groupName = str("group_name")
+        // ⚠ `group_name` is gone from the payload as of the island's 22.08
+        // release: it travelled in the clear to Apple, to the UnifiedPush
+        // distributor and through Cloudflare, so a third party learned which
+        // rooms a person is in and when each is busy. The name now comes from
+        // this device's own encrypted cache, filled whenever the group list
+        // refreshes. Kept reading the field first so an older island still
+        // works, and so does a room this install has never listed.
         val groupId = json.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
+        val groupName = str("group_name")
+            ?: groupId?.let { gid ->
+                runCatching {
+                    AccountManager.accounts.value.firstNotNullOfOrNull {
+                        SecureStore.peekGroupName(ctx, it.id, gid)
+                    }
+                }.getOrNull()
+            }
         val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val isGroup = groupName != null || groupId != null
 

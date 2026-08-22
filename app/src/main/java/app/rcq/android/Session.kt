@@ -3103,6 +3103,10 @@ class Session(context: Context) {
         _groups.value = (own + foreign).distinctBy { it.id }.sortedByDescending { it.createdAt ?: 0L }
         // Persist the roster so groups are reachable offline (report #7).
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
+        // And the names alone, encrypted, where a headless push wake can reach
+        // them: the island stopped putting the room name in the payload on
+        // 22.08 because it was reaching Apple and Cloudflare in the clear.
+        runCatching { store.cacheGroupNames(_groups.value.associate { it.id to it.name }) }
     }
 
     /** Upsert a group from a WS event. If the embedded roster no longer
