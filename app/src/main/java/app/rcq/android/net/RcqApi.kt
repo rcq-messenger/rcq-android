@@ -276,17 +276,76 @@ class RcqApi(
     suspend fun replenishDevicePrekeys(deviceId: Int, body: PrekeysBody) = withContext(Dispatchers.IO) {
         postNoContent("/keys/devices/$deviceId/prekeys", gson.toJson(body), authed = true)
     }
+    /** Stage 3 of the core-metadata plan: when true, the three peer key
+     *  lookups below carry NO session token, and a bundle fetch spends one
+     *  anonymous deposit token (`X-Deposit-Token`, minted by
+     *  [DepositAuthStore] against this very host) for its one-time prekey.
+     *  Every lookup used to tell the island, under our identity, whose keys
+     *  we were about to use; that is the pair the sealed queue row was
+     *  already being stripped of. Session sets it from /server/info
+     *  (`anon_keys && deposit_auth`) and copies it onto every rebuilt
+     *  instance; false is the old behaviour to the byte, which is what an
+     *  island without the flags, a guest session and a foreign island get.
+     *  The masquerade header for a closed island is unaffected: the
+     *  interceptor stamps it per host, not per account. */
+    @Volatile var anonKeyLookup: Boolean = false
+
     /** Fetch a peer's bundle to establish a v=2 session. */
     suspend fun fetchPeerBundle(uin: Int): PeerBundle = withContext(Dispatchers.IO) {
-        get("/keys/$uin/bundle", authed = true, PeerBundle::class.java)
+        fetchBundle("/keys/$uin/bundle")
     }
-    /** Every device of [uin] a sender has to reach, the primary included. */
+    /** Every device of [uin] a sender has to reach, the primary included.
+     *  Nothing is consumed by reading it, so the anonymous form needs no
+     *  token. `label` is "" on a Stage 3 island and must not be read off
+     *  this list; the owner's own registry (GET /devices) keeps labels. */
     suspend fun fetchPeerDevices(uin: Int): PeerDevices = withContext(Dispatchers.IO) {
-        get("/keys/$uin/devices", authed = true, PeerDevices::class.java)
+        get("/keys/$uin/devices", authed = !anonKeyLookup, PeerDevices::class.java)
     }
     /** One device's bundle, for the session that belongs to that device. */
     suspend fun fetchPeerDeviceBundle(uin: Int, deviceId: Int): PeerBundle = withContext(Dispatchers.IO) {
-        get("/keys/$uin/devices/$deviceId/bundle", authed = true, PeerBundle::class.java)
+        fetchBundle("/keys/$uin/devices/$deviceId/bundle")
+    }
+
+    /** A bundle lookup the way this island wants it: anonymous with a deposit
+     *  token when [anonKeyLookup] is set, the session token otherwise.
+     *
+     *  One token per fetch, single-use. The island answers 200 (token spent,
+     *  `one_time_prekey` filled), 403 (a bad or already-spent token, or an
+     *  island that stopped issuing: the epoch most likely rotated under the
+     *  cached params), or 404 (no such bundle or device; the token was never
+     *  looked at and goes back to the reserve). On 403 the cached params and
+     *  reserve are dropped, a fresh token is minted and the fetch is tried
+     *  once more; a second 403, or no token to be had at all, falls back to
+     *  the session-token path for THIS fetch so a send is never blocked on
+     *  the mint. The PoW inside the mint runs here on Dispatchers.IO, never
+     *  on the main thread. */
+    private fun fetchBundle(path: String): PeerBundle {
+        if (!anonKeyLookup) return get(path, authed = true, PeerBundle::class.java)
+        var token = DepositAuthStore.tokenFor(host, http())
+        var retried = false
+        while (token != null) {
+            val presented = token
+            val req = Request.Builder().url("$baseUrl$path").get()
+                .header("X-Deposit-Token", DepositAuthStore.headerValue(presented))
+                .build()
+            viaBestRoute { it.newCall(req).execute() }.use { resp ->
+                val text = resp.body?.string().orEmpty()
+                when {
+                    resp.isSuccessful ->
+                        return gson.fromJson(text, PeerBundle::class.java) ?: throw IOException("empty/unparseable response")
+                    resp.code == 403 -> Unit
+                    else -> {
+                        if (resp.code == 404) DepositAuthStore.giveBack(host, presented)
+                        throw IOException("HTTP ${resp.code}: ${text.take(200)}")
+                    }
+                }
+            }
+            DepositAuthStore.forget(host)
+            if (retried) break
+            retried = true
+            token = DepositAuthStore.tokenFor(host, http())
+        }
+        return get(path, authed = true, PeerBundle::class.java)
     }
     /** Retire one of MY key slots (POST /keys/devices/{id}/revoke, 204):
      *  senders stop fanning out to it and its one-time prekeys are gone.
@@ -1145,6 +1204,17 @@ class RcqApi(
         // a waking call and falls back to the legacy "call" type when it is
         // anything but true. See CrossIslandSender.peerHonoursRing.
         val envelope_class: Boolean = false,
+        // Stage 3 of the same plan (server 2026.08.23.4): the three peer key
+        // lookups (GET /keys/{uin}/devices and the two bundle routes) take no
+        // session token on this island, and a one-time prekey is handed out
+        // against an anonymous deposit token instead. `anon_keys` says the
+        // island understands that; `deposit_auth` says it also ISSUES the
+        // tokens. A client goes anonymous only when BOTH are true (see
+        // [anonKeyLookup]); an island missing either gets the old
+        // authenticated calls, never a half-anonymous one. Both default
+        // false: an older island omits them.
+        val anon_keys: Boolean = false,
+        val deposit_auth: Boolean = false,
     )
     data class ServerInfoResponse(
         val name: String = "",
