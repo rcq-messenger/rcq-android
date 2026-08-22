@@ -601,26 +601,40 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val albumPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(10),
     ) { uris ->
-        if (uris.isNotEmpty()) scope.launch {
+        // ⚠ NOT on this screen's scope, and NOT a bare runCatching. A batch used
+        // to upload on the composable's scope with every failure swallowed: no
+        // "Sending N files" strip above the composer, so the chat looked as if
+        // nothing had been sent until the first upload finished (#691); leaving
+        // the chat cancelled the rest mid-flight; and a failed file was simply
+        // absent, with nothing said. Same hole #473 closed for a single picture.
+        if (uris.isNotEmpty()) session.sendMediaDetached("album", uris.size) { oneDone ->
             val albumId = if (uris.size > 1) java.util.UUID.randomUUID().toString().uppercase() else null
+            var failed = 0
             for (uri in uris) {
-                val mime = withContext(Dispatchers.IO) { context.contentResolver.getType(uri) } ?: ""
-                runCatching {
+                try {
+                    val mime = withContext(Dispatchers.IO) { context.contentResolver.getType(uri) } ?: ""
                     if (mime.startsWith("video/")) {
                         val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
-                        if (v != null) {
-                            if (isGroup) session.sendGroupVideo(groupId!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
-                            else session.sendVideo(peer!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
-                        }
+                        if (v == null) { failed += 1; continue }
+                        if (isGroup) session.sendGroupVideo(groupId!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
+                        else session.sendVideo(peer!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
                     } else {
                         val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
-                        if (data != null) {
-                            if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
-                            else session.sendPhoto(peer!!, data, null, albumId = albumId)
-                        }
+                        if (data == null) { failed += 1; continue }
+                        if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
+                        else session.sendPhoto(peer!!, data, null, albumId = albumId)
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("RCQmedia", "album item failed: $uri", e)
+                    failed += 1
+                } finally {
+                    oneDone()
                 }
             }
+            // One failure toast for the batch, raised by the wrapper.
+            if (failed > 0) throw IllegalStateException("$failed of ${uris.size} album items failed")
         }
     }
 
@@ -669,33 +683,44 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 return@collect
             }
             val albumId = if (uris.size > 1 && allMedia) java.util.UUID.randomUUID().toString().uppercase() else null
-            for ((i, uri) in uris.withIndex()) {
-                val mime = mimes[i]
-                runCatching {
-                    when {
-                        mime.startsWith("video/") -> {
-                            val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
-                            if (v != null) {
+            // Detached from this screen for the same reasons as the paperclip
+            // batch above: the strip, surviving the user leaving, and a word
+            // when something fails (#691, #473).
+            session.sendMediaDetached("share", uris.size) { oneDone ->
+                var failed = 0
+                for ((i, uri) in uris.withIndex()) {
+                    val mime = mimes[i]
+                    try {
+                        when {
+                            mime.startsWith("video/") -> {
+                                val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
+                                if (v == null) { failed += 1; continue }
                                 if (isGroup) session.sendGroupVideo(groupId!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
                                 else session.sendVideo(peer!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
                             }
-                        }
-                        mime.startsWith("image/") -> {
-                            val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
-                            if (data != null) {
+                            mime.startsWith("image/") -> {
+                                val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
+                                if (data == null) { failed += 1; continue }
                                 if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
                                 else session.sendPhoto(peer!!, data, null, albumId = albumId)
                             }
-                        }
-                        else -> {
-                            val f = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
-                            if (f != null) {
+                            else -> {
+                                val f = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
+                                if (f == null) { failed += 1; continue }
                                 if (isGroup) session.sendGroupFile(groupId!!, f.bytes, f.name, f.mime)
                                 else session.sendFile(peer!!, f.bytes, f.name, f.mime)
                             }
                         }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w("RCQshare", "shared item failed: $uri", e)
+                        failed += 1
+                    } finally {
+                        oneDone()
                     }
                 }
+                if (failed > 0) throw IllegalStateException("$failed of ${uris.size} shared items failed")
             }
         }
     }
