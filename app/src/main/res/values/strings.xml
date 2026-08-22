@@ -846,6 +846,7 @@
     <string name="media_save">Save</string>
     <string name="media_saved">Saved</string>
     <string name="media_saved_to">Saved to %1$s</string>
+    <string name="media_load_failed">Could not load. Tap to try again.</string>
     <string name="media_save_failed">Couldn\'t save</string>
     <string name="media_fetching">Fetching the file…</string>
     <string name="media_fetch_failed">Could not fetch the file. Check the connection and try again.</string>

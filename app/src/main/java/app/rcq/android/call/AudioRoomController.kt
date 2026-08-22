@@ -21,7 +21,7 @@ import org.webrtc.PeerConnection
 class AudioRoomController(
     private val appContext: Context,
     private val scope: CoroutineScope,
-    private val send: (JsonObject) -> Unit,
+    private val send: (JsonObject) -> Boolean,
     private val turn: suspend () -> RcqApi.TurnCreds,
     private val api: () -> RcqApi,
     private val isInCall: () -> Boolean,
@@ -171,15 +171,56 @@ class AudioRoomController(
      *  roster; evicted → re-added and the others dial us again; room gone or
      *  full → `room_enter_rejected`, which tears the room down here). Found in
      *  review before 0.142. */
-    fun onSocketUp() {
+    fun onSocketUp(offlineGapMs: Long) {
+        // A leave the dead socket refused goes out first, or the island keeps
+        // a member nobody can hear until its own timer notices.
+        pendingLeave?.let { left ->
+            if (send(JsonObject().apply { addProperty("type", "room_leave"); addProperty("room_id", left) })) pendingLeave = null
+        }
         val id = _activeRoomId.value ?: return
         if (enterJob?.isActive == true) return   // the first entry is still on its way
-        send(JsonObject().apply { addProperty("type", "room_enter"); addProperty("room_id", id) })
+        if (offlineGapMs >= LONG_GAP_MS) {
+            // Long enough that the island may have evicted us (its timer is
+            // 60s) and the others dropped their legs. Whether it did or not is
+            // not knowable from here, so make it deterministic: leave (the
+            // others drop whatever they still hold), drop our own legs, enter
+            // (we are a fresh entrant, the others dial us). Costs an audio
+            // restart after an outage that long, which is no loss.
+            mesh.dropAllPeers()
+            send(JsonObject().apply { addProperty("type", "room_leave"); addProperty("room_id", id) })
+            send(JsonObject().apply { addProperty("type", "room_enter"); addProperty("room_id", id) })
+        } else {
+            // A blip: still a member, the legs are alive, the announce is a
+            // no-op on the island and comes back as the roster. What we may
+            // have missed is someone who entered meanwhile: the island told
+            // them to wait for OUR offer (the existing member dials), and the
+            // `room_member_entered` meant for us died with the socket. The
+            // roster handler dials whoever is in it and not in the mesh.
+            resyncPending = true
+            send(JsonObject().apply { addProperty("type", "room_enter"); addProperty("room_id", id) })
+        }
+    }
+
+    /** Set by [onSocketUp] for a short gap; the next roster is reconciled
+     *  against the mesh instead of only replacing the member list. */
+    private var resyncPending = false
+
+    /** A `room_leave` the socket refused (it was down); replayed on the next
+     *  socket up. Only the refused one: replaying a delivered leave later could
+     *  throw out a re-entry made from another device of the same account. */
+    private var pendingLeave: Int? = null
+
+    private companion object {
+        /** The island drops a member whose socket has been gone 60s
+         *  (`_OFFLINE_DEBOUNCE_SECONDS`). Well under that: near the line the
+         *  two sides can disagree on the gap, and a fresh entry is the safe
+         *  answer either way. */
+        const val LONG_GAP_MS = 40_000L
     }
 
     fun exit() {
         val id = _activeRoomId.value ?: return
-        send(JsonObject().apply { addProperty("type", "room_leave"); addProperty("room_id", id) })
+        if (!send(JsonObject().apply { addProperty("type", "room_leave"); addProperty("room_id", id) })) pendingLeave = id
         // Take ourselves off the cached headcount. The server knows we left, but
         // it only tells the people still inside (`room_member_left`), and we are
         // no longer one of them — so the room list kept showing the number from
@@ -231,6 +272,13 @@ class AudioRoomController(
                 _ownerOnlySpeaking.value =
                     obj.get("owner_only_speaking")?.takeIf { !it.isJsonNull }?.asBoolean ?: false
                 updateActiveCount(roomId, fresh.size)
+                if (resyncPending) {
+                    resyncPending = false
+                    val me = selfUin()
+                    val inMesh = mesh.peerUins()
+                    fresh.keys.filter { it != me && it !in inMesh }.forEach { mesh.dialNewPeer(it) }
+                    inMesh.filter { it !in fresh.keys }.forEach { mesh.dropPeer(it) }
+                }
             }
             "room_member_entered" -> {
                 if (_activeRoomId.value != roomId) return

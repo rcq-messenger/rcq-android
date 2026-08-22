@@ -570,6 +570,10 @@ private fun RcqApp(session: Session) {
         // ever sends both. The peer branch exists because the receiver can now
         // open the envelope and name the sender ([PushEnvelope]); wakes that
         // stayed sealed carry no peer and still land on Home, as before.
+        // Explicitly, not only via the chatTarget effect: the wake may name
+        // the chat that is already open under the room screen, and a value
+        // set to itself does not re-run the effect.
+        if (req.groupId != null || req.peerUin != null) showAudioRooms = false
         req.groupId?.let { chatTarget = ChatTarget.Group(it) }
             ?: req.peerUin?.let { chatTarget = ChatTarget.Peer(it) }
     }
@@ -954,6 +958,7 @@ private fun RcqApp(session: Session) {
             ) {
                 banner?.let { b -> InAppBanner(b, onTap = {
                     session.dismissBanner()
+                    if (b.groupId != null || b.peerUin != null) showAudioRooms = false
                     if (b.groupId != null) chatTarget = ChatTarget.Group(b.groupId)
                     else if (b.peerUin != null) chatTarget = ChatTarget.Peer(b.peerUin)
                 }) }

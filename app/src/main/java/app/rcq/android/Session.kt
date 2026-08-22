@@ -53,6 +53,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -514,9 +516,11 @@ class Session(context: Context) {
         // ⚠ Not ServerCapabilities(): its false defaults mean "the JSON
         // omitted the field", while the never-asked default here is the
         // permissive one the flags are born with.
-        applyCaps(capsCache(serverHost()) ?: RcqApi.ServerCapabilities(
+        val cached = capsCache(serverHost())
+        applyCaps(cached ?: RcqApi.ServerCapabilities(
             uin_shop = true, hall_of_fame = true, nearby = true, random_chat = true, reports = true,
         ))
+        cached?.let { app.rcq.android.data.AccountManager.serverMaxAccounts = it.max_accounts_per_device }
     }
     private val _randomEnabled = MutableStateFlow(cachedCaps?.random_chat ?: true)
     val randomEnabled: StateFlow<Boolean> = _randomEnabled.asStateFlow()
@@ -1636,7 +1640,7 @@ class Session(context: Context) {
                 if (up) flushCallOutbox()
                 // And tell the island we are still in the room we think we
                 // are in; it may have evicted us while the socket was gone.
-                if (up && everConnected) audioRooms.onSocketUp()
+                if (up) audioRooms.onSocketUp(offlineGapMs)
                 if (up) {
                     // ⚠⚠ There used to be a blanket five-second mute here, armed
                     // on EVERY connect including the first one of a session, to
@@ -1751,10 +1755,12 @@ class Session(context: Context) {
                 // the request is in flight rebinds the session to another
                 // island, and the old island's answer would then overwrite the
                 // new one's flags and be cached under the wrong host.
+                // Pinned by HOST, not by the api object: the route watchdog
+                // rebuilds `api` on an onion entry-guard rotation, and that
+                // answer is still this island's.
                 val askedHost = serverHost()
-                val askedApi = api
-                val caps = askedApi.serverInfo().capabilities
-                if (serverHost() != askedHost || api !== askedApi) return@launch
+                val caps = api.serverInfo().capabilities
+                if (serverHost() != askedHost) return@launch
                 applyCaps(caps)
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
                 rememberCaps(askedHost, caps)
@@ -4647,12 +4653,18 @@ class Session(context: Context) {
         // runCatching, so there was no strip, leaving the chat cancelled the
         // upload, and a failure said nothing (#691, the same hole #473 closed
         // for a single picture).
-        _mediaSending.value += count
+        // update {} rather than `value +=`: the add runs on the caller's
+        // thread and the subtract on the session scope, and a lost update
+        // would leave the strip stuck at a count that never reaches zero.
+        _mediaSending.update { it + count }
         var left = count
         val oneDone = {
             if (left > 1) {
                 left -= 1
-                _mediaSending.value = (_mediaSending.value - 1).coerceAtLeast(0)
+                _mediaSending.update { (it - 1).coerceAtLeast(0) }
+                // The next file is read and sealed before its first byte
+                // goes out; "100%" of the previous one would sit there meanwhile.
+                _mediaProgress.value = null
             }
         }
         scope.launch {
@@ -4662,10 +4674,10 @@ class Session(context: Context) {
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("RCQmedia", "$what failed to send", e)
-                _mediaSendFailed.value += 1
+                _mediaSendFailed.update { it + 1 }
             } finally {
-                _mediaSending.value = (_mediaSending.value - left).coerceAtLeast(0)
-                if (_mediaSending.value == 0) _mediaProgress.value = null
+                val now = _mediaSending.updateAndGet { (it - left).coerceAtLeast(0) }
+                if (now == 0) _mediaProgress.value = null
             }
         }
     }
