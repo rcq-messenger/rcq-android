@@ -1134,7 +1134,10 @@ class RcqApi(
         // older island that does not advertise the flag still accepts them.
         val reports: Boolean = true,
         val max_accounts_per_device: Int = 5,
-        // The ONE flag whose safe default is false. It was born together with
+        // Defaults false, like `uin_shop` and `hall_of_fame` above and unlike
+        // the feature toggles, though for a different reason: those two are
+        // surfaces that exist on the flagship and nowhere else, this one is a
+        // wire ability. It was born together with
         // the `ring` field of a sealed deposit (Stage 2 of the core-metadata
         // plan, server 2026.08.22.15): an island that does not advertise it is
         // an island that does not know `ring`, and a call deposited there as a
