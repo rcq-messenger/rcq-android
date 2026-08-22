@@ -1311,6 +1311,16 @@ object Push {
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, answerPi))
             .build()
         runCatching { NotificationManagerCompat.from(ctx).notify(CALL_NOTIF_ID, notif) }
+        // ⚠ A notification posted UNDER THE KEYGUARD is shown once, where the
+        // user may not be able to see it: Android never renders a heads-up over
+        // a lock screen, and with lock-screen content hidden it renders nothing
+        // at all. It does not replay one either. So on a phone whose owner has
+        // turned full-screen call notifications off, the ring sounded, the
+        // status bar carried an icon, and after unlocking there was still no
+        // Answer button anywhere except by pulling down the shade, which stops
+        // the ring (#679). Post it again the moment they unlock, while the call
+        // is still standing.
+        if (!activityWillRing && locked) armUnlockRepost(ctx, callId, notif)
         // AFTER the post, so whatever the system decides to show — the
         // full-screen IncomingCallActivity or a heads-up on the keyguard — is
         // already there when the panel comes up rather than a second later.
@@ -1319,7 +1329,61 @@ object Push {
 
     fun cancelCallNotification(ctx: Context) {
         runCatching { NotificationManagerCompat.from(ctx).cancel(CALL_NOTIF_ID) }
+        disarmUnlockRepost(ctx)
         releaseRingWakeLock()
+    }
+
+    // ── Re-post on unlock (#679) ─────────────────────────────────────────
+
+    @Volatile
+    private var unlockRepost: android.content.BroadcastReceiver? = null
+
+    /** Show the call notification again when the phone is unlocked.
+     *
+     *  Only for the branch that needs it: the full-screen intent was refused
+     *  (or the screen was already on), the keyguard was up when we posted, and
+     *  the notification is therefore the ONLY way to answer. The receiver has
+     *  to be context-registered: `ACTION_USER_PRESENT` is not delivered to
+     *  manifest receivers under the background limits.
+     *
+     *  It fires once and unregisters itself, and it is unregistered again when
+     *  the call ends, so a declined call cannot resurrect its own notification.
+     *  Re-notifying with the same id on the same channel re-alerts (nothing
+     *  here sets `setOnlyAlertOnce`), which is the point: the ring and the
+     *  Answer button arrive together, on a screen the person is looking at. */
+    private fun armUnlockRepost(
+        ctx: Context,
+        callId: String,
+        notif: android.app.Notification,
+    ) {
+        val app = ctx.applicationContext
+        disarmUnlockRepost(app)
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) {
+                disarmUnlockRepost(app)
+                // The call has to still be standing, and the full-screen surface
+                // must not have taken over in the meantime: it does its own
+                // ringing, and a second one beside it is the double-melody bug.
+                val pending = IncomingCallStore.pending
+                if (pending?.callId != callId || IncomingCallStore.fsiSurfaceActive) return
+                runCatching { NotificationManagerCompat.from(app).notify(CALL_NOTIF_ID, notif) }
+            }
+        }
+        unlockRepost = receiver
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                app,
+                receiver,
+                android.content.IntentFilter(Intent.ACTION_USER_PRESENT),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }.onFailure { unlockRepost = null }
+    }
+
+    private fun disarmUnlockRepost(ctx: Context) {
+        val receiver = unlockRepost ?: return
+        unlockRepost = null
+        runCatching { ctx.applicationContext.unregisterReceiver(receiver) }
     }
 
     // ── Lighting the screen for a ring ───────────────────────────────────
