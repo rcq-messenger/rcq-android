@@ -397,6 +397,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var showRelayPicker by remember { mutableStateOf(false) }
     // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
     var fullscreenImage by remember { mutableStateOf<ByteArray?>(null) }
+    /** An album opened full screen: every picture of the batch and where to
+     *  start. The grid only ever draws four, and before this the other six of a
+     *  batch of ten could not be looked at from anywhere (#691/#675/#689). */
+    var albumViewer by remember { mutableStateOf<Pair<List<ChatMessage>, Int>?>(null) }
     // ...and of a video. Same shape on purpose: the player reads the DECRYPTED
     // BYTES and never a URL, so a received clip is watched here rather than
     // being written out as plaintext for whatever player happens to be
@@ -1262,6 +1266,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                         onViewImage = { fullscreenImage = it },
                         onViewVideo = { fullscreenVideo = it },
+                        onOpenAlbum = { idx -> albumViewer = row.items to idx },
                     )
                 }
             }
@@ -1524,6 +1529,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 onCancelVoice = { cancelRecording() },
             )
         }
+    }
+
+    albumViewer?.let { (items, idx) ->
+        AlbumPagerViewer(
+            session, items, idx,
+            onShare = {
+                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
+                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
+                MediaSaver.share(context, it, name, mime)
+            },
+            onSave = {
+                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
+                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
+                runSave {
+                    val ok = MediaSaver.saveToGallery(context, it, name, mime)
+                    val msg = if (ok) context.getString(R.string.media_saved_to, "Pictures/RCQ") else saveFailToast
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { albumViewer = null },
+        )
     }
 
     fullscreenImage?.let { bytes ->
@@ -2972,7 +2998,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (ByteArray) -> Unit = {}) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (ByteArray) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -2991,7 +3017,7 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
                 Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
         }
-        AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo)
+        AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo, onOpenAlbum)
         items.firstOrNull { it.body.isNotEmpty() }?.let { cap ->
             EmoticonText(
                 cap.body, color = c.textPrimary, fontSize = 14.sp,
@@ -3018,6 +3044,7 @@ private fun AlbumGrid(
     onLongPress: () -> Unit,
     onViewImage: (ByteArray) -> Unit = {},
     onViewVideo: (ByteArray) -> Unit = {},
+    onOpenAlbum: (Int) -> Unit = {},
 ) {
     val maxW = 240.dp
     val sp = 3.dp
@@ -3027,25 +3054,25 @@ private fun AlbumGrid(
         val gridMod = Modifier.clip(RoundedCornerShape(12.dp))
         when (count) {
             2 -> Row(gridMod, horizontalArrangement = Arrangement.spacedBy(sp)) {
-                AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
-                AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
+                AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
+                AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
             }
             3 -> Column(gridMod, verticalArrangement = Arrangement.spacedBy(sp)) {
-                AlbumTile(session, items[0], maxW, maxW * 0.55f, onLongPress, onViewImage, onViewVideo)
+                AlbumTile(session, items[0], maxW, maxW * 0.55f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[1], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo)
-                    AlbumTile(session, items[2], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo)
+                    AlbumTile(session, items[1], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
+                    AlbumTile(session, items[2], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(2) })
                 }
             }
             else -> Column(gridMod, verticalArrangement = Arrangement.spacedBy(sp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
-                    AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
+                    AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
+                    AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[2], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
+                    AlbumTile(session, items[2], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(2) })
                     Box(contentAlignment = Alignment.Center) {
-                        AlbumTile(session, items[3], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo)
+                        AlbumTile(session, items[3], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(3) })
                         if (items.size > 4) {
                             Box(
                                 Modifier.size(half, maxW * 0.5f).background(Color.Black.copy(alpha = 0.5f)),
@@ -3072,6 +3099,9 @@ private fun AlbumTile(
     onLongPress: () -> Unit,
     onViewImage: (ByteArray) -> Unit = {},
     onViewVideo: (ByteArray) -> Unit = {},
+    /** Open the whole album at this tile, so everything in it can be reached
+     *  by swiping. Null for the callers that have no album around them. */
+    onOpenAlbum: (() -> Unit)? = null,
 ) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
@@ -3091,6 +3121,12 @@ private fun AlbumTile(
     Box(
         Modifier.size(w, h).background(c.bgSecondary).combinedClickable(
             onClick = {
+                // In an album, a tap opens the ALBUM at this picture. Opening
+                // the single tapped file was why only what the grid happened to
+                // show could be looked at: a batch of ten had four reachable
+                // and six that existed nowhere in the interface (#691, #675,
+                // #689). Videos keep their own player.
+                if (onOpenAlbum != null && !isVideo) { onOpenAlbum(); return@combinedClickable }
                 val mid = m.mediaId; val key = m.mediaKey
                 if (mid != null && key != null) scope.launch {
                     // An album tile used to hand BOTH kinds to an external app,
@@ -3475,6 +3511,120 @@ private fun blurForSpoiler(src: Bitmap): Bitmap {
     val outW = w.coerceAtMost(360)
     val outH = (outW * h / w).coerceAtLeast(1)
     return Bitmap.createScaledBitmap(small, outW, outH, true)
+}
+
+/** The whole album, full screen, one picture per page.
+ *
+ *  ⚠ The grid draws four tiles however many pictures the batch holds, and a tap
+ *  used to open the ONE file under the finger. So a batch of ten had four you
+ *  could look at and six that existed nowhere in the interface: no swipe, no
+ *  list, nothing (#691, #675, #689). Every picture of the batch is a page here,
+ *  the counter says where you are, and each page fetches its own bytes when it
+ *  comes into view rather than pulling ten files down to open one.
+ *
+ *  Videos are not paged: they have their own player, and mixing a video page
+ *  into a photo swipe would put a still frame where a play button belongs. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun AlbumPagerViewer(
+    session: Session,
+    items: List<ChatMessage>,
+    startIndex: Int,
+    onShare: (ByteArray) -> Unit = {},
+    onSave: (ByteArray) -> Unit = {},
+    onDismiss: () -> Unit,
+) {
+    val photos = remember(items) { items.filter { it.kind != "video" } }
+    if (photos.isEmpty()) { onDismiss(); return }
+    val start = remember(items, startIndex) {
+        // The tapped tile's place among the PHOTOS, since videos are dropped.
+        val tapped = items.getOrNull(startIndex)
+        photos.indexOfFirst { it.id == tapped?.id }.coerceAtLeast(0)
+    }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = start, pageCount = { photos.size },
+    )
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val m = photos[page]
+                val bytes by produceState<ByteArray?>(initialValue = null, m.id) {
+                    val mid = m.mediaId; val key = m.mediaKey
+                    value = if (mid != null && key != null) {
+                        session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+                    } else {
+                        null
+                    }
+                }
+                var scale by remember(m.id) { mutableStateOf(1f) }
+                var offset by remember(m.id) { mutableStateOf(Offset.Zero) }
+                val transform = rememberTransformableState { zoomChange, panChange, _ ->
+                    scale = (scale * zoomChange).coerceIn(1f, 5f)
+                    offset = if (scale > 1f) offset + panChange else Offset.Zero
+                }
+                Box(
+                    Modifier.fillMaxSize().clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onDismiss,
+                    ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val b = bytes
+                    when {
+                        b == null -> CircularProgressIndicator(color = RcqTheme.colors.accent)
+                        b.isGif() -> SafeAnimatedGif(b, Modifier.fillMaxWidth())
+                        else -> rememberSampledBitmap(b, maxPx = 2560)?.let { img ->
+                            Image(
+                                bitmap = img,
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                                    .transformable(transform)
+                                    .graphicsLayer(
+                                        scaleX = scale, scaleY = scale,
+                                        translationX = offset.x, translationY = offset.y,
+                                    ),
+                            )
+                        }
+                    }
+                }
+            }
+            val current = photos.getOrNull(pager.currentPage)
+            val currentBytes by produceState<ByteArray?>(initialValue = null, current?.id) {
+                val mid = current?.mediaId; val key = current?.mediaKey
+                value = if (mid != null && key != null) {
+                    session.fetchImage(mid, key, current.groupId?.let { session.groupHost(it) })
+                } else {
+                    null
+                }
+            }
+            ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
+                Modifier.align(Alignment.TopEnd).padding(16.dp), onDismiss)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+            ) {
+                currentBytes?.let { cb ->
+                    ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(cb) }
+                    ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(cb) }
+                }
+            }
+            if (photos.size > 1) {
+                Text(
+                    "${pager.currentPage + 1} / ${photos.size}",
+                    color = Color.White, fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
 }
 
 /** Fullscreen photo viewer (tester #10): tap anywhere or the X to close, pinch

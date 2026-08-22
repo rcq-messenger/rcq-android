@@ -459,13 +459,18 @@ class Session(context: Context) {
      *  matching iOS defaultLegacy + every pre-/server/info backend); refreshed
      *  on each start(). Self-host rcq-server-ref returns false → the Settings
      *  shop row hides. */
-    private val _uinShopEnabled = MutableStateFlow(true)
+    /** What this island last said, read ONCE at construction. In `start()` it
+     *  was already too late: the first frames are drawn before the session
+     *  starts, and they drew the retired surface from the permissive default. */
+    private val cachedCaps: RcqApi.ServerCapabilities? = capsCache(serverHost())
+
+    private val _uinShopEnabled = MutableStateFlow(cachedCaps?.uin_shop ?: true)
     val uinShopEnabled: StateFlow<Boolean> = _uinShopEnabled.asStateFlow()
 
     /** Hall of Fame opt-in surface. Flagship advertises hall_of_fame=true;
      *  self-host rcq-server-ref returns false → the Privacy settings opt-in
      *  hides. Permissive default (true) until the first /server/info lands. */
-    private val _hallOfFameEnabled = MutableStateFlow(true)
+    private val _hallOfFameEnabled = MutableStateFlow(cachedCaps?.hall_of_fame ?: true)
     val hallOfFameEnabled: StateFlow<Boolean> = _hallOfFameEnabled.asStateFlow()
 
     /** Operator-toggleable optional features (admin console → Features). Each
@@ -489,16 +494,16 @@ class Session(context: Context) {
         }
     }
 
-    private val _nearbyEnabled = MutableStateFlow(true)
+    private val _nearbyEnabled = MutableStateFlow(cachedCaps?.nearby ?: true)
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
-    private val _randomEnabled = MutableStateFlow(true)
+    private val _randomEnabled = MutableStateFlow(cachedCaps?.random_chat ?: true)
     val randomEnabled: StateFlow<Boolean> = _randomEnabled.asStateFlow()
 
     /** Does this island run a report desk at all? A self-hoster who does not
      *  want to answer anybody switches it off, and then the two entries that
      *  lead there have no business being in Settings. Permissive default so an
      *  island that predates the flag behaves as it always did. */
-    private val _reportsEnabled = MutableStateFlow(true)
+    private val _reportsEnabled = MutableStateFlow(cachedCaps?.reports ?: true)
     val reportsEnabled: StateFlow<Boolean> = _reportsEnabled.asStateFlow()
 
     /** Load the server push-preference toggles (Notifications settings). */
@@ -1713,13 +1718,7 @@ class Session(context: Context) {
         // the request takes. Seen with my own eyes on a cold start: the retired
         // "Nearby" button in the bottom bar, there and then gone, on an island
         // that answers `nearby: false`. A tester asked what it was (#690).
-        capsCache(serverHost())?.let { c ->
-            _uinShopEnabled.value = c.uin_shop
-            _hallOfFameEnabled.value = c.hall_of_fame
-            _nearbyEnabled.value = c.nearby
-            _randomEnabled.value = c.random_chat
-            _reportsEnabled.value = c.reports
-        }
+        // (the flags were already seeded from `cachedCaps` at construction)
         scope.launch {
             runCatching {
                 val caps = api.serverInfo().capabilities
