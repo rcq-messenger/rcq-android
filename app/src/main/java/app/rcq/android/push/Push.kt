@@ -1335,8 +1335,17 @@ object Push {
 
     // ── Re-post on unlock (#679) ─────────────────────────────────────────
 
-    @Volatile
-    private var unlockRepost: android.content.BroadcastReceiver? = null
+    /** The armed receiver, swapped atomically: arm and disarm are reached from
+     *  the socket reader thread and from the main thread, and an unsynchronised
+     *  check-then-act loses one of them to a race, which leaks a registered
+     *  receiver that then re-rings a call somebody else already answered. */
+    private val unlockRepost =
+        java.util.concurrent.atomic.AtomicReference<android.content.BroadcastReceiver?>(null)
+
+    /** Gap between the unlock and the re-post, so a call screen coming up on
+     *  that same unlock gets to claim the ring first. Matches the delay
+     *  IncomingCallActivity uses for the keyguard bounce. */
+    private const val UNLOCK_REPOST_DELAY_MS = 800L
 
     /** Show the call notification again when the phone is unlocked.
      *
@@ -1361,15 +1370,26 @@ object Push {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context, intent: Intent) {
                 disarmUnlockRepost(app)
-                // The call has to still be standing, and the full-screen surface
-                // must not have taken over in the meantime: it does its own
-                // ringing, and a second one beside it is the double-melody bug.
-                val pending = IncomingCallStore.pending
-                if (pending?.callId != callId || IncomingCallStore.fsiSurfaceActive) return
-                runCatching { NotificationManagerCompat.from(app).notify(CALL_NOTIF_ID, notif) }
+                // ⚠ NOT synchronously. The unlock this fires on is very often
+                // the user unlocking IN ORDER to answer: they tap the ring
+                // notification, the keyguard asks for the PIN, and
+                // ACTION_USER_PRESENT lands a beat before the call screen comes
+                // up. Re-posting on the audible channel right then re-rings the
+                // phone at somebody who is already answering, and the surface
+                // that would have suppressed it has not raised its flag yet.
+                // The same 800 ms the keyguard bounce uses is long enough for
+                // the screen to claim the call, and short enough that a person
+                // who unlocked for another reason still sees the button.
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val pending = IncomingCallStore.pending
+                    if (pending?.callId != callId || IncomingCallStore.fsiSurfaceActive) {
+                        return@postDelayed
+                    }
+                    runCatching { NotificationManagerCompat.from(app).notify(CALL_NOTIF_ID, notif) }
+                }, UNLOCK_REPOST_DELAY_MS)
             }
         }
-        unlockRepost = receiver
+        unlockRepost.set(receiver)
         runCatching {
             androidx.core.content.ContextCompat.registerReceiver(
                 app,
@@ -1377,12 +1397,11 @@ object Push {
                 android.content.IntentFilter(Intent.ACTION_USER_PRESENT),
                 androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
             )
-        }.onFailure { unlockRepost = null }
+        }.onFailure { unlockRepost.compareAndSet(receiver, null) }
     }
 
     private fun disarmUnlockRepost(ctx: Context) {
-        val receiver = unlockRepost ?: return
-        unlockRepost = null
+        val receiver = unlockRepost.getAndSet(null) ?: return
         runCatching { ctx.applicationContext.unregisterReceiver(receiver) }
     }
 
