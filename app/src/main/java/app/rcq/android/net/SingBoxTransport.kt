@@ -10,7 +10,7 @@ import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 /**
- * Embedded censorship-circumvention transport. Runs sing-box in-process (via
+ * The RCQ relays: an embedded obfuscated transport. Runs sing-box in-process (via
  * the gomobile-bound [rcqbox] wrapper — same Go core the iOS client uses),
  * exposing a local SOCKS/mixed proxy on 127.0.0.1:[LOCAL_PORT]. RcqApi /
  * RcqSocket route their OkHttp traffic through [proxy] when the transport is
@@ -409,13 +409,13 @@ object SingBoxTransport {
      *  for into a request that simply fails, and a failure with no reason given
      *  is read as "the app is broken" — which is the report we would get next.
      *  The two states a user has to be able to tell apart are "this island
-     *  cannot be reached and I turned the automatic bypass off" and "RCQ is
+     *  cannot be reached and I turned the automatic relays off" and "RCQ is
      *  broken", so the notice names the setting and points at the manual
      *  switch, which still works.
      *
      *  Silent when the opt-out is off (the auto-engage path handles it and
      *  there is nothing to explain), and silent when the device has no network
-     *  at all — that failure is not about the bypass and the user knows about
+     *  at all: that failure is not about the relays and the user knows about
      *  it already. Safe from any thread. */
     fun noteAutoEngageDeclined(what: String) {
         val ctx = appCtx ?: return
@@ -520,7 +520,7 @@ object SingBoxTransport {
         if (localProxyMode()) {
             // LOCAL PROXY: a single socks/http outbound to the user's own
             // Tor/i2p; no relays, no urltest, no onion. The user's proxy IS the
-            // circumvention + metadata layer. sing-box just forwards the local
+            // relay + metadata layer. sing-box just forwards the local
             // mixed inbound (1089) → user proxy, so proxy()/call sites are
             // untouched. NO automatic fallback to relays (that would leak around
             // Tor) — if the proxy is down, requests fail until the user fixes it.

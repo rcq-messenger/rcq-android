@@ -10,7 +10,7 @@
     <string name="onboard_cta_skip">Atla</string>
     <string name="onboard_welcome_kicker">RCQ</string>
     <string name="onboard_welcome_title">Hoş geldin</string>
-    <string name="onboard_welcome_body">Varsayılan olarak gerçek uçtan uca şifreleme ve dahili sansür engelini aşma sunan ciddi bir gizlilik mesajlaşması. Telefon yok, e-posta yok, reklam yok.</string>
+    <string name="onboard_welcome_body">Varsayılan olarak gerçek uçtan uca şifreleme ve adresini gizleyen dahili röleler sunan ciddi bir gizlilik mesajlaşması. Telefon yok, e-posta yok, reklam yok.</string>
     <string name="onboard_anon_kicker">ANONİM</string>
     <string name="onboard_anon_title">Telefon yok, e-posta yok</string>
     <string name="onboard_anon_body">Kimliğin sayısal bir UIN, başka bir şey değil. Hesap sana bağlı değil. İstediğin zaman yakıp baştan başla.</string>
@@ -29,9 +29,9 @@
     <string name="onboard_federation_kicker">FEDERASYON</string>
     <string name="onboard_federation_title">Tek bir sahibi yok</string>
     <string name="onboard_federation_body">RCQ tek bir şirketin sunucusu değil. Her sunucu bağımsız bir ada ve isteyen herkes bir tane işletebilir. Hesabın seçtiğin adada yaşar, taşınsan bile numaran sende kalır.</string>
-    <string name="onboard_relay_kicker">ENGEL AŞMA</string>
-    <string name="onboard_relay_title">Geçmek için yapıldı</string>
-    <string name="onboard_relay_body">Ağ RCQ\'yu engellediğinde uygulama kendini bir röleden, sıradan trafik kılığında geçirir. Röle ağını topluluk işletir ve soğan yönlendirme röleleri zincirler, böylece tek bir röle hem seni hem adanı görmez.</string>
+    <string name="onboard_relay_kicker">RCQ RÖLELERİ</string>
+    <string name="onboard_relay_title">Ada adresini görmez</string>
+    <string name="onboard_relay_body">Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Röle ağını topluluk işletir. RCQ\'nun engellendiği yerlerde ayrıca tek yol budur.</string>
     <string name="onboard_server_label">Sunucu</string>
     <string name="onboard_language">Dil</string>
     <!-- Status -->
@@ -335,8 +335,8 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Sesli odalar</string>
     <string name="home_menu_radio">Radyo</string>
-    <string name="home_menu_bypass_enable">Engel aşmayı aç</string>
-    <string name="home_menu_bypass_disable">Engel aşmayı kapat</string>
+    <string name="home_menu_bypass_enable">Uygulamayı RCQ rölelerinden geçir</string>
+    <string name="home_menu_bypass_disable">RCQ rölelerinden geçirmeyi bırak</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
     <string name="radio_title">Radyo</string>
     <string name="radio_on_air">Şu adla yayında</string>
@@ -508,7 +508,7 @@
     <string name="chat_bg_custom">Galeri</string>
     <string name="app_icon_default">Varsayılan</string>
     <string name="app_icon_footer">Başka bir başlatıcı simgesi seç. Güncellenirken ana ekran bir an titreyebilir.</string>
-    <string name="settings_foot_privacy">Seni kimin görebileceğini ve sana kimin ulaşabileceğini belirle. Sunucu, vekil sunucu, gizleme ve röleler Ağ altında.</string>
+    <string name="settings_foot_privacy">Seni kimin görebileceğini ve sana kimin ulaşabileceğini belirle. Sunucu, vekil sunucu ve RCQ röleleri Ağ altında.</string>
     <string name="settings_foot_history">Mesajları yalnızca bu cihazdan siler. Hesabın ve kişilerin kalır.</string>
     <string name="theme_auto">Otomatik</string>
     <string name="theme_light">Açık</string>
@@ -581,12 +581,12 @@
     <string name="presence_countdown_lt1m">&lt;1 dk</string>
     <string name="presence_info_title">Çıktıktan sonra görünür kal</string>
     <string name="presence_info_body">Uygulamayı kapattıktan sonra bu süre boyunca çevrimiçi görünmeyi sürdürürsün. Ayarlar, Gizlilik &amp; Ağ altından değiştir.</string>
-    <string name="stealth_info_title">Engel aşma etkin</string>
-    <string name="stealth_info_body_manual">Engel aşmayı menüden kendin açtın. Açıkken RCQ yalnızca dahili şifreli tünelden geçer ve doğrudan bağlantı denemez. Aynı menüden kapatabilirsin.</string>
-    <string name="stealth_shield_green">Yeşil kalkan: engel aşmadan geçen trafiğin adaya ulaştığı doğrulandı.</string>
-    <string name="stealth_shield_amber">Sarı kalkan: engel aşma açık ama içinden veri geçtiği henüz doğrulanmadı. Sarı kalırsa menüden engel aşmayı kapatıp tekrar açmayı dene.</string>
-    <string name="stealth_info_body">Ağın engelli göründü, bu yüzden RCQ dahili şifreli engel aşma üzerinden bağlanıyor. Ayar gerekmez, doğrudan bağlantı olmadığında kendiliğinden açılır.</string>
-    <string name="connecting_stealth">Engel aşılıyor…</string>
+    <string name="stealth_info_title">Rölelerden</string>
+    <string name="stealth_info_body_manual">RCQ rölelerini menüden kendin açtın. Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Bu açıkken uygulama doğrudan bağlantı denemez. Aynı menüden kapatabilirsin.</string>
+    <string name="stealth_shield_green">Yeşil kalkan: rölelerden geçen trafiğin adaya ulaştığı doğrulandı.</string>
+    <string name="stealth_shield_amber">Sarı kalkan: röleler açık ama içlerinden veri geçtiği henüz doğrulanmadı. Sarı kalırsa menüden röleleri kapatıp tekrar açmayı dene.</string>
+    <string name="stealth_info_body">Uygulama RCQ rölelerinden geçiyor: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Doğrudan bağlantı geçmediği için kendiliğinden açıldı, ayar gerekmez.</string>
+    <string name="connecting_stealth">Rölelerden bağlanılıyor…</string>
     <string name="pv_profile_card">Profil kartı</string>
     <string name="pv_profile_card_desc">Tam profilini (şehir, yaş, hakkında) kimler açabilir.</string>
     <string name="pv_gender_desc">Profilindeki cinsiyeti kimler görebilir.</string>
@@ -609,14 +609,16 @@
     <string name="pv_network">Ağ</string>
     <string name="pv_relay_calls">Aramaları hep röleden geçir</string>
     <string name="pv_relay_calls_desc">Arama sesini ve görüntüsünü rölemizden geçirir, böylece karşı taraf IP adresini hiç öğrenmez. Bunu kapatmak arama kalitesini artırabilir ama adresini gösterir.</string>
-    <string name="pv_obfuscated">Gizlenmiş bağlantı</string>
-    <string name="pv_obfuscated_desc">Ağ RCQ\'yu doğrudan engellediğinde bağlantıyı bir röleden geçirir. Kısıtlı ağlarda güvenilirliği artırır. Bir sonraki açılışta geçerli olur.</string>
-    <string name="pv_obf_auto_disable">Kendiliğinden devreye girmesin</string>
-    <string name="pv_obf_auto_disable_desc">Uygulama varsayılan olarak sunucuya doğrudan ulaşamazsa gizlemeyi kendiliğinden açar. Trafiğini kendi VPN\'inden ya da vekil sunucundan geçiriyorsan bunu aç, böylece bizim taşıyıcımız seninkinin üstüne binmez.</string>
+    <string name="pv_relays_section">RCQ röleleri</string>
+    <string name="relay_what_is">Röle nedir?</string>
+    <string name="pv_obfuscated">Uygulamayı RCQ rölelerinden geçir</string>
+    <string name="pv_obfuscated_desc">Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Bir sonraki açılışta geçerli olur. RCQ\'nun engellendiği yerlerde ayrıca tek yol budur.</string>
+    <string name="pv_obf_auto_disable">Röleleri kendiliğinden açma</string>
+    <string name="pv_obf_auto_disable_desc">Uygulama varsayılan olarak adaya doğrudan ulaşamazsa röleleri kendiliğinden açar. Trafiğini kendi VPN\'inden ya da vekil sunucundan geçiriyorsan bunu aç, böylece bizim taşıyıcımız seninkinin üstüne binmez.</string>
     <string name="pv_onion">Soğan yönlendirme (deneysel)</string>
-    <string name="pv_onion_desc">İki röleden geçirir, böylece tek bir röle hem seni hem sunucuyu görmez. Korumalı bağlantıyı kendiliğinden açar. Biraz daha yavaş. Bir sonraki açılışta geçerli olur.</string>
+    <string name="pv_onion_desc">İki röleden geçirir, böylece tek bir röle hem seni hem adayı görmez. RCQ rölelerini kendiliğinden açar. Biraz daha yavaş. Bir sonraki açılışta geçerli olur.</string>
     <string name="pv_localproxy">Vekil sunucu</string>
-    <string name="pv_localproxy_desc">Uygulamayı herhangi bir yerel vekil sunucudan geçir: Tor, I2P, AWG/wiresocks vb. Rölelerin ve soğan yönlendirmenin yerini alır.</string>
+    <string name="pv_localproxy_desc">Uygulamayı herhangi bir yerel vekil sunucudan geçir: Tor, I2P, AWG/wiresocks vb. RCQ rölelerinin ve soğan yönlendirmenin yerini alır.</string>
     <string name="pv_localproxy_host">Adres</string>
     <string name="pv_localproxy_port">Bağlantı noktası</string>
     <string name="pv_localproxy_test">Dene</string>
@@ -644,7 +646,7 @@
     <!-- Connection diagnostics -->
     <string name="diag_title">Bağlantı tanılaması</string>
     <string name="diag_transport">Rota</string>
-    <string name="diag_mode_tunnel">Röle (gizlenmiş)</string>
+    <string name="diag_mode_tunnel">Rölelerden</string>
     <string name="diag_mode_direct">Doğrudan</string>
     <string name="diag_backend_direct">Sunucu, doğrudan</string>
     <string name="diag_backend_route">Sunucu, geçerli rota</string>
@@ -658,7 +660,7 @@
     <string name="diag_relays_remote">%1$d röle · imzalı v%2$d</string>
     <string name="diag_relays_bundled">%1$d röle · gömülü</string>
     <string name="diag_run_again">Tekrar çalıştır</string>
-    <string name="diag_footer">Sunucu doğrudan engelliyken geçerli rotadan erişilebiliyorsa röle işini yapıyor demektir. İkisi de olmuyorsa ağın erişebildiğimiz her şeyi engelliyor.</string>
+    <string name="diag_footer">Sunucu doğrudan engelliyken geçerli rotadan erişilebiliyorsa röleler işini yapıyor demektir. İkisi de olmuyorsa ağın erişebildiğimiz her şeyi engelliyor.</string>
     <string name="pv_custom_server">Özel sunucu</string>
     <string name="pv_default">Varsayılan</string>
     <!-- Settings: sounds -->
@@ -1089,7 +1091,7 @@
     <string name="onboard_cta_netcheck">RCQ bağlanmıyor mu? Ağı kontrol et</string>
     <string name="onboard_netcheck_send">Bu satırı kopyalayıp bize gönder</string>
     <string name="diag_audit_hint">Bu adaya, ön uca, rölelere ve iyi bilinen iki denetim sunucusuna düz soket açar; böylece bu ağın neyi süzdüğünü anlar. Hiçbir yere bir şey gönderilmez; sonucu kendin kopyala.</string>
-    <string name="diag_audit_calls_blocked">Mesajlar geçiyor, aramalar geçmeyecek. Arama sesini taşıyan röleye bu ağdan erişilemiyor ve gizlenmiş bağlantı aramaları kapsamıyor: ses onun yanından doğrudan çıkıyor.</string>
+    <string name="diag_audit_calls_blocked">Mesajlar geçiyor, aramalar geçmeyecek. Arama sesini taşıyan röleye bu ağdan erişilemiyor ve RCQ röleleri aramaları kapsamıyor: ses onların yanından doğrudan çıkıyor.</string>
     <string name="diag_audit_fine">Ada doğrudan cevap veriyor. Burada bir şey süzülmüyor.</string>
     <string name="diag_audit_no_net">Denetim sunucularına bile erişilemiyor: bu cihazda çalışan bir internet yok, yani aşağıdakilerin RCQ ile ilgisi yok.</string>
     <string name="diag_audit_by_name">Adresimiz başka bir adla cevap veriyor. Süzgeç İSME göre çalışıyor, yani aynı sunucunun önündeki farklı bir ad geçmeli.</string>
@@ -1153,8 +1155,8 @@
     <string name="how_q3">Çalışmayı bırakınca ne yapmalıyım?</string>
     <string name="how_a3">Önce engellenip engellenmediğinizi öğrenin: Ayarlar → Ağ → Bağlantı tanılama, ve tam denetimi VPN KAPALIYKEN çalıştırın.\n\nSize tek bir satır verir. Onu Hata bildir üzerinden gönderin: o satır ağınızda tam olarak neyin kapalı olduğunu söyler, onsuz tahmin yürütürüz.</string>
     <string name="how_q4">Ağım RCQ’yu engellediğinde ne olur?</string>
-    <string name="how_a4">Uygulama bunu fark eder ve kendisi dolanır. Açılacak bir şey yok, ayrı bir VPN de gerekmez: rölelerimizden birine tünel açar ve çalışmaya devam eder.\n\nEngelleyen taraf için bu trafik, sıradan bir siteye yapılan sıradan bir ziyaret gibi görünür — tarayıcınızın gün boyu kurduğu şifreli bağlantıların aynısı. Röle mühürlü zarflar taşır, yani mesajlarınızı o da okuyamaz.</string>
+    <string name="how_a4">Uygulama bunu fark eder ve kendisi RCQ rölelerinden geçer. Açılacak bir şey yok, ayrı bir VPN de gerekmez: rölelerimizden birine tünel açar ve çalışmaya devam eder.\n\nEngelleyen taraf için bu trafik, sıradan bir siteye yapılan sıradan bir ziyaret gibi görünür, tarayıcınızın gün boyu kurduğu şifreli bağlantıların aynısı. Röle mühürlü zarflar taşır, yani mesajlarınızı o da okuyamaz.</string>
     <string name="how_q5">Kime yazdığımı biri öğrenebilir mi?</string>
-    <string name="how_a5">Adanız bir zarfın birine gittiğini bilir, sizden çıktığını bilmez: adınız dışarıda yazmaz.\n\nTünel açıkken dışarı çıkan yol iki röle arasında bölünür. Birincisi sizi görür ama hangi adaya gittiğinizi bilmez; ikincisi adaya ulaşır ama kim olduğunuzu bilmez. İki yarıyı birleştirmek ikisini birden gerektirir, ve onlar farklı ülkelerde farklı kişilere aittir.\n\nGizlenemeyen şey: RCQ kullandığınız, ağınızı elinde tutan tarafa görünür — tünel kapalı olduğu sürece.</string>
+    <string name="how_a5">Adanız bir zarfın birine gittiğini bilir, sizden çıktığını bilmez: adınız dışarıda yazmaz.\n\nRCQ röleleri açıkken dışarı çıkan yol iki röle arasında bölünür. Birincisi sizi görür ama hangi adaya gittiğinizi bilmez; ikincisi adaya ulaşır ama kim olduğunuzu bilmez. İki yarıyı birleştirmek ikisini birden gerektirir, ve onlar farklı ülkelerde farklı kişilere aittir.\n\nGizlenemeyen şey: RCQ kullandığınız, ağınızı elinde tutan tarafa görünür, RCQ röleleri kapalı olduğu sürece.</string>
     <string name="how_more">Daha fazla soru: rcq.app/faq →</string>
 </resources>

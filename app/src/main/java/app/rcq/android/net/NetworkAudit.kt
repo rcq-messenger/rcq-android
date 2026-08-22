@@ -235,7 +235,7 @@ object NetworkAudit {
             // rides UDP. Both protocols answer on 443 of the same machine, so a
             // TCP probe says "the machine is up", NOT "this entry can carry
             // traffic here". On a network that eats QUIC every hy2 entry probes
-            // OPEN and works for nobody, which is what "the bypass works
+            // OPEN and works for nobody, which is what "the relays work
             // sometimes" looks like from the inside. Count them separately and
             // read the number next to `udp:` below.
             val hy2 = r.proto == "hysteria2"
@@ -272,10 +272,10 @@ object NetworkAudit {
         /// from "only that service is allowed". Null when no carrier answered.
         var carrierOurName: Pair<Reach, String>? = null
         // ⚠ Measured on EVERY run, not only when the island is unreachable.
-        // Somebody whose island answers fine still turns the bypass on, and on
+        // Somebody whose island answers fine still turns the relays on, and on
         // a network that blocks UDP the Hysteria2 half of the pool cannot carry
-        // them — that is the difference between "the bypass is flaky" and "the
-        // bypass has half as many relays as it looks like it has". Skipping the
+        // them: that is the difference between "the relays are flaky" and "the
+        // pool has half as many usable relays as it looks like it has". Skipping the
         // measurement on a healthy direct path meant every such report arrived
         // saying ALL_FINE with nothing to go on.
         val udpOk: Boolean = udpWorks()
@@ -330,8 +330,8 @@ object NetworkAudit {
         }
 
         // ⚠⚠ The relay that carries call MEDIA, tested the way calls reach it:
-        // straight out, with no transport in front. That is not a detail — the
-        // obfuscated connection covers this app's own sockets, and WebRTC does
+        // straight out, with no transport in front. That is not a detail: the
+        // RCQ relays cover this app's own sockets, and WebRTC does
         // not use them. It opens its own, so on a network that blocks RCQ the
         // messages ride the tunnel and the audio has nowhere to go.
         //
@@ -353,7 +353,7 @@ object NetworkAudit {
                 lines += Line(
                     "релей звонков",
                     turnOk,
-                    if (viaTunnel) "доступен через обход" else "НЕДОСТУПЕН даже через обход",
+                    if (viaTunnel) "доступен через релеи" else "НЕДОСТУПЕН даже через релеи",
                 )
             } else {
                 // 443 first: it is the port most likely to survive a filter, and
@@ -371,7 +371,7 @@ object NetworkAudit {
                     lines += Line(
                         "что делать",
                         null,
-                        "включить обход блокировок: тогда звонки пойдут через него",
+                        "включить релеи RCQ: тогда звонки пойдут через них",
                     )
                 }
             }

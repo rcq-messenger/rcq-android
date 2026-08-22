@@ -76,7 +76,10 @@ private sealed interface Hero {
     data object StatusRow : Hero
 }
 
-private data class OnbPage(val kicker: Int, val title: Int, val body: Int, val hero: Hero)
+/** [relayLink] hangs "What is a relay?" under the body. Only the relays page
+ *  uses it: naming the relay is the point, so the word has to come with a way
+ *  to find out what it means. */
+private data class OnbPage(val kicker: Int, val title: Int, val body: Int, val hero: Hero, val relayLink: Boolean = false)
 
 /**
  * First-run onboarding — a swipeable 6-page deck matching the iOS
@@ -100,7 +103,7 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
         OnbPage(R.string.onboard_chat_kicker, R.string.onboard_chat_title, R.string.onboard_chat_body, Hero.Sym(Icons.Filled.Lock)),
         OnbPage(R.string.onboard_pin_kicker, R.string.onboard_pin_title, R.string.onboard_pin_body, Hero.Sym(Icons.Filled.Shield)),
         OnbPage(R.string.onboard_federation_kicker, R.string.onboard_federation_title, R.string.onboard_federation_body, Hero.Sym(Icons.Filled.Hub)),
-        OnbPage(R.string.onboard_relay_kicker, R.string.onboard_relay_title, R.string.onboard_relay_body, Hero.Sym(Icons.Filled.VpnLock)),
+        OnbPage(R.string.onboard_relay_kicker, R.string.onboard_relay_title, R.string.onboard_relay_body, Hero.Sym(Icons.Filled.VpnLock), relayLink = true),
     )
     val pager = rememberPagerState(pageCount = { pages.size })
     val lastPage = pager.currentPage == pages.size - 1
@@ -252,6 +255,10 @@ private fun PageContent(p: OnbPage) {
         Text(stringResource(p.title), color = c.textPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(14.dp))
         Text(stringResource(p.body), color = c.textSecondary, fontSize = 15.sp, textAlign = TextAlign.Center)
+        if (p.relayLink) {
+            Spacer(Modifier.height(12.dp))
+            RelayLearnMore()
+        }
     }
 }
 
