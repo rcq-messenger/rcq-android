@@ -4610,18 +4610,32 @@ class Session(context: Context) {
      *  looked identical to a successful one: dialog closes, nothing appears,
      *  nothing said. This runs on the session's own scope and reports what
      *  happened. */
-    fun sendMediaDetached(what: String, block: suspend () -> Unit) {
-        _mediaSending.value += 1
+    fun sendMediaDetached(what: String, count: Int = 1, block: suspend (oneDone: () -> Unit) -> Unit) {
+        // An album is `count` files behind one call: the strip above the
+        // composer counts them down as each one lands, instead of saying
+        // "1 file" for a batch of ten. Before 0.142 a batch did not go through
+        // here at all: it ran on the chat screen's own scope with a bare
+        // runCatching, so there was no strip, leaving the chat cancelled the
+        // upload, and a failure said nothing (#691, the same hole #473 closed
+        // for a single picture).
+        _mediaSending.value += count
+        var left = count
+        val oneDone = {
+            if (left > 1) {
+                left -= 1
+                _mediaSending.value = (_mediaSending.value - 1).coerceAtLeast(0)
+            }
+        }
         scope.launch {
             try {
-                block()
+                block(oneDone)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("RCQmedia", "$what failed to send", e)
                 _mediaSendFailed.value += 1
             } finally {
-                _mediaSending.value = (_mediaSending.value - 1).coerceAtLeast(0)
+                _mediaSending.value = (_mediaSending.value - left).coerceAtLeast(0)
                 if (_mediaSending.value == 0) _mediaProgress.value = null
             }
         }
