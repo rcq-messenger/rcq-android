@@ -210,20 +210,125 @@ object CrossIslandSender {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         ownHost: String,
-    ): Boolean = depositToPrimary(
-        contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost,
-        envelopeType = "message",
-        ring = isWakingCall(env),
-    )
+    ): Boolean {
+        val ring = isWakingCall(env)
+        // A call that does not ring is not a call (founder rule): a waking
+        // signal bound for an island that predates `ring` goes out under the
+        // legacy, more telling type "call", the only thing such an island rings
+        // a closed app on. `ring` stays set in both forms; it is harmless to an
+        // old island and exact on a new one. Non-waking signals never ask and
+        // never change type, but they do WAIT while a probe of this host is in
+        // flight: the offer is what the probe delays, and an ICE batch that
+        // slipped past it landed in the callee's queue before the call it
+        // belongs to, which the callee drops. Nothing goes to a host mid-probe.
+        val envelopeType = if (ring) {
+            if (peerHonoursRing(contact.host)) "message" else "call"
+        } else {
+            ringProbeLocks[contact.host]?.let { synchronized(it) {} }
+            "message"
+        }
+        return depositToPrimary(
+            contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost,
+            envelopeType = envelopeType,
+            ring = ring,
+        )
+    }
+
+    /** Per-host memo for [peerHonoursRing]: answer + the elapsedRealtime it
+     *  expires at. A true answer is kept long (an island does not un-learn
+     *  `ring`); anything else short, so an island that upgrades is picked up
+     *  and a transient failure is not remembered as "old" for an hour. */
+    private val ringCapable = HashMap<String, Pair<Boolean, Long>>()
+    private val ringProbeLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    private const val RING_TRUE_TTL_MS = 60 * 60 * 1000L
+    private const val RING_OTHER_TTL_MS = 10 * 60 * 1000L
+    private const val RING_PROBE_TIMEOUT_S = 5L
+
+    /**
+     * Does the island at [host] honour the `ring` flag of a sealed deposit?
+     * Read from its open `/server/info`, `capabilities.envelope_class`, which
+     * was born together with `ring` (server 2026.08.22.15). Only `true` counts:
+     * false, absent, a non-200, a failed or timed-out fetch and an unparseable
+     * body all mean "treat as old", because the cost of a wrong "new" is a
+     * call that stays silent while the cost of a wrong "old" is one legible
+     * "call" row on an island that could have done better.
+     *
+     * Sits on the press-to-ringback path, so the fetch gives up after
+     * [RING_PROBE_TIMEOUT_S] and the answer is memoised per host; the other
+     * signals of the same call hit the memo. Goes through [viaBestRoute] like
+     * the deposit itself, so an island that is blocked here but reachable
+     * through the tunnel is not mistaken for an old one just because a direct
+     * fetch failed. ⚠ A TIMEOUT is not a blocked route: this deadline is
+     * tighter than the deposit's, so a mere slow answer must not engage the
+     * tunnel and pin the host to it for the rest of the process. It is caught
+     * inside the route and simply reads as "cannot tell quickly", i.e. false;
+     * a hard connection failure still takes the deposit's own tunnel path.
+     * One fetch per host at a time: concurrent callers for the same host wait
+     * on its lock and then read the memo.
+     */
+    private fun peerHonoursRing(host: String): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(ringCapable) {
+            ringCapable[host]?.let { (ok, until) -> if (now < until) return ok }
+        }
+        synchronized(ringProbeLocks.computeIfAbsent(host) { Any() }) {
+            synchronized(ringCapable) {
+                ringCapable[host]?.let { (ok, until) -> if (now < until) return ok }
+            }
+            val ok = runCatching {
+                val req = Request.Builder().url("https://$host/server/info").get().build()
+                val probe = viaBestRoute(host) { c ->
+                    try {
+                        // newBuilder shares the pool and dispatcher; only the
+                        // overall deadline is tightened for this one call.
+                        c.newBuilder().callTimeout(RING_PROBE_TIMEOUT_S, TimeUnit.SECONDS).build()
+                            .newCall(req).execute()
+                    } catch (e: java.io.InterruptedIOException) {
+                        // callTimeout and the socket timeouts both surface as
+                        // this. Swallowed HERE, inside the route, so
+                        // viaBestRoute's IOException path (engage the tunnel,
+                        // remember the host as blocked) is not taken for a
+                        // slow answer; any other IOException still propagates.
+                        null
+                    }
+                } ?: return@runCatching false
+                probe.use { resp ->
+                    if (!resp.isSuccessful) return@runCatching false
+                    val o = JsonParser.parseString(resp.body?.string() ?: return@runCatching false).asJsonObject
+                    o.getAsJsonObject("capabilities")?.get("envelope_class")
+                        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+                        ?.asBoolean == true
+                }
+            }.getOrDefault(false)
+            val ttl = if (ok) RING_TRUE_TTL_MS else RING_OTHER_TTL_MS
+            synchronized(ringCapable) {
+                ringCapable[host] = ok to (android.os.SystemClock.elapsedRealtime() + ttl)
+            }
+            return ok
+        }
+    }
+
+    /** Warm the [peerHonoursRing] memo for [host] ahead of an outgoing call,
+     *  off the offer's path: the caller fires this when the call starts, next
+     *  to the TURN refresh, so by the time the offer is built the answer is
+     *  already in memory and the deposit pays no extra round trip. A cache hit
+     *  returns at once; a failure is memoised as "old" for a short while, the
+     *  same answer the deposit itself would have reached. Nothing propagates. */
+    fun prewarmRing(host: String) {
+        runCatching { peerHonoursRing(host) }
+    }
 
     /**
      * §5d: does this call signal have to RING a device that holds no live
-     * socket? Stage 2 (core-metadata plan): every call deposit rides
-     * `envelope_type "message"`, and a waking signal adds `ring:true` so the
-     * recipient's island fires the same VoIP + UnifiedPush pair a same-island
-     * `call_offer` does, instead of the ordinary message banner. Before Stage 2
-     * this was carried by the more telling type `"call"`; `ring` asks for the
-     * exact same wake while the island stores the quieter `"message"`.
+     * socket? Stage 2 (core-metadata plan): a call deposit to an island that
+     * knows `ring` rides `envelope_type "message"`, and a waking signal adds
+     * `ring:true` so the recipient's island fires the same VoIP + UnifiedPush
+     * pair a same-island `call_offer` does, instead of the ordinary message
+     * banner. Before Stage 2 this was carried by the more telling type
+     * `"call"`; `ring` asks for the exact same wake while the island stores
+     * the quieter `"message"`. An island that predates `ring` still gets the
+     * legacy `"call"` type for a waking signal, see [peerHonoursRing]; the
+     * two signals named below are the only ones that ever do.
      *
      * Only the two signals that must reach a CLOSED app ring: the OFFER, which
      * is the call, and the END, which takes a ring down when the caller gives up
@@ -279,10 +384,12 @@ object CrossIslandSender {
      *  copies: those mailboxes are polled (~30s), and both callers are
      *  interactive (call signalling, a contact request the sender is waiting on).
      *
-     *  [envelopeType] is the OUTER type the island routes on and stays
-     *  `"message"` in every case now; a §5d call that must wake a closed app
-     *  sets [ring] instead of a louder type; see [isWakingCall]. The INNER
-     *  envelope is unchanged in every case; nothing else about the wire moves. */
+     *  [envelopeType] is the OUTER type the island routes on and is
+     *  `"message"` in every case but one; a §5d call that must wake a closed app
+     *  sets [ring] instead of a louder type (see [isWakingCall]), and only an
+     *  island too old to know [ring] still gets the legacy `"call"` type (see
+     *  [peerHonoursRing]). The INNER envelope is unchanged in every case;
+     *  nothing else about the wire moves. */
     private fun depositToPrimary(
         host: String,
         uin: Int,
