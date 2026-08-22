@@ -43,7 +43,6 @@
     <!-- Home: bottom bar -->
     <string name="home_bar_add">添加</string>
     <string name="home_bar_qr">QR</string>
-    <string name="home_bar_random">随机</string>
     <string name="home_bar_nearby">附近</string>
     <string name="home_bar_settings">设置</string>
     <!-- Home: sections -->
@@ -58,7 +57,7 @@
     <!-- Home: overflow + account menu -->
     <string name="home_menu_add_contact">添加联系人</string>
     <string name="home_menu_search">搜索</string>
-    <string name="home_menu_post_story">发布动态</string>
+    <string name="home_menu_random">随机聊天</string>
     <string name="home_menu_news">新闻</string>
     <string name="home_menu_outgoing">已发送请求</string>
     <string name="outgoing_title">已发送的请求</string>
@@ -418,13 +417,6 @@
     <string name="nearby_stranger">附近的陌生人</string>
     <string name="nearby_add">添加</string>
     <string name="nearby_request_sent">好友请求已发送</string>
-    <!-- Hood Chat (district) -->
-    <string name="hood_title">街区聊天</string>
-    <string name="hood_here">%1$d 人在此</string>
-    <string name="hood_unencrypted">公开，未加密</string>
-    <string name="hood_deleted">消息已删除</string>
-    <string name="hood_hint">在街区里发消息…</string>
-    <string name="hood_send">发送</string>
     <string name="settings_sec_history">聊天记录</string>
     <string name="settings_sec_about">关于</string>
     <string name="settings_sec_account">账号</string>
@@ -776,22 +768,6 @@
     <string name="chat_typing">正在输入…</string>
     <string name="chat_saved_title">收藏</string>
     <string name="chat_saved_subtitle">给自己的备忘</string>
-    <!-- Stories -->
-    <string name="story_you">你</string>
-    <string name="story_anonymous">匿名</string>
-    <string name="story_add">添加</string>
-    <string name="story_post_title">发布动态</string>
-    <string name="story_caption_hint">添加说明（可选）</string>
-    <string name="story_anonymous_post">匿名发布</string>
-    <string name="story_post">发布</string>
-    <string name="story_posted">动态已发布</string>
-    <string name="story_post_failed">动态发布失败</string>
-    <string name="story_pick_failed">无法读取这张图片</string>
-    <string name="story_load_failed">无法加载这条动态</string>
-    <string name="story_viewers">查看的人</string>
-    <string name="story_no_viewers">还没有人看过</string>
-    <string name="story_delete">删除</string>
-    <string name="story_delete_q">删除这条动态？</string>
     <!-- Random chat -->
     <string name="random_title">随机聊天</string>
     <string name="random_intro_title">和陌生人聊聊</string>

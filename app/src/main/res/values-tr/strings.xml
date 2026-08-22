@@ -43,7 +43,6 @@
     <!-- Home: bottom bar -->
     <string name="home_bar_add">Ekle</string>
     <string name="home_bar_qr">QR</string>
-    <string name="home_bar_random">Rastgele</string>
     <string name="home_bar_nearby">Yakındakiler</string>
     <string name="home_bar_settings">Ayarlar</string>
     <!-- Home: sections -->
@@ -58,7 +57,7 @@
     <!-- Home: overflow + account menu -->
     <string name="home_menu_add_contact">Kişi ekle</string>
     <string name="home_menu_search">Ara</string>
-    <string name="home_menu_post_story">Hikâye paylaş</string>
+    <string name="home_menu_random">Rastgele sohbet</string>
     <string name="home_menu_news">Haberler</string>
     <string name="home_menu_outgoing">Gönderilen istekler</string>
     <string name="outgoing_title">Gönderilen istekler</string>
@@ -418,13 +417,6 @@
     <string name="nearby_stranger">Yakındaki yabancı</string>
     <string name="nearby_add">Ekle</string>
     <string name="nearby_request_sent">Kişi isteği gönderildi</string>
-    <!-- Hood Chat (district) -->
-    <string name="hood_title">Mahalle sohbeti</string>
-    <string name="hood_here">%1$d kişi burada</string>
-    <string name="hood_unencrypted">Herkese açık, şifresiz</string>
-    <string name="hood_deleted">Mesaj silindi</string>
-    <string name="hood_hint">Mahalleye yaz…</string>
-    <string name="hood_send">Gönder</string>
     <string name="settings_sec_history">Geçmiş</string>
     <string name="settings_sec_about">Hakkında</string>
     <string name="settings_sec_account">Hesap</string>
@@ -776,22 +768,6 @@
     <string name="chat_typing">yazıyor…</string>
     <string name="chat_saved_title">Kayıtlı mesajlar</string>
     <string name="chat_saved_subtitle">Kendine notlar</string>
-    <!-- Stories -->
-    <string name="story_you">Sen</string>
-    <string name="story_anonymous">Anonim</string>
-    <string name="story_add">Ekle</string>
-    <string name="story_post_title">Hikâye paylaş</string>
-    <string name="story_caption_hint">Açıklama ekle (isteğe bağlı)</string>
-    <string name="story_anonymous_post">Anonim paylaş</string>
-    <string name="story_post">Paylaş</string>
-    <string name="story_posted">Hikâye paylaşıldı</string>
-    <string name="story_post_failed">Hikâye paylaşılamadı</string>
-    <string name="story_pick_failed">O görsel okunamadı</string>
-    <string name="story_load_failed">Bu hikâye yüklenemedi</string>
-    <string name="story_viewers">Görüntüleyenler</string>
-    <string name="story_no_viewers">Henüz görüntüleme yok</string>
-    <string name="story_delete">Sil</string>
-    <string name="story_delete_q">Bu hikâye silinsin mi?</string>
     <!-- Random chat -->
     <string name="random_title">Rastgele sohbet</string>
     <string name="random_intro_title">Bir yabancıyla konuş</string>

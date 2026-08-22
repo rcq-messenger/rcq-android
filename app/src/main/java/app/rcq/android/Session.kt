@@ -261,21 +261,6 @@ class Session(context: Context) {
     /** People Nearby (geohash check-in). REST-polled; no WS routing. */
     val nearby = app.rcq.android.nearby.NearbyController(appCtx, scope) { api }
 
-    /** Hood Chat (district chat) + Hood Banners — bucket-scoped, server-backed.
-     *  Borrows the Nearby display-name/anonymous for the sender label. */
-    val hood = app.rcq.android.nearby.HoodController(
-        scope = scope,
-        api = { api },
-        send = { obj -> socket.send(obj.toString()) },
-        // Same reason as the radio callsign below: `store` is the REAL account
-        // in a migrated decoy session, so with the anonymous toggle off this
-        // signed the duress session's hood messages with the real nickname.
-        // The hood itself is refused by the DuressGate (it is server-backed),
-        // but the label must not be the real one on any path.
-        nick = { if (nearby.anonymous.value) nearby.displayName.value else (nickname.takeIf { it != "—" } ?: uin?.toString() ?: "?") },
-        isAnonymous = { nearby.anonymous.value },
-    )
-
     /** Radio — offline BLE + Wi-Fi-Direct local mesh (text/rooms/PTT voice).
      *  Fully peer-to-peer (no server); reuses the anonymous Nearby label. */
     val radio = app.rcq.android.nearby.RadioController(
@@ -360,12 +345,6 @@ class Session(context: Context) {
     val typingFrom: StateFlow<Int?> = _typingFrom.asStateFlow()
     private var typingSeq = 0
 
-    /** Active 24h stories feed, grouped by poster (own group first). Drives
-     *  the home ring strip + the full-screen viewer. Refreshed on start, on
-     *  WS story_posted/story_deleted nudges, and after post/view/delete. */
-    private val _stories = MutableStateFlow<List<RcqApi.StoryGroupOut>>(emptyList())
-    val stories: StateFlow<List<RcqApi.StoryGroupOut>> = _stories.asStateFlow()
-
     /** Random-chat (stranger roulette) state machine + the ephemeral message
      *  list for the current pair. Chat rides the normal sealed path, but a
      *  random peer is NOT a contact, so inbound from [activeRandomPeer] is
@@ -402,10 +381,6 @@ class Session(context: Context) {
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
     private val _randomEnabled = MutableStateFlow(true)
     val randomEnabled: StateFlow<Boolean> = _randomEnabled.asStateFlow()
-    private val _hoodEnabled = MutableStateFlow(true)
-    val hoodEnabled: StateFlow<Boolean> = _hoodEnabled.asStateFlow()
-    private val _storiesEnabled = MutableStateFlow(true)
-    val storiesEnabled: StateFlow<Boolean> = _storiesEnabled.asStateFlow()
 
     /** Does this island run a report desk at all? A self-hoster who does not
      *  want to answer anybody switches it off, and then the two entries that
@@ -1033,7 +1008,6 @@ class Session(context: Context) {
         calls.teardown()   // drop any in-flight call before the identity swaps
         audioRooms.teardown()
         nearby.teardown()
-        hood.teardown()
         radio.teardown()
         store = SecureStore(appCtx, accountId)
         // db is (re)opened by bindDb() in start(), with the current dataKey.
@@ -1052,7 +1026,6 @@ class Session(context: Context) {
         _messages.value = emptyMap()
         _groups.value = emptyList()
         _groupMessages.value = emptyMap()
-        _stories.value = emptyList()
         // Back to "never loaded", not to "no devices": another account's
         // registry is a different list, and leaving this one visible would
         // show one account's linked sessions under another.
@@ -1596,7 +1569,6 @@ class Session(context: Context) {
         scope.launch { runCatching { withRetry { refreshOutgoing() } } }
         scope.launch { runCatching { withRetry { refreshGroups() } } }
         scope.launch { runCatching { withRetry { loadOwnReadReceiptSetting() } } }
-        scope.launch { runCatching { refreshStories() } }
         // A distributor the server cannot reach AT ALL leaves the user with no
         // wakes and nothing to explain it — and no way to be told, since being
         // told would take the push that is broken. Move off it here, once.
@@ -1618,8 +1590,6 @@ class Session(context: Context) {
                 _hallOfFameEnabled.value = caps.hall_of_fame
                 _nearbyEnabled.value = caps.nearby
                 _randomEnabled.value = caps.random_chat
-                _hoodEnabled.value = caps.hood
-                _storiesEnabled.value = caps.stories
                 _reportsEnabled.value = caps.reports
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
             }
@@ -2003,7 +1973,6 @@ class Session(context: Context) {
         calls.teardown()
         audioRooms.teardown()
         nearby.teardown()
-        hood.teardown()
         radio.teardown()
         socket.disconnect()
         _connected.value = false
@@ -2135,7 +2104,6 @@ class Session(context: Context) {
         runCatching { calls.teardown() }
         runCatching { audioRooms.teardown() }
         runCatching { nearby.teardown() }
-        runCatching { hood.teardown() }
         runCatching { radio.teardown() }
         runCatching { socket.disconnect() }
         if (::db.isInitialized) runCatching { db.close() }
@@ -2234,7 +2202,6 @@ class Session(context: Context) {
         runCatching { calls.teardown() }
         runCatching { audioRooms.teardown() }
         runCatching { nearby.teardown() }
-        runCatching { hood.teardown() }
         runCatching { radio.teardown() }
         runCatching { socket.disconnect() }
         started = false
@@ -2280,7 +2247,7 @@ class Session(context: Context) {
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
         peerIdentityCache.clear(); noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; ackedReads.clear()
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
-        _groups.value = emptyList(); _groupMessages.value = emptyMap(); _stories.value = emptyList(); _devices.value = null
+        _groups.value = emptyList(); _groupMessages.value = emptyMap(); _devices.value = null
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
     }
 
@@ -2561,7 +2528,6 @@ class Session(context: Context) {
         calls.teardown()
         audioRooms.teardown()
         nearby.teardown()
-        hood.teardown()
         radio.teardown()
         socket.disconnect()
         decoySessionUin = PanicPinService.decoySessionUin() ?: DecoyStore.randomUin()
@@ -2574,7 +2540,6 @@ class Session(context: Context) {
         _messages.value = emptyMap()
         _groups.value = emptyList()
         _groupMessages.value = emptyMap()
-        _stories.value = emptyList()
         _devices.value = null
         _ownAvatar.value = null
         backupHomes.value = emptyList()
@@ -2671,7 +2636,6 @@ class Session(context: Context) {
         _groupMessages.value = emptyMap()
         _contacts.value = emptyList()
         _groups.value = emptyList()
-        _stories.value = emptyList()
     }
 
     /** Wipe local message history (both 1:1 and group threads) without
@@ -2836,58 +2800,6 @@ class Session(context: Context) {
                 else ReportReply.Failed
             },
         )
-
-    // ── stories (24h ephemeral) ──────────────────────────────────────
-
-    /** Pull the active stories feed into [stories]. Soft-fails (keeps the
-     *  last good list) so a transient error doesn't blank the ring strip. */
-    suspend fun refreshStories() {
-        runCatching { api.storiesFeed() }.onSuccess { _stories.value = it.groups }
-    }
-
-    /** Encrypt + upload a JPEG, then post it as a 24h photo story. Reuses the
-     *  same sealed-blob path as photo messages. Refreshes the feed on success
-     *  so the poster's own ring appears immediately. Throws on failure. */
-    suspend fun postPhotoStory(jpeg: ByteArray, caption: String?, anonymous: Boolean) {
-        val key = MediaCrypto.newKey()
-        val blob = MediaCrypto.seal(jpeg, key)
-        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
-        val upload = api.uploadBlob(blob)
-        imageCache.put(upload.media_id, jpeg)
-        api.postStory(
-            RcqApi.PostStoryBody(
-                media_id = upload.media_id,
-                media_kind = "photo",
-                media_key_b64 = keyB64,
-                caption = caption?.takeIf { it.isNotBlank() },
-                is_anonymous = anonymous,
-                duration_sec = null,
-            )
-        )
-        refreshStories()
-    }
-
-    /** Mark a story watched (idempotent server-side) and flip its `viewed`
-     *  flag in [stories] so the ring greys out without a full refresh. */
-    fun markStoryViewed(storyId: String) {
-        scope.launch {
-            runCatching { api.markStoryViewed(storyId) }
-            _stories.value = _stories.value.map { g ->
-                if (g.stories.none { it.id == storyId }) g
-                else g.copy(stories = g.stories.map { if (it.id == storyId) it.copy(viewed = true) else it })
-            }
-        }
-    }
-
-    /** The viewer list for one of your own stories (owner-only server-side). */
-    suspend fun storyViewers(storyId: String): List<RcqApi.StoryViewer> =
-        runCatching { api.storyViewers(storyId).viewers }.getOrDefault(emptyList())
-
-    /** Delete one of your own stories early, then refresh the feed. */
-    suspend fun deleteStory(storyId: String) {
-        runCatching { api.deleteStory(storyId) }
-        refreshStories()
-    }
 
     // ── random chat (stranger roulette) ──────────────────────────────
 
@@ -4041,7 +3953,6 @@ class Session(context: Context) {
         _messages.value = emptyMap()
         _groups.value = emptyList()
         _groupMessages.value = emptyMap()
-        _stories.value = emptyList()
         // Back to "never loaded", not to "no devices": another account's
         // registry is a different list, and leaving this one visible would
         // show one account's linked sessions under another.
@@ -6643,15 +6554,12 @@ class Session(context: Context) {
             "audio_room_key_rotated", "audio_room_member_muted",
             "audio_room_owner_only_changed", "audio_room_renamed" ->
                 audioRooms.onSignal(type, obj)
-            "hood_message", "hood_count", "hood_delete", "hood_reaction" ->
-                hood.onSignal(type, obj)
             "presence" -> scope.launch { runCatching { refreshContacts() } }
             // A contact changed their name. Nothing announced this before, so
             // the new name only appeared whenever the roster happened to be
             // re-read next — "изменение произошло не сразу, в какой момент оно
             // должно актуализироваться?" had no answer.
             "contact_renamed" -> scope.launch { runCatching { refreshContacts() } }
-            "story_posted", "story_deleted" -> scope.launch { runCatching { refreshStories() } }
             "random_match" -> {
                 val pairId = obj.get("pair_id")?.takeIf { !it.isJsonNull }?.asString
                 obj.getAsJsonObject("peer")?.let { p ->

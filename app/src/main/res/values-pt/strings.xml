@@ -43,7 +43,6 @@
     <!-- Home: bottom bar -->
     <string name="home_bar_add">Adicionar</string>
     <string name="home_bar_qr">QR</string>
-    <string name="home_bar_random">Aleatório</string>
     <string name="home_bar_nearby">Por perto</string>
     <string name="home_bar_settings">Configurações</string>
     <!-- Home: sections -->
@@ -58,7 +57,7 @@
     <!-- Home: overflow + account menu -->
     <string name="home_menu_add_contact">Adicionar contato</string>
     <string name="home_menu_search">Buscar</string>
-    <string name="home_menu_post_story">Publicar um story</string>
+    <string name="home_menu_random">Bate-papo aleatório</string>
     <string name="home_menu_news">Novidades</string>
     <string name="home_menu_outgoing">Solicitações enviadas</string>
     <string name="outgoing_title">Solicitações enviadas</string>
@@ -418,13 +417,6 @@
     <string name="nearby_stranger">Desconhecido por perto</string>
     <string name="nearby_add">Adicionar</string>
     <string name="nearby_request_sent">Solicitação de contato enviada</string>
-    <!-- Hood Chat (district) -->
-    <string name="hood_title">Conversa do bairro</string>
-    <string name="hood_here">%1$d aqui</string>
-    <string name="hood_unencrypted">Pública, sem criptografia</string>
-    <string name="hood_deleted">Mensagem apagada</string>
-    <string name="hood_hint">Escreva para o bairro…</string>
-    <string name="hood_send">Enviar</string>
     <string name="settings_sec_history">Histórico</string>
     <string name="settings_sec_about">Sobre</string>
     <string name="settings_sec_account">Conta</string>
@@ -776,22 +768,6 @@
     <string name="chat_typing">digitando…</string>
     <string name="chat_saved_title">Mensagens salvas</string>
     <string name="chat_saved_subtitle">Notas para você</string>
-    <!-- Stories -->
-    <string name="story_you">Você</string>
-    <string name="story_anonymous">Anônimo</string>
-    <string name="story_add">Adicionar</string>
-    <string name="story_post_title">Publicar um story</string>
-    <string name="story_caption_hint">Escreva uma legenda (opcional)</string>
-    <string name="story_anonymous_post">Publicar anonimamente</string>
-    <string name="story_post">Publicar</string>
-    <string name="story_posted">Story publicado</string>
-    <string name="story_post_failed">Não foi possível publicar o story</string>
-    <string name="story_pick_failed">Não foi possível ler essa imagem</string>
-    <string name="story_load_failed">Não foi possível carregar este story</string>
-    <string name="story_viewers">Quem viu</string>
-    <string name="story_no_viewers">Nenhuma visualização ainda</string>
-    <string name="story_delete">Apagar</string>
-    <string name="story_delete_q">Apagar este story?</string>
     <!-- Random chat -->
     <string name="random_title">Bate-papo aleatório</string>
     <string name="random_intro_title">Fale com um desconhecido</string>

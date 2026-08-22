@@ -193,7 +193,7 @@ internal fun SettingsScreen(
     // profile editing ("нижние поля ввода проваливаются под клавиатуру"): each
     // sub-screen builds its own root Column and none of them consumed the IME
     // inset, so with adjustResize the scroll area kept its full height and the
-    // last fields sat behind the keyboard. Chat/Random/Hood already did this per
+    // last fields sat behind the keyboard. Chat and Random already did this per
     // screen; doing it here covers the ones that come later too.
     Box(Modifier.fillMaxSize().imePadding()) {
     when (route) {
