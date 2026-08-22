@@ -471,6 +471,24 @@ class Session(context: Context) {
     /** Operator-toggleable optional features (admin console → Features). Each
      *  defaults true so a legacy server keeps the tab; turned off → the UI hides
      *  the entry and the route is also 404-gated server-side. */
+    /** The last answer this island gave about its optional surfaces, per host.
+     *  Read at start so a switched-off surface does not flash back for the
+     *  second the request takes; the live answer overwrites it either way. */
+    private fun capsCache(host: String): RcqApi.ServerCapabilities? {
+        val raw = appCtx.getSharedPreferences("rcq_caps", android.content.Context.MODE_PRIVATE)
+            .getString(host, null) ?: return null
+        return runCatching {
+            com.google.gson.Gson().fromJson(raw, RcqApi.ServerCapabilities::class.java)
+        }.getOrNull()
+    }
+
+    private fun rememberCaps(host: String, caps: RcqApi.ServerCapabilities) {
+        runCatching {
+            appCtx.getSharedPreferences("rcq_caps", android.content.Context.MODE_PRIVATE)
+                .edit().putString(host, com.google.gson.Gson().toJson(caps)).apply()
+        }
+    }
+
     private val _nearbyEnabled = MutableStateFlow(true)
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
     private val _randomEnabled = MutableStateFlow(true)
@@ -1688,6 +1706,20 @@ class Session(context: Context) {
         if (_devices.value != null) scope.launch { runCatching { refreshDevices() } }
         // Optional-surface flags for this server (UIN shop). Best-effort:
         // failure keeps the permissive default so the shop stays reachable.
+        // ⚠ Start from what this island said LAST time, not from the permissive
+        // default. The default exists for an island we have never asked, and it
+        // has to stay permissive; but applying it again on every launch means a
+        // surface the island has switched OFF comes back for the second or two
+        // the request takes. Seen with my own eyes on a cold start: the retired
+        // "Nearby" button in the bottom bar, there and then gone, on an island
+        // that answers `nearby: false`. A tester asked what it was (#690).
+        capsCache(serverHost())?.let { c ->
+            _uinShopEnabled.value = c.uin_shop
+            _hallOfFameEnabled.value = c.hall_of_fame
+            _nearbyEnabled.value = c.nearby
+            _randomEnabled.value = c.random_chat
+            _reportsEnabled.value = c.reports
+        }
         scope.launch {
             runCatching {
                 val caps = api.serverInfo().capabilities
@@ -1697,6 +1729,7 @@ class Session(context: Context) {
                 _randomEnabled.value = caps.random_chat
                 _reportsEnabled.value = caps.reports
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
+                rememberCaps(serverHost(), caps)
             }
         }
         // Advertise sender-keys support so others broadcast to us (encrypt-once)
