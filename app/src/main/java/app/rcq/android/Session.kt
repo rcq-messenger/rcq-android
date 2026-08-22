@@ -187,7 +187,16 @@ class Session(context: Context) {
      *  is answered "busy" until the registration goes stale, up to ten minutes
      *  (#699, found by calling from the desktop and hanging up on the phone).
      *  The web client has held these since August; the phone dropped them.
-     *  Held here, flushed the moment the socket comes back. */
+     *  Held here, flushed the moment the socket comes back.
+     *
+     *  ⚠ This catches a socket OkHttp has ALREADY noticed is dead. A socket
+     *  dying silently (the case RcqSocket's own watchdog exists for) still
+     *  accepts the frame, buffers it into a corpse and reports success, and
+     *  nothing here can tell. Closing that hole means an acknowledgement the
+     *  call channel does not have, so it stays open on purpose rather than
+     *  being papered over with a blind re-send: replaying a `call_end` at a
+     *  later moment risks ending the WRONG call between the same two people.
+     *  The peer's own dead-call watchdog (45s) is what covers it today. */
     private val callOutbox = java.util.Collections.synchronizedList(mutableListOf<JsonObject>())
 
     /** Flush the held call signals. A `call_end` goes out whatever happened
@@ -202,7 +211,11 @@ class Session(context: Context) {
             val copy = callOutbox.toList(); callOutbox.clear(); copy
         }
         if (held.isEmpty()) return
-        val liveCall = calls.state.value.info?.id
+        // A call still ON FOOT, not the one whose Ended state lingers for a
+        // couple of seconds so the screen can show a verdict: replaying an
+        // offer and its ICE at somebody whose call is already over is worse
+        // than dropping them.
+        val liveCall = calls.state.value.takeIf { it.active }?.info?.id
         for ((i, frame) in held.withIndex()) {
             val type = frame.get("type")?.takeIf { !it.isJsonNull }?.asString
             val callId = frame.get("call_id")?.takeIf { !it.isJsonNull }?.asString
@@ -225,7 +238,16 @@ class Session(context: Context) {
                 synchronized(callOutbox) {
                     // Bounded: a call is a handful of signals, and a box that
                     // grew without limit on a long outage would replay a crowd.
-                    if (callOutbox.size >= CALL_OUTBOX_MAX) callOutbox.removeAt(0)
+                    // ⚠ What gets dropped is never a `call_end` while anything
+                    // else is in there: the end is the whole reason the box
+                    // exists, and evicting the oldest frame would have thrown
+                    // it out first, under a pile of ICE from a later redial.
+                    if (callOutbox.size >= CALL_OUTBOX_MAX) {
+                        val victim = callOutbox.indexOfFirst {
+                            it.get("type")?.takeIf { t -> !t.isJsonNull }?.asString != "call_end"
+                        }
+                        callOutbox.removeAt(if (victim >= 0) victim else 0)
+                    }
                     callOutbox.add(obj)
                 }
             }
@@ -1094,6 +1116,11 @@ class Session(context: Context) {
         peerIdentityCache.clear()
         noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
+        // ⚠ Held call signals belong to the account that made them: an island,
+        // a socket and a peer number that mean somebody else entirely on the
+        // next one. Flushing them after a switch would hand a stranger's
+        // hang-up to whoever holds that number here.
+        synchronized(callOutbox) { callOutbox.clear() }
         lastVisitAt.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
@@ -2352,6 +2379,11 @@ class Session(context: Context) {
         }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
         peerIdentityCache.clear(); noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; ackedReads.clear()
+        // ⚠ Held call signals belong to the account that made them: an island,
+        // a socket and a peer number that mean somebody else entirely on the
+        // next one. Flushing them after a switch would hand a stranger's
+        // hang-up to whoever holds that number here.
+        synchronized(callOutbox) { callOutbox.clear() }
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _devices.value = null
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
@@ -4053,6 +4085,11 @@ class Session(context: Context) {
         peerIdentityCache.clear()
         noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
+        // ⚠ Held call signals belong to the account that made them: an island,
+        // a socket and a peer number that mean somebody else entirely on the
+        // next one. Flushing them after a switch would hand a stranger's
+        // hang-up to whoever holds that number here.
+        synchronized(callOutbox) { callOutbox.clear() }
         _contacts.value = emptyList()
         _pending.value = emptyList()
         _outgoing.value = emptyList()
@@ -4372,6 +4409,11 @@ class Session(context: Context) {
         peerIdentityCache.clear()
         noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
+        // ⚠ Held call signals belong to the account that made them: an island,
+        // a socket and a peer number that mean somebody else entirely on the
+        // next one. Flushing them after a switch would hand a stranger's
+        // hang-up to whoever holds that number here.
+        synchronized(callOutbox) { callOutbox.clear() }
         _contacts.value = emptyList()
         _pending.value = emptyList()
         _outgoing.value = emptyList()

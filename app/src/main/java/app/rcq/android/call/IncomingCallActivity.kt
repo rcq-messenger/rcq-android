@@ -237,9 +237,15 @@ class IncomingCallActivity : ComponentActivity() {
         // the Ringer (report #638). A real departure survives the delay; the
         // bounce cancels the runnable in onStart before it fires.
         val appCtx = applicationContext
+        // The ringer, not the field: a Runnable parked in a STATIC field must
+        // not hold this Activity. It is also stopped before the id guard below,
+        // because a stop that a guard can skip is a ringtone that goes on
+        // playing for a call the screen no longer belongs to.
+        val leavingRinger = ringer
         val repost = Runnable {
+            pendingRepost = null
+            leavingRinger?.stop()
             if (IncomingCallStore.pending?.callId != p.callId) return@Runnable
-            ringer?.stop()
             Push.showIncomingCall(
                 appCtx,
                 com.google.gson.JsonObject().apply {
