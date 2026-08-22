@@ -597,6 +597,11 @@ private fun RcqApp(session: Session) {
                 // first — and leaving it means abandoning the share, not
                 // falling through to whatever was open underneath.
                 shareReq != null -> ShareIntake.pending.value = null
+                // The room screen renders above a chat and the profiles (see
+                // the `when` below), so Back must pop it first: otherwise a
+                // room opened from the strip over a chat ate one Back to close
+                // the INVISIBLE chat underneath and needed a second to leave.
+                showAudioRooms -> showAudioRooms = false
                 // peerInfo first to match the render precedence (a profile
                 // opened from group-info sits on top of it).
                 peerInfoUin != null -> peerInfoUin = null
@@ -606,7 +611,6 @@ private fun RcqApp(session: Session) {
                 showNews -> showNews = false
                 showOutgoing -> showOutgoing = false
                 showRandom -> showRandom = false
-                showAudioRooms -> showAudioRooms = false
                 showNearby -> showNearby = false
                 showRadio -> showRadio = false
                 showProfile -> showProfile = false
@@ -626,7 +630,15 @@ private fun RcqApp(session: Session) {
         // keeps running with the microphone open (#684). The strip says so and
         // takes one tap to get back.
         val activeRoomNow by session.audioRooms.activeRoomId.collectAsState()
-        val roomBarVisible = activeRoomNow != null && !showAudioRooms
+        // Not over the PIN lock (its tap would be swallowed there and the
+        // padding would shift the lock screen), same rule as the call overlay.
+        val roomBarVisible = activeRoomNow != null && !showAudioRooms &&
+            state is UiState.Registered && !locked
+        // A chat opened from a banner or a notification lands ON TOP of the
+        // room screen, and the strip must be there to get back; with
+        // showAudioRooms still set it would not be. Opening a chat leaves the
+        // room SCREEN (not the room).
+        LaunchedEffect(chatTarget) { if (chatTarget != null) showAudioRooms = false }
         val stateHolder = rememberSaveableStateHolder()
         // Everything below the minimised-call bar moves down by exactly its
         // height, so the bar never covers a screen's own header — which on the
@@ -679,6 +691,17 @@ private fun RcqApp(session: Session) {
                     chatTarget = picked
                 },
                 onCancel = { ShareIntake.pending.value = null },
+            )
+            // ⚠ The room screen outranks a chat, a profile and the other
+            // secondary screens. It used to sit below them, which made the
+            // "you are in a room" strip a lie from a chat: the tap set
+            // showAudioRooms, the chat branch still won, and all that happened
+            // was the strip disappearing (found in review, 0.142). Up here the
+            // strip always opens the room, and Back from the room returns to
+            // whatever was underneath.
+            s is UiState.Registered && showAudioRooms -> app.rcq.android.ui.AudioRoomsScreen(
+                session,
+                onBack = { showAudioRooms = false },
             )
             // peerInfo is checked BEFORE groupInfo so that opening a member's
             // profile FROM the group-info screen (which leaves groupInfoId set)
@@ -745,10 +768,6 @@ private fun RcqApp(session: Session) {
                 // Set-your-age leads straight into the profile editor and comes
                 // back here when it closes (iOS parity).
                 onEditProfile = { showRandom = false; profileReturnsToRandom = true; showProfile = true },
-            )
-            s is UiState.Registered && showAudioRooms -> app.rcq.android.ui.AudioRoomsScreen(
-                session,
-                onBack = { showAudioRooms = false },
             )
             s is UiState.Registered && showNearby -> app.rcq.android.ui.NearbyScreen(
                 session,
