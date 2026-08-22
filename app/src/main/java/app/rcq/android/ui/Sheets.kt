@@ -3,6 +3,7 @@ package app.rcq.android.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,6 +27,7 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
@@ -254,11 +256,33 @@ fun RcqField(
 ) {
     val c = RcqTheme.colors
     val fill = c.textPrimary.copy(alpha = 0.06f)
+    // ⚠ A gesture that starts INSIDE a multi-line field, once the field hits
+    // its own scroll bound, spills its leftover up through the sheet's scroll to
+    // ModalBottomSheet, which reads it as a swipe-to-dismiss. Scrolling back to
+    // the top of a long bug-report draft therefore closed the sheet mid-write
+    // (#696). This connection eats what the field could not consume, so the
+    // drag stops at the field and never reaches the sheet; the drag handle and
+    // the title above the field still dismiss, because they are outside it.
+    val fenceSheetSwipe = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ) = available
+            override suspend fun onPostFling(
+                consumed: androidx.compose.ui.unit.Velocity,
+                available: androidx.compose.ui.unit.Velocity,
+            ) = available
+        }
+    }
     Column(modifier) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = if (singleLine) Modifier.fillMaxWidth()
+                       else Modifier.fillMaxWidth()
+                           .nestedScroll(fenceSheetSwipe),
             placeholder = placeholder?.let {
                 { Text(it, color = c.textSecondary, fontSize = 15.sp) }
             },

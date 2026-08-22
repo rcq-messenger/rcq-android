@@ -103,6 +103,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.NoPhotography
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.PlayArrow
@@ -1105,7 +1106,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (!isGroup && !isSelf && peer != null) {
                         DropdownMenuItem(
                             text = { Text(stringResource(if (chatSecure) R.string.chat_secure_off else R.string.chat_secure_on), color = c.textPrimary) },
-                            leadingIcon = { Icon(Icons.Filled.Shield, null, tint = if (chatSecure) c.accent else c.textSecondary) },
+                            // A camera-with-a-cross, not a shield: this mode
+                            // BLOCKS nothing, it only tells the peer when a
+                            // screenshot is taken (the blocking one is Settings
+                            // -> "Запрет скриншотов"). The shield promised
+                            // protection the feature does not give (#700).
+                            leadingIcon = { Icon(Icons.Filled.NoPhotography, null, tint = if (chatSecure) c.accent else c.textSecondary) },
                             onClick = { chatMenu = false; session.setChatSecure(peer, !chatSecure) },
                         )
                     }
@@ -1765,8 +1771,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             SheetTextRow(stringResource(R.string.common_save)) {
                 val newText = editValue.text.trim()
                 val orig = m
+                // Was the reader sitting at the newest message before the sheet
+                // opened? An edit rewrites the bubble in place (same id), so the
+                // stick-to-bottom effect, keyed on the last id, never fires, and
+                // the keyboard's shrink then regrow around a changed bubble
+                // height leaves the list resting just above the end with the
+                // newest row off-screen and the jump-to-latest chevron showing
+                // (#698: "a keyboard icon stays in the corner"). If they were at
+                // the end, put them back there once the layout settles.
+                val wasAtEnd = !listState.canScrollForward
                 editMsg = null
-                if (newText.isNotEmpty() && newText != orig.body) scope.launch { runCatching { session.sendEdit(orig, newText) } }
+                if (newText.isNotEmpty() && newText != orig.body) {
+                    scope.launch { runCatching { session.sendEdit(orig, newText) } }
+                }
+                if (wasAtEnd) scope.launch {
+                    repeat(6) { withFrameNanos {} ; listState.scrollBy(1_000_000f) }
+                }
             }
             SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { editMsg = null }
         }
