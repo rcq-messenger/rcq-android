@@ -180,6 +180,9 @@
     <string name="backup_island_err_invalid">That does not look like an island host.</string>
     <string name="backup_island_err_primary">That is already your primary island.</string>
     <string name="backup_island_err_already">This island is already added.</string>
+    <string name="backup_island_err_no_account">This island has no account for your key, so there is nothing to switch to. Remove it and add it again.</string>
+    <string name="backup_island_err_no_route">The island’s address did not resolve on this network. If it is blocked here, turn on RCQ relays and try again.</string>
+    <string name="backup_island_err_said">The island answered %1$s, so the switch did not happen. Nothing changed.</string>
     <string name="backup_island_err_generic">Could not connect to the island.</string>
     <string name="backup_island_promote">Make primary</string>
     <string name="backup_island_promote_title">Make this island primary?</string>

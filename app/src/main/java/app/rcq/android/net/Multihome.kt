@@ -67,7 +67,16 @@ object Multihome {
     suspend fun recoverOn(host: String, signingPriv: ByteArray, signingPub: ByteArray): RcqApi.RegisterResponse? {
         val api = RcqApi("https://$host")
         val skB64 = Base64.encodeToString(signingPub, Base64.NO_WRAP)
-        val challenge = api.recoverChallenge(skB64).challenge
+        // ⚠ The challenge call belongs INSIDE the same failure handling as the
+        // recover call. It used to sit outside, so a 404 from an island that
+        // does not know the endpoint arrived as a raw IOException while the
+        // very same 404 from `recover` meant "no account here" — two names for
+        // one answer, and the caller could not tell them apart (#687).
+        val challenge = try {
+            api.recoverChallenge(skB64).challenge
+        } catch (e: IOException) {
+            if (e.message?.startsWith("HTTP 404") == true) return null else throw e
+        }
         val signature = RecoveryPhrase.signChallenge(signingPriv, challenge)
         return try {
             api.recover(RcqApi.RecoverRequest(skB64, challenge, signature))

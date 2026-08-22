@@ -3003,16 +3003,28 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
     // island by hand; everyone else just sees the toggle.
     var advanced by remember { mutableStateOf(manualHomes.isNotEmpty()) }
 
-    fun errorText(e: Throwable): String = when (e.message) {
-        "invalid_host" -> context.getString(R.string.backup_island_err_invalid)
-        "primary_island" -> context.getString(R.string.backup_island_err_primary)
-        "already_added" -> context.getString(R.string.backup_island_err_already)
-        "no_island" -> context.getString(R.string.backup_island_err_none)
-        "unreachable" -> context.getString(R.string.backup_island_err_unreachable)
-        // Keep the cause visible — "could not connect" alone is undebuggable
-        // for a self-hoster pointing at their own island.
-        else -> context.getString(R.string.backup_island_err_generic) +
-            " (${e.message ?: e.javaClass.simpleName})"
+    fun errorText(e: Throwable): String {
+        val m = e.message
+        // The island answered, and WHAT it answered is the whole diagnosis: a
+        // 401 is a key it will not take, a 404 an endpoint it does not have.
+        // Calling those "unreachable" sent a reporter chasing his own network
+        // while three healthy islands sat there answering him (#687).
+        if (m != null && m.startsWith("island_said:")) {
+            return context.getString(R.string.backup_island_err_said, m.removePrefix("island_said:"))
+        }
+        return when (m) {
+            "invalid_host" -> context.getString(R.string.backup_island_err_invalid)
+            "primary_island" -> context.getString(R.string.backup_island_err_primary)
+            "already_added" -> context.getString(R.string.backup_island_err_already)
+            "no_island" -> context.getString(R.string.backup_island_err_none)
+            "no_account_here" -> context.getString(R.string.backup_island_err_no_account)
+            "no_route" -> context.getString(R.string.backup_island_err_no_route)
+            "unreachable" -> context.getString(R.string.backup_island_err_unreachable)
+            // Keep the cause visible: "could not connect" alone is undebuggable
+            // for a self-hoster pointing at their own island.
+            else -> context.getString(R.string.backup_island_err_generic) +
+                " (${e.message ?: e.javaClass.simpleName})"
+        }
     }
 
     // §5a.5 promote: confirm-first — the number and the connected island change.

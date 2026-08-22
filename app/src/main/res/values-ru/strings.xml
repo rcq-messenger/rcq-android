@@ -179,6 +179,9 @@
     <string name="backup_island_err_invalid">Это не похоже на адрес острова.</string>
     <string name="backup_island_err_primary">Это уже ваш основной остров.</string>
     <string name="backup_island_err_already">Этот остров уже добавлен.</string>
+    <string name="backup_island_err_no_account">На этом острове нет аккаунта под ваш ключ, переключаться не на что. Уберите остров и добавьте заново.</string>
+    <string name="backup_island_err_no_route">Адрес острова не разрешается в этой сети. Если он тут заблокирован, включите релеи RCQ и повторите.</string>
+    <string name="backup_island_err_said">Остров ответил %1$s, поэтому переключение не состоялось. Ничего не изменено.</string>
     <string name="backup_island_err_generic">Не удалось подключиться к острову.</string>
     <string name="backup_island_promote">Сделать основным</string>
     <string name="backup_island_promote_title">Сделать этот остров основным?</string>
