@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Schedule
@@ -1076,6 +1077,7 @@ private fun HomeHeader(
     var overflowMenu by remember { mutableStateOf(false) }
     var showPresenceInfo by remember { mutableStateOf(false) }
     var showStealthInfo by remember { mutableStateOf(false) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
     if (showPresenceInfo) {
         // OK is the only way out of an explanation, so it is the sheet's own
@@ -1113,6 +1115,9 @@ private fun HomeHeader(
                     ),
                     color = if (routeVerified) c.accent else c.statusAway,
                 )
+                // The sheet names the relay, so it also has to say where to
+                // find out what one is.
+                RelayLearnMore()
             }
             SheetGap()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1231,8 +1236,8 @@ private fun HomeHeader(
                 Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
                 Text("#$uin", color = chrome.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
             }
-            // Right of the nick/UIN: a status-width slot holding the stealth
-            // shield when the censorship bypass is engaged (iOS StealthHeaderBadge
+            // Right of the nick/UIN: a status-width slot holding the shield
+            // while the app is going through RCQ relays (iOS StealthHeaderBadge
             // parity). The 30dp slot balances the leading status icon so the
             // nick/UIN stays dead-centred.
             // Next to the flower and the shield, exactly where founder asked
@@ -1245,7 +1250,7 @@ private fun HomeHeader(
             // slot exists to balance the status icon on the other side so the
             // nick and UIN stay dead-centred, and a second one shifted the
             // whole block 18dp off centre whenever an update was pending.
-            // Two marks in one slot is fine — the bypass shield and a pending
+            // Two marks in one slot is fine: the relay shield and a pending
             // update are rarely both true, and when they are the update yields.
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 val up = pendingUpdate
@@ -1262,9 +1267,9 @@ private fun HomeHeader(
                 }
                 if (stealthActive) {
                     // Honest shield: solid accent only when the route is VERIFIED to
-                    // reach the backend; amber when the bypass is engaged but not yet
-                    // (or no longer) carrying traffic — so it can't claim a working
-                    // bypass when the chain is dead ("щит есть, связи нет").
+                    // reach the backend; amber when the relays are engaged but not yet
+                    // (or no longer) carrying traffic, so it can't claim a working
+                    // relay route when the chain is dead ("щит есть, связи нет").
                     Icon(
                         Icons.Filled.Shield,
                         stringResource(R.string.stealth_info_title),
@@ -1299,7 +1304,7 @@ private fun HomeHeader(
                 )
             }
             DropdownMenu(expanded = overflowMenu, onDismissRequest = { overflowMenu = false }) {
-                // Censorship bypass: manual override, back by request. It also
+                // RCQ relays: manual override, back by request. It also
                 // engages automatically when a direct connection looks blocked,
                 // but auto-detection can be wrong ("green" indicator yet no real
                 // traffic), so the manual on/off lives here too — it engages/drops
@@ -1308,6 +1313,14 @@ private fun HomeHeader(
                     text = { Text(stringResource(if (stealthActive) R.string.home_menu_bypass_disable else R.string.home_menu_bypass_enable), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.Shield, null, tint = if (stealthActive) c.accent else c.textSecondary) },
                     onClick = { overflowMenu = false; onToggleBypass(!stealthActive) },
+                )
+                // The menu is the one place that names the relays while they are
+                // OFF, and there is no shield to tap for the explanation then, so
+                // the way to find out what a relay is has to sit right here.
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.relay_what_is), color = c.textSecondary) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.HelpOutline, null, tint = c.textSecondary) },
+                    onClick = { overflowMenu = false; runCatching { uriHandler.openUri(RELAYS_FAQ_URL) } },
                 )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.diag_title), color = c.textPrimary) },
@@ -1802,7 +1815,7 @@ private fun ConnectingState(stealth: Boolean = false) {
         PetalLoader(size = 72.dp)
         Text(stringResource(R.string.home_connecting_title), color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         Text(stringResource(R.string.home_connecting_body), color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
-        // When the censorship bypass had to engage, say so (iOS "engaging
+        // When the app had to go through the relays, say so (iOS "engaging
         // stealth" parity) instead of silently looking stuck.
         if (stealth) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

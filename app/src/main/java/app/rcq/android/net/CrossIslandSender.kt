@@ -55,7 +55,7 @@ object CrossIslandSender {
     private val needsTunnel = java.util.Collections.synchronizedSet(HashSet<String>())
 
     /**
-     * Run a call to [host], falling back to the circumvention tunnel when the
+     * Run a call to [host], falling back to the RCQ relays when the
      * DIRECT route to that specific island is blocked.
      *
      * The app auto-engages the tunnel when its OWN island fails to answer, and

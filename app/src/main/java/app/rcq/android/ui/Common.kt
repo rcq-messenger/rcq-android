@@ -51,6 +51,30 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** The FAQ entry that explains what a relay is.
+ *
+ *  Every place that names "RCQ relays" links here. The founder's call: the user
+ *  is supposed to MEET the word "relay" rather than have it hidden behind a
+ *  euphemism, which only works if there is somewhere to go and find out what it
+ *  means. */
+internal const val RELAYS_FAQ_URL = "https://rcq.app/faq#relays"
+
+/** "What is a relay?", the link that goes with [RELAYS_FAQ_URL]. Plain accent
+ *  text so it reads as a link without turning a settings row into a button. */
+@Composable
+internal fun RelayLearnMore(modifier: Modifier = Modifier) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    Text(
+        stringResource(R.string.relay_what_is),
+        color = RcqTheme.colors.accent,
+        fontSize = 12.sp,
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { runCatching { uriHandler.openUri(RELAYS_FAQ_URL) } }
+            .padding(vertical = 4.dp),
+    )
+}
+
 internal fun formatTime(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 

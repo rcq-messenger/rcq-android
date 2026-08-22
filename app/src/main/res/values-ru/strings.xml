@@ -9,7 +9,7 @@
 
     <string name="onboard_welcome_kicker">RCQ</string>
     <string name="onboard_welcome_title">Добро пожаловать</string>
-    <string name="onboard_welcome_body">Серьёзный мессенджер с настоящим шифрованием по умолчанию и встроенным обходом блокировок. Без телефона, без почты, без рекламы.</string>
+    <string name="onboard_welcome_body">Серьёзный мессенджер с настоящим шифрованием по умолчанию и встроенными релеями, которые прячут ваш адрес. Без телефона, без почты, без рекламы.</string>
 
     <string name="onboard_anon_kicker">АНОНИМНО</string>
     <string name="onboard_anon_title">Без телефона и почты</string>
@@ -33,9 +33,9 @@
     <string name="onboard_federation_kicker">ФЕДЕРАЦИЯ</string>
     <string name="onboard_federation_title">Без единого владельца</string>
     <string name="onboard_federation_body">RCQ это не сервер одной компании. Каждый сервер это независимый остров, поднять его может любой. Ваш аккаунт живёт на выбранном острове, при переезде номер сохраняется.</string>
-    <string name="onboard_relay_kicker">ОБХОД</string>
-    <string name="onboard_relay_title">Проходит сквозь блокировки</string>
-    <string name="onboard_relay_body">Когда сеть блокирует RCQ, приложение само идёт через реле, маскируясь под обычный трафик. Сеть реле держит сообщество, а луковичная маршрутизация связывает их так, что ни одно реле не видит и вас, и ваш остров.</string>
+    <string name="onboard_relay_kicker">РЕЛЕИ RCQ</string>
+    <string name="onboard_relay_title">Остров не видит ваш адрес</string>
+    <string name="onboard_relay_body">Трафик идёт не прямо к острову, а через наши релеи: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Сеть релеев держит сообщество. Там, где RCQ заблокирован, это к тому же единственный путь.</string>
 
     <string name="onboard_server_label">Сервер</string>
     <string name="onboard_language">Язык</string>
@@ -350,8 +350,8 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Аудиокомнаты</string>
     <string name="home_menu_radio">Рация</string>
-    <string name="home_menu_bypass_enable">Включить обход блокировок</string>
-    <string name="home_menu_bypass_disable">Выключить обход блокировок</string>
+    <string name="home_menu_bypass_enable">Пускать приложение через релеи RCQ</string>
+    <string name="home_menu_bypass_disable">Не пускать через релеи RCQ</string>
 
     <!-- Radio (офлайн BLE + Wi-Fi Direct) -->
     <string name="radio_title">Рация</string>
@@ -522,7 +522,7 @@
     <string name="chat_bg_custom">Из галереи</string>
     <string name="app_icon_default">По умолчанию</string>
     <string name="app_icon_footer">Выберите другую иконку на рабочем столе. При смене иконка может на миг мигнуть, пока система обновляет её.</string>
-    <string name="settings_foot_privacy">Кто вас видит и кто может с вами связаться. Сервер, прокси, маскировка и релеи находятся в разделе «Сеть».</string>
+    <string name="settings_foot_privacy">Кто вас видит и кто может с вами связаться. Сервер, прокси и релеи RCQ находятся в разделе «Сеть».</string>
     <string name="settings_foot_history">Удаляет сообщения только с этого устройства. Аккаунт и контакты остаются.</string>
     <string name="theme_auto">Авто</string>
     <string name="theme_light">Светлая</string>
@@ -601,13 +601,13 @@
     <string name="presence_countdown_lt1m">&lt;1м</string>
     <string name="presence_info_title">Видимость после выхода</string>
     <string name="presence_info_body">Вас показывают онлайн ещё столько времени после закрытия приложения. Изменить можно в Настройки, Приватность и сеть.</string>
-    <string name="stealth_info_title">Обход блокировок включён</string>
-    <string name="stealth_info_body_manual">Вы включили обход вручную в меню. Пока он включён, RCQ ходит только через встроенный шифрованный туннель и прямое соединение не пробует. Выключить можно там же, в меню.</string>
-    <string name="stealth_shield_green">Щит зелёный: проверено, что через обход данные доходят до острова.</string>
-    <string name="stealth_shield_amber">Щит оранжевый: обход включён, но что данные через него доходят, пока не подтверждено. Если так и останется, попробуйте выключить и включить обход в меню.</string>
-    <string name="stealth_info_body">Сеть выглядела заблокированной, поэтому RCQ подключается через встроенный шифрованный обход. Настраивать ничего не нужно, он включается сам, когда прямое соединение не проходит.</string>
-    <string name="connecting_stealth">Обхожу блокировку…</string>
-    <string name="bypass_auto_off_unreachable">Остров недоступен, а «Не включать автоматически» включено, поэтому обход не поднимался. Чтобы пойти через него, включите обход блокировок в меню.</string>
+    <string name="stealth_info_title">Через релеи</string>
+    <string name="stealth_info_body_manual">Вы включили релеи RCQ вручную в меню. Трафик идёт не прямо к острову, а через наши релеи: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Пока это включено, прямое соединение приложение не пробует. Выключить можно там же, в меню.</string>
+    <string name="stealth_shield_green">Щит зелёный: проверено, что через релеи данные доходят до острова.</string>
+    <string name="stealth_shield_amber">Щит оранжевый: релеи включены, но что данные через них доходят, пока не подтверждено. Если так и останется, попробуйте выключить и включить релеи в меню.</string>
+    <string name="stealth_info_body">Приложение идёт через релеи RCQ: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Включилось само, потому что прямое соединение не прошло, настраивать ничего не нужно.</string>
+    <string name="connecting_stealth">Подключаюсь через релеи…</string>
+    <string name="bypass_auto_off_unreachable">Остров недоступен, а «Не включать релеи автоматически» включено, поэтому релеи не поднимались. Чтобы пойти через них, включите релеи RCQ в меню.</string>
     <string name="pv_profile_card">Карточка профиля</string>
     <string name="pv_profile_card_desc">Кто может открыть ваш полный профиль (город, возраст, о себе).</string>
     <string name="pv_gender_desc">Кто видит ваш пол в профиле.</string>
@@ -630,14 +630,16 @@
     <string name="pv_network">Сеть</string>
     <string name="pv_relay_calls">Всегда ретранслировать звонки</string>
     <string name="pv_relay_calls_desc">Пропускать звук и видео через наш ретранслятор, чтобы собеседник не узнал ваш IP-адрес. Если выключить, качество может вырасти, но собеседник увидит ваш адрес.</string>
-    <string name="pv_obfuscated">Маскировка соединения</string>
-    <string name="pv_obfuscated_desc">Проводит соединение через релей, когда сеть блокирует RCQ напрямую. Повышает стабильность на ограничивающих сетях. Применяется при следующем запуске.</string>
-    <string name="pv_obf_auto_disable">Не включать автоматически</string>
-    <string name="pv_obf_auto_disable_desc">По умолчанию приложение само включает маскировку, если не может подключиться напрямую. Если вы пускаете трафик через свой VPN/прокси, включите этот переключатель, чтобы наш транспорт не накладывался поверх вашего.</string>
+    <string name="pv_relays_section">Релеи RCQ</string>
+    <string name="relay_what_is">Что такое релей?</string>
+    <string name="pv_obfuscated">Пускать приложение через релеи RCQ</string>
+    <string name="pv_obfuscated_desc">Трафик идёт не прямо к острову, а через наши релеи: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Применяется при следующем запуске. Там, где RCQ заблокирован, это к тому же единственный путь.</string>
+    <string name="pv_obf_auto_disable">Не включать релеи автоматически</string>
+    <string name="pv_obf_auto_disable_desc">По умолчанию приложение само включает релеи, если не может подключиться напрямую. Если вы пускаете трафик через свой VPN/прокси, включите этот переключатель, чтобы наш транспорт не накладывался поверх вашего.</string>
     <string name="pv_onion">Луковая маршрутизация (эксперимент)</string>
-    <string name="pv_onion_desc">Проводит соединение через два релея, чтобы ни один релей не видел одновременно вас и сервер. Маскировку соединения включает автоматически. Немного медленнее. Применяется при следующем запуске.</string>
+    <string name="pv_onion_desc">Проводит соединение через два релея, чтобы ни один релей не видел одновременно вас и остров. Релеи RCQ включает автоматически. Немного медленнее. Применяется при следующем запуске.</string>
     <string name="pv_localproxy">Прокси</string>
-    <string name="pv_localproxy_desc">Пускать приложение через любой локальный прокси: Tor, I2P, AWG/wiresocks и другие. Заменяет релеи и onion.</string>
+    <string name="pv_localproxy_desc">Пускать приложение через любой локальный прокси: Tor, I2P, AWG/wiresocks и другие. Заменяет релеи RCQ и луковую маршрутизацию.</string>
     <string name="pv_localproxy_host">Хост</string>
     <string name="pv_localproxy_port">Порт</string>
     <string name="pv_localproxy_test">Проверить</string>
@@ -665,8 +667,8 @@
     <!-- Connection diagnostics -->
     <string name="diag_title">Диагностика подключения</string>
     <string name="diag_transport">Маршрут</string>
-    <string name="diag_mode_tunnel">Релей (маскировка)</string>
-    <string name="diag_mode_direct">Прямой</string>
+    <string name="diag_mode_tunnel">Через релеи</string>
+    <string name="diag_mode_direct">Напрямую</string>
     <string name="diag_backend_direct">Сервер, напрямую</string>
     <string name="diag_backend_route">Сервер, текущий маршрут</string>
     <string name="diag_ws">Канал реального времени</string>
@@ -679,7 +681,7 @@
     <string name="diag_relays_remote">релеев: %1$d, подписанный v%2$d</string>
     <string name="diag_relays_bundled">релеев: %1$d, встроенные</string>
     <string name="diag_run_again">Проверить снова</string>
-    <string name="diag_footer">Если сервер недоступен напрямую, но доступен по текущему маршруту, релей работает. Если не проходит ни то, ни другое, сеть блокирует всё, до чего мы можем дотянуться.</string>
+    <string name="diag_footer">Если сервер недоступен напрямую, но доступен по текущему маршруту, релеи работают. Если не проходит ни то, ни другое, сеть блокирует всё, до чего мы можем дотянуться.</string>
     <string name="pv_custom_server">Свой сервер</string>
     <string name="pv_default">По умолчанию</string>
 
@@ -891,13 +893,13 @@
     <string name="relay_share_invalid">Подключение не поддерживается</string>
     <string name="relay_share_sent_note">Вы поделились способом подключения</string>
     <string name="relay_share_pick_title">Поделиться подключением</string>
-    <string name="relay_share_pick_body">Передайте контакту relay, чтобы он смог пробиться, когда его собственные подключения заблокированы. Он нажмёт Добавить, чтобы использовать его.</string>
-    <string name="relay_share_group_warn">Relay увидят все участники группы. Делитесь дефицитными домашними relay только в проверенных группах.</string>
-    <string name="relay_share_none">Пока нет relay, которыми можно поделиться.</string>
-    <string name="relay_import_title">Добавить relay</string>
+    <string name="relay_share_pick_body">Передайте контакту релей, чтобы он смог пробиться, когда его собственные подключения заблокированы. Он нажмёт «Добавить», чтобы использовать его.</string>
+    <string name="relay_share_group_warn">Релей увидят все участники группы. Делитесь дефицитными домашними релеями только в проверенных группах.</string>
+    <string name="relay_share_none">Пока нет релеев, которыми можно поделиться.</string>
+    <string name="relay_import_title">Добавить релей</string>
     <string name="relay_import_body">Вставьте ссылку rcq-relay://, которую вам дали, либо ключ доступа из кабинета, если вы платите за приватные релеи.</string>
-    <string name="relay_import_add">Добавить relay</string>
-    <string name="relay_import_bad">Это не похоже на корректную ссылку relay.</string>
+    <string name="relay_import_add">Добавить релей</string>
+    <string name="relay_import_bad">Это не похоже на корректную ссылку релея.</string>
     <string name="relay_import_hint">rcq-relay://… или ключ доступа</string>
     <string name="relay_key_checking">Проверяем…</string>
     <string name="relay_key_unknown">Такой ключ нам не знаком. Проверьте, что скопировали его целиком.</string>
@@ -906,9 +908,9 @@
     <plurals name="relay_key_ok_body"><item quantity="one">Ваш %1$d узел теперь в работе. Общий пул остаётся запасным.</item><item quantity="few">Ваших %1$d узла теперь в работе. Общий пул остаётся запасным.</item><item quantity="many">Ваших %1$d узлов теперь в работе. Общий пул остаётся запасным.</item><item quantity="other">Ваших %1$d узла теперь в работе. Общий пул остаётся запасным.</item></plurals>
     <string name="relay_key_active">Ключ доступа введён</string>
     <string name="relay_key_remove">Убрать</string>
-    <string name="relay_import_ok">Relay добавлен</string>
-    <string name="relay_shared_section">Полученные relay</string>
-    <string name="relay_shared_empty">Полученных relay нет. Контакт может прислать relay в чате, или вставьте ссылку выше.</string>
+    <string name="relay_import_ok">Релей добавлен</string>
+    <string name="relay_shared_section">Полученные релеи</string>
+    <string name="relay_shared_empty">Полученных релеев нет. Контакт может прислать релей в чате, или вставьте ссылку выше.</string>
     <string name="relay_shared_from">от #%1$d</string>
     <string name="relay_shared_imported">импортирован</string>
     <string name="relay_shared_remove">Удалить</string>
@@ -1120,7 +1122,7 @@
     <string name="onboard_cta_netcheck">RCQ \u043d\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0430\u0435\u0442\u0441\u044f? \u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0441\u0435\u0442\u044c</string>
     <string name="onboard_netcheck_send">\u0421\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0441\u0442\u0440\u043e\u043a\u0443 \u0438 \u043f\u0440\u0438\u0441\u043b\u0430\u0442\u044c \u043d\u0430\u043c</string>
     <string name="diag_audit_hint">Открывает обычные сокеты к этому острову, фронту, релеям и двум заведомо разрешённым узлам, чтобы понять, что именно режет сеть. Никуда ничего не отправляется, результат вы копируете сами.</string>
-    <string name="diag_audit_calls_blocked">Сообщения проходят, звонки не пройдут. Ретранслятор, через который идёт голос, из этой сети недоступен, а обход блокировок звонки не покрывает: голос уходит напрямую, мимо него.</string>
+    <string name="diag_audit_calls_blocked">Сообщения проходят, звонки не пройдут. Ретранслятор, через который идёт голос, из этой сети недоступен, а релеи RCQ звонки не покрывают: голос уходит напрямую, мимо них.</string>
     <string name="diag_audit_fine">Остров отвечает напрямую. Здесь ничего не режется.</string>
     <string name="diag_audit_no_net">Недоступны даже контрольные узлы: на устройстве нет рабочего интернета, и всё остальное не про RCQ.</string>
     <string name="diag_audit_by_name">Наш адрес отвечает под чужим именем. Режут по ИМЕНИ, значит другое имя перед тем же сервером должно проходить.</string>
@@ -1186,9 +1188,9 @@
     <string name="how_q3">Что делать, когда перестало работать?</string>
     <string name="how_a3">Сначала выясните, дело ли в блокировке: Настройки → Сеть → Диагностика подключения, и полная проверка С ВЫКЛЮЧЕННЫМ VPN.\n\nОна даёт одну строку. Пришлите её через «Сообщить об ошибке»: эта строка говорит нам, что именно закрыто у вас в сети, а без неё мы гадаем.</string>
     <string name="how_q4">Что происходит, когда сеть блокирует RCQ?</string>
-    <string name="how_a4">Приложение замечает это и обходит блокировку само. Ничего включать не нужно, отдельный VPN не нужен: оно поднимает туннель до одного из наших релеев и продолжает работать.\n\nДля того, кто блокирует, этот трафик выглядит как обычный заход на обычный сайт — такое же шифрованное соединение, какие ваш браузер делает весь день. Релей несёт запечатанные конверты, так что и он ваши сообщения не читает.</string>
+    <string name="how_a4">Приложение замечает это и само идёт через релеи RCQ. Ничего включать не нужно, отдельный VPN не нужен: оно поднимает туннель до одного из наших релеев и продолжает работать.\n\nДля того, кто блокирует, этот трафик выглядит как обычный заход на обычный сайт, такое же шифрованное соединение, какие ваш браузер делает весь день. Релей несёт запечатанные конверты, так что и он ваши сообщения не читает.</string>
     <string name="how_q5">Может ли кто-то узнать, кому я пишу?</string>
-    <string name="how_a5">Ваш остров знает, что конверт кому-то адресован, и не знает, что он от вас: вашего имени снаружи нет.\n\nКогда включён туннель, путь наружу разделён между двумя релеями. Первый видит вас и не знает, до какого острова вы идёте; второй доходит до острова и не знает, кто вы. Чтобы сложить половинки, нужны оба, а они принадлежат разным людям в разных странах.\n\nЧего скрыть нельзя: сам факт, что вы пользуетесь RCQ, виден тому, кто держит вашу сеть, — пока туннель не включён.</string>
+    <string name="how_a5">Ваш остров знает, что конверт кому-то адресован, и не знает, что он от вас: вашего имени снаружи нет.\n\nКогда включены релеи RCQ, путь наружу разделён между двумя релеями. Первый видит вас и не знает, до какого острова вы идёте; второй доходит до острова и не знает, кто вы. Чтобы сложить половинки, нужны оба, а они принадлежат разным людям в разных странах.\n\nЧего скрыть нельзя: сам факт, что вы пользуетесь RCQ, виден тому, кто держит вашу сеть, пока релеи RCQ не включены.</string>
     <string name="how_more">Больше вопросов на rcq.app/faq →</string>
     <string name="how_copy">Скопировать этот текст</string>
 </resources>

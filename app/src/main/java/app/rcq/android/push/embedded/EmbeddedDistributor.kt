@@ -158,7 +158,7 @@ object EmbeddedDistributor {
     const val EXTRA_RECONNECT = "reconnect"
 
     /** Redial now instead of waiting out the backoff. Used when the transport
-     *  changes underneath us (the user engaged or dropped the circumvention
+     *  changes underneath us (the user engaged or dropped the relay
      *  tunnel): the live socket is pinned to the old route and, if that route
      *  just became the blocked one, would sit there looking healthy. */
     fun reconnectNow(ctx: Context) {

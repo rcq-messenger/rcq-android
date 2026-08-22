@@ -56,7 +56,7 @@ import java.util.concurrent.TimeUnit
 object UpdateChecker {
     // Manifest is fetched from rcq.app first, then the GitHub-release mirror as a
     // fallback so a blocked/dead rcq.app doesn't kill updates. (Both also ride
-    // the sing-box proxy via client() when bypass is on.) GitHub
+    // the sing-box proxy via client() when the relays are on.) GitHub
     // releases/latest/download/ always tracks the newest published release.
     private val MANIFEST_URLS = listOf(
         // dl.rcq.app first: same files, but behind Cloudflare, which is what

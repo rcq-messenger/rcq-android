@@ -46,7 +46,7 @@ class RcqApi(
         // a fresh one is cheap next to a 10s+ dead-socket hang.
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
         // Route through the embedded sing-box SOCKS proxy when the
-        // circumvention transport is engaged (null = direct, the default).
+        // RCQ relays are engaged (null = direct, the default).
         // Captured at build time; Session rebuilds this RcqApi after engaging
         // the transport so the new instance picks the proxy up.
         .proxy(SingBoxTransport.proxy())
@@ -91,7 +91,7 @@ class RcqApi(
 
     /**
      * Execute against the best route for THIS host: direct while that works,
-     * through the circumvention tunnel once the direct route to this specific
+     * through the RCQ relays once the direct route to this specific
      * island turns out to be blocked.
      *
      * The gap this closes: the boot ladder probes only the user's OWN island,

@@ -195,7 +195,7 @@ class PushSocketService : Service() {
             Log.w(TAG, "no topic registered — stopping")
             stopSelf(); return
         }
-        // Ride the censorship-circumvention tunnel whenever it is engaged. A
+        // Ride the RCQ relays whenever they are engaged. A
         // push socket pinned to a direct route would be the one part of the app
         // that dies the moment the push host is blocked, while everything else
         // kept working through relays — which is precisely when a user needs to

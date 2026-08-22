@@ -10,7 +10,7 @@
     <string name="onboard_cta_skip">跳过</string>
     <string name="onboard_welcome_kicker">RCQ</string>
     <string name="onboard_welcome_title">欢迎</string>
-    <string name="onboard_welcome_body">一款认真对待隐私的即时通讯工具，默认就是真正的端到端加密，并内置规避审查。没有手机号，没有邮箱，没有广告。</string>
+    <string name="onboard_welcome_body">一款认真对待隐私的即时通讯工具，默认就是真正的端到端加密，并内置隐藏你地址的中继。没有手机号，没有邮箱，没有广告。</string>
     <string name="onboard_anon_kicker">匿名</string>
     <string name="onboard_anon_title">不要手机号，不要邮箱</string>
     <string name="onboard_anon_body">你的身份就是一个数字 UIN，除此之外什么都没有。账号和你本人没有任何关联。随时可以销毁它，重新开始。</string>
@@ -29,9 +29,9 @@
     <string name="onboard_federation_kicker">联邦</string>
     <string name="onboard_federation_title">没有单一的拥有者</string>
     <string name="onboard_federation_body">RCQ 不是某一家公司的服务器。每一台服务器都是一个独立的岛，任何人都可以搭建。你的账号住在你挑选的岛上，搬家时号码不变。</string>
-    <string name="onboard_relay_kicker">规避审查</string>
-    <string name="onboard_relay_title">为穿过封锁而生</string>
-    <string name="onboard_relay_body">当网络封锁 RCQ 时，应用会自己改走中继，伪装成普通流量。中继网络由社区运行，洋葱路由把它们串成链路，任何一个中继都不会同时看到你和你的岛。</string>
+    <string name="onboard_relay_kicker">RCQ 中继</string>
+    <string name="onboard_relay_title">岛看不到你的地址</string>
+    <string name="onboard_relay_body">流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。中继网络由社区运行。在 RCQ 被封锁的地方，这也是唯一的通路。</string>
     <string name="onboard_server_label">服务器</string>
     <string name="onboard_language">语言</string>
     <!-- Status -->
@@ -335,8 +335,8 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">语音房间</string>
     <string name="home_menu_radio">电台</string>
-    <string name="home_menu_bypass_enable">开启规避审查</string>
-    <string name="home_menu_bypass_disable">关闭规避审查</string>
+    <string name="home_menu_bypass_enable">让应用走 RCQ 中继</string>
+    <string name="home_menu_bypass_disable">不再走 RCQ 中继</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
     <string name="radio_title">电台</string>
     <string name="radio_on_air">广播身份</string>
@@ -508,7 +508,7 @@
     <string name="chat_bg_custom">相册</string>
     <string name="app_icon_default">默认</string>
     <string name="app_icon_footer">选择另一个启动器图标。更新时主屏幕可能会闪一下。</string>
-    <string name="settings_foot_privacy">控制谁能看到你、谁能联系你。服务器、代理、混淆和中继在“网络”里。</string>
+    <string name="settings_foot_privacy">控制谁能看到你、谁能联系你。服务器、代理和 RCQ 中继在“网络”里。</string>
     <string name="settings_foot_history">只从这台设备上删除消息。你的账号和联系人会保留。</string>
     <string name="theme_auto">自动</string>
     <string name="theme_light">浅色</string>
@@ -581,12 +581,12 @@
     <string name="presence_countdown_lt1m">&lt;1 分钟</string>
     <string name="presence_info_title">离开后继续显示在线</string>
     <string name="presence_info_body">关闭应用后，你会在这段时间内继续显示为在线。可在“设置”→“隐私与网络”中修改。</string>
-    <string name="stealth_info_title">规避审查已启用</string>
-    <string name="stealth_info_body_manual">你在菜单里自己打开了规避审查。开启期间，RCQ 只走内置的加密隧道，不会尝试直接连接。在同一个菜单里可以关闭。</string>
-    <string name="stealth_shield_green">绿色盾牌：已确认经规避审查通道的流量能到达岛。</string>
-    <string name="stealth_shield_amber">橙色盾牌：规避审查已开启，但数据能否通过还未确认。如果一直是橙色，试着在菜单里把规避审查关掉再打开。</string>
-    <string name="stealth_info_body">你的网络看起来被封锁了，所以 RCQ 正通过内置的加密通道连接。无需任何设置，直连失败时会自动启用。</string>
-    <string name="connecting_stealth">正在绕过封锁…</string>
+    <string name="stealth_info_title">经中继</string>
+    <string name="stealth_info_body_manual">你在菜单里自己打开了 RCQ 中继。流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。开启期间，应用不会尝试直连。在同一个菜单里可以关闭。</string>
+    <string name="stealth_shield_green">绿色盾牌：已确认经中继的流量能到达岛。</string>
+    <string name="stealth_shield_amber">橙色盾牌：中继已开启，但数据能否通过还未确认。如果一直是橙色，试着在菜单里把中继关掉再打开。</string>
+    <string name="stealth_info_body">应用正在走 RCQ 中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。因为直连没通，它自己启用了，无需任何设置。</string>
+    <string name="connecting_stealth">正在经中继连接…</string>
     <string name="pv_profile_card">资料卡</string>
     <string name="pv_profile_card_desc">谁可以打开你的完整个人资料（城市、年龄、简介）。</string>
     <string name="pv_gender_desc">谁可以在你的个人资料上看到性别。</string>
@@ -609,14 +609,16 @@
     <string name="pv_network">网络</string>
     <string name="pv_relay_calls">通话始终走中继</string>
     <string name="pv_relay_calls_desc">通过我们的中继传输通话的音频和视频，这样对方无法得知你的 IP 地址。关闭后通话质量可能更好，但对方会看到你的地址。</string>
-    <string name="pv_obfuscated">混淆连接</string>
-    <string name="pv_obfuscated_desc">当网络直接封锁 RCQ 时，通过中继转发连接。在受限网络下更可靠。下次启动时生效。</string>
-    <string name="pv_obf_auto_disable">不自动启用</string>
-    <string name="pv_obf_auto_disable_desc">默认情况下，如果无法直接连到服务器，应用会自动打开混淆。如果你已经把流量走自己的 VPN/代理，请打开这个开关，避免我们的传输叠加在你的之上。</string>
+    <string name="pv_relays_section">RCQ 中继</string>
+    <string name="relay_what_is">什么是中继？</string>
+    <string name="pv_obfuscated">让应用走 RCQ 中继</string>
+    <string name="pv_obfuscated_desc">流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。下次启动时生效。在 RCQ 被封锁的地方，这也是唯一的通路。</string>
+    <string name="pv_obf_auto_disable">不自动启用中继</string>
+    <string name="pv_obf_auto_disable_desc">默认情况下，如果无法直接连到岛，应用会自动打开中继。如果你已经把流量走自己的 VPN/代理，请打开这个开关，避免我们的传输叠加在你的之上。</string>
     <string name="pv_onion">洋葱路由（实验性）</string>
-    <string name="pv_onion_desc">经过两个中继转发，任何单个中继都无法同时看到你和服务器。会自动打开受保护的连接。速度略慢。下次启动时生效。</string>
+    <string name="pv_onion_desc">经过两个中继转发，任何单个中继都无法同时看到你和岛。会自动打开 RCQ 中继。速度略慢。下次启动时生效。</string>
     <string name="pv_localproxy">代理</string>
-    <string name="pv_localproxy_desc">让应用走任意本地代理：Tor、I2P、AWG/wiresocks 等。会替代中继和洋葱路由。</string>
+    <string name="pv_localproxy_desc">让应用走任意本地代理：Tor、I2P、AWG/wiresocks 等。会替代 RCQ 中继和洋葱路由。</string>
     <string name="pv_localproxy_host">主机</string>
     <string name="pv_localproxy_port">端口</string>
     <string name="pv_localproxy_test">测试</string>
@@ -644,7 +646,7 @@
     <!-- Connection diagnostics -->
     <string name="diag_title">连接诊断</string>
     <string name="diag_transport">线路</string>
-    <string name="diag_mode_tunnel">中继（混淆）</string>
+    <string name="diag_mode_tunnel">经中继</string>
     <string name="diag_mode_direct">直连</string>
     <string name="diag_backend_direct">服务器，直连</string>
     <string name="diag_backend_route">服务器，当前线路</string>
@@ -1088,7 +1090,7 @@
     <string name="onboard_cta_netcheck">RCQ 连不上？检查一下网络</string>
     <string name="onboard_netcheck_send">复制这一行发给我们</string>
     <string name="diag_audit_hint">向这个岛、前置域名、中继以及两个公认的对照主机建立普通连接，判断这个网络在过滤什么。不会把任何东西发出去，结果由你自己复制。</string>
-    <string name="diag_audit_calls_blocked">消息能通，通话不行。承载通话音频的中继在这个网络里连不上，而混淆连接不覆盖通话：语音是绕过它直接发出去的。</string>
+    <string name="diag_audit_calls_blocked">消息能通，通话不行。承载通话音频的中继在这个网络里连不上，而 RCQ 中继不覆盖通话：语音是绕过它们直接发出去的。</string>
     <string name="diag_audit_fine">岛可以直接连上。这里没有任何东西被过滤。</string>
     <string name="diag_audit_no_net">连对照主机都连不上：这台设备没有可用的网络，所以下面的内容与 RCQ 无关。</string>
     <string name="diag_audit_by_name">我们的地址换个名字就能应答。过滤是按名字来的，因此在同一台服务器前面换一个名字应该可以通过。</string>
@@ -1151,8 +1153,8 @@
     <string name="how_q3">不能用了该怎么办？</string>
     <string name="how_a3">先弄清是不是被封锁了：设置 → 网络 → 连接诊断，在关闭 VPN 的情况下跑一次完整检查。\n\n它会给你一行结果。通过「报告问题」发给我们：这一行能准确告诉我们你的网络里被封的是什么，没有它我们只能猜。</string>
     <string name="how_q4">当网络屏蔽 RCQ 时会怎样？</string>
-    <string name="how_a4">应用会自己发现并绕过去。不用打开什么，也不需要另外的 VPN：它会向我们的一台中继开一条隧道，然后继续工作。\n\n在屏蔽方看来，这些流量就像一次普通网站的普通访问——和你的浏览器整天都在建立的加密连接一样。中继运送的是封好的信封，所以它同样读不到你的消息。</string>
+    <string name="how_a4">应用会自己发现并改走 RCQ 中继。不用打开什么，也不需要另外的 VPN：它会向我们的一台中继开一条隧道，然后继续工作。\n\n在屏蔽方看来，这些流量就像一次普通网站的普通访问，和你的浏览器整天都在建立的加密连接一样。中继运送的是封好的信封，所以它同样读不到你的消息。</string>
     <string name="how_q5">有人能知道我在跟谁聊天吗？</string>
-    <string name="how_a5">你的岛知道有个信封寄给了某人，却不知道它出自你手：外面没有你的名字。\n\n隧道打开时，出口的路被分给两台中继。第一台看得见你，却不知道你要去哪个岛；第二台到得了岛，却不知道你是谁。把两半拼起来需要它们两个，而它们属于不同国家的不同人。\n\n藏不住的是：只要隧道没开，你在用 RCQ 这件事，掌管你网络的人就看得到。</string>
+    <string name="how_a5">你的岛知道有个信封寄给了某人，却不知道它出自你手：外面没有你的名字。\n\nRCQ 中继打开时，出口的路被分给两台中继。第一台看得见你，却不知道你要去哪个岛；第二台到得了岛，却不知道你是谁。把两半拼起来需要它们两个，而它们属于不同国家的不同人。\n\n藏不住的是：只要 RCQ 中继没开，你在用 RCQ 这件事，掌管你网络的人就看得到。</string>
     <string name="how_more">更多问题见 rcq.app/faq →</string>
 </resources>

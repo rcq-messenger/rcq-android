@@ -322,15 +322,15 @@ class Session(context: Context) {
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
-    /** True once the obfuscated transport (censorship bypass) is engaged, so
-     *  the home header can show a stealth indicator (iOS StealthHeaderBadge
+    /** True once the app is going through the RCQ relays, so the home header
+     *  can show the relay shield (iOS StealthHeaderBadge
      *  parity). The tunnel persists for the process once up, so this only
      *  flips on. */
     private val _stealthActive = MutableStateFlow(false)
     val stealthActive: StateFlow<Boolean> = _stealthActive.asStateFlow()
 
-    /** True when the bypass is on because the USER switched it on, false when
-     *  the app engaged it itself after a direct connection failed.
+    /** True when the relays are on because the USER switched them on, false
+     *  when the app engaged them itself after a direct connection failed.
      *
      *  The two are indistinguishable on screen today, so the explainer told
      *  everybody "the network looked blocked, it turns itself on" even when
@@ -351,8 +351,8 @@ class Session(context: Context) {
     /** Whether the engaged tunnel VERIFIABLY reaches the backend through the
      *  current route (the same /health-through-route probe the watchdog +
      *  diagnostics use). The home shield reflects this so it can't claim a working
-     *  bypass when the chain (esp. onion) carries no traffic — the "лук: щит есть,
-     *  связи нет" report. Meaningless (false) when no tunnel is engaged. */
+     *  relay route when the chain (esp. onion) carries no traffic, the "лук: щит
+     *  есть, связи нет" report. Meaningless (false) when no tunnel is engaged. */
     private val _routeVerified = MutableStateFlow(false)
     val routeVerified: StateFlow<Boolean> = _routeVerified.asStateFlow()
 
@@ -707,7 +707,7 @@ class Session(context: Context) {
      *  creating the local account slot or tearing down the current session,
      *  so an unreachable host / typo throws here with the current account
      *  left completely intact. Throws at the roster cap. */
-    /** Engage the circumvention transport (if needed) BEFORE the first network
+    /** Engage the RCQ relays (if needed) BEFORE the first network
      *  call of registration/recovery — mirrors [start]'s engage logic. No-op
      *  when a direct /health probe to [host] succeeds (healthy network, no
      *  block) or the transport is already up. Blocking work (probe + sing-box
@@ -715,7 +715,7 @@ class Session(context: Context) {
      *  transport just leaves the subsequent request to go direct (and fail as
      *  before), so this never makes registration worse.
      *
-     *  Bound by the user's "don't engage automatically" opt-out exactly like
+     *  Bound by the user's "don't turn relays on automatically" opt-out exactly like
      *  the boot ladder is (#588): unreachable + opted out means the request is
      *  left to fail, with the reason said out loud rather than swallowed. */
     private suspend fun ensureTransportForHost(host: String) = withContext(Dispatchers.IO) {
@@ -723,9 +723,9 @@ class Session(context: Context) {
         if (!transport.isActive) {
             // ⚠ Report #588 ("включает обход, хотя стоит настройка не включать
             // автоматом") was this line: a failed probe engaged the tunnel here
-            // without ever reading "don't engage automatically", so signing up
-            // or restoring on a network that merely answered slowly turned the
-            // bypass on for a user who had switched that off — and it then
+            // without ever reading "don't turn relays on automatically", so signing
+            // up or restoring on a network that merely answered slowly turned the
+            // relays on for a user who had switched that off, and they then
             // stayed on for the session. The forced toggle still engages (that
             // is the user asking); only the probe-driven half is gated, the
             // same way [runRouteLadder] gates it.
@@ -749,7 +749,7 @@ class Session(context: Context) {
     suspend fun registerNewAccount(nickname: String, serverInput: String? = null, invite: String? = null): Int {
         if (AccountManager.isAtLimit) throw IllegalStateException("Account limit reached")
         val host = normalizeHost(serverInput)
-        // Engage circumvention BEFORE the first network call (registration).
+        // Engage the RCQ relays BEFORE the first network call (registration).
         // Without this a blocked user's very first request goes out direct,
         // times out ("Couldn't connect"), and they have to switch on a VPN
         // just to sign up. The RcqApi built next captures the SOCKS proxy.
@@ -880,7 +880,7 @@ class Session(context: Context) {
         }
         val host = normalizeHost(serverInput)
         // Same as registration: a blocked user must be able to RESTORE without
-        // a manual VPN, so bring up circumvention before the challenge call.
+        // a manual VPN, so bring the RCQ relays up before the challenge call.
         ensureTransportForHost(host ?: RcqApi.DEFAULT_HOST)
         val regApi = RcqApi("https://${host ?: RcqApi.DEFAULT_HOST}")
         val signingPubB64 = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP)
@@ -1231,7 +1231,7 @@ class Session(context: Context) {
                 }
             }
             CrashReporter.crumb(appCtx, "load_db")
-            // Obfuscated transport (censorship circumvention), engaged BEFORE
+            // The RCQ relays (obfuscated sing-box transport), engaged BEFORE
             // the socket/API connect so they ride the sing-box tunnel. Engage
             // when the user forced it on OR — the chicken-and-egg fix — when a
             // direct /health probe fails, since a blocked user can't reach
@@ -1260,7 +1260,7 @@ class Session(context: Context) {
         }
     }
 
-    /** Quick toggle for the obfuscated transport (the home "censorship bypass"
+    /** Quick toggle for the RCQ relays (the home "Route the app through RCQ relays"
      *  control). Unlike the Settings switch — which only persists the pref and
      *  applies on next launch — this engages/drops sing-box LIVE: rebuild the
      *  API + socket so they capture (or release) the SOCKS proxy, then
@@ -1333,7 +1333,7 @@ class Session(context: Context) {
      *  It used to happen exactly once, at launch, which meant a network that
      *  started blocking mid-session was never re-evaluated: the socket just
      *  retried the dead route with backoff until the user killed the app. From
-     *  the outside that is "RCQ broke", while the bypass sat there unused.
+     *  the outside that is "RCQ broke", while the relays sat there unused.
      *
      *  Returns true when the route CHANGED (front engaged, tunnel started or
      *  dropped), so the caller knows the socket has to be rebuilt.
@@ -1439,7 +1439,7 @@ class Session(context: Context) {
             } else if (droppable && flagship && transport.probeDirect(FRONT_HOST)) {
                 // Tunnel dead AND direct dead — the state where this install has
                 // nothing left. The front was skipped on the way in because the
-                // bypass was engaged, and that is right while the tunnel works:
+                // the relays were engaged, and that is right while they work:
                 // a relay hides the user's address from the island, the front
                 // does not. But an engaged tunnel that carries nothing is not
                 // privacy, it is an app that does not open, and the front is

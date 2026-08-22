@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * ⚠⚠ The problem this exists for: the obfuscated connection is applied to this
  * app's OkHttp clients, and WebRTC does not use them. It opens its own sockets.
- * So on a network that blocks RCQ, someone turns on обход, their chats start
+ * So on a network that blocks RCQ, someone turns on релеи RCQ, their chats start
  * working, and their calls stay dead — the voice goes out beside the tunnel,
  * into the same block the tunnel exists to get around. No setting could fix it
  * and nothing in the app said so.

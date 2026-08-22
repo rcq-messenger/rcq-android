@@ -1311,8 +1311,22 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 )
             }
 
-            // Obfuscated connection (embedded sing-box). Off by default; takes
-            // effect on next launch. Honest framing as "connection reliability".
+            // "RCQ relays" (embedded sing-box). A privacy layer first: the
+            // island never learns your address and the network never learns you
+            // run RCQ. Where RCQ is blocked it also happens to be the only way
+            // through, which is a consequence and not the headline.
+            // ⚠ Wording only. The default and the auto-engage logic are
+            // untouched; renaming and re-defaulting are separate decisions.
+            //
+            // Header and link as ONE block: the screen's 18dp rhythm otherwise
+            // scatters them into three unrelated lines instead of a section.
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(stringResource(R.string.pv_relays_section), color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                // The section names the relay, so it carries the way to find out
+                // what one is. Deliberately a plain link, not a euphemism: the
+                // founder wants the user to meet the word.
+                RelayLearnMore()
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.pv_obfuscated), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -1336,9 +1350,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 )
             }
 
-            // "Don't engage automatically" (iOS parity): by default the app turns
-            // the tunnel on when it can't reach the server directly; a user on their
-            // own VPN/proxy can opt out so our sing-box doesn't stack on theirs.
+            // "Don't turn relays on automatically" (iOS parity): by default the app
+            // turns the relays on when it can't reach the island directly; a user on
+            // their own VPN/proxy can opt out so our sing-box doesn't stack on theirs.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.pv_obf_auto_disable), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -1350,9 +1364,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                     onCheckedChange = {
                         autoDisabled = it
                         app.rcq.android.net.SingBoxTransport.setAutoEngageDisabled(context, it)
-                        // "Don't engage automatically" while an AUTO-engaged tunnel
-                        // is running means stop that one too: the user is telling us
-                        // to stay out of the way now, not from the next launch.
+                        // "Don't turn relays on automatically" while an AUTO-engaged
+                        // relay route is running means stop that one too: the user is
+                        // telling us to stay out of the way now, not from next launch.
                         if (it && !obfuscated && stealthActive) {
                             session.setObfuscation(false)
                             app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(context)
@@ -1363,9 +1377,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             }
 
             // Onion routing (M3, experimental). One switch for the user: turning
-            // it on ALSO engages the obfuscated connection, because onion routes
-            // THROUGH the obfuscated tunnel and can't work without it. So the
-            // user never has to think about two toggles.
+            // it on ALSO turns the RCQ relays on, because onion routes THROUGH
+            // the relay tunnel and can't work without it. So the user never has
+            // to think about two toggles.
             var onion by remember { mutableStateOf(app.rcq.android.net.SingBoxTransport.isOnionOptIn(context)) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -1391,9 +1405,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             }
 
             // Local proxy: route everything through the user's OWN local Tor /
-            // i2p SOCKS5/HTTP. Mutually exclusive with relays/onion above (they
-            // grey out while this is on). No auto-fallback to relays if the proxy
-            // is down — that would leak around Tor.
+            // i2p SOCKS5/HTTP. Mutually exclusive with the RCQ relays and onion
+            // above (they grey out while this is on). No auto-fallback to our
+            // relays if the proxy is down, that would leak around Tor.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(R.string.pv_localproxy), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
@@ -1739,6 +1753,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                 )
             }
             SectionFooter(stringResource(R.string.diag_footer))
+            RelayLearnMore()
             CapsuleButton(stringResource(R.string.diag_run_again), enabled = !running) { run() }
 
             // Full network audit. Separate button because it opens raw sockets

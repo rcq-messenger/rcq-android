@@ -10,7 +10,7 @@
     <string name="onboard_cta_skip">Pular</string>
     <string name="onboard_welcome_kicker">RCQ</string>
     <string name="onboard_welcome_title">Boas-vindas</string>
-    <string name="onboard_welcome_body">Um mensageiro sério de privacidade, com criptografia de ponta a ponta de verdade por padrão e contorno de bloqueios embutido. Sem telefone, sem e-mail, sem anúncios.</string>
+    <string name="onboard_welcome_body">Um mensageiro sério de privacidade, com criptografia de ponta a ponta de verdade por padrão e relays embutidos que escondem o seu endereço. Sem telefone, sem e-mail, sem anúncios.</string>
     <string name="onboard_anon_kicker">ANÔNIMO</string>
     <string name="onboard_anon_title">Sem telefone, sem e-mail</string>
     <string name="onboard_anon_body">Sua identidade é um UIN numérico e nada mais. A conta não está ligada a você. Queime ela e recomece quando quiser.</string>
@@ -29,9 +29,9 @@
     <string name="onboard_federation_kicker">FEDERAÇÃO</string>
     <string name="onboard_federation_title">Sem dono único</string>
     <string name="onboard_federation_body">O RCQ não é o servidor de uma empresa só. Cada servidor é uma ilha independente, e qualquer um pode manter a sua. Sua conta vive na ilha que você escolher, e você fica com o seu número se mudar de ilha.</string>
-    <string name="onboard_relay_kicker">CONTORNO</string>
-    <string name="onboard_relay_title">Feito para passar</string>
-    <string name="onboard_relay_body">Quando a rede bloqueia o RCQ, o app se roteia por um relay, disfarçado de tráfego comum. A rede de relays é mantida pela comunidade, e o roteamento onion encadeia os relays para que nenhum deles veja você e sua ilha ao mesmo tempo.</string>
+    <string name="onboard_relay_kicker">RELAYS DO RCQ</string>
+    <string name="onboard_relay_title">A ilha não vê o seu endereço</string>
+    <string name="onboard_relay_body">O tráfego não vai direto para a ilha, vai pelos nossos relays: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. A rede de relays é mantida pela comunidade. Onde o RCQ está bloqueado, esse ainda é o único caminho.</string>
     <string name="onboard_server_label">Servidor</string>
     <string name="onboard_language">Idioma</string>
     <!-- Status -->
@@ -335,8 +335,8 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Salas de áudio</string>
     <string name="home_menu_radio">Rádio</string>
-    <string name="home_menu_bypass_enable">Ligar o contorno de bloqueios</string>
-    <string name="home_menu_bypass_disable">Desligar o contorno de bloqueios</string>
+    <string name="home_menu_bypass_enable">Levar o app pelos relays do RCQ</string>
+    <string name="home_menu_bypass_disable">Parar de ir pelos relays do RCQ</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
     <string name="radio_title">Rádio</string>
     <string name="radio_on_air">No ar como</string>
@@ -508,7 +508,7 @@
     <string name="chat_bg_custom">Galeria</string>
     <string name="app_icon_default">Padrão</string>
     <string name="app_icon_footer">Escolha outro ícone para a tela inicial. A tela pode piscar por um instante enquanto ele muda.</string>
-    <string name="settings_foot_privacy">Controle quem pode te ver e quem pode falar com você. Servidor, proxy, ofuscação e relays ficam em Rede.</string>
+    <string name="settings_foot_privacy">Controle quem pode te ver e quem pode falar com você. Servidor, proxy e relays do RCQ ficam em Rede.</string>
     <string name="settings_foot_history">Remove as mensagens só deste aparelho. Sua conta e seus contatos continuam.</string>
     <string name="theme_auto">Automático</string>
     <string name="theme_light">Claro</string>
@@ -581,12 +581,12 @@
     <string name="presence_countdown_lt1m">&lt;1 min</string>
     <string name="presence_info_title">Continuar visível depois de sair</string>
     <string name="presence_info_body">Você continua aparecendo como online por este tempo depois de fechar o app. Mude isso em Configurações, Privacidade &amp; Rede.</string>
-    <string name="stealth_info_title">Contorno de bloqueios ativo</string>
-    <string name="stealth_info_body_manual">Você mesmo ligou o contorno pelo menu. Enquanto ele está ligado, o RCQ passa só pelo túnel criptografado embutido e não tenta uma conexão direta. Desligue no mesmo menu.</string>
-    <string name="stealth_shield_green">Escudo verde: está confirmado que o tráfego pelo contorno chega à ilha.</string>
-    <string name="stealth_shield_amber">Escudo âmbar: o contorno está ligado, mas ainda não há confirmação de que os dados passem por ele. Se continuar âmbar, tente desligar e ligar o contorno de novo pelo menu.</string>
-    <string name="stealth_info_body">Sua rede parecia bloqueada, então o RCQ está conectando pelo contorno criptografado embutido. Não precisa configurar nada, isto liga sozinho quando a conexão direta falha.</string>
-    <string name="connecting_stealth">Passando pelo bloqueio…</string>
+    <string name="stealth_info_title">Pelos relays</string>
+    <string name="stealth_info_body_manual">Você mesmo ligou os relays do RCQ pelo menu. O tráfego não vai direto para a ilha, vai pelos nossos relays: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. Enquanto isto está ligado, o app não tenta uma conexão direta. Desligue no mesmo menu.</string>
+    <string name="stealth_shield_green">Escudo verde: está confirmado que o tráfego pelos relays chega à ilha.</string>
+    <string name="stealth_shield_amber">Escudo âmbar: os relays estão ligados, mas ainda não há confirmação de que os dados passem por eles. Se continuar âmbar, tente desligar e ligar os relays de novo pelo menu.</string>
+    <string name="stealth_info_body">O app está indo pelos relays do RCQ: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. Ligou sozinho porque a conexão direta não passou, e não há nada para configurar.</string>
+    <string name="connecting_stealth">Conectando pelos relays…</string>
     <string name="pv_profile_card">Cartão de perfil</string>
     <string name="pv_profile_card_desc">Quem pode abrir seu perfil completo (cidade, idade, sobre).</string>
     <string name="pv_gender_desc">Quem pode ver seu gênero no seu perfil.</string>
@@ -609,14 +609,16 @@
     <string name="pv_network">Rede</string>
     <string name="pv_relay_calls">Sempre passar chamadas por relay</string>
     <string name="pv_relay_calls_desc">Manda o áudio e o vídeo da chamada pelo nosso relay, assim o outro lado nunca fica sabendo seu endereço IP. Desligar isto pode melhorar a qualidade da chamada e mostra seu endereço a ele.</string>
-    <string name="pv_obfuscated">Conexão ofuscada</string>
-    <string name="pv_obfuscated_desc">Roteia a conexão por um relay quando a rede bloqueia o RCQ direto. Melhora a confiabilidade em redes restritivas. Vale a partir da próxima abertura do app.</string>
-    <string name="pv_obf_auto_disable">Não ligar automaticamente</string>
-    <string name="pv_obf_auto_disable_desc">Por padrão o app liga a ofuscação sozinho se não conseguir alcançar o servidor direto. Se você já leva seu tráfego pelo seu próprio VPN ou proxy, ligue isto para o nosso transporte não empilhar em cima do seu.</string>
+    <string name="pv_relays_section">Relays do RCQ</string>
+    <string name="relay_what_is">O que é um relay?</string>
+    <string name="pv_obfuscated">Levar o app pelos relays do RCQ</string>
+    <string name="pv_obfuscated_desc">O tráfego não vai direto para a ilha, vai pelos nossos relays: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. Vale a partir da próxima abertura do app. Onde o RCQ está bloqueado, esse ainda é o único caminho.</string>
+    <string name="pv_obf_auto_disable">Não ligar os relays automaticamente</string>
+    <string name="pv_obf_auto_disable_desc">Por padrão o app liga os relays sozinho se não conseguir alcançar a ilha direto. Se você já leva seu tráfego pelo seu próprio VPN ou proxy, ligue isto para o nosso transporte não empilhar em cima do seu.</string>
     <string name="pv_onion">Roteamento onion (experimental)</string>
-    <string name="pv_onion_desc">Passa por dois relays para que nenhum deles veja você e o servidor ao mesmo tempo. Liga a conexão protegida automaticamente. Um pouco mais lento. Vale a partir da próxima abertura do app.</string>
+    <string name="pv_onion_desc">Passa por dois relays para que nenhum deles veja você e a ilha ao mesmo tempo. Liga os relays do RCQ automaticamente. Um pouco mais lento. Vale a partir da próxima abertura do app.</string>
     <string name="pv_localproxy">Proxy</string>
-    <string name="pv_localproxy_desc">Leve o app por qualquer proxy local: Tor, I2P, AWG/wiresocks, etc. Substitui os relays e o onion.</string>
+    <string name="pv_localproxy_desc">Leve o app por qualquer proxy local: Tor, I2P, AWG/wiresocks, etc. Substitui os relays do RCQ e o roteamento onion.</string>
     <string name="pv_localproxy_host">Host</string>
     <string name="pv_localproxy_port">Porta</string>
     <string name="pv_localproxy_test">Testar</string>
@@ -644,7 +646,7 @@
     <!-- Connection diagnostics -->
     <string name="diag_title">Diagnóstico da conexão</string>
     <string name="diag_transport">Rota</string>
-    <string name="diag_mode_tunnel">Relay (ofuscado)</string>
+    <string name="diag_mode_tunnel">Pelos relays</string>
     <string name="diag_mode_direct">Direto</string>
     <string name="diag_backend_direct">Servidor, direto</string>
     <string name="diag_backend_route">Servidor, rota atual</string>
@@ -658,7 +660,7 @@
     <string name="diag_relays_remote">%1$d relays · assinada v%2$d</string>
     <string name="diag_relays_bundled">%1$d relays · embutida</string>
     <string name="diag_run_again">Verificar de novo</string>
-    <string name="diag_footer">Se o servidor está bloqueado no acesso direto mas responde pela rota atual, o relay está fazendo o trabalho dele. Se os dois falham, sua rede está bloqueando tudo que conseguimos alcançar.</string>
+    <string name="diag_footer">Se o servidor está bloqueado no acesso direto mas responde pela rota atual, os relays estão fazendo o trabalho deles. Se os dois falham, sua rede está bloqueando tudo que conseguimos alcançar.</string>
     <string name="pv_custom_server">Servidor personalizado</string>
     <string name="pv_default">Padrão</string>
     <!-- Settings: sounds -->
@@ -1089,7 +1091,7 @@
     <string name="onboard_cta_netcheck">O RCQ não conecta? Verifique a rede</string>
     <string name="onboard_netcheck_send">Copie esta linha e mande para a gente</string>
     <string name="diag_audit_hint">Abre sockets simples para esta ilha, para o front, para os relays e para dois hosts de controle conhecidos, para descobrir o que esta rede filtra. Nada é enviado a lugar nenhum; copie o resultado você mesmo.</string>
-    <string name="diag_audit_calls_blocked">As mensagens passam, as chamadas não vão passar. O relay que leva o áudio das chamadas está inacessível a partir desta rede, e a conexão ofuscada não cobre chamadas: a voz sai direto, por fora dela.</string>
+    <string name="diag_audit_calls_blocked">As mensagens passam, as chamadas não vão passar. O relay que leva o áudio das chamadas está inacessível a partir desta rede, e os relays do RCQ não cobrem chamadas: a voz sai direto, por fora deles.</string>
     <string name="diag_audit_fine">A ilha responde direto. Nada está sendo filtrado aqui.</string>
     <string name="diag_audit_no_net">Até os hosts de controle estão inacessíveis: este aparelho não tem internet funcionando, então nada abaixo é sobre o RCQ.</string>
     <string name="diag_audit_by_name">Nosso endereço responde com outro nome. O filtro vai pelo NOME, então um nome diferente na frente do mesmo servidor deve passar.</string>
@@ -1153,8 +1155,8 @@
     <string name="how_q3">O que faço quando para de funcionar?</string>
     <string name="how_a3">Primeiro descubra se você está sendo bloqueado: Configurações → Rede → Diagnóstico de conexão, e rode a verificação completa COM A VPN DESLIGADA.\n\nEla devolve uma linha. Mande para nós em Relatar um erro: essa linha diz exatamente o que está fechado na sua rede, e sem ela ficamos no chute.</string>
     <string name="how_q4">O que acontece quando minha rede bloqueia o RCQ?</string>
-    <string name="how_a4">O app percebe e contorna sozinho. Não há nada para ligar e não precisa de VPN à parte: ele abre um túnel até um dos nossos relays e continua funcionando.\n\nPara quem bloqueia, esse tráfego parece uma visita comum a um site comum — o mesmo tipo de conexão criptografada que seu navegador faz o dia inteiro. O relay carrega envelopes lacrados, então ele também não lê suas mensagens.</string>
+    <string name="how_a4">O app percebe e vai pelos relays do RCQ sozinho. Não há nada para ligar e não precisa de VPN à parte: ele abre um túnel até um dos nossos relays e continua funcionando.\n\nPara quem bloqueia, esse tráfego parece uma visita comum a um site comum, o mesmo tipo de conexão criptografada que seu navegador faz o dia inteiro. O relay carrega envelopes lacrados, então ele também não lê suas mensagens.</string>
     <string name="how_q5">Alguém consegue saber para quem eu escrevo?</string>
-    <string name="how_a5">Sua ilha sabe que um envelope é endereçado a alguém e não sabe que ele partiu de você: seu nome não está do lado de fora.\n\nCom o túnel ligado, o caminho de saída é dividido entre dois relays. O primeiro vê você e não sabe a que ilha você vai; o segundo chega à ilha e não sabe quem você é. Juntar as duas metades exige os dois, e eles pertencem a pessoas diferentes em países diferentes.\n\nO que não dá para esconder: que você usa RCQ é visível para quem controla a sua rede, enquanto o túnel estiver desligado.</string>
+    <string name="how_a5">Sua ilha sabe que um envelope é endereçado a alguém e não sabe que ele partiu de você: seu nome não está do lado de fora.\n\nCom os relays do RCQ ligados, o caminho de saída é dividido entre dois relays. O primeiro vê você e não sabe a que ilha você vai; o segundo chega à ilha e não sabe quem você é. Juntar as duas metades exige os dois, e eles pertencem a pessoas diferentes em países diferentes.\n\nO que não dá para esconder: que você usa RCQ é visível para quem controla a sua rede, enquanto os relays do RCQ estiverem desligados.</string>
     <string name="how_more">Mais perguntas em rcq.app/faq →</string>
 </resources>
