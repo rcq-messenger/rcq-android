@@ -51,6 +51,78 @@ object SealedSender {
      *  the field sends and the only thing they know how to read. */
     const val PRIMARY_DEVICE_ID = 1
 
+    // ── Stage 2 size-padding + message class (core-metadata plan) ─────
+    // A sealed blob still leaks its LENGTH: the outer wire is fixed-width apart
+    // from the inner sealed-sender JSON, so `payload` grows with the message. We
+    // hide that by padding the INNER plaintext (the bytes fed to the AEAD seal)
+    // up to a coarse size bucket before sealing, via a `_pad` filler field. The
+    // pad lives INSIDE the seal (a wire observer that parses the outer JSON sees
+    // only the padded `ct`), and it is transparent to every shipped decoder: the
+    // v=1 signature is over `ek || env_bytes` (not the inner JSON), and every
+    // receiver reads the inner by named keys and ignores an unknown `_pad`. So a
+    // padded message opens byte-for-byte on an old client. Padding is a
+    // SENDER-ONLY policy (receivers never look at buckets), so it need not
+    // byte-match web or iOS to interop; the shared ladder only makes a text pad
+    // to the same rung wherever it was composed. Mirrors web crypto.ts.
+
+    /** Size buckets (bytes) the inner plaintext is padded up to; past the last
+     *  fixed rung the ladder continues in multiples of 65536. */
+    private val BUCKETS = intArrayOf(256, 1024, 4096, 16384, 65536)
+
+    /** The smallest bucket that holds [n] bytes. */
+    internal fun bucketFor(n: Int): Int {
+        for (b in BUCKETS) if (n <= b) return b
+        return ((n + 65535) / 65536) * 65536
+    }
+
+    /** The inner-JSON key the filler rides in. The filler is ASCII 'A', which
+     *  JSON never escapes, so the padded byte length is exact. */
+    internal const val PAD_KEY = "_pad"
+    /** Byte cost of an EMPTY pad field: `,"_pad":""` is exactly 10 ASCII bytes. */
+    private const val PAD_OVERHEAD = 10
+
+    /** Kinds whose on-wire size tracks what the user wrote or attached, and so
+     *  are worth padding. Receipts / reactions / signalling are omitted: tiny,
+     *  frequent, and their size carries no content, so buying them uniformity is
+     *  not worth the relay bytes. Sender-only policy, so this set is local. */
+    private val PAD_KINDS = setOf("text", "photo", "video", "file", "location", "edit", "poll", "carbon")
+    internal fun shouldPad(kind: String?): Boolean = kind != null && kind in PAD_KINDS
+
+    /** Serialize [inner] and pad it up to its size bucket by appending a `_pad`
+     *  filler (added LAST, so it serializes as a trailing `,"_pad":"AAAA..."`),
+     *  returning the padded plaintext bytes to seal. The total byte length lands
+     *  exactly on the bucket. */
+    internal fun padInner(inner: JsonObject): ByteArray {
+        val unpadded = inner.toString().toByteArray(Charsets.UTF_8).size
+        val target = bucketFor(unpadded + PAD_OVERHEAD)
+        inner.addProperty(PAD_KEY, "A".repeat(target - unpadded - PAD_OVERHEAD))
+        return inner.toString().toByteArray(Charsets.UTF_8)
+    }
+
+    /** The wire `kind` of a serialized envelope, or null if unreadable. Used
+     *  only to decide size-padding on send; an unreadable kind simply is not
+     *  padded, which is always safe. */
+    internal fun envelopeKindOf(envJsonBytes: ByteArray): String? = try {
+        JsonParser.parseString(String(envJsonBytes, Charsets.UTF_8))
+            .asJsonObject.get("kind")?.takeIf { !it.isJsonNull }?.asString
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Mirror of the island's `_cls_for`: the retention / push class the server
+     *  derives from an [envelopeType]. Sent beside `envelope_type` so a new or
+     *  opaque type is classified by its sender rather than guessed by the island;
+     *  for every type shipped today it equals what the island derives, so push
+     *  and retention behaviour is unchanged. 0 = ephemeral, 1 = content,
+     *  2 = critical. */
+    private val CLS_EPHEMERAL = setOf("typing", "read", "visit", "presence", "nudge", "bounce")
+    private val CLS_CRITICAL = setOf("skdm", "sknack")
+    internal fun messageClass(envelopeType: String): Int = when {
+        envelopeType in CLS_EPHEMERAL -> 0
+        envelopeType in CLS_CRITICAL -> 2
+        else -> 1
+    }
+
     class DecryptException(message: String) : Exception(message)
 
     data class Decrypted(
@@ -117,9 +189,14 @@ object SealedSender {
             addProperty("spub", b64(signingPub))
             addProperty("sig", b64(sig))
             addProperty("env", b64(envJson))
-        }.toString().toByteArray(Charsets.UTF_8)
+        }
+        // Stage 2: size-pad content kinds so the sealed blob's length no longer
+        // tracks the message. Transparent to every decoder: the sig is over
+        // ek||env (not the inner JSON), and receivers ignore the extra `_pad`.
+        val innerBytes = if (shouldPad(envelopeKindOf(envJson))) padInner(inner)
+            else inner.toString().toByteArray(Charsets.UTF_8)
 
-        val combined = aeadSeal(aeadKey, aad = ephPub, plaintext = inner)
+        val combined = aeadSeal(aeadKey, aad = ephPub, plaintext = innerBytes)
 
         val wire = JsonObject().apply {
             addProperty("v", WIRE_V1)
@@ -221,6 +298,10 @@ object SealedSender {
         recipientIdentityPub: ByteArray,
         ownUin: Int,
         ownDeviceId: Int = PRIMARY_DEVICE_ID,
+        // The plaintext envelope's wire kind (text/photo/…), for the size-pad
+        // decision only; null skips padding. The libsignal ct in `msg` hides the
+        // message but not its LENGTH, so we pad the inner exactly as v=1 does.
+        envelopeKind: String? = null,
     ): String {
         val gen = X25519KeyPairGenerator().apply {
             init(X25519KeyGenerationParameters(SecureRandom()))
@@ -238,9 +319,13 @@ object SealedSender {
             // Left out for the primary: an older peer reads this JSON without
             // knowing the key, and its absence already means device 1 there.
             if (ownDeviceId != PRIMARY_DEVICE_ID) addProperty("dev", ownDeviceId)
-        }.toString().toByteArray(Charsets.UTF_8)
+        }
+        // Stage 2: size-pad content kinds (same scheme + buckets as v=1).
+        // Receivers read InnerV2 by named keys and ignore the extra `_pad`.
+        val innerBytes = if (shouldPad(envelopeKind)) padInner(inner)
+            else inner.toString().toByteArray(Charsets.UTF_8)
 
-        val combined = aeadSeal(aeadKey, aad = ephPub, plaintext = inner)
+        val combined = aeadSeal(aeadKey, aad = ephPub, plaintext = innerBytes)
 
         val wire = JsonObject().apply {
             addProperty("v", WIRE_V2)

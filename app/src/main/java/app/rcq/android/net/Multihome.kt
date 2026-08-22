@@ -500,6 +500,8 @@ object Multihome {
                 val body = JsonObject().apply {
                     addProperty("to_uin", h.uin)
                     addProperty("envelope_type", "message")
+                    // Stage 2: retention / push class beside the legacy type.
+                    addProperty("cls", SealedSender.messageClass("message"))
                     addProperty("payload", payload)
                 }.toString().toRequestBody(JSON)
                 val req = Request.Builder().url("https://${h.host}/messages/sealed").post(body).build()

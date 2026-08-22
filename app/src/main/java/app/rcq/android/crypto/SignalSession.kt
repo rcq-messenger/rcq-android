@@ -343,9 +343,12 @@ object SignalSession {
             if (recipientDeviceId == DEVICE_ID) recipientMessagingPub
             else stores.peerDeviceOuterKey(recipientUin, recipientDeviceId)
                 ?: error("no sealed-sender key for $recipientUin/$recipientDeviceId")
+        // Serialize once: the ciphertext hides these bytes, but their wire
+        // `kind` still drives the Stage 2 size-pad decision in [wrapV2].
+        val plain = envelope.toJsonBytes()
         val (kind, libsignalBytes) = synchronized(stores) {
             val cipher = SessionCipher(stores, stores, stores, stores, stores, addr)
-            val ciphertext: CiphertextMessage = cipher.encrypt(envelope.toJsonBytes())
+            val ciphertext: CiphertextMessage = cipher.encrypt(plain)
             val k = when (ciphertext.type) {
                 CiphertextMessage.PREKEY_TYPE -> "prekey"
                 CiphertextMessage.WHISPER_TYPE -> "signal"
@@ -353,7 +356,7 @@ object SignalSession {
             }
             k to ciphertext.serialize()
         }
-        return SealedSender.wrapV2(libsignalBytes, kind, outerPub, ownUin, ownDeviceId)
+        return SealedSender.wrapV2(libsignalBytes, kind, outerPub, ownUin, ownDeviceId, SealedSender.envelopeKindOf(plain))
     }
 
     /**
