@@ -627,7 +627,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Throwable, not Exception: decoding a huge picture can
+                    // throw OutOfMemoryError, and the old runCatching swallowed
+                    // it; one bad file must not take the whole app down.
                     android.util.Log.w("RCQmedia", "album item failed: $uri", e)
                     failed += 1
                 } finally {
@@ -714,7 +717,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         android.util.Log.w("RCQshare", "shared item failed: $uri", e)
                         failed += 1
                     } finally {
@@ -3581,13 +3584,20 @@ private fun AlbumPagerViewer(
     // One copy of each page's bytes, shared between the page and the
     // save/share buttons. Two produceState()s on the same id used to race
     // past the cache and download the same blob twice (found in review).
+    // Pictures only: a clip can be tens of megabytes and would otherwise sit
+    // here for the dialog's life after one play; the session's own cache
+    // covers a second play.
     val loaded = remember(items) { mutableStateMapOf<String, ByteArray>() }
     suspend fun bytesOf(m: ChatMessage): ByteArray? {
         loaded[m.id]?.let { return it }
         val mid = m.mediaId ?: return null
         val key = m.mediaKey ?: return null
-        return session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })?.also { loaded[m.id] = it }
+        return session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+            ?.also { if (m.kind != "video") loaded[m.id] = it }
     }
+    // Save/share fetch on the tap (a clip is not pulled down for the buttons);
+    // while that runs the buttons are a spinner, not two more downloads.
+    var actionBusy by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             androidx.compose.foundation.pager.HorizontalPager(
@@ -3608,6 +3618,7 @@ private fun AlbumPagerViewer(
                         }
                     }
                     var fetching by remember(m.id) { mutableStateOf(false) }
+                    var playFailed by remember(m.id) { mutableStateOf(false) }
                     Box(
                         Modifier.fillMaxSize().clickable(
                             interactionSource = remember { MutableInteractionSource() },
@@ -3622,20 +3633,30 @@ private fun AlbumPagerViewer(
                         if (fetching) {
                             CircularProgressIndicator(color = RcqTheme.colors.accent)
                         } else {
-                            ViewerAction(Icons.Filled.PlayArrow, stringResource(R.string.chat_play_video), Modifier.size(72.dp)) {
-                                if (fetching) return@ViewerAction
-                                fetching = true
-                                scope.launch {
-                                    val b = bytesOf(m)
-                                    fetching = false
-                                    if (b != null) onPlayVideo(b)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                ViewerAction(Icons.Filled.PlayArrow, stringResource(R.string.chat_play_video), Modifier.size(72.dp)) {
+                                    if (fetching) return@ViewerAction
+                                    fetching = true; playFailed = false
+                                    scope.launch {
+                                        val b = bytesOf(m)
+                                        fetching = false
+                                        if (b != null) onPlayVideo(b) else playFailed = true
+                                    }
                                 }
+                                // A fetch that came back empty used to leave a
+                                // disc that did nothing. Say so; the disc retries.
+                                if (playFailed) Text(stringResource(R.string.media_load_failed), color = Color.White, fontSize = 13.sp)
                             }
                         }
                     }
                 } else {
-                    val bytes by produceState<ByteArray?>(initialValue = loaded[m.id], m.id) {
-                        value = bytesOf(m)
+                    // `attempt` re-keys the fetch so a tap on the failure text
+                    // tries again; a null after a finished attempt is a failure,
+                    // not "still loading".
+                    var attempt by remember(m.id) { mutableStateOf(0) }
+                    var tried by remember(m.id) { mutableStateOf(false) }
+                    val bytes by produceState<ByteArray?>(initialValue = loaded[m.id], m.id, attempt) {
+                        if (value == null) { tried = false; value = bytesOf(m); tried = true }
                     }
                     var scale by remember(m.id) { mutableStateOf(1f) }
                     var offset by remember(m.id) { mutableStateOf(Offset.Zero) }
@@ -3653,6 +3674,10 @@ private fun AlbumPagerViewer(
                     ) {
                         val b = bytes
                         when {
+                            b == null && tried -> Text(
+                                stringResource(R.string.media_load_failed), color = Color.White, fontSize = 14.sp,
+                                modifier = Modifier.clickable { attempt += 1 }.padding(24.dp),
+                            )
                             b == null -> CircularProgressIndicator(color = RcqTheme.colors.accent)
                             b.isGif() -> SafeAnimatedGif(b, Modifier.fillMaxWidth())
                             else -> rememberSampledBitmap(b, maxPx = 2560)?.let { img ->
@@ -3690,11 +3715,17 @@ private fun AlbumPagerViewer(
                 ) {
                     // Save and share act on the page you are looking at. A photo
                     // page has its bytes already; a clip is fetched on the tap.
-                    ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) {
-                        scope.launch { bytesOf(current)?.let { onSave(current, it) } }
-                    }
-                    ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
-                        scope.launch { bytesOf(current)?.let { onShare(current, it) } }
+                    if (actionBusy) {
+                        CircularProgressIndicator(color = RcqTheme.colors.accent, modifier = Modifier.size(36.dp).padding(6.dp), strokeWidth = 2.dp)
+                    } else {
+                        ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) {
+                            actionBusy = true
+                            scope.launch { try { bytesOf(current)?.let { onSave(current, it) } } finally { actionBusy = false } }
+                        }
+                        ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
+                            actionBusy = true
+                            scope.launch { try { bytesOf(current)?.let { onShare(current, it) } } finally { actionBusy = false } }
+                        }
                     }
                 }
             }

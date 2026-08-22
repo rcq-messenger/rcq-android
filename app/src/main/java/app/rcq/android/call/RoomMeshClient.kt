@@ -154,6 +154,18 @@ class RoomMeshClient(
         }
     }
 
+    fun peerUins(): Set<Int> = synchronized(lock) { peers.keys.toSet() }
+
+    /** Every leg at once, for a re-entry after the island evicted us: the
+     *  others dial fresh and their offers must not land on these. */
+    fun dropAllPeers() {
+        synchronized(lock) {
+            peers.values.forEach { runCatching { it.close() } }
+            peers.clear()
+            pendingIce.clear()
+        }
+    }
+
     fun dropPeer(uin: Int) {
         synchronized(lock) {
             peers.remove(uin)?.let { runCatching { it.close() } }

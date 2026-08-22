@@ -842,6 +842,7 @@
     <string name="media_save">Сохранить</string>
     <string name="media_saved">Сохранено</string>
     <string name="media_saved_to">Сохранено в %1$s</string>
+    <string name="media_load_failed">Не удалось загрузить. Нажмите, чтобы повторить.</string>
     <string name="media_save_failed">Не удалось сохранить</string>
     <string name="media_fetching">Скачиваем файл…</string>
     <string name="media_fetch_failed">Не удалось скачать файл. Проверьте связь и попробуйте ещё раз.</string>
