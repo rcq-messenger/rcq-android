@@ -18,8 +18,20 @@ class Ringer(private val context: Context) {
     private var ringback: ToneGenerator? = null
     private val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
+    /** Is an incoming ring already sounding? A repeated [startIncoming] then
+     *  leaves it alone instead of starting it over.
+     *
+     *  ⚠ The keyguard bounces the incoming-call activity through stop/start
+     *  (MIUI does it on every dismiss), and each start called this. The ring
+     *  audibly cut out and began again from the first note the moment the phone
+     *  was unlocked, which is what report #680 heard. A ring is one continuous
+     *  thing; restarting it is never what the caller or the callee wanted. */
+    @Volatile private var incomingActive = false
+
     fun startIncoming() {
+        if (incomingActive) return
         stop()
+        incomingActive = true
         runCatching {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             ringtone = RingtoneManager.getRingtone(context, uri)?.apply {
@@ -44,6 +56,7 @@ class Ringer(private val context: Context) {
     }
 
     fun stop() {
+        incomingActive = false
         runCatching { ringtone?.stop() }
         ringtone = null
         runCatching { ringback?.stopTone(); ringback?.release() }

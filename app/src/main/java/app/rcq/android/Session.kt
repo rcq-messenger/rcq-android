@@ -1903,6 +1903,17 @@ class Session(context: Context) {
         // Is the primary actually down right now? Cheap /health through the
         // live route; a backup drain on a healthy primary is just the normal
         // belt-and-braces copy and must NOT raise the failover flag.
+        //
+        // ⚠ A phone with the radios off fails that probe exactly the way a
+        // blocked island does, and the banner then told the user two untrue
+        // things at once: that their island was not answering, and that their
+        // mail was arriving through the backup one (#674). Nothing arrives
+        // through anything without a network, so say nothing and skip the
+        // probe; the flag is cleared so a banner raised while online goes away.
+        if (!app.rcq.android.net.SingBoxTransport.hasNetwork(appCtx)) {
+            _receivingViaBackup.value = false
+            return
+        }
         withContext(Dispatchers.IO) {
             _receivingViaBackup.value =
                 !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())

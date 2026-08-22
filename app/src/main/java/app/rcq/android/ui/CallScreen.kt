@@ -399,7 +399,11 @@ private fun statusText(
             "%d:%02d".format(secs / 60, secs % 60)
         }
     }
-    is CallController.State.Ended -> stringResource(R.string.call_out_ended)
+    // The Ended state has carried the reason all along; the screen printed the
+    // generic word anyway and left "busy" to be discovered in the history (#683).
+    is CallController.State.Ended -> stringResource(
+        app.rcq.android.call.endedLabelRes(state.reason, state.info.outgoing),
+    )
     CallController.State.Idle -> ""
 }
 

@@ -1301,7 +1301,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 snapshotFlow {
                     val info = listState.layoutInfo
                     val floor = info.viewportEndOffset - info.afterContentPadding
-                    info.visibleItemsInfo.lastOrNull { it.offset + it.size <= floor }?.index ?: -1
+                    // Reaching the end of the list IS reading it to the end, and
+                    // it has to be said separately: a message taller than the
+                    // screen is never "fully visible", so a chat whose last
+                    // message is a long one would sit at the very bottom with
+                    // the mark stuck one row short of it (#676).
+                    if (!listState.canScrollForward && info.totalItemsCount > 0) {
+                        info.totalItemsCount - 1
+                    } else {
+                        info.visibleItemsInfo.lastOrNull { it.offset + it.size <= floor }?.index ?: -1
+                    }
                 }
                     // A row taller than the screen is never fully visible, so this
                     // yields -1 and the mark simply waits where it was until the
@@ -1325,7 +1334,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                 }
             }
-            if (showJumpDown) {
+            // ⚠ The arrow's rule and the badge's rule disagreed, and the badge
+            // lost. The arrow appears once the newest row's TOP edge crosses the
+            // bottom of the screen (#19 wanted it that loose), while a message
+            // counts as read only when its whole height has been on screen. On a
+            // long last message the arrow vanished, taking the badge with it,
+            // while the reader had not seen a line of the text (#676). So the
+            // count now keeps the arrow up on its own; with everything read
+            // `belowCount` is 0 and #19's rule is untouched.
+            if (showJumpDown || belowCount > 0) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp),
                     contentAlignment = Alignment.TopEnd,

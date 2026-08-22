@@ -441,7 +441,7 @@ object SingBoxTransport {
      *  VALIDATED: Android validates by fetching a Google host, which a network
      *  that filters us often blocks too, and that is precisely the case the
      *  notice is for. */
-    private fun hasNetwork(ctx: Context): Boolean = runCatching {
+    fun hasNetwork(ctx: Context): Boolean = runCatching {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
         val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
         caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)

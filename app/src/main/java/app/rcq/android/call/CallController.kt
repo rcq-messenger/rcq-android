@@ -1217,18 +1217,7 @@ class CallController(
                     // — while the notification called the same call missed.
                     // Report #472 is that pair of contradictory labels.
                     answered -> R.string.call_out_failed
-                    else -> when (reason) {
-                        "declined", "declinedElsewhere" -> R.string.call_out_declined
-                        "cancelled" -> if (call.outgoing) R.string.call_out_cancelled else R.string.call_out_missed
-                        "busy" -> R.string.call_out_busy
-                        "expired", "unanswered" -> if (call.outgoing) R.string.call_out_no_answer else R.string.call_out_missed
-                        "unreachable" -> R.string.call_out_unreachable
-                        // "failed" is the web/desktop client's connect-timeout
-                        // reason; "setup_failed" is ours. Same thing to a reader.
-                        "setup_failed", "failed" -> R.string.call_out_failed
-                        "peer_disconnected" -> R.string.call_out_disconnected
-                        else -> R.string.call_out_ended
-                    }
+                    else -> endedLabelRes(reason, call.outgoing)
                 }
             )
         }
@@ -1294,4 +1283,25 @@ class CallController(
         private const val MAX_ICE_RESTARTS = 2
         private const val CALLEE_FAILSAFE_MS = 32_000L
     }
+}
+
+/** How a call that never connected ENDED, in one word.
+ *
+ *  Shared by the history line and the call screen. It used to live inside the
+ *  history writer alone, so the screen said the generic "ended" for every
+ *  reason there is: calling somebody who was already on another call ended with
+ *  "Завершён" on screen and turned into "Занято" only later, in the log, which
+ *  reads as a call that broke rather than one that was answered elsewhere
+ *  (report #683; the web and desktop clients have always named it on screen). */
+internal fun endedLabelRes(reason: String, outgoing: Boolean): Int = when (reason) {
+    "declined", "declinedElsewhere" -> R.string.call_out_declined
+    "cancelled" -> if (outgoing) R.string.call_out_cancelled else R.string.call_out_missed
+    "busy" -> R.string.call_out_busy
+    "expired", "unanswered" -> if (outgoing) R.string.call_out_no_answer else R.string.call_out_missed
+    "unreachable" -> R.string.call_out_unreachable
+    // "failed" is the web/desktop client's connect-timeout reason;
+    // "setup_failed" is ours. Same thing to a reader.
+    "setup_failed", "failed" -> R.string.call_out_failed
+    "peer_disconnected" -> R.string.call_out_disconnected
+    else -> R.string.call_out_ended
 }
