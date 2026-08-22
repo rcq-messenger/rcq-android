@@ -622,13 +622,22 @@ private fun RcqApp(session: Session) {
         // rebuilds on return, so the slow re-sort #9 is a separate keep-composed
         // change; this fixes the scroll-position #2.)
         val callMinimizedNow by session.calls.minimized.collectAsState()
+        // In a room, but not looking at it: Back leaves the SCREEN and the room
+        // keeps running with the microphone open (#684). The strip says so and
+        // takes one tap to get back.
+        val activeRoomNow by session.audioRooms.activeRoomId.collectAsState()
+        val roomBarVisible = activeRoomNow != null && !showAudioRooms
         val stateHolder = rememberSaveableStateHolder()
         // Everything below the minimised-call bar moves down by exactly its
         // height, so the bar never covers a screen's own header — which on the
         // chat is where Back lives.
         Box(
             Modifier.fillMaxSize().padding(
-                top = if (callMinimizedNow) app.rcq.android.ui.MINIMIZED_CALL_BAR_HEIGHT else 0.dp,
+                top = if (callMinimizedNow || roomBarVisible) {
+                    app.rcq.android.ui.MINIMIZED_CALL_BAR_HEIGHT
+                } else {
+                    0.dp
+                },
             ),
             contentAlignment = Alignment.Center,
         ) {
@@ -815,6 +824,16 @@ private fun RcqApp(session: Session) {
         if (callVisible && callMinimized) {
             app.rcq.android.ui.MinimizedCallBar(
                 controller = session.calls,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+        // Same strip, same place, for a room left behind. A call outranks it:
+        // the two cannot both be live (single-busy), and if they ever are, the
+        // call is the one with a countdown running.
+        if (roomBarVisible && !(callVisible && callMinimized)) {
+            app.rcq.android.ui.MinimizedRoomBar(
+                controller = session.audioRooms,
+                onOpen = { showAudioRooms = true },
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }

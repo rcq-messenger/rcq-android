@@ -328,6 +328,7 @@
     <string name="call_hangup">Завершить</string>
     <string name="call_ongoing">Идёт звонок</string>
     <string name="call_return">Нажмите, чтобы вернуться к звонку</string>
+    <string name="room_return">Нажмите, чтобы вернуться в комнату</string>
     <string name="call_upgrade_prompt">%1$s хочет включить видео</string>
     <string name="call_upgrade_accept">Включить</string>
     <string name="call_upgrade_decline">Не сейчас</string>
