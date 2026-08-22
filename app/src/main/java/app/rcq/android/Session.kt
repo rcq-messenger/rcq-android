@@ -1808,9 +1808,26 @@ class Session(context: Context) {
         val oldHost = serverHost()
         if (host == oldHost) throw IllegalArgumentException("primary_island")
         if (MultihomeStore.list(oldUin).none { it.host == host }) throw IllegalArgumentException("not_backup")
+        // ⚠ EVERY failure used to collapse into one word, "unreachable", and the
+        // screen said "the island is unreachable, nothing changed" whether the
+        // island had answered 401, answered 404, or never been reached at all
+        // (#687: three islands, all of them answering from the outside, all of
+        // them reported unreachable, and the report could not say more because
+        // the app did not know either). The cause now rides in the message:
+        // `no_account_here` when the island does not know this key, `island_said`
+        // plus the status when it answered with one, `no_route` when the address
+        // did not resolve, `unreachable` only when nothing answered at all.
         val cred = withContext(Dispatchers.IO) {
-            runCatching { Multihome.recoverOn(host, signingPriv(), signingPub()) }.getOrNull()
-        } ?: throw IllegalArgumentException("unreachable")
+            try {
+                Multihome.recoverOn(host, signingPriv(), signingPub())
+                    ?: throw IllegalArgumentException("no_account_here")
+            } catch (e: java.net.UnknownHostException) {
+                throw IllegalArgumentException("no_route")
+            } catch (e: java.io.IOException) {
+                val http = e.message?.takeIf { it.startsWith("HTTP ") }?.take(12)?.trim()
+                throw IllegalArgumentException(if (http != null) "island_said:$http" else "unreachable")
+            }
+        }
 
         // Token in hand — the swap below is pure local bookkeeping.
         socket.disconnect()
