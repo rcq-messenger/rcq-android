@@ -458,64 +458,6 @@ class RcqApi(
         deleteNoContent("/reports/mine/$id", authed = true)
     }
 
-    // ── stories (24h ephemeral, rcq-spec) ────────────────────────────
-    // Media reuses the sealed-blob path: encrypt → /media/upload → the
-    // resulting media_id + key go up with the story. Datetimes arrive as
-    // ISO-8601 strings.
-    data class StoryOut(
-        val id: String,
-        val owner_uin: Int?,            // null for an anonymous story (non-owner view)
-        val owner_nickname: String?,
-        val media_id: String,
-        val media_kind: String,         // "photo" | "video"
-        val media_key_b64: String,
-        val caption: String?,
-        val is_anonymous: Boolean = false,
-        val duration_sec: Int? = null,
-        val posted_at: String?,
-        val expires_at: String?,
-        val view_count: Int = 0,
-        val viewed: Boolean = false,
-    )
-    data class StoryGroupOut(
-        val owner_uin: Int?,
-        val owner_nickname: String?,
-        val is_anonymous: Boolean = false,
-        val stories: List<StoryOut> = emptyList(),
-    )
-    data class StoriesFeed(val groups: List<StoryGroupOut> = emptyList())
-    data class PostStoryBody(
-        val media_id: String,
-        val media_kind: String,
-        val media_key_b64: String,
-        val caption: String?,
-        val is_anonymous: Boolean,
-        val duration_sec: Int?,
-    )
-    data class PostedStory(val story: StoryOut)
-    data class StoryViewer(val viewer_uin: Int, val viewer_nickname: String?, val viewed_at: String?)
-    data class StoryViewers(val viewers: List<StoryViewer> = emptyList())
-
-    suspend fun storiesFeed(): StoriesFeed = withContext(Dispatchers.IO) {
-        get("/stories/feed", authed = true, StoriesFeed::class.java)
-    }
-
-    suspend fun postStory(body: PostStoryBody): PostedStory = withContext(Dispatchers.IO) {
-        post("/stories", gson.toJson(body), authed = true, PostedStory::class.java)
-    }
-
-    suspend fun markStoryViewed(storyId: String) = withContext(Dispatchers.IO) {
-        sendNoResult("POST", "/stories/$storyId/view", "{}", authed = true)
-    }
-
-    suspend fun storyViewers(storyId: String): StoryViewers = withContext(Dispatchers.IO) {
-        get("/stories/$storyId/viewers", authed = true, StoryViewers::class.java)
-    }
-
-    suspend fun deleteStory(storyId: String) = withContext(Dispatchers.IO) {
-        sendNoResult("DELETE", "/stories/$storyId", null, authed = true)
-    }
-
     // ── random chat (anonymous time-boxed 1:1 with a stranger) ───────
     // Matchmaking only — once matched, chat rides the normal /messages/sealed
     // path (we have the peer's identity_key from the match). /queue may 403
@@ -1146,8 +1088,8 @@ class RcqApi(
 
     // ── server capability discovery (GET /server/info, unauthenticated) ──
 
-    // nearby/random_chat/hood/stories default TRUE so a server that omits them
-    // (legacy) keeps the tabs visible; the operator hides a feature via the admin
+    // nearby/random_chat default TRUE so a server that omits them (legacy)
+    // keeps the entry visible; the operator hides a feature via the admin
     // console (Features). max_accounts_per_device caps the account switcher.
     data class ServerCapabilities(
         val uin_shop: Boolean = false,
@@ -1155,8 +1097,6 @@ class RcqApi(
         val registration_policy: String = "open",
         val nearby: Boolean = true,
         val random_chat: Boolean = true,
-        val hood: Boolean = true,
-        val stories: Boolean = true,
         // An island may run no report desk at all. Permissive default: an
         // older island that does not advertise the flag still accepts them.
         val reports: Boolean = true,
@@ -1311,45 +1251,6 @@ class RcqApi(
 
     suspend fun nearbyEndCheckin() = withContext(Dispatchers.IO) {
         sendNoResult("DELETE", "/nearby/checkin", null, authed = true)
-    }
-
-    // ── Hood Chat (district chat, per geohash bucket) ─────────────────
-    data class HoodMessage(
-        val id: Int,
-        val bucket_id: String = "",
-        val nickname: String = "",
-        val owner_uin: Int? = null,
-        val body: String = "",
-        val anonymous: Boolean = true,
-        val reply_to_id: Int? = null,
-        val reply_to_nickname: String? = null,
-        val reply_to_body: String? = null,
-        val deleted: Boolean = false,
-        val reactions: Map<String, String> = emptyMap(),
-        val created_at: String? = null,
-    )
-    data class HoodList(val messages: List<HoodMessage> = emptyList(), val bucket_count: Int = 0)
-    data class HoodSendBody(
-        val body: String,
-        val nickname: String,
-        val anonymous: Boolean,
-        val reply_to_id: Int? = null,
-        val reply_to_nickname: String? = null,
-        val reply_to_body: String? = null,
-    )
-
-    suspend fun hoodMessages(bucket: String): HoodList = withContext(Dispatchers.IO) {
-        val q = java.net.URLEncoder.encode(bucket, "UTF-8")
-        get("/hood/messages?bucket=$q", authed = true, HoodList::class.java)
-    }
-    suspend fun hoodSend(body: HoodSendBody): HoodMessage = withContext(Dispatchers.IO) {
-        request("POST", "/hood/send", gson.toJson(body), authed = true, HoodMessage::class.java)
-    }
-    suspend fun hoodDelete(id: Int) = withContext(Dispatchers.IO) {
-        sendNoResult("DELETE", "/hood/messages/$id", null, authed = true)
-    }
-    suspend fun hoodReact(id: Int, emoji: String) = withContext(Dispatchers.IO) {
-        sendNoResult("POST", "/hood/messages/$id/react", gson.toJson(mapOf("emoji" to emoji)), authed = true)
     }
 
     /** Partial profile/privacy update (PUT /me). Gson omits null fields,

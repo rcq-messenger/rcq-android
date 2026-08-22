@@ -31,7 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * matter (the route watchdog, both queue drains, the mute sync, the cross-island
  * refreshes), but every OTHER caller of `api` still authenticates as the real
  * user: the profile editor, linked devices, my numbers, my reports, the UIN
- * shop, an avatar upload, a story post. Some of those WRITE.
+ * shop, an avatar upload. Some of those WRITE.
  *
  * So the gate sits under the HTTP clients themselves and refuses. An IOException
  * is what every one of those paths already handles as "no network", which is

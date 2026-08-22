@@ -43,7 +43,6 @@
     <!-- Home: bottom bar -->
     <string name="home_bar_add">Додати</string>
     <string name="home_bar_qr">QR</string>
-    <string name="home_bar_random">Рандом</string>
     <string name="home_bar_nearby">Поруч</string>
     <string name="home_bar_settings">Налаштування</string>
     <!-- Home: sections -->
@@ -58,7 +57,7 @@
     <!-- Home: overflow + account menu -->
     <string name="home_menu_add_contact">Додати контакт</string>
     <string name="home_menu_search">Пошук</string>
-    <string name="home_menu_post_story">Опублікувати історію</string>
+    <string name="home_menu_random">Випадковий чат</string>
     <string name="home_menu_news">Новини</string>
     <string name="home_menu_outgoing">Надіслані запити</string>
     <string name="outgoing_title">Надіслані запити</string>
@@ -418,13 +417,6 @@
     <string name="nearby_stranger">Незнайомець поруч</string>
     <string name="nearby_add">Додати</string>
     <string name="nearby_request_sent">Запит у контакти надіслано</string>
-    <!-- Hood Chat (district) -->
-    <string name="hood_title">Чат району</string>
-    <string name="hood_here">%1$d поруч</string>
-    <string name="hood_unencrypted">Публічний, без шифрування</string>
-    <string name="hood_deleted">Повідомлення видалено</string>
-    <string name="hood_hint">Написати району…</string>
-    <string name="hood_send">Надіслати</string>
     <string name="settings_sec_history">Історія</string>
     <string name="settings_sec_about">Про застосунок</string>
     <string name="settings_sec_account">Акаунт</string>
@@ -776,22 +768,6 @@
     <string name="chat_typing">пише…</string>
     <string name="chat_saved_title">Збережені повідомлення</string>
     <string name="chat_saved_subtitle">Нотатки собі</string>
-    <!-- Stories -->
-    <string name="story_you">Ти</string>
-    <string name="story_anonymous">Анонім</string>
-    <string name="story_add">Додати</string>
-    <string name="story_post_title">Додати історію</string>
-    <string name="story_caption_hint">Підпис (необов\'язково)</string>
-    <string name="story_anonymous_post">Опублікувати анонімно</string>
-    <string name="story_post">Опублікувати</string>
-    <string name="story_posted">Історію опубліковано</string>
-    <string name="story_post_failed">Не вдалося опублікувати історію</string>
-    <string name="story_pick_failed">Не вдалося прочитати це зображення</string>
-    <string name="story_load_failed">Не вдалося завантажити цю історію</string>
-    <string name="story_viewers">Перегляди</string>
-    <string name="story_no_viewers">Переглядів поки немає</string>
-    <string name="story_delete">Видалити</string>
-    <string name="story_delete_q">Видалити цю історію?</string>
     <!-- Random chat -->
     <string name="random_title">Випадковий чат</string>
     <string name="random_intro_title">Поговори з незнайомцем</string>

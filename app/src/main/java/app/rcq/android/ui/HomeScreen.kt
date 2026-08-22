@@ -1,7 +1,6 @@
 package app.rcq.android.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
@@ -29,7 +27,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,7 +34,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Archive
@@ -277,23 +273,9 @@ internal fun HomeScreen(
     val favorites by LocalStores.favorites.collectAsState()
     val archived by LocalStores.archived.collectAsState()
     val unread by LocalStores.unread.collectAsState()
-    val storyGroups by session.stories.collectAsState()
     // Operator-toggleable features (admin console → Features); default true.
     val nearbyEnabled by session.nearbyEnabled.collectAsState()
     val randomEnabled by session.randomEnabled.collectAsState()
-    val storiesEnabled by session.storiesEnabled.collectAsState()
-
-    // Stories: a compressed JPEG awaiting the caption/anonymous sheet before
-    // posting, and the group currently open in the full-screen viewer.
-    var pendingStory by remember { mutableStateOf<ByteArray?>(null) }
-    var viewerGroup by remember { mutableStateOf<RcqApi.StoryGroupOut?>(null) }
-    val storyPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) scope.launch {
-            val jpeg = withContext(Dispatchers.IO) { compressImageFor(context, uri) }
-            if (jpeg != null) pendingStory = jpeg
-            else android.widget.Toast.makeText(context, context.getString(R.string.story_pick_failed), android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
 
     var showAdd by AddSheet.open
     var showQr by remember { mutableStateOf(false) }
@@ -426,8 +408,10 @@ internal fun HomeScreen(
                 onOpenSaved = onOpenSaved,
                 onOpenAudioRooms = onOpenAudioRooms,
                 onOpenRadio = onOpenRadio,
-                onPostStory = { storyPicker.launch("image/*") },
-                showPostStory = storiesEnabled,
+                onOpenRandom = onOpenRandom,
+                // Random chat is a secondary destination and an operator can
+                // switch it off entirely (admin console -> Features).
+                showRandom = randomEnabled,
                 onToggleBypass = { session.setObfuscation(it) },
                 onComingSoon = { comingSoon = it },
                 onSwitchAccount = onSwitchAccount,
@@ -479,16 +463,6 @@ internal fun HomeScreen(
                         PushNudgeBanner(
                             onSetup = { app.rcq.android.push.Push.openNtfyInstall(context) },
                             onDismiss = { LocalStores.dismissPushNudge() },
-                        )
-                    }
-                }
-                if (storyGroups.isNotEmpty() && storiesEnabled) {
-                    item(key = "stories") {
-                        StoriesStrip(
-                            groups = storyGroups,
-                            ownUin = session.uin,
-                            onAdd = { storyPicker.launch("image/*") },
-                            onOpen = { viewerGroup = it },
                         )
                     }
                 }
@@ -663,11 +637,9 @@ internal fun HomeScreen(
             BottomBar(
                 onAdd = { showAdd = true },
                 onQr = { showQr = true },
-                onRandom = onOpenRandom,
                 onNearby = onOpenNearby,
                 onSettings = onOpenSettings,
-                // Operator toggles Random / Nearby via the admin console (Features).
-                showRandom = randomEnabled,
+                // Operator toggles Nearby via the admin console (Features).
                 showNearby = nearbyEnabled,
             )
         }
@@ -705,10 +677,6 @@ internal fun HomeScreen(
                     onClearThread = { clearGroupTarget = it }),
                 onDismiss = { previewGroup = null },
             )
-        }
-        // Full-screen story viewer overlays everything (incl. the bottom bar).
-        viewerGroup?.let { g ->
-            StoryViewer(session = session, group = g, onClose = { viewerGroup = null })
         }
     }
 
@@ -843,94 +811,6 @@ internal fun HomeScreen(
             cancelLabel = stringResource(R.string.common_ok),
         )
     }
-    // Confirm + caption/anonymous before posting a picked photo as a story.
-    pendingStory?.let { jpeg ->
-        var caption by remember { mutableStateOf("") }
-        var anon by remember { mutableStateOf(false) }
-        RcqSheet(onDismiss = { pendingStory = null }, title = stringResource(R.string.story_post_title)) {
-            RcqField(
-                value = caption,
-                onValueChange = { caption = it.take(280) },
-                placeholder = stringResource(R.string.story_caption_hint),
-                // A caption wraps: it was never a single-line field.
-                singleLine = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            SheetGap(8)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { anon = !anon },
-            ) {
-                Checkbox(checked = anon, onCheckedChange = { anon = it })
-                Text(stringResource(R.string.story_anonymous_post), color = c.textPrimary, fontSize = 14.sp)
-            }
-            SheetGap()
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { pendingStory = null }) {
-                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
-                }
-                TextButton(onClick = {
-                    val cap = caption.trim()
-                    val a = anon
-                    pendingStory = null
-                    scope.launch {
-                        runCatching { session.postPhotoStory(jpeg, cap, a) }
-                            .onSuccess { android.widget.Toast.makeText(context, context.getString(R.string.story_posted), android.widget.Toast.LENGTH_SHORT).show() }
-                            .onFailure { android.widget.Toast.makeText(context, context.getString(R.string.story_post_failed), android.widget.Toast.LENGTH_SHORT).show() }
-                    }
-                }) { Text(stringResource(R.string.story_post), color = c.accent) }
-            }
-        }
-    }
-}
-
-/** Horizontal ring strip at the top of Home (iOS stories row parity). First
- *  tile adds a story; each following tile is one poster's group — an accent
- *  ring while it has an unwatched story, grey once all are seen. */
-@Composable
-private fun StoriesStrip(
-    groups: List<RcqApi.StoryGroupOut>,
-    ownUin: Int?,
-    onAdd: () -> Unit,
-    onOpen: (RcqApi.StoryGroupOut) -> Unit,
-) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp),
-    ) {
-        item(key = "story-add") { StoryTile(label = stringResource(R.string.story_add), initial = "+", ring = false, onClick = onAdd) }
-        items(groups, key = { it.owner_uin ?: (it.stories.firstOrNull()?.id ?: "anon") }) { g ->
-            val isOwn = g.owner_uin != null && g.owner_uin == ownUin
-            val unwatched = g.stories.any { !it.viewed }
-            val name = when {
-                isOwn -> stringResource(R.string.story_you)
-                g.is_anonymous || g.owner_uin == null -> stringResource(R.string.story_anonymous)
-                else -> g.owner_nickname ?: "${g.owner_uin}"
-            }
-            StoryTile(label = name, initial = name.take(1).uppercase(), ring = unwatched, onClick = { onOpen(g) })
-        }
-    }
-}
-
-@Composable
-private fun StoryTile(label: String, initial: String, ring: Boolean, onClick: () -> Unit) {
-    val c = RcqTheme.colors
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(66.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(vertical = 2.dp),
-    ) {
-        Box(
-            Modifier.size(60.dp).clip(CircleShape).background(if (ring) c.accent else c.divider),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(53.dp).clip(CircleShape).background(c.bgSecondary), contentAlignment = Alignment.Center) {
-                Text(initial, color = c.textPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = c.textSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
 }
 
 /** Saved Messages in the chat list. Same shape as a contact row so it does not
@@ -1028,9 +908,9 @@ private fun groupActions(
 
 /** Home top bar, iOS ContactListView parity: left = account switcher,
  *  centre = status picker + nick + UIN (no '#', no presence dot), right =
- *  overflow menu of the things you can do (add contact, search, story,
- *  news, saved). Items whose screens aren't built yet route to a
- *  "coming soon" sheet. */
+ *  overflow menu of the things you can do (add contact, search, news, saved,
+ *  and the secondary destinations: audio rooms, radio, random chat). Items
+ *  whose screens aren't built yet route to a "coming soon" sheet. */
 @Composable
 private fun HomeHeader(
     /** Foregrounds for everything drawn DIRECTLY on the wallpaper. Equal to
@@ -1063,8 +943,8 @@ private fun HomeHeader(
     onOpenSaved: () -> Unit,
     onOpenAudioRooms: () -> Unit,
     onOpenRadio: () -> Unit,
-    onPostStory: () -> Unit,
-    showPostStory: Boolean = true,
+    onOpenRandom: () -> Unit,
+    showRandom: Boolean = true,
     onToggleBypass: (Boolean) -> Unit,
     onComingSoon: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
@@ -1342,13 +1222,6 @@ private fun HomeHeader(
                     leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onSearch() },
                 )
-                if (showPostStory) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.home_menu_post_story), color = c.textPrimary) },
-                        leadingIcon = { Icon(Icons.Filled.AddAPhoto, null, tint = c.accent) },
-                        onClick = { overflowMenu = false; onPostStory() },
-                    )
-                }
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -1378,6 +1251,18 @@ private fun HomeHeader(
                     leadingIcon = { Icon(Icons.Filled.Sensors, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenRadio() },
                 )
+                // Random chat used to sit in the bottom bar, next to the things
+                // you reach every day. It is a side attraction, not one of
+                // those, so it lives here with the other optional destinations
+                // (founder's call). The operator flag still decides whether it
+                // is offered at all.
+                if (showRandom) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.home_menu_random), color = c.textPrimary) },
+                        leadingIcon = { Icon(Icons.Filled.Shuffle, null, tint = c.accent) },
+                        onClick = { overflowMenu = false; onOpenRandom() },
+                    )
+                }
             }
         }
     }
@@ -1827,7 +1712,7 @@ private fun ConnectingState(stealth: Boolean = false) {
 }
 
 @Composable
-private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onRandom: () -> Unit, onNearby: () -> Unit, onSettings: () -> Unit, showRandom: Boolean = true, showNearby: Boolean = true) {
+private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onNearby: () -> Unit, onSettings: () -> Unit, showNearby: Boolean = true) {
     val c = RcqTheme.colors
     Row(
         Modifier
@@ -1841,9 +1726,10 @@ private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onRandom: () -> Unit,
     ) {
         BarButton(Icons.Filled.PersonAdd, stringResource(R.string.home_bar_add), onAdd)
         BarButton(Icons.Filled.QrCode2, stringResource(R.string.home_bar_qr), onQr)
-        // Random/chat-roulette is a public-network feature; hide it on org
-        // islands / self-host (founder's call). Nearby stays everywhere (mesh).
-        if (showRandom) BarButton(Icons.Filled.Shuffle, stringResource(R.string.home_bar_random), onRandom)
+        // Nearby is a mesh feature and stays on the bar; the operator can still
+        // switch it off (admin console -> Features), and then the bar is three
+        // buttons wide instead of four. Each one takes an equal share of the
+        // row, so a hidden entry closes up rather than leaving a hole.
         if (showNearby) BarButton(Icons.Filled.NearMe, stringResource(R.string.home_bar_nearby), onNearby)
         BarButton(Icons.Filled.Settings, stringResource(R.string.home_bar_settings), onSettings)
     }
@@ -1858,8 +1744,8 @@ private fun androidx.compose.foundation.layout.RowScope.BarButton(icon: ImageVec
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Icon(icon, contentDescription = label, tint = c.textPrimary, modifier = Modifier.size(22.dp))
-        // One line, always. Five labels share the width, and the longest of
-        // them ("Настройки") wrapped onto a second line on a device with the
+        // One line, always. Up to four labels share the width, and the longest
+        // of them ("Настройки") wrapped onto a second line on a device with the
         // system font scaled up — the tab then stood a row taller than its
         // neighbours (vss). The cap lets the label grow with the user's font
         // setting up to a point and no further; the icon above it carries the

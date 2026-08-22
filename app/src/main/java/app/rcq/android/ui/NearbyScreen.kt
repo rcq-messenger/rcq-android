@@ -34,7 +34,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -66,14 +65,6 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
     val displayName by controller.displayName.collectAsState()
 
     val active = state is NearbyController.State.Active
-    val activeBucket = (state as? NearbyController.State.Active)?.bucketId
-    // Operator can hide Hood Chat via the admin console (Features).
-    val hoodEnabled by session.hoodEnabled.collectAsState()
-
-    // Nested nav into the bucket-scoped district screens.
-    var hoodChatBucket by remember { mutableStateOf<String?>(null) }
-    hoodChatBucket?.let { return HoodChatScreen(session, it) { hoodChatBucket = null } }
-
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val granted = result.values.any { it }
         controller.start(granted)
@@ -118,9 +109,6 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
                 is NearbyController.State.Active -> {
                     val exp = (state as NearbyController.State.Active).expiresAtMs
                     CountdownLabel(exp)
-                    // Full-width stacked (was a 2-up Row where "Announcements"
-                    // overflowed the half-width capsule) so both labels fit.
-                    if (hoodEnabled) CapsuleButton(stringResource(R.string.hood_title), modifier = Modifier.fillMaxWidth()) { hoodChatBucket = activeBucket }
                     CapsuleButton(stringResource(R.string.nearby_stop), modifier = Modifier.fillMaxWidth()) { controller.stop() }
                 }
                 is NearbyController.State.Pending -> {

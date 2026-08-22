@@ -216,8 +216,8 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
  *  status flower everyone already knows, so nothing regresses for the people
  *  who never set one.
  *
- *  ⚠ Deliberately NOT used where strangers meet: Random, Nearby, the hood, and
- *  an unaccepted contact request all keep the glyph. A picture is for people
+ *  ⚠ Deliberately NOT used where strangers meet: Random, Nearby and an
+ *  unaccepted contact request all keep the glyph. A picture is for people
  *  you already have a relationship with, and an incoming request is otherwise
  *  a way to push an image onto someone's screen.
  */

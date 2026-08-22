@@ -51,7 +51,6 @@
     <!-- Home: bottom bar -->
     <string name="home_bar_add">Add</string>
     <string name="home_bar_qr">QR</string>
-    <string name="home_bar_random">Random</string>
     <string name="home_bar_nearby">Nearby</string>
     <string name="home_bar_settings">Settings</string>
 
@@ -68,7 +67,7 @@
     <!-- Home: overflow + account menu -->
     <string name="home_menu_add_contact">Add contact</string>
     <string name="home_menu_search">Search</string>
-    <string name="home_menu_post_story">Post story</string>
+    <string name="home_menu_random">Random chat</string>
     <string name="home_menu_news">News</string>
     <string name="home_menu_outgoing">Sent requests</string>
     <string name="outgoing_title">Sent requests</string>
@@ -435,13 +434,6 @@
     <string name="nearby_stranger">Stranger nearby</string>
     <string name="nearby_add">Add</string>
     <string name="nearby_request_sent">Contact request sent</string>
-    <!-- Hood Chat (district) -->
-    <string name="hood_title">District chat</string>
-    <string name="hood_here">%1$d here</string>
-    <string name="hood_unencrypted">Public, not encrypted</string>
-    <string name="hood_deleted">Message deleted</string>
-    <string name="hood_hint">Message the district…</string>
-    <string name="hood_send">Send</string>
     <string name="settings_sec_history">History</string>
     <string name="settings_sec_about">About</string>
     <string name="settings_sec_account">Account</string>
@@ -808,22 +800,6 @@
     <string name="chat_typing">typing…</string>
     <string name="chat_saved_title">Saved messages</string>
     <string name="chat_saved_subtitle">Notes to yourself</string>
-    <!-- Stories -->
-    <string name="story_you">You</string>
-    <string name="story_anonymous">Anonymous</string>
-    <string name="story_add">Add</string>
-    <string name="story_post_title">Post a story</string>
-    <string name="story_caption_hint">Add a caption (optional)</string>
-    <string name="story_anonymous_post">Post anonymously</string>
-    <string name="story_post">Post</string>
-    <string name="story_posted">Story posted</string>
-    <string name="story_post_failed">Couldn\'t post story</string>
-    <string name="story_pick_failed">Couldn\'t read that image</string>
-    <string name="story_load_failed">Couldn\'t load this story</string>
-    <string name="story_viewers">Viewers</string>
-    <string name="story_no_viewers">No views yet</string>
-    <string name="story_delete">Delete</string>
-    <string name="story_delete_q">Delete this story?</string>
     <!-- Random chat -->
     <string name="random_title">Random chat</string>
     <string name="random_intro_title">Talk to a stranger</string>

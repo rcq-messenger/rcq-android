@@ -50,7 +50,6 @@
     <!-- Home: bottom bar -->
     <string name="home_bar_add">Добавить</string>
     <string name="home_bar_qr">QR</string>
-    <string name="home_bar_random">Рандом</string>
     <string name="home_bar_nearby">Рядом</string>
     <string name="home_bar_settings">Настройки</string>
 
@@ -67,7 +66,7 @@
     <!-- Home: overflow + account menu -->
     <string name="home_menu_add_contact">Добавить контакт</string>
     <string name="home_menu_search">Поиск</string>
-    <string name="home_menu_post_story">Опубликовать историю</string>
+    <string name="home_menu_random">Случайный чат</string>
     <string name="home_menu_news">Новости</string>
     <string name="home_menu_outgoing">Исходящие заявки</string>
     <string name="outgoing_title">Исходящие заявки</string>
@@ -431,13 +430,6 @@
     <string name="nearby_stranger">Незнакомец рядом</string>
     <string name="nearby_add">Добавить</string>
     <string name="nearby_request_sent">Запрос в контакты отправлен</string>
-    <!-- Hood Chat (district) -->
-    <string name="hood_title">Чат района</string>
-    <string name="hood_here">%1$d рядом</string>
-    <string name="hood_unencrypted">Публичный, без шифрования</string>
-    <string name="hood_deleted">Сообщение удалено</string>
-    <string name="hood_hint">Написать в район…</string>
-    <string name="hood_send">Отправить</string>
     <string name="settings_sec_history">История</string>
     <string name="settings_sec_about">О приложении</string>
     <string name="settings_sec_account">Аккаунт</string>
@@ -804,22 +796,6 @@
     <string name="chat_typing">печатает…</string>
     <string name="chat_saved_title">Заметки</string>
     <string name="chat_saved_subtitle">Заметки для себя</string>
-    <!-- Stories -->
-    <string name="story_you">Вы</string>
-    <string name="story_anonymous">Аноним</string>
-    <string name="story_add">Добавить</string>
-    <string name="story_post_title">Добавить историю</string>
-    <string name="story_caption_hint">Подпись (необязательно)</string>
-    <string name="story_anonymous_post">Анонимно</string>
-    <string name="story_post">Опубликовать</string>
-    <string name="story_posted">История опубликована</string>
-    <string name="story_post_failed">Не удалось опубликовать</string>
-    <string name="story_pick_failed">Не удалось прочитать изображение</string>
-    <string name="story_load_failed">Не удалось загрузить историю</string>
-    <string name="story_viewers">Просмотры</string>
-    <string name="story_no_viewers">Пока нет просмотров</string>
-    <string name="story_delete">Удалить</string>
-    <string name="story_delete_q">Удалить историю?</string>
     <!-- Random chat -->
     <string name="random_title">Случайный чат</string>
     <string name="random_intro_title">Поговорить с незнакомцем</string>

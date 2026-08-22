@@ -15,7 +15,7 @@ Censorship circumvention is built into the app rather than left to the user.
 **Status: open beta.** Published outside Google Play by sideloading; the app
 self-updates from a manifest, trying `dl.rcq.app/android/latest.json` first and
 `rcq.app/android/latest.json` after it. Messages, groups, calls and media are
-cross-platform with the iOS and web clients; stories are on the phones only.
+cross-platform with the iOS and web clients.
 
 ## What is in here
 
@@ -25,7 +25,7 @@ cross-platform with the iOS and web clients; stories are on the phones only.
 | `app/src/main/java/app/rcq/android/net` | REST + WebSocket client, and `SingBoxTransport`, the embedded circumvention transport |
 | `app/src/main/java/app/rcq/android/push` | UnifiedPush connector, plus `push/embedded`: our own in-app UnifiedPush distributor |
 | `app/src/main/java/app/rcq/android/ui` | Compose screens |
-| `app/src/main/java/app/rcq/android/nearby` | Nearby, district chat, and Radio Chat — the offline mesh over BLE + Wi-Fi Direct |
+| `app/src/main/java/app/rcq/android/nearby` | Nearby, plus Radio Chat: the offline mesh over BLE + Wi-Fi Direct |
 | `app/src/main/java/app/rcq/android/backup` | The `.rcqbak` archive: the same file the iOS and web clients read |
 | `docs/` | `REPRODUCIBLE-BUILDS.md` — how to check a published APK against this source |
 
