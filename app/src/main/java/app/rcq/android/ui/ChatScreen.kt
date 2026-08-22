@@ -39,6 +39,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -3583,7 +3584,15 @@ private fun AlbumPagerViewer(
                                 contentDescription = null,
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier.fillMaxSize()
-                                    .transformable(transform)
+                                    // ⚠ Seen with my own eyes: with a plain
+                                    // transformable() the pager never turned a
+                                    // page. Any drag past touch slop is a pan to
+                                    // it, consumed before the pager sees it. At
+                                    // scale 1 there is nothing to pan, so the
+                                    // drag is handed on: one finger turns pages,
+                                    // two fingers zoom, and a zoomed picture pans
+                                    // instead of flipping.
+                                    .transformable(transform, canPan = { scale > 1f })
                                     .graphicsLayer(
                                         scaleX = scale, scaleY = scale,
                                         translationX = offset.x, translationY = offset.y,
@@ -3617,7 +3626,9 @@ private fun AlbumPagerViewer(
                 Text(
                     "${pager.currentPage + 1} / ${photos.size}",
                     color = Color.White, fontSize = 13.sp,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)
+                    // The dialog is laid out under the gesture bar; 28dp put the
+                    // counter right on the handle.
+                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 40.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(Color.Black.copy(alpha = 0.5f))
                         .padding(horizontal = 10.dp, vertical = 4.dp),
