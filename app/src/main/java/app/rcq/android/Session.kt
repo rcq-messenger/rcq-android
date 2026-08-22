@@ -496,6 +496,28 @@ class Session(context: Context) {
 
     private val _nearbyEnabled = MutableStateFlow(cachedCaps?.nearby ?: true)
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
+
+    /** Apply an island's answer (live or cached) to the five surface flags. */
+    private fun applyCaps(c: RcqApi.ServerCapabilities) {
+        _uinShopEnabled.value = c.uin_shop
+        _hallOfFameEnabled.value = c.hall_of_fame
+        _nearbyEnabled.value = c.nearby
+        _randomEnabled.value = c.random_chat
+        _reportsEnabled.value = c.reports
+    }
+
+    /** After an account switch the flags still say what the PREVIOUS island
+     *  said. Re-seed from the new island's cached answer, or fall back to
+     *  the permissive default for an island never asked; the live answer in
+     *  start() overwrites either way. */
+    private fun reseedCaps() {
+        // ⚠ Not ServerCapabilities(): its false defaults mean "the JSON
+        // omitted the field", while the never-asked default here is the
+        // permissive one the flags are born with.
+        applyCaps(capsCache(serverHost()) ?: RcqApi.ServerCapabilities(
+            uin_shop = true, hall_of_fame = true, nearby = true, random_chat = true, reports = true,
+        ))
+    }
     private val _randomEnabled = MutableStateFlow(cachedCaps?.random_chat ?: true)
     val randomEnabled: StateFlow<Boolean> = _randomEnabled.asStateFlow()
 
@@ -1165,6 +1187,7 @@ class Session(context: Context) {
         activeThread = null
         started = false
         everConnected = false
+        reseedCaps()
     }
 
     /** Load local history, open the WebSocket, drain the offline queue,
@@ -1611,6 +1634,9 @@ class Session(context: Context) {
                 // The socket is back: hand over the call signals it refused
                 // while it was down, `call_end` first among them (#699).
                 if (up) flushCallOutbox()
+                // And tell the island we are still in the room we think we
+                // are in; it may have evicted us while the socket was gone.
+                if (up && everConnected) audioRooms.onSocketUp()
                 if (up) {
                     // ⚠⚠ There used to be a blanket five-second mute here, armed
                     // on EVERY connect including the first one of a session, to
@@ -1721,14 +1747,17 @@ class Session(context: Context) {
         // (the flags were already seeded from `cachedCaps` at construction)
         scope.launch {
             runCatching {
-                val caps = api.serverInfo().capabilities
-                _uinShopEnabled.value = caps.uin_shop
-                _hallOfFameEnabled.value = caps.hall_of_fame
-                _nearbyEnabled.value = caps.nearby
-                _randomEnabled.value = caps.random_chat
-                _reportsEnabled.value = caps.reports
+                // Pin the island this answer is FOR. An account switch while
+                // the request is in flight rebinds the session to another
+                // island, and the old island's answer would then overwrite the
+                // new one's flags and be cached under the wrong host.
+                val askedHost = serverHost()
+                val askedApi = api
+                val caps = askedApi.serverInfo().capabilities
+                if (serverHost() != askedHost || api !== askedApi) return@launch
+                applyCaps(caps)
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
-                rememberCaps(serverHost(), caps)
+                rememberCaps(askedHost, caps)
             }
         }
         // Advertise sender-keys support so others broadcast to us (encrypt-once)

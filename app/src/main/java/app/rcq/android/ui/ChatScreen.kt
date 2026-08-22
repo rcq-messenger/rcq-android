@@ -125,6 +125,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -1558,22 +1559,29 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     albumViewer?.let { (items, idx) ->
+        // Name and type follow the page: a clip is an .mp4 in Movies/RCQ, a
+        // picture a .jpg (or .gif) in Pictures/RCQ, like the single viewers.
+        fun nameAndMime(m: ChatMessage, b: ByteArray): Pair<String, String> = when {
+            m.kind == "video" -> "RCQ_${System.currentTimeMillis()}.mp4" to "video/mp4"
+            b.isGif() -> "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
+            else -> "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
+        }
         AlbumPagerViewer(
             session, items, idx,
-            onShare = {
-                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
-                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
-                MediaSaver.share(context, it, name, mime)
+            onShare = { m, b ->
+                val (name, mime) = nameAndMime(m, b)
+                MediaSaver.share(context, b, name, mime)
             },
-            onSave = {
-                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
-                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
+            onSave = { m, b ->
+                val (name, mime) = nameAndMime(m, b)
                 runSave {
-                    val ok = MediaSaver.saveToGallery(context, it, name, mime)
-                    val msg = if (ok) context.getString(R.string.media_saved_to, "Pictures/RCQ") else saveFailToast
+                    val ok = MediaSaver.saveToGallery(context, b, name, mime)
+                    val dir = if (m.kind == "video") "Movies/RCQ" else "Pictures/RCQ"
+                    val msg = if (ok) context.getString(R.string.media_saved_to, dir) else saveFailToast
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
+            onPlayVideo = { fullscreenVideo = it },
             onDismiss = { albumViewer = null },
         )
     }
@@ -3151,8 +3159,9 @@ private fun AlbumTile(
                 // the single tapped file was why only what the grid happened to
                 // show could be looked at: a batch of ten had four reachable
                 // and six that existed nowhere in the interface (#691, #675,
-                // #689). Videos keep their own player.
-                if (onOpenAlbum != null && !isVideo) { onOpenAlbum(); return@combinedClickable }
+                // #689). A clip opens the album at its page as well: the
+                // pager shows its poster and hands it to the player on tap.
+                if (onOpenAlbum != null) { onOpenAlbum(); return@combinedClickable }
                 val mid = m.mediaId; val key = m.mediaKey
                 if (mid != null && key != null) scope.launch {
                     // An album tile used to hand BOTH kinds to an external app,
@@ -3539,117 +3548,159 @@ private fun blurForSpoiler(src: Bitmap): Bitmap {
     return Bitmap.createScaledBitmap(small, outW, outH, true)
 }
 
-/** The whole album, full screen, one picture per page.
+/** The whole album, full screen, one item per page.
  *
- *  ⚠ The grid draws four tiles however many pictures the batch holds, and a tap
+ *  ⚠ The grid draws four tiles however many items the batch holds, and a tap
  *  used to open the ONE file under the finger. So a batch of ten had four you
  *  could look at and six that existed nowhere in the interface: no swipe, no
- *  list, nothing (#691, #675, #689). Every picture of the batch is a page here,
- *  the counter says where you are, and each page fetches its own bytes when it
+ *  list, nothing (#691, #675, #689). Every item of the batch is a page here,
+ *  the counter says where you are, and a photo page fetches its bytes when it
  *  comes into view rather than pulling ten files down to open one.
  *
- *  Videos are not paged: they have their own player, and mixing a video page
- *  into a photo swipe would put a still frame where a play button belongs. */
+ *  A video is a page too, as its poster with a play disc: the first cut paged
+ *  photos only, and a batch of five clips, or four clips ahead of two photos,
+ *  had the same unreachable tail as before (found in review). Tapping the disc
+ *  hands the clip to the video player above this dialog; closing the player
+ *  lands back on the same page. Nothing of a clip is fetched until asked. */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumPagerViewer(
     session: Session,
     items: List<ChatMessage>,
     startIndex: Int,
-    onShare: (ByteArray) -> Unit = {},
-    onSave: (ByteArray) -> Unit = {},
+    onShare: (ChatMessage, ByteArray) -> Unit = { _, _ -> },
+    onSave: (ChatMessage, ByteArray) -> Unit = { _, _ -> },
+    onPlayVideo: (ByteArray) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
-    val photos = remember(items) { items.filter { it.kind != "video" } }
-    if (photos.isEmpty()) { onDismiss(); return }
-    val start = remember(items, startIndex) {
-        // The tapped tile's place among the PHOTOS, since videos are dropped.
-        val tapped = items.getOrNull(startIndex)
-        photos.indexOfFirst { it.id == tapped?.id }.coerceAtLeast(0)
-    }
+    if (items.isEmpty()) { onDismiss(); return }
+    val scope = rememberCoroutineScope()
     val pager = androidx.compose.foundation.pager.rememberPagerState(
-        initialPage = start, pageCount = { photos.size },
+        initialPage = startIndex.coerceIn(0, items.size - 1), pageCount = { items.size },
     )
+    // One copy of each page's bytes, shared between the page and the
+    // save/share buttons. Two produceState()s on the same id used to race
+    // past the cache and download the same blob twice (found in review).
+    val loaded = remember(items) { mutableStateMapOf<String, ByteArray>() }
+    suspend fun bytesOf(m: ChatMessage): ByteArray? {
+        loaded[m.id]?.let { return it }
+        val mid = m.mediaId ?: return null
+        val key = m.mediaKey ?: return null
+        return session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })?.also { loaded[m.id] = it }
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             androidx.compose.foundation.pager.HorizontalPager(
                 state = pager,
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
-                val m = photos[page]
-                val bytes by produceState<ByteArray?>(initialValue = null, m.id) {
-                    val mid = m.mediaId; val key = m.mediaKey
-                    value = if (mid != null && key != null) {
-                        session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
-                    } else {
-                        null
+                val m = items[page]
+                val isVideo = m.kind == "video"
+                if (isVideo) {
+                    // Poster from the bubble's own thumbnail; the clip itself
+                    // is fetched only when the disc is tapped.
+                    val poster = remember(m.id) {
+                        m.thumbB64?.takeIf { it.isNotEmpty() }?.let {
+                            runCatching {
+                                val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP)
+                                BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
+                            }.getOrNull()
+                        }
                     }
-                }
-                var scale by remember(m.id) { mutableStateOf(1f) }
-                var offset by remember(m.id) { mutableStateOf(Offset.Zero) }
-                val transform = rememberTransformableState { zoomChange, panChange, _ ->
-                    scale = (scale * zoomChange).coerceIn(1f, 5f)
-                    offset = if (scale > 1f) offset + panChange else Offset.Zero
-                }
-                Box(
-                    Modifier.fillMaxSize().clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onDismiss,
-                    ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val b = bytes
-                    when {
-                        b == null -> CircularProgressIndicator(color = RcqTheme.colors.accent)
-                        b.isGif() -> SafeAnimatedGif(b, Modifier.fillMaxWidth())
-                        else -> rememberSampledBitmap(b, maxPx = 2560)?.let { img ->
-                            Image(
-                                bitmap = img,
-                                contentDescription = null,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize()
-                                    // ⚠ Seen with my own eyes: with a plain
-                                    // transformable() the pager never turned a
-                                    // page. Any drag past touch slop is a pan to
-                                    // it, consumed before the pager sees it. At
-                                    // scale 1 there is nothing to pan, so the
-                                    // drag is handed on: one finger turns pages,
-                                    // two fingers zoom, and a zoomed picture pans
-                                    // instead of flipping.
-                                    .transformable(transform, canPan = { scale > 1f })
-                                    .graphicsLayer(
-                                        scaleX = scale, scaleY = scale,
-                                        translationX = offset.x, translationY = offset.y,
-                                    ),
-                            )
+                    var fetching by remember(m.id) { mutableStateOf(false) }
+                    Box(
+                        Modifier.fillMaxSize().clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onDismiss,
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (poster != null) {
+                            Image(bitmap = poster, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                        }
+                        if (fetching) {
+                            CircularProgressIndicator(color = RcqTheme.colors.accent)
+                        } else {
+                            ViewerAction(Icons.Filled.PlayArrow, stringResource(R.string.chat_play_video), Modifier.size(72.dp)) {
+                                if (fetching) return@ViewerAction
+                                fetching = true
+                                scope.launch {
+                                    val b = bytesOf(m)
+                                    fetching = false
+                                    if (b != null) onPlayVideo(b)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val bytes by produceState<ByteArray?>(initialValue = loaded[m.id], m.id) {
+                        value = bytesOf(m)
+                    }
+                    var scale by remember(m.id) { mutableStateOf(1f) }
+                    var offset by remember(m.id) { mutableStateOf(Offset.Zero) }
+                    val transform = rememberTransformableState { zoomChange, panChange, _ ->
+                        scale = (scale * zoomChange).coerceIn(1f, 5f)
+                        offset = if (scale > 1f) offset + panChange else Offset.Zero
+                    }
+                    Box(
+                        Modifier.fillMaxSize().clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onDismiss,
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val b = bytes
+                        when {
+                            b == null -> CircularProgressIndicator(color = RcqTheme.colors.accent)
+                            b.isGif() -> SafeAnimatedGif(b, Modifier.fillMaxWidth())
+                            else -> rememberSampledBitmap(b, maxPx = 2560)?.let { img ->
+                                Image(
+                                    bitmap = img,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
+                                        // ⚠ Seen with my own eyes: with a plain
+                                        // transformable() the pager never turned a
+                                        // page. Any drag past touch slop is a pan to
+                                        // it, consumed before the pager sees it. At
+                                        // scale 1 there is nothing to pan, so the
+                                        // drag is handed on: one finger turns pages,
+                                        // two fingers zoom, and a zoomed picture pans
+                                        // instead of flipping.
+                                        .transformable(transform, canPan = { scale > 1f })
+                                        .graphicsLayer(
+                                            scaleX = scale, scaleY = scale,
+                                            translationX = offset.x, translationY = offset.y,
+                                        ),
+                                )
+                            }
                         }
                     }
                 }
             }
-            val current = photos.getOrNull(pager.currentPage)
-            val currentBytes by produceState<ByteArray?>(initialValue = null, current?.id) {
-                val mid = current?.mediaId; val key = current?.mediaKey
-                value = if (mid != null && key != null) {
-                    session.fetchImage(mid, key, current.groupId?.let { session.groupHost(it) })
-                } else {
-                    null
-                }
-            }
+            val current = items.getOrNull(pager.currentPage)
             ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
                 Modifier.align(Alignment.TopEnd).padding(16.dp), onDismiss)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
-            ) {
-                currentBytes?.let { cb ->
-                    ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(cb) }
-                    ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(cb) }
+            if (current != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                ) {
+                    // Save and share act on the page you are looking at. A photo
+                    // page has its bytes already; a clip is fetched on the tap.
+                    ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) {
+                        scope.launch { bytesOf(current)?.let { onSave(current, it) } }
+                    }
+                    ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
+                        scope.launch { bytesOf(current)?.let { onShare(current, it) } }
+                    }
                 }
             }
-            if (photos.size > 1) {
+            if (items.size > 1) {
                 Text(
-                    "${pager.currentPage + 1} / ${photos.size}",
+                    "${pager.currentPage + 1} / ${items.size}",
                     color = Color.White, fontSize = 13.sp,
                     // The dialog is laid out under the gesture bar; 28dp put the
                     // counter right on the handle.
