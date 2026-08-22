@@ -178,12 +178,57 @@ class Session(context: Context) {
         },
     )
 
+    /** Same-island call signals owed to the peer while the socket is down.
+     *
+     *  ⚠ `socket.send` on a closed socket drops the frame and says so, and for
+     *  a call that is not a lost optimization. A dropped `call_end` leaves the
+     *  island believing both parties are still talking: the other end keeps
+     *  counting the call it can no longer hear, and every next offer either way
+     *  is answered "busy" until the registration goes stale, up to ten minutes
+     *  (#699, found by calling from the desktop and hanging up on the phone).
+     *  The web client has held these since August; the phone dropped them.
+     *  Held here, flushed the moment the socket comes back. */
+    private val callOutbox = java.util.Collections.synchronizedList(mutableListOf<JsonObject>())
+
+    /** Flush the held call signals. A `call_end` goes out whatever happened
+     *  since: it is what clears the island's busy registration and stops the
+     *  peer ringing. Everything else only means something to a call still on
+     *  foot, so frames from a call that ended during the gap are dropped rather
+     *  than replayed at somebody who has moved on. A frame the socket refuses
+     *  (it died again between the state flip and this running) goes back in the
+     *  box with everything after it. */
+    private fun flushCallOutbox() {
+        val held = synchronized(callOutbox) {
+            val copy = callOutbox.toList(); callOutbox.clear(); copy
+        }
+        if (held.isEmpty()) return
+        val liveCall = calls.state.value.info?.id
+        for ((i, frame) in held.withIndex()) {
+            val type = frame.get("type")?.takeIf { !it.isJsonNull }?.asString
+            val callId = frame.get("call_id")?.takeIf { !it.isJsonNull }?.asString
+            if (type != "call_end" && callId != liveCall) continue
+            if (!socket.send(frame.toString())) {
+                synchronized(callOutbox) { callOutbox.addAll(0, held.subList(i, held.size)) }
+                return
+            }
+        }
+    }
+
     /** §5d: WS for same-island peers, sealed deposit for cross-island ones. */
     private fun routeCallSignal(obj: JsonObject) {
         val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val ci = toUin?.let { CrossIslandStore.findByUin(it) }
         if (ci == null) {
-            socket.send(obj.toString())   // same-island: unchanged plaintext WS relay
+            // same-island: unchanged plaintext WS relay, but no longer fire and
+            // forget — a refused frame waits for the socket instead of vanishing.
+            if (!socket.send(obj.toString())) {
+                synchronized(callOutbox) {
+                    // Bounded: a call is a handful of signals, and a box that
+                    // grew without limit on a long outage would replay a crowd.
+                    if (callOutbox.size >= CALL_OUTBOX_MAX) callOutbox.removeAt(0)
+                    callOutbox.add(obj)
+                }
+            }
             return
         }
         val me = store.uin ?: return
@@ -1513,6 +1558,9 @@ class Session(context: Context) {
                 // The primary answered: whatever the backup drain thought, we
                 // are not in failover any more.
                 if (up) _receivingViaBackup.value = false
+                // The socket is back: hand over the call signals it refused
+                // while it was down, `call_end` first among them (#699).
+                if (up) flushCallOutbox()
                 if (up) {
                     // ⚠⚠ There used to be a blanket five-second mute here, armed
                     // on EVERY connect including the first one of a session, to
@@ -7108,6 +7156,10 @@ class Session(context: Context) {
         /** Floor between two burned-account probes (#655): the socket redials
          *  on its backoff and every 4401 close would otherwise probe again. */
         const val BURN_PROBE_THROTTLE_MS = 60_000L
+        /** Held call signals kept while the socket is down (#699). A call is a
+         *  handful of frames; a box with no ceiling would replay a crowd after
+         *  a long outage. */
+        const val CALL_OUTBOX_MAX = 32
         /** Floor between two ladder runs. A ladder walk costs up to three
          *  probes of several seconds each, and on a network that is down for
          *  everyone it would otherwise repeat every minute forever. */
