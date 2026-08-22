@@ -1,5 +1,6 @@
 package app.rcq.android.net
 
+import app.rcq.android.crypto.SealedSender
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
@@ -539,6 +540,15 @@ class RcqApi(
         // Gson omits it when null, which is the legacy "any device" shape a
         // v=1 seal keeps using and an older island only knows how to route.
         val to_device_id: Int? = null,
+        // Stage 2 (core-metadata plan): the retention / push class beside the
+        // legacy type. Equals the island's own `_cls_for` derivation for every
+        // shipped type, so push + retention behaviour is unchanged; an old
+        // island ignores the unknown field.
+        val cls: Int? = null,
+        // A deposit that must WAKE a closed app (a §5d call wake) rides
+        // `envelope_type "message"` with `ring:true`; the island honours it and
+        // keeps the quieter type. Gson omits it on an ordinary send.
+        val ring: Boolean? = null,
     )
     data class SendResponse(val delivered: Boolean = false, val queued: Boolean = false)
 
@@ -547,11 +557,21 @@ class RcqApi(
         payloadB64: String,
         envelopeType: String = "message",
         toDeviceId: Int? = null,
+        ring: Boolean = false,
     ): SendResponse =
         withContext(Dispatchers.IO) {
             post(
                 "/messages/sealed",
-                gson.toJson(SendRequest(toUin, envelopeType, payloadB64, toDeviceId)),
+                gson.toJson(
+                    SendRequest(
+                        toUin,
+                        envelopeType,
+                        payloadB64,
+                        toDeviceId,
+                        cls = SealedSender.messageClass(envelopeType),
+                        ring = if (ring) true else null,
+                    ),
+                ),
                 authed = false, // sealed-sender is anonymous by design
                 SendResponse::class.java,
             )
@@ -603,6 +623,15 @@ class RcqApi(
         // The device this copy was encrypted for; null = a legacy sender's
         // copy, addressed to the account rather than to one of its installs.
         val to_device_id: Int? = null,
+        // Stage 2 (core-metadata plan): the server's retention / push class
+        // (0/1/2) and a durable per-mailbox sequence, served alongside the
+        // legacy `id`. Both are read only when present and are null on an older
+        // island. The drain still cursors and dedupes on `id` / envelope UUID;
+        // `seq` is captured for future ordering / dedup, and a GAP in it is
+        // NEVER read as loss (rows served to a sibling device, TTL-expired rows,
+        // and other mailboxes all leave holes by design).
+        val cls: Int? = null,
+        val seq: Long? = null,
     )
 
     /** Fetch the offline queue with `ack=1`: the server returns rows WITHOUT
@@ -865,7 +894,9 @@ class RcqApi(
     }
 
     data class GroupPayload(val to_uin: Int, val payload: String)
-    data class GroupSendBody(val group_id: Int, val envelope_type: String, val payloads: List<GroupPayload>)
+    // Stage 2: `cls` mirrors the island's `_cls_for` for the group type (skdm /
+    // sknack are critical, everything else content); an old island ignores it.
+    data class GroupSendBody(val group_id: Int, val envelope_type: String, val payloads: List<GroupPayload>, val cls: Int? = null)
 
     /** Group send: per-recipient fan-out (anonymous, like 1:1 sealed).
      *  [authed] attaches our bearer token — used ONLY for owner_only
@@ -876,13 +907,13 @@ class RcqApi(
         withContext(Dispatchers.IO) {
             post(
                 "/messages/group-sealed",
-                gson.toJson(GroupSendBody(groupId, envelopeType, payloads)),
+                gson.toJson(GroupSendBody(groupId, envelopeType, payloads, cls = SealedSender.messageClass(envelopeType))),
                 authed = authed,
                 SendResponse::class.java,
             )
         }
 
-    data class GroupBroadcastBody(val group_id: Int, val envelope_type: String, val payload: String)
+    data class GroupBroadcastBody(val group_id: Int, val envelope_type: String, val payload: String, val cls: Int? = null)
 
     /** Sender-keys encrypt-once group send: ONE ciphertext for the whole
      *  group. The server fans the same blob to every capable member. Always
@@ -892,7 +923,7 @@ class RcqApi(
         withContext(Dispatchers.IO) {
             post(
                 "/messages/group-broadcast",
-                gson.toJson(GroupBroadcastBody(groupId, envelopeType, payload)),
+                gson.toJson(GroupBroadcastBody(groupId, envelopeType, payload, cls = SealedSender.messageClass(envelopeType))),
                 authed = true,
                 SendResponse::class.java,
             )

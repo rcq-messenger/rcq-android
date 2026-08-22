@@ -212,34 +212,34 @@ object CrossIslandSender {
         ownHost: String,
     ): Boolean = depositToPrimary(
         contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost,
-        envelopeType = callEnvelopeType(env),
+        envelopeType = "message",
+        ring = isWakingCall(env),
     )
 
     /**
-     * §5d — which OUTER `envelope_type` a call deposit rides.
+     * §5d: does this call signal have to RING a device that holds no live
+     * socket? Stage 2 (core-metadata plan): every call deposit rides
+     * `envelope_type "message"`, and a waking signal adds `ring:true` so the
+     * recipient's island fires the same VoIP + UnifiedPush pair a same-island
+     * `call_offer` does, instead of the ordinary message banner. Before Stage 2
+     * this was carried by the more telling type `"call"`; `ring` asks for the
+     * exact same wake while the island stores the quieter `"message"`.
      *
-     * `"call"` asks the recipient's island to RING a device that holds no live
-     * socket: it fires the same VoIP + UnifiedPush pair a same-island
-     * `call_offer` does, instead of the ordinary message alert. Without it the
-     * deposit sat in the queue and a closed app never made a sound — a call
-     * that does not ring is not a call.
+     * Only the two signals that must reach a CLOSED app ring: the OFFER, which
+     * is the call, and the END, which takes a ring down when the caller gives up
+     * before pickup. `call_answer` / `call_ice` / `call_renegotiate*` only ever
+     * matter to an app already up and holding this call, so they deposit as a
+     * plain `"message"` with no ring.
      *
-     * Only the two signals that must reach a CLOSED app ask for it: the OFFER,
-     * which is the call, and the END, which takes a ring down when the caller
-     * gives up before pickup. `call_answer` / `call_ice` / `call_renegotiate*`
-     * only ever matter to an app that is already up and holding this call, so
-     * they stay `"message"` and buy the recipient's island no extra knowledge.
-     *
-     * ⚠ WHAT THIS TELLS THE RECIPIENT'S ISLAND: that a call is arriving for
-     * this user, at this instant. Nothing else — who is calling, on which
-     * island, the call id, audio vs video and the SDP all stay inside the
-     * sealed envelope, which that island cannot open. Founder decision
-     * 2026-08-15, made because a censor can already infer a call from packet
-     * timing and size.
+     * ⚠ WHAT `ring` TELLS THE RECIPIENT'S ISLAND: that a call is arriving for
+     * this user, at this instant. Nothing else: who is calling, on which
+     * island, the call id, audio vs video and the SDP all stay inside the sealed
+     * envelope, which that island cannot open. Founder decision 2026-08-15, made
+     * because a censor can already infer a call from packet timing and size.
      */
-    private fun callEnvelopeType(env: Envelope): String {
+    private fun isWakingCall(env: Envelope): Boolean {
         val sig = (env as? Envelope.CallSignal)?.sig
-        return if (sig == "call_offer" || sig == "call_end") "call" else "message"
+        return sig == "call_offer" || sig == "call_end"
     }
 
     /** §5f cross-island contact requests: same one-hop deposit as [deliverCall]
@@ -279,10 +279,10 @@ object CrossIslandSender {
      *  copies: those mailboxes are polled (~30s), and both callers are
      *  interactive (call signalling, a contact request the sender is waiting on).
      *
-     *  [envelopeType] is the OUTER type the island routes on, and stays
-     *  `"message"` for everything but the two §5d signals that must wake a
-     *  closed app — see [callEnvelopeType]. The INNER envelope is unchanged in
-     *  every case; nothing else about the wire moves. */
+     *  [envelopeType] is the OUTER type the island routes on and stays
+     *  `"message"` in every case now; a §5d call that must wake a closed app
+     *  sets [ring] instead of a louder type; see [isWakingCall]. The INNER
+     *  envelope is unchanged in every case; nothing else about the wire moves. */
     private fun depositToPrimary(
         host: String,
         uin: Int,
@@ -293,12 +293,17 @@ object CrossIslandSender {
         signingPub: ByteArray,
         ownHost: String,
         envelopeType: String = "message",
+        ring: Boolean = false,
     ): Boolean {
         val recipientPub = Base64.decode(identityKeyB64, Base64.NO_WRAP)
         val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
         val body = JsonObject().apply {
             addProperty("to_uin", uin)
             addProperty("envelope_type", envelopeType)
+            // Stage 2: the retention / push class beside the legacy type, and
+            // the ring flag for a call wake. An old island ignores both.
+            addProperty("cls", SealedSender.messageClass(envelopeType))
+            if (ring) addProperty("ring", true)
             addProperty("payload", payload)
         }.toString().toRequestBody(JSON)
         val req = Request.Builder().url("https://$host/messages/sealed").post(body).build()
@@ -333,6 +338,8 @@ object CrossIslandSender {
                     val body = JsonObject().apply {
                         addProperty("to_uin", h.uin)
                         addProperty("envelope_type", "message")
+                        // Stage 2: retention / push class beside the legacy type.
+                        addProperty("cls", SealedSender.messageClass("message"))
                         addProperty("payload", payload)
                         // F3 deposit-auth: attach an anonymous blinded token when the
                         // recipient island offers it, so our cross-island deposit isn't
