@@ -224,7 +224,12 @@ class IncomingCallActivity : ComponentActivity() {
         if (isFinishing) return
         val p = IncomingCallStore.pending ?: return
         if (p.callId != callId) return
-        ringer?.stop()
+        // ⚠ The ring stops on the same delay as the notification below, and for
+        // the same reason: the keyguard bounces this activity through stop and
+        // start, and stopping here made the ring cut out and start over from the
+        // first note the moment the phone was unlocked (report #680). A real
+        // departure outlives the delay and the notification takes the ring over;
+        // a bounce cancels this in onStart before a note is lost.
         // Deferred, not immediate: a MIUI keyguard dismiss bounces this activity
         // stop/start, and posting here meant a moment of the AUDIBLE call channel
         // (the screen is unlocked by now) that onStart cancelled milliseconds
@@ -234,6 +239,7 @@ class IncomingCallActivity : ComponentActivity() {
         val appCtx = applicationContext
         val repost = Runnable {
             if (IncomingCallStore.pending?.callId != p.callId) return@Runnable
+            ringer?.stop()
             Push.showIncomingCall(
                 appCtx,
                 com.google.gson.JsonObject().apply {
