@@ -263,17 +263,26 @@ fun RcqField(
     // (#696). This connection eats what the field could not consume, so the
     // drag stops at the field and never reaches the sheet; the drag handle and
     // the title above the field still dismiss, because they are outside it.
+    // ⚠ Only DOWNWARD leftovers. Eating everything also ate the sheet's own
+    // scroll: the sheet content is taller than the screen with the keyboard up
+    // (that is what the height ceiling above is about), so a drag UP on the
+    // field is how the reader reaches Send, and swallowing it left the buttons
+    // under the fold with the biggest target on the sheet doing nothing.
+    // Dismissal is the downward direction, and downward is exactly the gesture
+    // of scrolling BACK through what you wrote, which is the one #696 lost.
     val fenceSheetSwipe = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             override fun onPostScroll(
                 consumed: androidx.compose.ui.geometry.Offset,
                 available: androidx.compose.ui.geometry.Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
-            ) = available
+            ) = if (available.y > 0f) available.copy(x = 0f)
+                else androidx.compose.ui.geometry.Offset.Zero
             override suspend fun onPostFling(
                 consumed: androidx.compose.ui.unit.Velocity,
                 available: androidx.compose.ui.unit.Velocity,
-            ) = available
+            ) = if (available.y > 0f) available.copy(x = 0f)
+                else androidx.compose.ui.unit.Velocity.Zero
         }
     }
     Column(modifier) {
