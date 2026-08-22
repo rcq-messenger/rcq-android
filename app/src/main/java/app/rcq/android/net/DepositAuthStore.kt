@@ -11,7 +11,7 @@ import java.math.BigInteger
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * F3 deposit-auth client — mints + caches anonymous blinded deposit tokens
+ * F3 deposit-auth client: mints + caches anonymous blinded deposit tokens
  * ([BlindToken]) to attach to cross-island sealed deposits, so the recipient
  * island can rate-limit us WITHOUT learning who we are. See
  * `RCQ/docs/deposit-auth-design.md` + `rcq-server-ref app/routers/deposit_auth.py`.
@@ -22,10 +22,15 @@ import java.util.concurrent.ConcurrentHashMap
  * BATCH at a time (amortise the PoW) into an in-memory reserve and popped on send.
  * Best-effort + self-gating: an island without deposit-auth (404 on /params) is
  * remembered and skipped, and a mint failure just returns null (the deposit then
- * rides the legacy per-IP path — additive, never blocks a send).
+ * rides the legacy per-IP path; additive, never blocks a send).
+ *
+ * Stage 3 of the core-metadata plan (server 2026.08.23.4) spends the same token
+ * on the OWN island: a peer's prekey bundle is fetched with no session token and
+ * `X-Deposit-Token` instead, so the island no longer learns whose keys we asked
+ * for. See [headerValue], [forget] and [giveBack] for the pieces that path needs.
  *
  * In-memory only (no persistence): a reserve is cheap to re-mint and we never want
- * tokens surviving uninstall. Blocking (PoW + HTTP) — call off the main thread; the
+ * tokens surviving uninstall. Blocking (PoW + HTTP): call off the main thread; the
  * cross-island send path already runs on Dispatchers.IO.
  */
 object DepositAuthStore {
@@ -51,6 +56,35 @@ object DepositAuthStore {
         }
         return minted.first()
     }
+
+    /** Put back a token the island did NOT spend: a bundle fetch that answered
+     *  404 never reached the verifier, and the token is as good as new. Goes
+     *  to the front of the reserve so it is the next one used. */
+    fun giveBack(host: String, token: JsonObject) {
+        val dq = reserve.getOrPut(host) { ArrayDeque() }
+        synchronized(dq) { dq.addFirst(token) }
+    }
+
+    /** Drop everything cached for [host]: params AND the reserve. Called when a
+     *  spend answers 403, which means the epoch rotated under us (every token
+     *  minted under the old key is dead with it) or the island stopped issuing.
+     *  The host is also allowed to be probed again: a 404 on /params that put
+     *  it on the disabled list may predate an upgrade. The next [tokenFor]
+     *  re-reads the params and mints a fresh batch. */
+    fun forget(host: String) {
+        params.remove(host)
+        reserve.remove(host)
+        disabled.remove(host)
+    }
+
+    /** The `X-Deposit-Token` header value for [token]: base64url, no padding,
+     *  of the same `{epoch_id, prepared, sig}` JSON a sealed deposit carries in
+     *  its body. The server base64url-decodes with padding tolerance, so the
+     *  unpadded form is the canonical one. Pure (no Android classes) so the
+     *  JVM unit test can check it. */
+    fun headerValue(token: JsonObject): String =
+        java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(token.toString().toByteArray(Charsets.UTF_8))
 
     private fun mintBatch(host: String, http: OkHttpClient): List<JsonObject>? {
         val p = ensureParams(host, http) ?: return null
@@ -99,7 +133,7 @@ object DepositAuthStore {
         val req = Request.Builder().url("https://$host/deposit-auth/issue").post(reqBody).build()
         return try {
             http.newCall(req).execute().use { resp ->
-                if (resp.code == 409) { params.remove(host); return null }   // epoch rotated — drop cache, retry later
+                if (resp.code == 409) { params.remove(host); return null }   // epoch rotated: drop cache, retry later
                 if (!resp.isSuccessful) return null
                 val o = JsonParser.parseString(resp.body?.string() ?: return null).asJsonObject
                 val sig = BlindToken.finalize(Base64.decode(o.get("blind_sig").asString, Base64.NO_WRAP), b.blindInv, p.n)

@@ -149,9 +149,21 @@ class Session(context: Context) {
     // off the apex is a config push rather than a release.
     private val FRONT_HOST: String get() = app.rcq.android.net.RelayConfigStore.frontHost
     private fun apiHost(): String = frontHost ?: serverHost()
+    // Stage 3 of the core-metadata plan: this island takes the peer key
+    // lookups without a session token (`anon_keys && deposit_auth` on
+    // /server/info). Seeded from the island's LAST answer so the first send
+    // after a cold start does not name the pair for the second the request
+    // takes; the live answer in start() overwrites it. Held here, not only on
+    // the api object, because that object is rebuilt on every route change
+    // and each new instance has to inherit it (see [newApi]).
+    @Volatile private var anonKeyLookup: Boolean =
+        capsCache(serverHost())?.let { it.anon_keys && it.deposit_auth } ?: false
     private var api = newApi()
     private var socket = newSocket()
-    private fun newApi(): RcqApi = RcqApi("https://${apiHost()}", isPrimary = true).apply { if (store.isRegistered) setToken(store.token) }
+    private fun newApi(): RcqApi = RcqApi("https://${apiHost()}", isPrimary = true).apply {
+        if (store.isRegistered) setToken(store.token)
+        anonKeyLookup = this@Session.anonKeyLookup
+    }
     private fun newSocket(): RcqSocket = RcqSocket("wss://${apiHost()}")
     // Opened lazily by [bindDb] (in [start]) so the message DB is never opened
     // before the panic-PIN dataKey is available — opening a PIN-encrypted DB
@@ -499,13 +511,19 @@ class Session(context: Context) {
     private val _nearbyEnabled = MutableStateFlow(cachedCaps?.nearby ?: true)
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
 
-    /** Apply an island's answer (live or cached) to the five surface flags. */
+    /** Apply an island's answer (live or cached) to the five surface flags
+     *  and to the wire switch for anonymous key lookups. */
     private fun applyCaps(c: RcqApi.ServerCapabilities) {
         _uinShopEnabled.value = c.uin_shop
         _hallOfFameEnabled.value = c.hall_of_fame
         _nearbyEnabled.value = c.nearby
         _randomEnabled.value = c.random_chat
         _reportsEnabled.value = c.reports
+        // Both or neither: an island that understands the open lookups but
+        // issues no tokens would hand out bundles without a one-time prekey
+        // to an anonymous caller, so it keeps getting the session token.
+        anonKeyLookup = c.anon_keys && c.deposit_auth
+        api.anonKeyLookup = anonKeyLookup
     }
 
     /** After an account switch the flags still say what the PREVIOUS island
@@ -621,9 +639,14 @@ class Session(context: Context) {
     // switch (a peer may publish a bundle later; we re-probe next session).
     private val noV2Peers = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
-    // uin -> (fetched at, that account's libsignal device ids). A v=2 send
+    // uin -> (good until, that account's libsignal device ids). A v=2 send
     // asks for the list on every message and it only changes when somebody
-    // links or drops an install, so it is held briefly rather than per send.
+    // links or drops an install, so it is held for a while rather than per
+    // send. The expiry is stamped per entry with its own jitter (see
+    // [peerDevices]), so a row of live conversations does not refetch in
+    // lockstep. Dropped early by the three signals that say the list is
+    // stale: a send or a bundle fetch for one of its devices answering 404,
+    // and an inbound v=2 message naming a device the list does not have.
     private val peerDeviceCache =
         java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<Int>>>()
 
@@ -4993,7 +5016,12 @@ class Session(context: Context) {
                         // that install: the old clock is meaningless.
                         if (result == SignalSession.ProbeResult.REBUILT) awaitingReplySince.remove(probeKey)
                     }
-                    if (!SignalSession.ensureSession(signalStores, api, toUin, dev)) return@mapNotNull null
+                    val usable = SignalSession.ensureSession(signalStores, api, toUin, dev) {
+                        // The island has no such install: the list this id
+                        // came from is stale, so the next send re-reads it.
+                        peerDeviceCache.remove(toUin)
+                    }
+                    if (!usable) return@mapNotNull null
                     runCatching {
                         SealedCopy(dev, SignalSession.encrypt(signalStores, env, recipientPub, toUin, me, dev, mine))
                     }.onSuccess {
@@ -5161,7 +5189,7 @@ class Session(context: Context) {
      *  installs, not for the one composing it. */
     private suspend fun peerDevices(uin: Int): List<Int>? {
         val now = System.currentTimeMillis()
-        peerDeviceCache[uin]?.let { (at, devices) -> if (now - at < PEER_DEVICES_TTL_MS) return devices }
+        peerDeviceCache[uin]?.let { (goodUntil, devices) -> if (now < goodUntil) return devices }
         val self = if (uin == store.uin) myDeviceId() else null
         val answered = try {
             val rows = api.fetchPeerDevices(uin).devices
@@ -5176,7 +5204,11 @@ class Session(context: Context) {
             emptyList()
         }
         val devices = answered.filter { it > 0 && it != self }.sorted()
-        peerDeviceCache[uin] = now to devices
+        // Each entry gets its own expiry: the base TTL plus or minus a random
+        // share of the jitter, so lists fetched together are not re-read
+        // together (a burst of lookups at a fixed period is a signature).
+        val jitter = (Math.random() * 2 - 1) * PEER_DEVICES_JITTER_MS
+        peerDeviceCache[uin] = (now + PEER_DEVICES_TTL_MS + jitter.toLong()) to devices
         return devices
     }
 
@@ -7260,6 +7292,17 @@ class Session(context: Context) {
             if (dev != null && d.senderUin != store.uin) {
                 awaitingReplySince.remove("${d.senderUin}:$dev")
             }
+            // A device the cached list does not have is a device linked after
+            // the list was read: drop the list, the next send re-reads it and
+            // fans out to the new install too. Our own list leaves our own
+            // id out by design, so that id is not a stale-list signal.
+            if (dev != null) {
+                val from = d.senderUin
+                peerDeviceCache[from]?.let { (_, known) ->
+                    val ours = from == store.uin && dev == myDeviceIdOrNull()
+                    if (dev !in known && !ours) peerDeviceCache.remove(from)
+                }
+            }
         }
 
     /** Surface a failed inbound decrypt instead of swallowing it. A v=2
@@ -7305,9 +7348,16 @@ class Session(context: Context) {
         const val HELD_GMSG_CAP = 64
         const val HELD_GMSG_KIDS = 16
         /** How long a peer's libsignal device list is reused before it is
-         *  asked for again. Short: a device linked on the other side has to
-         *  start receiving without the sender restarting. */
-        const val PEER_DEVICES_TTL_MS = 5 * 60_000L
+         *  asked for again, and the spread around it each entry draws its
+         *  own share of. Was five minutes flat: with Stage 3 the lookup
+         *  names nobody, but a fixed period per live conversation is a
+         *  signature of its own, and a longer hold is fewer lookups. Not a
+         *  day: a device linked on the other side has to start receiving
+         *  without the sender restarting, and an hour of no carbons was a
+         *  real report (2026-08-19). The three stale-list signals on
+         *  [peerDeviceCache] cover the rest. */
+        const val PEER_DEVICES_TTL_MS = 15 * 60_000L
+        const val PEER_DEVICES_JITTER_MS = 3 * 60_000L
         /** Background rounds a sealed copy that no attempt could place gets
          *  before the message it belongs to is failed, and the gap before the
          *  first of them (it widens by that much each round). Long enough to

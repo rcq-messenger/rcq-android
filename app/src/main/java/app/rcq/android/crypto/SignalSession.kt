@@ -78,12 +78,17 @@ object SignalSession {
      * has no bundle / the fetch failed — in which case the caller stays on
      * v=1. Never throws for the "no bundle" case; the API layer's error is
      * caught and reported as false.
+     *
+     * [onNoSuchDevice] runs when a NAMED device's bundle answered 404: the
+     * island does not know that install (revoked, or never there), so the
+     * list the caller took the id from is stale and it can drop it.
      */
     suspend fun ensureSession(
         stores: SignalStores,
         api: RcqApi,
         uin: Int,
         deviceId: Int? = null,
+        onNoSuchDevice: (() -> Unit)? = null,
     ): Boolean {
         val target = deviceId ?: DEVICE_ID
         val addr = addressOf(uin, target)
@@ -99,6 +104,7 @@ object SignalSession {
             // No published bundle (peer hasn't bootstrapped v=2) or a transient
             // error: stay on v=1 / leave this device out of the fan-out.
             Log.d(TAG, "no v2 bundle for $uin/$deviceId (${e.javaClass.simpleName}); using v1")
+            if (deviceId != null && e.message?.startsWith("HTTP 404") == true) onNoSuchDevice?.invoke()
             return false
         }
         if (bundle.uin != uin) {
