@@ -504,3 +504,39 @@ fun MinimizedCallBar(controller: CallController, modifier: Modifier = Modifier) 
 /** Height of [MinimizedCallBar]; the app content is padded by the same amount
  *  so the bar sits above it instead of over it. */
 val MINIMIZED_CALL_BAR_HEIGHT: Dp = 34.dp
+
+/** The same strip for an audio room left behind by the system Back button.
+ *
+ *  ⚠ Back left the room SCREEN, never the room. The microphone stayed open, the
+ *  mesh kept running, calls kept being refused as busy, and nothing anywhere on
+ *  screen said so: people sat in rooms for hours without knowing (#684, and the
+ *  iPhone has had a bar for this all along). One tap goes back in; leaving is
+ *  done from the room, where the button says what it does. */
+@Composable
+fun MinimizedRoomBar(
+    controller: app.rcq.android.call.AudioRoomController,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val name by controller.activeRoomName.collectAsState()
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(MINIMIZED_CALL_BAR_HEIGHT)
+            .background(Color(0xFF1F7A3D))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(Icons.Filled.VolumeUp, null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Text(
+            name ?: stringResource(R.string.rooms_title),
+            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(2.dp))
+        Text(stringResource(R.string.room_return), color = Color(0xFFCDEBD7), fontSize = 12.sp)
+    }
+}

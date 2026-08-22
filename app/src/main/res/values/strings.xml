@@ -329,6 +329,7 @@
     <string name="call_hangup">End</string>
     <string name="call_ongoing">Call in progress</string>
     <string name="call_return">Tap to return to the call</string>
+    <string name="room_return">Tap to return to the room</string>
     <string name="call_upgrade_prompt">%1$s wants to turn on video</string>
     <string name="call_upgrade_accept">Turn on</string>
     <string name="call_upgrade_decline">Not now</string>
