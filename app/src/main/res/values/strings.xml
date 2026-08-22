@@ -828,8 +828,8 @@
     <string name="random_err_other">Something went wrong. Try again.</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">Search this chat</string>
-    <string name="chat_secure_on">Secure this chat</string>
-    <string name="chat_secure_off">Turn off secure chat</string>
+    <string name="chat_secure_on">Screenshot alerts</string>
+    <string name="chat_secure_off">Screenshot alerts: on</string>
     <string name="secscreen_peer_screenshot">%1$s took a screenshot</string>
     <string name="chat_menu_cd">Chat actions</string>
     <string name="chat_search_idle">Search messages in this chat.</string>

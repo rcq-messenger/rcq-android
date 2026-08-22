@@ -824,8 +824,8 @@
     <string name="random_err_other">Что-то пошло не так. Попробуйте снова.</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">Поиск в этом чате</string>
-    <string name="chat_secure_on">Защитить этот чат</string>
-    <string name="chat_secure_off">Выключить защиту чата</string>
+    <string name="chat_secure_on">Уведомлять о скриншотах</string>
+    <string name="chat_secure_off">Уведомлять о скриншотах: вкл</string>
     <string name="secscreen_peer_screenshot">%1$s сделал(а) скриншот</string>
     <string name="chat_menu_cd">Действия чата</string>
     <string name="chat_search_idle">Поиск по сообщениям в этом чате.</string>
