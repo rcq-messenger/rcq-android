@@ -399,11 +399,11 @@ private fun statusText(
             "%d:%02d".format(secs / 60, secs % 60)
         }
     }
-    // The Ended state has carried the reason all along; the screen printed the
-    // generic word anyway and left "busy" to be discovered in the history (#683).
-    is CallController.State.Ended -> stringResource(
-        app.rcq.android.call.endedLabelRes(state.reason, state.info.outgoing),
-    )
+    // The controller resolves the word, with the same answered / connected
+    // guards the history writer applies: the screen printed the generic one and
+    // left "busy" to be discovered in the log (#683), and resolving it here
+    // from the raw reason would have called an answered call missed (#472).
+    is CallController.State.Ended -> stringResource(state.labelRes)
     CallController.State.Idle -> ""
 }
 

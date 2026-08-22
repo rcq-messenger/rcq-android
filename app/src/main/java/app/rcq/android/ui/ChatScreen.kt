@@ -1365,7 +1365,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                         listState.animateScrollToItem(ret.coerceIn(0, rows.lastIndex.coerceAtLeast(0)), replyReturnOffset)
                                         replyReturnIndex = null
                                     } else {
+                                        // ⚠ To the true END, not to the top of the
+                                        // last row. On a last message taller than
+                                        // the screen those are different places,
+                                        // and stopping at its top left the badge
+                                        // standing (the row is still not fully
+                                        // seen) with a button that then did
+                                        // nothing when pressed again.
                                         listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+                                        repeat(3) { withFrameNanos {} ; listState.scrollBy(1_000_000f) }
                                     }
                                 }
                             },

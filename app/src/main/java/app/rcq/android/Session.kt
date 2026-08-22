@@ -1899,8 +1899,14 @@ class Session(context: Context) {
             } catch (e: java.net.UnknownHostException) {
                 throw IllegalArgumentException("no_route")
             } catch (e: java.io.IOException) {
-                val http = e.message?.takeIf { it.startsWith("HTTP ") }?.take(12)?.trim()
-                throw IllegalArgumentException(if (http != null) "island_said:$http" else "unreachable")
+                // Just the status code. A fixed-width prefix of the message
+                // dragged a fragment of the island's JSON body onto the screen,
+                // and that body is the island's to phrase, not ours to show
+                // half of.
+                val code = Regex("^HTTP (\\d{3})").find(e.message.orEmpty())?.groupValues?.get(1)
+                throw IllegalArgumentException(
+                    if (code != null) "island_said:HTTP $code" else "unreachable",
+                )
             }
         }
 

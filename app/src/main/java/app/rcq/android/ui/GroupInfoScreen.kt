@@ -165,24 +165,27 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // group looked shuffled and moved between openings (#688). A name is what
     // people scan for, and who is here now is what they scan for first.
     val sortedMembers = remember(group.members) {
-        group.members.sortedWith(
-            compareBy<app.rcq.android.model.GroupMember> {
-                when (it.role) { "owner" -> 0; "admin" -> 1; else -> 2 }
-            }
-                .thenBy {
-                    // Away and do-not-disturb are here too; invisible and
-                    // offline are not, and neither is a member the server
-                    // declines to report a presence for.
-                    when (it.presence) {
-                        app.rcq.android.model.UserStatus.ONLINE -> 0
-                        app.rcq.android.model.UserStatus.AWAY,
-                        app.rcq.android.model.UserStatus.DND -> 1
-                        else -> 2
-                    }
+        // Decorated once, not per comparison: this screen is built for rosters
+        // of two thousand, and `thenBy { it.nickname.lowercase() }` allocates
+        // two strings on every one of the ~n log n comparisons.
+        group.members
+            .map { m ->
+                val rank = when (m.role) { "owner" -> 0; "admin" -> 1; else -> 2 }
+                // Away and do-not-disturb count as present; invisible and
+                // offline do not, and neither does a member the server
+                // declines to report a presence for.
+                val here = when (m.presence) {
+                    app.rcq.android.model.UserStatus.ONLINE -> 0
+                    app.rcq.android.model.UserStatus.AWAY,
+                    app.rcq.android.model.UserStatus.DND -> 1
+                    else -> 2
                 }
-                .thenBy { it.nickname.lowercase() }
-                .thenBy { it.uin },
-        )
+                Triple(rank, here, m.nickname.lowercase()) to m
+            }
+            .sortedWith(
+                compareBy({ it.first.first }, { it.first.second }, { it.first.third }, { it.second.uin }),
+            )
+            .map { it.second }
     }
     val previewLimit = 8
     val q = memberSearch.trim().lowercase()

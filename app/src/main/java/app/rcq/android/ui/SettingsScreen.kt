@@ -98,6 +98,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -287,7 +288,12 @@ private fun SettingsRoot(
     var migrating by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showBugReport by remember { mutableStateOf(false) }
-    var bugText by remember { mutableStateOf("") }
+    // rememberSaveable, not remember: the draft has to outlive leaving this
+    // screen for another settings page and a rotation, not only the accidental
+    // sheet dismiss it was hoisted for (#685). Attachments stay in `remember`;
+    // they are content Uris whose permission grants do not survive the process
+    // anyway, so saving them would restore rows that cannot be read.
+    var bugText by rememberSaveable { mutableStateOf("") }
     var bugSending by remember { mutableStateOf(false) }
     var bugSent by remember { mutableStateOf(false) }
     // Why the last send failed, shown in the dialog; null when there is nothing
@@ -455,7 +461,10 @@ private fun SettingsRoot(
                 // which is the button that means it.
                 SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) {
                     bugSent = false
-                    bugSending = false
+                    // ⚠ `bugSending` is NOT reset here. It is the accurate
+                    // in-flight flag, set by the coroutine that is still
+                    // uploading; clearing it on reopen re-enabled the button and
+                    // let the same report go twice.
                     bugError = null
                     showBugReport = true
                 }

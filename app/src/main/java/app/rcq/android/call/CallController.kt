@@ -64,7 +64,15 @@ class CallController(
         data class Outgoing(override val info: CallInfo) : State
         data class Incoming(override val info: CallInfo) : State
         data class Connected(override val info: CallInfo) : State
-        data class Ended(override val info: CallInfo, val reason: String) : State
+        /** [labelRes] is the word the screen shows, resolved by the controller
+         *  because only it knows whether the call was answered and whether any
+         *  media ever flowed. Defaulted so nothing else has to change; the
+         *  controller always sets it. */
+        data class Ended(
+            override val info: CallInfo,
+            val reason: String,
+            val labelRes: Int = R.string.call_out_ended,
+        ) : State
     }
 
     val rtc = WebRtcClient(appContext)
@@ -793,7 +801,19 @@ class CallController(
         // keeps the call screen up showing "call ended" for a moment, and
         // there is nothing to announce — going straight to Idle dismisses the
         // ringing UI and nothing more.
-        _state.value = if (answeredElsewhere) State.Idle else State.Ended(call, reason)
+        // ⚠ The SAME two guards the history writer uses, and for the same
+        // reason: an answered call that carried no media is a failed
+        // connection whatever word the far end put on it, and a call that did
+        // connect is simply over. Without them the screen printed the raw
+        // reason and could call an answered call missed (#472 all over again,
+        // from the other side).
+        val endedLabel = when {
+            duration >= 1000 -> R.string.call_out_ended
+            answered -> R.string.call_out_failed
+            else -> endedLabelRes(reason, call.outgoing)
+        }
+        _state.value =
+            if (answeredElsewhere) State.Idle else State.Ended(call, reason, endedLabel)
         rtc.close()
         ringer.stop()
         // Tear down any full-screen incoming-call UI we raised for a backgrounded
