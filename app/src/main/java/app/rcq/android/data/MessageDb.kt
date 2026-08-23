@@ -133,6 +133,13 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         if (oldVersion < 15) db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER")
         if (oldVersion < 16) db.execSQL(DELETED_IDS_DDL)
         if (oldVersion < 17) db.execSQL(DECOY_CONTACTS_DDL)
+        // 18: an inbound row's `state` becomes the read-receipt ledger (READ
+        // once our receipt for it has left; see Session.sendReadReceipts).
+        // Everything already here was acked under the old rule, which sent
+        // a receipt for the whole thread on every open, so it starts READ:
+        // otherwise the first open of a long chat would re-ack its entire
+        // history in one envelope.
+        if (oldVersion < 18) db.execSQL("UPDATE messages SET state = 'READ' WHERE from_me = 0")
     }
 
     // ── decoy roster (only ever populated in the DECOY store) ────────────
@@ -223,6 +230,21 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
 
     fun updateState(id: String, state: DeliveryState) {
         db.update("messages", ContentValues().apply { put("state", state.name) }, "id = ?", arrayOf(id))
+    }
+
+    /** One transaction for a batch of rows (a read receipt names a page of
+     *  them at once; a write per row on the caller's thread froze the
+     *  screen on a long chat). */
+    fun updateStates(ids: Collection<String>, state: DeliveryState) {
+        if (ids.isEmpty()) return
+        db.beginTransaction()
+        try {
+            val cv = ContentValues().apply { put("state", state.name) }
+            ids.forEach { db.update("messages", cv, "id = ?", arrayOf(it)) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun updateReactions(id: String, reactions: Map<Int, String>) {
@@ -341,7 +363,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 17
+        const val VERSION = 18
 
         /** The decoy store's own contact list (synthetic uins). Created on
          *  every db so the schema is uniform; empty everywhere but the decoy. */

@@ -898,7 +898,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION).forEach { e.remove("$accountId.$it") }
         e.apply()
     }
 

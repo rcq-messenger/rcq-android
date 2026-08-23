@@ -106,7 +106,9 @@ internal fun FullscreenVideoViewer(
     // touch; a View inside `AndroidView` does not. Closing is the X's job.
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+        // Edge to edge on every Android (see the album pager): the controls
+        // are placed by the bar's real height.
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false),
     ) {
         // #656: playback used to obey the normal screen timeout, so a clip
         // longer than it went dark mid-watch. Same helper the call screen uses.

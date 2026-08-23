@@ -54,12 +54,16 @@ object ContactsVault {
     /** Fold the server's list into the slot. Never throws: the roster is on
      *  screen already and a vault that is down is not the user's problem at
      *  that moment. */
-    suspend fun mirror(api: RcqApi, identityPriv: ByteArray, list: List<Contact>, now: Long = System.currentTimeMillis()): Outcome {
+    /** [stillOurs] is asked after every await: an account switch mid-flight
+     *  rebinds the stores, and neither the floor nor the slot may then be
+     *  touched on behalf of the account the list belonged to. */
+    suspend fun mirror(api: RcqApi, identityPriv: ByteArray, list: List<Contact>, now: Long = System.currentTimeMillis(), stillOurs: () -> Boolean = { true }): Outcome {
         val slot = Vault.slotId(identityPriv, Vault.CONTACTS)
         var floor = LocalStores.vaultContactsVersion()
         return try {
             repeat(5) {
                 val cur = api.vaultGet(slot)
+                if (!stillOurs()) return Outcome.Skipped
                 if (cur.version < floor) {
                     // The island served an older version than this install has
                     // seen. In the mirror phase the server list is the truth
@@ -75,6 +79,7 @@ object ContactsVault {
                 }
                 val sealed = Vault.seal(identityPriv, slot, cur.version + 1, gson.toJson(next).toByteArray(Charsets.UTF_8))
                 val w = api.vaultPut(slot, Base64.encodeToString(sealed, Base64.NO_WRAP), cur.version)
+                if (!stillOurs()) return Outcome.Skipped
                 if (w.version != null) {
                     LocalStores.setVaultContactsVersion(w.version)
                     return Outcome.Written
