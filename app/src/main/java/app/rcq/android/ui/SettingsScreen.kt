@@ -158,11 +158,16 @@ internal fun SettingsScreen(
     // told people to make the backup primary "in settings" and left them to
     // find it (vss did not). The banner is a link now and lands here.
     openBackupIsland: Boolean = false,
+    // Deep-link: a tapped "a new device connected to this account" wake. The
+    // only reason to open that notification is to look at the list, and it
+    // used to land on the chat list and leave the person to find it (#672).
+    openLinkedDevices: Boolean = false,
 ) {
     var route by remember {
         mutableStateOf(
             when {
                 openMyReports -> SettingsRoute.MY_REPORTS
+                openLinkedDevices -> SettingsRoute.LINKED_DEVICES
                 openDiagnostics -> SettingsRoute.DIAGNOSTICS
                 openBackupIsland -> SettingsRoute.BACKUP_ISLAND
                 else -> SettingsRoute.ROOT
