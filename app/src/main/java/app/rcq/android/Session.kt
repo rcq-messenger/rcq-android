@@ -266,22 +266,6 @@ class Session(context: Context) {
     private fun routeCallSignal(obj: JsonObject) {
         val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val ci = toUin?.let { CrossIslandStore.findByUin(it) }
-        // ⚠ "call_missed" is the one call signal that must NOT ride the socket
-        // on our own island. Every other one is live: it means nothing to a
-        // peer who is not there. This one exists precisely because they were
-        // not there (CallController.depositMissedIfUnreachable), so it has to
-        // wait for them in the offline queue like a message does. Deposited
-        // sealed, same as the cross-island path below does with everything.
-        if (ci == null && toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_missed") {
-            val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
-            val data = mutableMapOf<String, String>()
-            for ((k, v) in obj.entrySet()) {
-                if (k == "type" || k == "to_uin" || k == "call_id") continue
-                if (v.isJsonPrimitive) data[k] = v.asString
-            }
-            scope.launch { runCatching { sendControl(toUin, Envelope.callSignal("call_missed", callId, data)) } }
-            return
-        }
         if (ci == null) {
             // same-island: unchanged plaintext WS relay, but no longer fire and
             // forget — a refused frame waits for the socket instead of vanishing.
@@ -5738,14 +5722,6 @@ class Session(context: Context) {
         is Envelope.Edit -> "edit"
         is Envelope.Visit -> "visit"
         is Envelope.SecureScreen, is Envelope.ScreenshotTaken -> "secscreen"
-        // A missed-call marker (#678) is labelled like a receipt on the OUTER
-        // envelope, which is the label the island does not push for. That is
-        // deliberate: the call is already over, so a wake would ring nothing
-        // and a "new message" banner would name it wrong. It waits in the
-        // queue, and the drain that runs when the app is next opened files the
-        // row and raises the missed-call notification there — which is the
-        // moment the person actually wanted to be told.
-        is Envelope.CallSignal -> "read"
         else -> "message"
     }.takeIf { TYPED_CONTROL_SENDS } ?: "message"
 
@@ -5956,32 +5932,6 @@ class Session(context: Context) {
             // (old ts — offline-queue drains deliver hours-old rows) is filed
             // as a missed call instead of ringing.
             (dec.envelope as? Envelope.CallSignal)?.let { cs ->
-                // ⚠ Before the same-island early return below. A missed call is
-                // the one call signal that arrives as an envelope from our own
-                // island: the caller leaves it when the island told them we were
-                // not reachable, so that a phone whose app was force-stopped
-                // still learns it was called (#678). It never rings — the call
-                // is long over — it files the row and raises the same missed
-                // notification the live path would have.
-                if (cs.sig == "call_missed") {
-                    logCallHistory(
-                        dec.senderUin,
-                        fromMe = false,
-                        text = appCtx.getString(
-                            if (cs.data["media"] == "video") app.rcq.android.R.string.call_missed_video_push
-                            else app.rcq.android.R.string.call_missed_push,
-                        ),
-                        missed = true,
-                        startedAt = cs.ts * 1000L,
-                    )
-                    app.rcq.android.push.Push.showMissedCall(
-                        appCtx,
-                        peerUin = dec.senderUin,
-                        nickname = contactName(dec.senderUin),
-                        video = cs.data["media"] == "video",
-                    )
-                    return@runCatching
-                }
                 val host = dec.senderHost ?: return@runCatching // same-island calls use the WS, not envelopes
                 // ⚠ The Cloudflare FRONT is OUR island by another road, and a
                 // build that stamps `cdn.rcq.app` instead of the island is not
