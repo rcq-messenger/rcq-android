@@ -73,7 +73,7 @@
     <string name="outgoing_title">Sent requests</string>
     <string name="outgoing_empty">You haven\'t sent any requests.</string>
 
-    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">You already have a contact numbered #%1$d on another island. A conversation is still filed by number alone, so a second #%1$d would share that history. Not added.</string>
     <string name="share_to_title">Send to…</string>
     <string name="share_to_search">Search chats</string>
@@ -99,7 +99,7 @@
     <string name="access_token_label">Access token (optional)</string>
     <string name="access_token_hint">For a private (closed) island, paste the access token you were given.</string>
     <string name="access_token_bad">Invalid or expired access token for this island.</string>
-    <string name="manage_accounts_intro">Accounts on this device. Switch between them from the account button on the home screen. Deleting an account here removes it from this device only — its identity stays on the server.</string>
+    <string name="manage_accounts_intro">Accounts on this device. Switch between them from the account button on the home screen. Deleting an account here removes it from this device only. Its identity stays on the server.</string>
     <string name="manage_accounts_active">Active</string>
     <string name="manage_accounts_add_by_phrase">Add account by recovery phrase</string>
     <string name="manage_accounts_delete">Delete</string>
@@ -148,7 +148,7 @@
     <string name="weblink_body">This will log the website in as your account so you can chat from a browser. Only continue if you opened this from the QR code on chat.rcq.app yourself.</string>
     <string name="weblink_confirm">Connect</string>
     <string name="weblink_done">Web connected. Your browser should log in now.</string>
-    <string name="weblink_failed">Couldn\'t connect to web. The code may have expired — try again.</string>
+    <string name="weblink_failed">Couldn\'t connect to web. The code may have expired. Try again.</string>
     <string name="weblink_taken">This link was already used. Refresh the QR on the website and scan the new one.</string>
     <string name="common_add">Add</string>
     <string name="kind_message">New message</string>
@@ -163,7 +163,7 @@
     <string name="addlink_request_sent">Request sent</string>
     <string name="settings_row_linked_devices">Linked devices</string>
     <string name="settings_row_backup_island">Standby island</string>
-    <string name="backup_island_body">Automatic backup, not a second login — you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
+    <string name="backup_island_body">Automatic backup, not a second login: you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
     <string name="backup_island_row_uin">mailbox on this island: #%1$d</string>
     <string name="home_via_backup">Your island is not answering. Messages are arriving through your backup island; to send from there, make it the main one in Settings.</string>
     <string name="backup_island_row_uin_diff">mailbox on this island: #%1$d (islands number independently and your #%2$d was taken here)</string>
@@ -718,7 +718,7 @@
     <string name="snd_presence_favorites">Favourites</string>
     <string name="snd_presence_off">Off</string>
     <string name="snd_system_channel">Notification sound and volume</string>
-    <string name="snd_footer">The open app plays its own tone; with the app in the background the same tone arrives as a system notification. Both ride the notification volume, and both stay quiet in silent, vibrate and Do Not Disturb modes. The slider above can only make our tone quieter than the system level — the level itself is changed in the notification settings above. Per-chat mute (long-press a chat on the home screen) silences both.</string>
+    <string name="snd_footer">The open app plays its own tone; with the app in the background the same tone arrives as a system notification. Both ride the notification volume, and both stay quiet in silent, vibrate and Do Not Disturb modes. The slider above can only make our tone quieter than the system level; the level itself is changed in the notification settings above. Per-chat mute (long-press a chat on the home screen) silences both.</string>
 
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Translations roll out gradually. Untranslated text falls back to English.</string>
@@ -891,7 +891,7 @@
     <string name="media_fetch_failed">Could not fetch the file. Check the connection and try again.</string>
     <string name="media_video_too_old">This video was sent in the old format and is too big to open here (%1$d MB). Ask the sender to send it again from a newer version.</string>
     <string name="media_video_damaged">This video did not arrive in one piece and stopped part way. Ask the sender to send it again.</string>
-    <string name="media_too_large_for_island">This video is %1$d MB — this server takes at most %2$d MB.</string>
+    <string name="media_too_large_for_island">This video is %1$d MB and this server takes at most %2$d MB.</string>
     <string name="chat_pin">Pin</string>
     <string name="chat_pinned_media">📎 Attachment</string>
     <string name="chat_pin_failed">Could not pin that message.</string>
@@ -1027,7 +1027,7 @@
     <string name="add_search_prompt">Search for people and groups to add. A bare number is on your island; for another island type number@island.</string>
     <string name="add_on_own_island">Send request · on %1$s</string>
     <string name="add_ci_row">Contact on another island</string>
-    <string name="add_ci_self">This is you — your account on this island</string>
+    <string name="add_ci_self">This is you: your account on this island</string>
     <string name="add_searching">Searching…</string>
     <string name="add_no_results">Nothing found.</string>
     <string name="add_scan">Scan a QR code</string>
@@ -1126,6 +1126,7 @@
     <string name="myreports_status_duplicate">Duplicate</string>
     <string name="myreports_delete">Remove from list</string>
     <string name="myreports_delete_refused">This one is still under review, so it cannot be removed from the list yet.</string>
+    <string name="myreports_delete_error">Could not remove it. Try again.</string>
     <string name="myreports_remove_title">Remove from list?</string>
     <string name="myreports_remove_body">It disappears from your list. The report itself stays with us and still counts toward the Hall of Fame.</string>
     <string name="myreports_number">#%1$d</string>
@@ -1209,7 +1210,7 @@
     <string name="common_homepage">Website</string>
     <string name="common_real_name">Name</string>
     <string name="chat_empty_title">No messages yet</string>
-    <string name="chat_empty_body">Say hi — your first message starts the thread.</string>
+    <string name="chat_empty_body">Say hi. Your first message starts the thread.</string>
     <plurals name="chat_media_sending">
         <item quantity="one">Sending %d file…</item>
         <item quantity="other">Sending %d files…</item>
@@ -1220,9 +1221,9 @@
     <string name="how_q1">Who can read what I send?</string>
     <string name="how_a1">Only the person you sent it to. The text is encrypted on your device and decrypted on theirs, and the island in between carries a sealed envelope it cannot open.\n\nWhat the island does see: that you were online, and who your envelopes were addressed to. What it does not see: what is inside them.</string>
     <string name="how_q2">What is an island, and why is there more than one?</string>
-    <string name="how_a2">An island is a server that holds your mail. RCQ is not one server but many independent ones: ours, other people\u0027s, and yours if you run one.\n\nYour number is issued by an island, so the same number on two islands is two different people — an address is the number AND the island. People on different islands still write to each other, call, and share groups.</string>
+    <string name="how_a2">An island is a server that holds your mail. RCQ is not one server but many independent ones: ours, other people\u0027s, and yours if you run one.\n\nYour number is issued by an island, so the same number on two islands is two different people: an address is the number AND the island. People on different islands still write to each other, call, and share groups.</string>
     <string name="how_q3">What do I do when it stops working?</string>
-    <string name="how_a3">First find out whether you are being blocked: Settings → Network → Connection diagnostics, and run the full check with your VPN OFF.\n\nIt gives you one line. Send it through Report a bug — that line tells us exactly what is closed on your network, and without it we are guessing.</string>
+    <string name="how_a3">First find out whether you are being blocked: Settings → Network → Connection diagnostics, and run the full check with your VPN OFF.\n\nIt gives you one line. Send it through Report a bug: that line tells us exactly what is closed on your network, and without it we are guessing.</string>
     <string name="how_q4">What happens when my network blocks RCQ?</string>
     <string name="how_a4">The app notices and goes through RCQ relays by itself. There is nothing to turn on and no separate VPN: it opens a tunnel to one of our relays and keeps working.\n\nTo whoever is doing the blocking, that traffic looks like an ordinary visit to an ordinary site, the same kind of encrypted connection your browser makes all day. The relay carries sealed envelopes, so it cannot read your messages either.</string>
     <string name="how_q5">Can anyone tell who I am writing to?</string>

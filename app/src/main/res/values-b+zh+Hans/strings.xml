@@ -62,7 +62,7 @@
     <string name="home_menu_outgoing">已发送请求</string>
     <string name="outgoing_title">已发送的请求</string>
     <string name="outgoing_empty">你没有发送过任何请求。</string>
-    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">你在另一个岛上已经有一个号码为 #%1$d 的联系人。会话目前仅按号码归档，第二个 #%1$d 会和它共用同一段聊天记录。未添加。</string>
     <string name="share_to_title">发送到…</string>
     <string name="share_to_search">搜索聊天</string>
@@ -1084,6 +1084,7 @@
     <string name="myreports_status_duplicate">重复</string>
     <string name="myreports_delete">从列表中移除</string>
     <string name="myreports_delete_refused">这条还在处理中，暂时无法从列表中移除。</string>
+    <string name="myreports_delete_error">没能移除，请再试一次。</string>
     <string name="myreports_remove_title">要从列表中移除吗？</string>
     <string name="myreports_remove_body">它会从你的列表中消失。反馈本身仍留在我们这里，也仍然计入名人堂。</string>
     <string name="myreports_number">#%1$d</string>
