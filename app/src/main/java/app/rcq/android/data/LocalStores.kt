@@ -877,6 +877,16 @@ object LocalStores {
     fun cachedContactsJsonFor(accountId: String): String? =
         if (::prefs.isInitialized) prefs.getString("$accountId.$K_CONTACTS_CACHE", null) else null
 
+    /** The highest version of the vault's `contacts` slot this install has
+     *  seen, per account: the floor below which an island's answer is a
+     *  rollback rather than data (see ContactsVault). 0 = never read. */
+    fun vaultContactsVersion(): Long =
+        if (::prefs.isInitialized && acct != null) prefs.getLong(pk(K_VAULT_CONTACTS_VERSION), 0L) else 0L
+
+    fun setVaultContactsVersion(version: Long) {
+        if (::prefs.isInitialized && acct != null) prefs.edit().putLong(pk(K_VAULT_CONTACTS_VERSION), version).apply()
+    }
+
     fun cachedGroupsJson(): String? =
         if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_GROUPS_CACHE), null) else null
 
@@ -931,4 +941,5 @@ object LocalStores {
     private const val K_PRIVACY_CACHE = "privacy_cache"
     private const val K_CONTACTS_CACHE = "contacts_cache"
     private const val K_GROUPS_CACHE = "groups_cache"
+    private const val K_VAULT_CONTACTS_VERSION = "vault_contacts_version"
 }

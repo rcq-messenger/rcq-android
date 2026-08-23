@@ -840,6 +840,85 @@ class RcqApi(
         val avatar_media_key: String? = null,
     )
 
+    // ── the vault (stage 4 of the core-metadata plan, spec §4.9) ───────────
+    //
+    // Opaque, versioned, client-sealed slots per account. The island stores
+    // ciphertext and a version and holds neither a key nor a schema. The one
+    // rule: a write names the version it was based on and is refused with
+    // 409 and the current one otherwise (the #605 rule), and a version is
+    // never reused within a slot (a delete leaves a tombstone that keeps
+    // counting; 404 carries the version). These four return the version on
+    // every answer rather than throwing on 404/409, because both are
+    // answers the caller acts on, not failures. See crypto/Vault.kt for the
+    // sealing and data/ContactsVault.kt for the read-merge-write loop.
+
+    /** A slot as the island holds it: [blob] null when the slot never
+     *  existed (version 0) or was deleted (the tombstone's version). */
+    data class VaultSlotRead(val blob: String?, val version: Long)
+    /** The version a write landed as, or null and the island's current
+     *  version when the write was stale. */
+    data class VaultWrite(val version: Long?, val current: Long)
+    data class VaultSlotRef(val slot: String, val version: Long)
+    private data class VaultListBody(val slots: List<VaultSlotRef> = emptyList())
+    private data class VaultPutBody(val blob: String, val version: Long)
+    private data class VaultVersionBody(val version: Long = 0)
+    private data class VaultDetail(val detail: VaultDetailBody? = null)
+    private data class VaultDetailBody(val code: String? = null, val version: Long = 0)
+
+    suspend fun vaultList(): List<VaultSlotRef> = withContext(Dispatchers.IO) {
+        get("/vault", authed = true, VaultListBody::class.java).slots
+    }
+
+    suspend fun vaultGet(slot: String): VaultSlotRead = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url("$baseUrl/vault/$slot").get()
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            when (resp.code) {
+                200 -> {
+                    val b = gson.fromJson(text, VaultGetBody::class.java) ?: throw IOException("empty vault answer")
+                    VaultSlotRead(b.blob, b.version)
+                }
+                404 -> VaultSlotRead(null, gson.fromJson(text, VaultDetail::class.java)?.detail?.version ?: 0)
+                else -> throw IOException("HTTP ${resp.code}: ${text.take(200)}")
+            }
+        }
+    }
+    private data class VaultGetBody(val blob: String = "", val version: Long = 0)
+
+    /** [version] is the version this write is based on (0 only for a slot
+     *  that never existed). */
+    suspend fun vaultPut(slot: String, blobB64: String, version: Long): VaultWrite = withContext(Dispatchers.IO) {
+        val json = gson.toJson(VaultPutBody(blobB64, version))
+        val builder = Request.Builder().url("$baseUrl/vault/$slot").put(json.toRequestBody(JSON))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            when (resp.code) {
+                200 -> {
+                    val v = gson.fromJson(text, VaultVersionBody::class.java)?.version ?: throw IOException("empty vault answer")
+                    VaultWrite(v, v)
+                }
+                409 -> VaultWrite(null, gson.fromJson(text, VaultDetail::class.java)?.detail?.version ?: 0)
+                else -> throw IOException("HTTP ${resp.code}: ${text.take(200)}")
+            }
+        }
+    }
+
+    /** A delete names the version it is based on, like a write. True when
+     *  it landed (or there was nothing to delete), false when stale. */
+    suspend fun vaultDelete(slot: String, version: Long): Boolean = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url("$baseUrl/vault/$slot?version=$version").delete()
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
+            when (resp.code) {
+                204 -> true
+                409 -> false
+                else -> throw IOException("HTTP ${resp.code}: ${resp.body?.string()?.take(200)}")
+            }
+        }
+    }
+
     suspend fun contacts(): List<ContactRow> = withContext(Dispatchers.IO) {
         get("/contacts", authed = true, Array<ContactRow>::class.java).toList()
     }
@@ -1317,6 +1396,16 @@ class RcqApi(
         // island omits it, and asking it for a log it does not keep would
         // only earn a 404.
         val group_log: Boolean = false,
+        // Stage 4 of the plan (server 2026.08.23.8): the island serves
+        // PUT/GET/DELETE /vault/{slot}, opaque versioned client-sealed slots
+        // per account. An island that advertises it gets the contact list
+        // mirrored into the account's `contacts` slot after every roster
+        // refresh (see Session.mirrorContactsToVault); one that does not is
+        // left alone. Default false: an older island omits it. The two caps
+        // ride along so a client never has to discover them by failing.
+        val vault: Boolean = false,
+        val vault_max_blob_bytes: Int = 0,
+        val vault_max_slots: Int = 0,
     )
     data class ServerInfoResponse(
         val name: String = "",
