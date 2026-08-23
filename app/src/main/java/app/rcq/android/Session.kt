@@ -169,6 +169,11 @@ class Session(context: Context) {
      *  Read by [drainGroupLog] and by the live `gmsg` handler. */
     @Volatile private var groupLogReader: Boolean =
         capsCache(serverHost())?.group_log ?: false
+    /** Stage 4: does this island keep a vault? Seeded from the cached answer
+     *  like the two above. Read after every roster refresh by
+     *  [mirrorContactsToVault]; an island without one is left alone. */
+    @Volatile private var vaultEnabled: Boolean =
+        capsCache(serverHost())?.vault ?: false
     /** The island whose LIVE /server/info answer this process has applied.
      *  Null until one lands: a boot with the radios off keeps the cached (or
      *  default) flags, and the first socket that comes up asks again. */
@@ -540,6 +545,7 @@ class Session(context: Context) {
         // to an anonymous caller, so it keeps getting the session token.
         anonKeyLookup = c.anon_keys && c.deposit_auth
         groupLogReader = c.group_log
+        vaultEnabled = c.vault
     }
 
     /** After an account switch the flags still say what the PREVIOUS island
@@ -7026,8 +7032,38 @@ class Session(context: Context) {
         }
         // Persist the roster so the chat list is reachable offline (report #7).
         runCatching { LocalStores.setCachedContactsJson(profileGson.toJson(_contacts.value)) }
+        mirrorContactsToVault(_contacts.value)
         // Cross-island contacts aren't in the server roster — surface them too.
         mergeCrossIslandContacts()
+    }
+
+    /** Stage 4, mirror phase: the list the island just served is sealed into
+     *  the account's vault slot so a reinstall has a roster once the island
+     *  stops serving one. Behind the refresh on our own scope, never blocking
+     *  it, never throwing; a write only happens when the slot disagrees with
+     *  the list, and one mirror runs at a time per process (a burst of
+     *  presence-driven refreshes would otherwise race each other to the same
+     *  version and take turns losing). Pinned to the island that served the
+     *  list: an account switch mid-flight rebinds `api`, and the old island's
+     *  roster must not land in the new island's slot. */
+    private val vaultMirrorInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    private fun mirrorContactsToVault(list: List<Contact>) {
+        if (!vaultEnabled) return
+        val ik = store.identityPrivate ?: return
+        val servedBy = serverHost()
+        val apiNow = api
+        if (!vaultMirrorInFlight.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                if (serverHost() != servedBy) return@launch
+                val out = app.rcq.android.data.ContactsVault.mirror(apiNow, ik, list.filter { it.host == null })
+                if (out is app.rcq.android.data.ContactsVault.Outcome.Failed) {
+                    android.util.Log.w("RCQvault", "contacts mirror: ${out.why}")
+                }
+            } finally {
+                vaultMirrorInFlight.set(false)
+            }
+        }
     }
 
     private suspend fun refreshPending() {
