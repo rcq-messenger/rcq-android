@@ -161,6 +161,13 @@ class Session(context: Context) {
     // process.
     @Volatile private var anonKeyLookup: Boolean =
         capsCache(serverHost())?.let { it.anon_keys && it.deposit_auth } ?: false
+    /** Stage 5: does this island keep one log per room? Seeded from the cached
+     *  answer for the same reason as [anonKeyLookup]; the live answer in
+     *  syncGraph() overwrites it and, when it turns the flag ON for the first
+     *  time, runs the log drain that start() could not know to run. Read by
+     *  [drainGroupLog] and by the live `gmsg` handler. */
+    @Volatile private var groupLogReader: Boolean =
+        capsCache(serverHost())?.group_log ?: false
     private var api = newApi()
     private var socket = newSocket()
     private fun newApi(): RcqApi =
@@ -515,7 +522,7 @@ class Session(context: Context) {
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
 
     /** Apply an island's answer (live or cached) to the five surface flags
-     *  and to the wire switch for anonymous key lookups. */
+     *  and to the wire switches: anonymous key lookups and the room log. */
     private fun applyCaps(c: RcqApi.ServerCapabilities) {
         _uinShopEnabled.value = c.uin_shop
         _hallOfFameEnabled.value = c.hall_of_fame
@@ -526,6 +533,7 @@ class Session(context: Context) {
         // issues no tokens would hand out bundles without a one-time prekey
         // to an anonymous caller, so it keeps getting the session token.
         anonKeyLookup = c.anon_keys && c.deposit_auth
+        groupLogReader = c.group_log
     }
 
     /** After an account switch the flags still say what the PREVIOUS island
@@ -1196,6 +1204,10 @@ class Session(context: Context) {
         // hang-up to whoever holds that number here.
         synchronized(callOutbox) { callOutbox.clear() }
         lastVisitAt.clear()
+        // Stage 5 bookkeeping is per account: another account's rooms are
+        // other logs, and a seq carried over would ack the wrong cursor.
+        groupLogSeq.clear()
+        pendingLogAcks.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
         _outgoing.value = emptyList()
@@ -1736,7 +1748,15 @@ class Session(context: Context) {
      *  retry (and the reconnect-driven re-call) make it recover on its own. */
     private fun syncGraph() {
         if (duressViewUp) return
-        scope.launch { runCatching { withRetry { drainQueue() } } }
+        // Stage 5: the room log is drained right after the legacy queue, in the
+        // same coroutine. Sequential on purpose: both drains share the
+        // poison-row marker (#616), and two of them writing it at once would
+        // pin a crash on the wrong row. Each is retried and soft-fails on its
+        // own; a dead log fetch does not cost the legacy rows.
+        scope.launch {
+            runCatching { withRetry { drainQueue() } }
+            runCatching { withRetry { drainGroupLog() } }
+        }
         // Multihoming v1: also drain the backup-island mailboxes (dedup by
         // envelope uuid collapses anything the primary already delivered).
         scope.launch { runCatching { drainBackupQueuesOnce() } }
@@ -1786,9 +1806,18 @@ class Session(context: Context) {
                 val askedHost = serverHost()
                 val caps = api.serverInfo().capabilities
                 if (serverHost() != askedHost) return@launch
+                val wasLogReader = groupLogReader
                 applyCaps(caps)
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
                 rememberCaps(askedHost, caps)
+                // The drain above ran on the CACHED flag, and on an island we
+                // had never asked (a fresh install, the first start after the
+                // island upgraded) that flag was false: the log was skipped.
+                // Run it now that the island has said yes, once; from the
+                // next start on the cached answer covers it.
+                if (groupLogReader && !wasLogReader) {
+                    runCatching { withRetry { drainGroupLog() } }
+                }
                 // The island takes anonymous key lookups: mint the first
                 // batch of deposit tokens now, in the background, so the
                 // first v=2 session start does not pay the PoW on the send
@@ -6097,6 +6126,152 @@ class Session(context: Context) {
         CrashReporter.crumb(appCtx, "drain_done")
     }
 
+    // ── room log drain (Stage 5 of the core-metadata plan) ──────────
+
+    /** One log drain at a time. A reconnect and the first-time capability
+     *  flip in syncGraph() can both ask for one; the second would only fetch
+     *  the rows the first is still ingesting and ack them twice. */
+    private val groupLogDrainLock = Mutex()
+
+    /** The last log seq this device persisted per room, as far as this
+     *  process knows: set from every fetch, advanced by contiguous live
+     *  frames. The island's cursor is the authority; this copy exists ONLY
+     *  so a live `gmsg` can be acked safely (see [ackLiveGmsg]). Cleared on
+     *  an account switch: another account's rooms are other logs. */
+    private val groupLogSeq = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /** Live-frame acks waiting to go out, max seq per room, coalesced so a
+     *  burst (an album, a fast thread) is one POST, not one per frame. */
+    private val pendingLogAcks = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+    private val logAckFlushScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Drain the room logs this device is behind on, all rooms in one call,
+     *  then move the island's cursors past what was persisted.
+     *
+     *  A post into a room used to be one queue row per member (872 copies of
+     *  one blob in RCQ Beta, 79% of the database); on an island that runs
+     *  Stage 5 it is ONE row in the room's log, and each device reads it
+     *  through its own cursor. The rows are the very same envelopes the legacy
+     *  group rows of /messages/queue carried, so they take the same road:
+     *  `gmsg` through the sender-keys chain, everything else through the
+     *  sealed group ingest, dedupe by message UUID in the store. Nothing the
+     *  user sees changes.
+     *
+     *  ⚠ Dual read. The legacy drain keeps running exactly as before: the 1:1
+     *  rows live there, and so does every group row written for this account
+     *  before its first log fetch (that fetch flips the account to "log
+     *  reader" on the island, implicitly). Either order is fine; the UUID
+     *  dedupe collapses any overlap.
+     *
+     *  The ack names the max seq per room that went through ingest. A `gmsg`
+     *  whose chain key has not arrived is HELD by [ingestGmsg] (in memory,
+     *  replayed when the SKDM lands) and acked all the same, like the legacy
+     *  drain does: a row that cannot be opened yet must not pin the room's
+     *  cursor forever, and the SKDM rides its own row. Skipped entirely on an
+     *  island that does not advertise `group_log`: asking it would 404, and
+     *  its queue already carries the rooms. */
+    private suspend fun drainGroupLog() {
+        if (duressViewUp) return   // same hazard as drainQueue: an ack from the decoy view loses the row
+        if (!groupLogReader) return
+        groupLogDrainLock.withLock {
+            CrashReporter.crumb(appCtx, "drain_group_log")
+            // Poison-row guard (#616): same prefs, same marker, same rule as
+            // drainQueue, under an "l:" key. The marker a death leaves behind
+            // is read by the legacy drain at the next start, which always runs
+            // before this one; reading it here too would, on the one run where
+            // the two overlap (the first-time flip in syncGraph), count a row
+            // the other drain is ingesting right now as a death.
+            val guard = appCtx.getSharedPreferences("rcq_drain_guard", android.content.Context.MODE_PRIVATE)
+            // Page until the island says there is no more. Each page is acked
+            // before the next is asked for, so a page that dies mid-way costs
+            // only itself on redelivery.
+            // Pinned to the account AND island this drain is for: a switch
+            // while a page is in flight rebinds `api` and its token, and an
+            // ack sent under the new ones would set cursors in the new
+            // account's rooms (the ack needs no membership) at seqs that mean
+            // nothing to it, possibly past rows it has not read.
+            val drainFor = serverHost() to store.uin
+            var pages = 0
+            while (true) {
+                if ((serverHost() to store.uin) != drainFor) break
+                val page = api.fetchGroupLog()
+                if ((serverHost() to store.uin) != drainFor) break
+                val upto = HashMap<Int, Long>()
+                // Every room the island answered for: remember where the
+                // cursor stands even when nothing came back, that is the
+                // baseline a live frame is checked against.
+                page.cursors.forEach { (gid, seq) -> gid.toIntOrNull()?.let { groupLogSeq[it] = seq } }
+                asBacklog {
+                    page.rows.forEach { r ->
+                        // Whatever happens to the row, the cursor moves past
+                        // it: an empty row, a poison row and a held row all
+                        // count as seen, or the room would stop for good.
+                        upto[r.gid] = maxOf(upto[r.gid] ?: 0L, r.seq)
+                        val payload = r.payload ?: return@forEach
+                        val rowKey = "l:${r.gid}:${r.seq}"
+                        if (guard.getInt("strikes:$rowKey", 0) >= 2) {
+                            android.util.Log.w("RCQdrain", "log row $rowKey skipped after 2 fatal attempts")
+                            CrashReporter.crumb(appCtx, "drain_skip_poison")
+                            return@forEach
+                        }
+                        guard.edit().putString("attempt", rowKey).commit()
+                        // The same dispatch the legacy drain applies to its
+                        // group rows: a broadcast opens through the chain,
+                        // everything else is a sealed per-member envelope.
+                        when (r.envelope_type) {
+                            "gmsg" -> ingestGmsg(payload, r.gid)
+                            else -> ingestGroup(payload, r.gid)
+                        }
+                        if (guard.contains("strikes:$rowKey")) guard.edit().remove("strikes:$rowKey").apply()
+                    }
+                    guard.edit().remove("attempt").commit()
+                }
+                if (upto.isNotEmpty()) {
+                    // Persisted (or held): move the cursors. A lost ack only
+                    // means the island serves the page again, and the dedupe
+                    // makes the repeat free.
+                    runCatching { api.ackGroupLog(upto) }
+                    upto.forEach { (gid, seq) -> groupLogSeq.merge(gid, seq) { a, b -> maxOf(a, b) } }
+                }
+                pages++
+                // `more` with no rows would be an island that cannot hand out
+                // its own backlog; do not spin on it.
+                if (!page.more || page.rows.isEmpty() || pages >= 40) break
+            }
+            CrashReporter.crumb(appCtx, "drain_group_log_done")
+        }
+    }
+
+    /** A live `gmsg` carried the room's `seq`: it was just ingested, tell the
+     *  island so the next fetch does not serve it again.
+     *
+     *  ⚠ Only when it is the NEXT seq after what this device already has. The
+     *  island's ack moves the cursor forward to whatever we name, and a frame
+     *  that arrives on reconnect, while the fetch for the rows posted during
+     *  the gap is still in flight, would otherwise move the cursor PAST those
+     *  rows before they were ever read. A jump is left to the fetch (the
+     *  dedupe by UUID makes the overlap free); a room this process has not
+     *  fetched yet is left alone for the same reason. */
+    private fun ackLiveGmsg(gid: Int, seq: Long) {
+        if (!groupLogReader) return
+        val last = groupLogSeq[gid] ?: return
+        if (seq != last + 1) return
+        if (!groupLogSeq.replace(gid, last, seq)) return
+        pendingLogAcks.merge(gid, seq) { a, b -> maxOf(a, b) }
+        if (logAckFlushScheduled.compareAndSet(false, true)) {
+            val ackFor = serverHost() to store.uin
+            scope.launch {
+                delay(1_500)
+                logAckFlushScheduled.set(false)
+                val batch = HashMap<Int, Long>()
+                pendingLogAcks.keys.toList().forEach { g -> pendingLogAcks.remove(g)?.let { batch[g] = it } }
+                // A switch empties the map; this is for a frame that slipped
+                // in between the clear and the rebind (same pin as the drain).
+                if (batch.isNotEmpty() && (serverHost() to store.uin) == ackFor) runCatching { api.ackGroupLog(batch) }
+            }
+        }
+    }
+
     // ── contacts ─────────────────────────────────────────────────────
 
     suspend fun addContact(uin: Int) {
@@ -6809,7 +6984,13 @@ class Session(context: Context) {
                 // Sender-keys broadcast: not a sealed envelope — decode via the chain.
                 val payload = obj.get("payload")?.asString
                 val gid = obj.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
-                if (payload != null && gid != null) ingestGmsg(payload, gid)
+                if (payload != null && gid != null) {
+                    ingestGmsg(payload, gid)
+                    // Stage 5: the frame names its row in the room's log when
+                    // the post was logged. Ingested (or held) above, so the
+                    // island may move this device's cursor past it.
+                    obj.get("seq")?.takeIf { !it.isJsonNull }?.asLong?.let { ackLiveGmsg(gid, it) }
+                }
             }
             "group_created", "group_membership_changed" -> {
                 obj.getAsJsonObject("group")?.let { gj ->
