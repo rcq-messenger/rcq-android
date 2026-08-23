@@ -213,6 +213,7 @@
     <string name="linked_devices_connect_steps">1. On your computer, open chat.rcq.app\n2. Choose \"Connect phone\"\n3. Tap \"Scan QR\" and point at the code shown there\n\nYour phone will ask you to confirm.</string>
     <string name="linked_devices_connected">Connected %1$s</string>
     <string name="common_close">Close</string>
+    <string name="common_on">On</string>
     <string name="common_done">Done</string>
     <string name="common_save">Save</string>
     <string name="common_ok">OK</string>

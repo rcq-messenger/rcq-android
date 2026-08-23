@@ -176,7 +176,7 @@
     <string name="linked_devices_hint">Браузери, підключені до твого акаунта. Щоб підключити ще один, відкрий chat.rcq.app, обери «Підключити телефон», натисни «Сканувати QR» нижче і наведи камеру на код.</string>
     <string name="linked_devices_slots_title">Ключі пристроїв</string>
     <string name="linked_devices_slots_hint">Кожна інсталяція цього акаунта зі своїми ключами шифрування. Вхід за фразою відновлення з’являється тут.</string>
-    <string name="linked_devices_slots_primary">Основний пристрій</string>
+    <string name="linked_devices_slots_primary">Спільний слот ключів</string>
     <string name="linked_devices_slots_unnamed">Без назви</string>
     <string name="linked_devices_slots_this">цей пристрій</string>
     <string name="linked_devices_web_title">Веб-сесії</string>
@@ -196,6 +196,7 @@
     <string name="linked_devices_connect_steps">1. На комп\'ютері відкрий chat.rcq.app\n2. Обери «Підключити телефон»\n3. Натисни «Сканувати QR» і наведи на код, показаний там\n\nТелефон попросить підтвердження.</string>
     <string name="linked_devices_connected">Підключено %1$s</string>
     <string name="common_close">Закрити</string>
+    <string name="common_on">Увімкнено</string>
     <string name="common_done">Готово</string>
     <string name="common_save">Зберегти</string>
     <string name="common_ok">OK</string>
@@ -793,7 +794,7 @@
     <string name="random_err_other">Щось пішло не так. Спробуй ще раз.</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">Пошук у цьому чаті</string>
-    <string name="chat_secure_on">Захистити цей чат</string>
+    <string name="chat_secure_on">Сповіщення про знімки екрана</string>
     <string name="chat_secure_off">Вимкнути захист чату</string>
     <string name="secscreen_peer_screenshot">%1$s зробив знімок екрана</string>
     <string name="chat_menu_cd">Дії в чаті</string>
