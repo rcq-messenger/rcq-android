@@ -191,8 +191,8 @@
     <string name="backup_island_err_unreachable">Остров недоступен. Ничего не изменено.</string>
     <string name="linked_devices_hint">Браузеры, подключённые к вашему аккаунту. Чтобы подключить, откройте chat.rcq.app, выберите «Connect phone», нажмите «Сканировать QR» ниже и наведите на код.</string>
     <string name="linked_devices_slots_title">Ключи устройств</string>
-    <string name="linked_devices_slots_hint">Каждая установка этого аккаунта со своими ключами шифрования. Вход по фразе восстановления появляется здесь.</string>
-    <string name="linked_devices_slots_primary">Основное устройство</string>
+    <string name="linked_devices_slots_hint">Каждая установка этого аккаунта со своими ключами шифрования. Вход по фразе восстановления появляется здесь. Общий слот это ключи, с которых аккаунт начинался: через них говорит любая установка, ещё не получившая свои.</string>
+    <string name="linked_devices_slots_primary">Общий слот ключей</string>
     <string name="linked_devices_slots_unnamed">Без имени</string>
     <string name="linked_devices_slots_this">это устройство</string>
     <string name="linked_devices_revoke">Отозвать</string>

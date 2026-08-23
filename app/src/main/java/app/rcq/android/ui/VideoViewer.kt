@@ -256,11 +256,11 @@ internal fun FullscreenVideoViewer(
             // gesture pill and the close button under the clock.
             ViewerAction(
                 Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp), onDismiss,
+                Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp), onDismiss,
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp),
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
             ) {
                 ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(bytes) }
                 ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(bytes) }

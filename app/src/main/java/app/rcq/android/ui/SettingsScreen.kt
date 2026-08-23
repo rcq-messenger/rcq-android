@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Inventory2
@@ -2754,7 +2755,14 @@ private fun LinkedDevicesScreen(session: Session, onBack: () -> Unit) {
                                 listOf("desktop", "mac", "windows", "linux").any { it in slotLabel } -> Icons.Filled.Computer
                                 listOf("web", "chrome", "safari", "firefox", "browser").any { it in slotLabel } -> Icons.Filled.Language
                                 listOf("iphone", "ipod", "android", "phone").any { it in slotLabel } -> Icons.Filled.Smartphone
-                                d.device_id == 1 -> Icons.Filled.Smartphone
+                                // ⚠ Slot 1 is not a device and never was: it
+                                // is the key slot the account started with,
+                                // which any install without its own speaks
+                                // through. Drawing a phone there invented a
+                                // third device the person does not own, and
+                                // calling it "primary" made two things primary
+                                // at once, one on each client (#671, #673).
+                                d.device_id == 1 -> Icons.Filled.VpnKey
                                 else -> Icons.Filled.Computer
                             },
                             null, tint = c.accent, modifier = Modifier.size(22.dp),
