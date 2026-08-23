@@ -7064,18 +7064,27 @@ class Session(context: Context) {
      *  list: an account switch mid-flight rebinds `api`, and the old island's
      *  roster must not land in the new island's slot. */
     private val vaultMirrorInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** The edges the mirror last folded this process, as a fingerprint, so
+     *  a roster refresh that changed nothing (every presence frame launches
+     *  one) costs no vault read. Keyed by island and account. */
+    @Volatile private var vaultMirrored: String? = null
     private fun mirrorContactsToVault(list: List<Contact>) {
         if (!vaultEnabled) return
         val ik = store.identityPrivate ?: return
         val servedBy = serverHost()
+        val own = list.filter { it.host == null }
+        val key = servedBy + "|" + store.uin + "|" + own.map { "${it.uin}:${if (it.blocked) 1 else 0}:${it.nickname}" }.sorted().joinToString("\n")
+        if (key == vaultMirrored) return
         val apiNow = api
         if (!vaultMirrorInFlight.compareAndSet(false, true)) return
         scope.launch {
             try {
                 if (serverHost() != servedBy) return@launch
-                val out = app.rcq.android.data.ContactsVault.mirror(apiNow, ik, list.filter { it.host == null })
-                if (out is app.rcq.android.data.ContactsVault.Outcome.Failed) {
-                    android.util.Log.w("RCQvault", "contacts mirror: ${out.why}")
+                val out = app.rcq.android.data.ContactsVault.mirror(apiNow, ik, own)
+                when (out) {
+                    is app.rcq.android.data.ContactsVault.Outcome.Failed ->
+                        android.util.Log.w("RCQvault", "contacts mirror: ${out.why}")
+                    else -> vaultMirrored = key
                 }
             } finally {
                 vaultMirrorInFlight.set(false)
