@@ -5612,18 +5612,35 @@ class Session(context: Context) {
         }
     }
 
-    /** Acknowledge every still-unacked inbound 1:1 message from [peer] with
-     *  a read receipt — unless the user set read receipts to "nobody".
-     *  Called when the thread is opened and when a message arrives into the
-     *  open thread. In-memory [ackedReads] keeps us from re-sending. */
-    fun sendReadReceipts(peer: Int) {
+    /** Acknowledge inbound 1:1 messages from [peer] with a read receipt,
+     *  unless the user set read receipts to "nobody".
+     *
+     *  "Read" means SEEN: the chat screen calls this with the ids of the
+     *  rows whose whole height has been on screen (the same mark that moves
+     *  the unread badge), debounced, as the reader scrolls. It used to fire
+     *  for the whole thread the moment the chat opened and again for every
+     *  message that arrived while it was open, whatever was on screen, so a
+     *  reader parked three screens up in the history "read" everything
+     *  below (#707) and every open re-sent receipts for the entire history
+     *  (the in-memory ledger forgot them on restart). An acked inbound row is
+     *  now marked READ in the store, which is the ledger that survives a
+     *  restart; the state of an inbound row is rendered nowhere, ticks are
+     *  drawn on own messages only. */
+    fun sendReadReceipts(peer: Int, only: Collection<String>) {
         if (readReceiptsVisibility == "nobody") return
+        val want = only.toHashSet()
         val ids = (_messages.value[peer] ?: return)
-            .filter { !it.fromMe }
+            .filter { !it.fromMe && it.state != DeliveryState.READ && it.id in want }
             .map { it.id }
             .filterNot { ackedReads.contains(it) }
         if (ids.isEmpty()) return
         ackedReads.addAll(ids)
+        val idSet = ids.toHashSet()
+        val cur = _messages.value.toMutableMap()
+        cur[peer] = (cur[peer] ?: emptyList()).map { m ->
+            if (!m.fromMe && m.id in idSet) { db.updateState(m.id, DeliveryState.READ); m.copy(state = DeliveryState.READ) } else m
+        }
+        _messages.value = cur
         scope.launch { sendControl(peer, Envelope.readReceipt(ids)) }
     }
 
@@ -7375,8 +7392,10 @@ class Session(context: Context) {
         // A finished call is a record of something both people were present
         // for; only a missed one is still owed attention.
         if (countsUnread) bumpUnreadIfInbound(row, LocalStores.peerThread(row.peerUin))
-        // Arrived into the open thread → ack it immediately with a receipt.
-        if (!row.fromMe && LocalStores.peerThread(row.peerUin) == activeThread) sendReadReceipts(row.peerUin)
+        // (A message that arrives into the open thread is NOT acked here: the
+        // chat screen sends the receipt once the row has actually been on
+        // screen, which for a reader at the bottom is the next frame and for
+        // a reader up in the history is when they get there, #707.)
         // And tell the sender it ARRIVED, whether or not anybody opened it.
         //
         // ⚠ This is the only way the second tick can ever catch up. The island
