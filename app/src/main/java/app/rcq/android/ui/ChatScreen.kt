@@ -1391,23 +1391,29 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 // `rows` is rebuilt on every message; the collector must see
                 // the current one, not the one captured when it started.
                 val rowsNow by androidx.compose.runtime.rememberUpdatedState(rows)
+                val ackSeen: (Int) -> Unit = { seen ->
+                    val rows = rowsNow
+                    val ids = ArrayList<String>()
+                    for (i in 0..minOf(seen, rows.lastIndex)) {
+                        when (val r = rows[i]) {
+                            is ChatRow.Single -> if (!r.m.fromMe) ids.add(r.m.id)
+                            is ChatRow.Album -> r.items.filter { !it.fromMe }.forEach { ids.add(it.id) }
+                            else -> {}
+                        }
+                    }
+                    if (ids.isNotEmpty()) session.sendReadReceipts(peer, ids)
+                }
                 LaunchedEffect(threadKey) {
                     @OptIn(kotlinx.coroutines.FlowPreview::class)
                     snapshotFlow { deepestSeen }
                         .filter { it >= 0 }
                         .debounce(400)
-                        .collect { seen ->
-                            val rows = rowsNow
-                            val ids = ArrayList<String>()
-                            for (i in 0..minOf(seen, rows.lastIndex)) {
-                                when (val r = rows[i]) {
-                                    is ChatRow.Single -> if (!r.m.fromMe) ids.add(r.m.id)
-                                    is ChatRow.Album -> r.items.filter { !it.fromMe }.forEach { ids.add(it.id) }
-                                    else -> {}
-                                }
-                            }
-                            if (ids.isNotEmpty()) session.sendReadReceipts(peer, ids)
-                        }
+                        .collect { ackSeen(it) }
+                }
+                // Leaving the chat inside the debounce window must not lose
+                // what was seen in it.
+                DisposableEffect(threadKey) {
+                    onDispose { if (deepestSeen >= 0) ackSeen(deepestSeen) }
                 }
             }
             val belowCount by remember(rows) {
@@ -3650,7 +3656,10 @@ private fun AlbumPagerViewer(
     // Save/share fetch on the tap (a clip is not pulled down for the buttons);
     // while that runs the buttons are a spinner, not two more downloads.
     var actionBusy by remember { mutableStateOf(false) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // Edge to edge on every Android, not only where the system forces it
+    // (15+): the counter below is placed by the bar's real height, and that
+    // is only right when the content is under the bar everywhere.
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             androidx.compose.foundation.pager.HorizontalPager(
                 state = pager,

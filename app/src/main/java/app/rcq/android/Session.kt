@@ -5634,14 +5634,25 @@ class Session(context: Context) {
             .map { it.id }
             .filterNot { ackedReads.contains(it) }
         if (ids.isEmpty()) return
+        // Claimed in memory first so a second pass during the send does not
+        // send them again; released if the send fails, so a later pass does.
         ackedReads.addAll(ids)
-        val idSet = ids.toHashSet()
-        val cur = _messages.value.toMutableMap()
-        cur[peer] = (cur[peer] ?: emptyList()).map { m ->
-            if (!m.fromMe && m.id in idSet) { db.updateState(m.id, DeliveryState.READ); m.copy(state = DeliveryState.READ) } else m
+        scope.launch {
+            if (!sendControl(peer, Envelope.readReceipt(ids))) {
+                ackedReads.removeAll(ids.toSet())
+                return@launch
+            }
+            // Only a receipt that left is recorded: one transaction on this
+            // thread, never a write per row on the caller's.
+            runCatching { db.updateStates(ids, DeliveryState.READ) }
+            val idSet = ids.toHashSet()
+            _messages.update { cur ->
+                val list = cur[peer] ?: return@update cur
+                val next = cur.toMutableMap()
+                next[peer] = list.map { m -> if (!m.fromMe && m.id in idSet) m.copy(state = DeliveryState.READ) else m }
+                next
+            }
         }
-        _messages.value = cur
-        scope.launch { sendControl(peer, Envelope.readReceipt(ids)) }
     }
 
     /** Inbound DELIVERY receipt: flip our own sent messages from SENT to
@@ -7013,6 +7024,10 @@ class Session(context: Context) {
         // this session, so that is what we track. Reset in rebindTo().
         val armed = presenceBaselineLive
         val prevPresence = _contacts.value.associate { it.uin to it.presence }
+        // Whose roster this is: an account switch while the fetch is in the
+        // air rebinds `store`, and the list must not be sealed into the new
+        // account's vault (the mirror checks the pin before it starts).
+        val fetchedFor = store.uin
         _contacts.value = api.contacts().map {
             Contact(
                 uin = it.uin,
@@ -7049,7 +7064,7 @@ class Session(context: Context) {
         }
         // Persist the roster so the chat list is reachable offline (report #7).
         runCatching { LocalStores.setCachedContactsJson(profileGson.toJson(_contacts.value)) }
-        mirrorContactsToVault(_contacts.value)
+        mirrorContactsToVault(_contacts.value, fetchedFor)
         // Cross-island contacts aren't in the server roster — surface them too.
         mergeCrossIslandContacts()
     }
@@ -7068,19 +7083,20 @@ class Session(context: Context) {
      *  a roster refresh that changed nothing (every presence frame launches
      *  one) costs no vault read. Keyed by island and account. */
     @Volatile private var vaultMirrored: String? = null
-    private fun mirrorContactsToVault(list: List<Contact>) {
+    private fun mirrorContactsToVault(list: List<Contact>, fetchedFor: Int?) {
         if (!vaultEnabled) return
+        if (fetchedFor == null || store.uin != fetchedFor) return
         val ik = store.identityPrivate ?: return
         val servedBy = serverHost()
         val own = list.filter { it.host == null }
-        val key = servedBy + "|" + store.uin + "|" + own.map { "${it.uin}:${if (it.blocked) 1 else 0}:${it.nickname}" }.sorted().joinToString("\n")
+        val key = servedBy + "|" + fetchedFor + "|" + own.map { "${it.uin}:${if (it.blocked) 1 else 0}:${it.nickname}" }.sorted().joinToString("\n")
         if (key == vaultMirrored) return
         val apiNow = api
         if (!vaultMirrorInFlight.compareAndSet(false, true)) return
         scope.launch {
             try {
-                if (serverHost() != servedBy) return@launch
-                val out = app.rcq.android.data.ContactsVault.mirror(apiNow, ik, own)
+                if (serverHost() != servedBy || store.uin != fetchedFor) return@launch
+                val out = app.rcq.android.data.ContactsVault.mirror(apiNow, ik, own) { store.uin == fetchedFor }
                 when (out) {
                     is app.rcq.android.data.ContactsVault.Outcome.Failed ->
                         android.util.Log.w("RCQvault", "contacts mirror: ${out.why}")
