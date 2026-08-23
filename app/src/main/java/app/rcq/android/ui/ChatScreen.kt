@@ -1341,13 +1341,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // Show the jump-down arrow only once the newest message has scrolled
             // fully off-screen — not the instant the list can scroll down by a
             // pixel (#19: "буквально один миллиметр — и она тут как тут").
-            val showJumpDown by remember {
+            val jumpDownRaw by remember {
                 derivedStateOf {
                     val info = listState.layoutInfo
                     val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
                     lastVisible < info.totalItemsCount - 1
                 }
             }
+            // ⚠ The arrow APPEARS on a delay and disappears at once.
+            //
+            // A new message is laid out before the effect that follows it can
+            // run, so for those frames the newest row is off-screen and the
+            // arrow was drawn, then taken away again the moment the list
+            // caught up: it blinked on every incoming message while the reader
+            // sat at the very bottom (#708, and #715 when hiding it during the
+            // scroll turned out to be a frame too late). Waiting a moment
+            // before showing it costs nothing for a real scroll-up, where the
+            // condition has been true for as long as the reader has been up
+            // there, and removes the blink whatever caused it.
+            var showJumpDown by remember(threadKey) { mutableStateOf(false) }
             // A reply-jump return target only makes sense while scrolled up; once
             // the user reaches the bottom on their own, drop it so the arrow goes
             // back to its plain scroll-to-latest role.
@@ -1450,7 +1462,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // while the reader had not seen a line of the text (#676). So the
             // count now keeps the arrow up on its own; with everything read
             // `belowCount` is 0 and #19's rule is untouched.
-            if ((showJumpDown || belowCount > 0) && !autoFollowing) {
+            // ★ `belowCount` keeps the arrow up on its own: the arrow's rule
+            // and the badge's rule disagreed and the badge lost, so on a long
+            // last message the arrow vanished and took the count with it while
+            // the reader had not seen a line of the text (#676).
+            val jumpWanted = jumpDownRaw || belowCount > 0
+            LaunchedEffect(jumpWanted, threadKey) {
+                if (!jumpWanted) {
+                    showJumpDown = false
+                } else {
+                    kotlinx.coroutines.delay(350)
+                    showJumpDown = true
+                }
+            }
+            if (showJumpDown && !autoFollowing) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp),
                     contentAlignment = Alignment.TopEnd,
