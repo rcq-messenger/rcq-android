@@ -30,6 +30,22 @@ class RcqApi(
      *  OTHER host (backup island, visited island, guest session, cross-island
      *  media) has no such ladder — see [viaBestRoute]. */
     private val isPrimary: Boolean = false,
+    /** Stage 3 of the core-metadata plan: when this answers true, the three
+     *  peer key lookups ([fetchPeerDevices], [fetchPeerBundle],
+     *  [fetchPeerDeviceBundle]) carry NO session token, and a bundle fetch
+     *  spends one anonymous deposit token (`X-Deposit-Token`, minted by
+     *  [DepositAuthStore] against this very host) for its one-time prekey.
+     *  Every lookup used to tell the island, under our identity, whose keys
+     *  we were about to use; that is the pair the sealed queue row was
+     *  already being stripped of. A supplier, not a value: Session reads its
+     *  own volatile switch (`anon_keys && deposit_auth` from /server/info)
+     *  at request time, so an instance built a moment before the answer
+     *  landed, or rebuilt by the route watchdog, never holds a stale copy.
+     *  False is the old behaviour to the byte, which is what an island
+     *  without the flags, a guest session and a foreign island get. The
+     *  masquerade header for a closed island is unaffected: the interceptor
+     *  stamps it per host, not per account. */
+    private val anonKeyLookup: () -> Boolean = { false },
 ) {
 
     private val client = OkHttpClient.Builder()
@@ -276,51 +292,55 @@ class RcqApi(
     suspend fun replenishDevicePrekeys(deviceId: Int, body: PrekeysBody) = withContext(Dispatchers.IO) {
         postNoContent("/keys/devices/$deviceId/prekeys", gson.toJson(body), authed = true)
     }
-    /** Stage 3 of the core-metadata plan: when true, the three peer key
-     *  lookups below carry NO session token, and a bundle fetch spends one
-     *  anonymous deposit token (`X-Deposit-Token`, minted by
-     *  [DepositAuthStore] against this very host) for its one-time prekey.
-     *  Every lookup used to tell the island, under our identity, whose keys
-     *  we were about to use; that is the pair the sealed queue row was
-     *  already being stripped of. Session sets it from /server/info
-     *  (`anon_keys && deposit_auth`) and copies it onto every rebuilt
-     *  instance; false is the old behaviour to the byte, which is what an
-     *  island without the flags, a guest session and a foreign island get.
-     *  The masquerade header for a closed island is unaffected: the
-     *  interceptor stamps it per host, not per account. */
-    @Volatile var anonKeyLookup: Boolean = false
-
     /** Fetch a peer's bundle to establish a v=2 session. */
     suspend fun fetchPeerBundle(uin: Int): PeerBundle = withContext(Dispatchers.IO) {
         fetchBundle("/keys/$uin/bundle")
     }
     /** Every device of [uin] a sender has to reach, the primary included.
      *  Nothing is consumed by reading it, so the anonymous form needs no
-     *  token. `label` is "" on a Stage 3 island and must not be read off
-     *  this list; the owner's own registry (GET /devices) keeps labels. */
-    suspend fun fetchPeerDevices(uin: Int): PeerDevices = withContext(Dispatchers.IO) {
-        get("/keys/$uin/devices", authed = !anonKeyLookup, PeerDevices::class.java)
+     *  token. `label` is "" for anyone but the owner on a Stage 3 island
+     *  (server 2026.08.23.5) and must not be read off a PEER's list; the
+     *  owner's own key-slot screen passes [own] and keeps the session token
+     *  on that one call about its own account (there is no pair to leak in
+     *  naming oneself), which is what the island serves the labels against. */
+    suspend fun fetchPeerDevices(uin: Int, own: Boolean = false): PeerDevices = withContext(Dispatchers.IO) {
+        get("/keys/$uin/devices", authed = own || !anonKeyLookup(), PeerDevices::class.java)
     }
     /** One device's bundle, for the session that belongs to that device. */
     suspend fun fetchPeerDeviceBundle(uin: Int, deviceId: Int): PeerBundle = withContext(Dispatchers.IO) {
         fetchBundle("/keys/$uin/devices/$deviceId/bundle")
     }
 
+    /** Fill the deposit-token reserve for this host in the background, so the
+     *  first bundle fetch after the island said `anon_keys && deposit_auth`
+     *  finds a token waiting instead of paying the PoW on the send path. */
+    fun warmDepositTokens() {
+        if (!anonKeyLookup() || app.rcq.android.security.DuressGate.isActive) return
+        DepositAuthStore.warm(host, http())
+    }
+
     /** A bundle lookup the way this island wants it: anonymous with a deposit
-     *  token when [anonKeyLookup] is set, the session token otherwise.
+     *  token when [anonKeyLookup] says so, the session token otherwise.
      *
      *  One token per fetch, single-use. The island answers 200 (token spent,
      *  `one_time_prekey` filled), 403 (a bad or already-spent token, or an
      *  island that stopped issuing: the epoch most likely rotated under the
-     *  cached params), or 404 (no such bundle or device; the token was never
-     *  looked at and goes back to the reserve). On 403 the cached params and
-     *  reserve are dropped, a fresh token is minted and the fetch is tried
-     *  once more; a second 403, or no token to be had at all, falls back to
-     *  the session-token path for THIS fetch so a send is never blocked on
-     *  the mint. The PoW inside the mint runs here on Dispatchers.IO, never
-     *  on the main thread. */
+     *  cached params), or 404 (no such bundle or device). A token the island
+     *  never looked at goes back to the reserve: that is the 404, a 429 from
+     *  the per-IP bucket in front of the handler, and a call that got no
+     *  answer at all (a dead pooled socket, a tunnel blip). On 403 the cached
+     *  params and the tokens of that epoch are dropped, a fresh token is
+     *  minted and the fetch is tried once more; a second 403, or no token to
+     *  be had at all, falls back to the session-token path for THIS fetch so
+     *  a send is never blocked on the mint. The PoW inside the mint runs here
+     *  on Dispatchers.IO, never on the main thread.
+     *
+     *  The duress gate is checked before the mint, not only inside
+     *  [viaBestRoute]: the mint talks to the island on its own, and a decoy
+     *  session must not spend a PoW and five requests to look offline. */
     private fun fetchBundle(path: String): PeerBundle {
-        if (!anonKeyLookup) return get(path, authed = true, PeerBundle::class.java)
+        if (!anonKeyLookup()) return get(path, authed = true, PeerBundle::class.java)
+        app.rcq.android.security.DuressGate.check()
         var token = DepositAuthStore.tokenFor(host, http())
         var retried = false
         while (token != null) {
@@ -328,19 +348,25 @@ class RcqApi(
             val req = Request.Builder().url("$baseUrl$path").get()
                 .header("X-Deposit-Token", DepositAuthStore.headerValue(presented))
                 .build()
-            viaBestRoute { it.newCall(req).execute() }.use { resp ->
+            val resp = try {
+                viaBestRoute { it.newCall(req).execute() }
+            } catch (e: IOException) {
+                DepositAuthStore.giveBack(host, presented)
+                throw e
+            }
+            resp.use {
                 val text = resp.body?.string().orEmpty()
                 when {
                     resp.isSuccessful ->
                         return gson.fromJson(text, PeerBundle::class.java) ?: throw IOException("empty/unparseable response")
                     resp.code == 403 -> Unit
                     else -> {
-                        if (resp.code == 404) DepositAuthStore.giveBack(host, presented)
+                        if (resp.code == 404 || resp.code == 429) DepositAuthStore.giveBack(host, presented)
                         throw IOException("HTTP ${resp.code}: ${text.take(200)}")
                     }
                 }
             }
-            DepositAuthStore.forget(host)
+            DepositAuthStore.forget(host, presented)
             if (retried) break
             retried = true
             token = DepositAuthStore.tokenFor(host, http())
@@ -1209,10 +1235,10 @@ class RcqApi(
         // session token on this island, and a one-time prekey is handed out
         // against an anonymous deposit token instead. `anon_keys` says the
         // island understands that; `deposit_auth` says it also ISSUES the
-        // tokens. A client goes anonymous only when BOTH are true (see
-        // [anonKeyLookup]); an island missing either gets the old
-        // authenticated calls, never a half-anonymous one. Both default
-        // false: an older island omits them.
+        // tokens. A client goes anonymous only when BOTH are true (see the
+        // `anonKeyLookup` supplier on the constructor); an island missing
+        // either gets the old authenticated calls, never a half-anonymous
+        // one. Both default false: an older island omits them.
         val anon_keys: Boolean = false,
         val deposit_auth: Boolean = false,
     )

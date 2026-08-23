@@ -153,17 +153,20 @@ class Session(context: Context) {
     // lookups without a session token (`anon_keys && deposit_auth` on
     // /server/info). Seeded from the island's LAST answer so the first send
     // after a cold start does not name the pair for the second the request
-    // takes; the live answer in start() overwrites it. Held here, not only on
-    // the api object, because that object is rebuilt on every route change
-    // and each new instance has to inherit it (see [newApi]).
+    // takes; the live answer in start() overwrites it. Held here and READ
+    // from here by every api object at request time (see [newApi]): that
+    // object is rebuilt on every route change, and a value copied onto it
+    // could be written onto an instance that is being replaced at that very
+    // moment, leaving the live one on the old path for the rest of the
+    // process.
     @Volatile private var anonKeyLookup: Boolean =
         capsCache(serverHost())?.let { it.anon_keys && it.deposit_auth } ?: false
     private var api = newApi()
     private var socket = newSocket()
-    private fun newApi(): RcqApi = RcqApi("https://${apiHost()}", isPrimary = true).apply {
-        if (store.isRegistered) setToken(store.token)
-        anonKeyLookup = this@Session.anonKeyLookup
-    }
+    private fun newApi(): RcqApi =
+        RcqApi("https://${apiHost()}", isPrimary = true, anonKeyLookup = { this@Session.anonKeyLookup }).apply {
+            if (store.isRegistered) setToken(store.token)
+        }
     private fun newSocket(): RcqSocket = RcqSocket("wss://${apiHost()}")
     // Opened lazily by [bindDb] (in [start]) so the message DB is never opened
     // before the panic-PIN dataKey is available — opening a PIN-encrypted DB
@@ -523,7 +526,6 @@ class Session(context: Context) {
         // issues no tokens would hand out bundles without a one-time prekey
         // to an anonymous caller, so it keeps getting the session token.
         anonKeyLookup = c.anon_keys && c.deposit_auth
-        api.anonKeyLookup = anonKeyLookup
     }
 
     /** After an account switch the flags still say what the PREVIOUS island
@@ -1787,6 +1789,12 @@ class Session(context: Context) {
                 applyCaps(caps)
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
                 rememberCaps(askedHost, caps)
+                // The island takes anonymous key lookups: mint the first
+                // batch of deposit tokens now, in the background, so the
+                // first v=2 session start does not pay the PoW on the send
+                // path. The answer came over this api object's route, so
+                // the mint goes the same way.
+                if (store.isRegistered) api.warmDepositTokens()
             }
         }
         // Advertise sender-keys support so others broadcast to us (encrypt-once)
@@ -4861,6 +4869,9 @@ class Session(context: Context) {
         val webPub = Base64.decode(webPubB64, Base64.NO_WRAP)
         val sealed = SealedSender.sealForWebLink(blob, webPub)
         api.depositLink(token, sealed)
+        // A new install of OUR account is about to register its key slot:
+        // the cached carbon list is stale from here on.
+        ownDeviceListChanged(linked = true)
         // The scan starts on the Linked Devices screen but the confirm dialog
         // (and this call) live in MainActivity, so the screen never heard that
         // the link went through and kept showing the old list.
@@ -4896,7 +4907,11 @@ class Session(context: Context) {
      *  device" marker. Throws on failure (screen shows its error state). */
     suspend fun keySlots(): Pair<List<RcqApi.PeerDeviceRow>, Int?> = withContext(Dispatchers.IO) {
         val me = store.uin ?: return@withContext emptyList<RcqApi.PeerDeviceRow>() to null
-        api.fetchPeerDevices(me).devices.sortedBy { it.device_id } to myDeviceIdOrNull()
+        // `own`: the island (2026.08.23.5) serves the slot labels only to the
+        // owner authenticating about their own account; the anonymous Stage 3
+        // form of this lookup would name every slot "unnamed" with the wrong
+        // glyph (founder batch 21.08, item 12, all over again).
+        api.fetchPeerDevices(me, own = true).devices.sortedBy { it.device_id } to myDeviceIdOrNull()
     }
 
     /** Retire one of the account's key slots (пункт 13). Throws on failure;
@@ -5207,9 +5222,30 @@ class Session(context: Context) {
         // Each entry gets its own expiry: the base TTL plus or minus a random
         // share of the jitter, so lists fetched together are not re-read
         // together (a burst of lookups at a fixed period is a signature).
+        // Our OWN list right after a link is the exception: it is re-read
+        // often for a while, see [ownDeviceListChanged].
         val jitter = (Math.random() * 2 - 1) * PEER_DEVICES_JITTER_MS
-        peerDeviceCache[uin] = (now + PEER_DEVICES_TTL_MS + jitter.toLong()) to devices
+        val ttl = if (self != null && now < ownListShortUntil) OWN_DEVICES_SHORT_TTL_MS
+                  else PEER_DEVICES_TTL_MS + jitter.toLong()
+        peerDeviceCache[uin] = (now + ttl) to devices
         return devices
+    }
+
+    /** Until when our OWN device list is re-read on the short TTL. */
+    @Volatile private var ownListShortUntil = 0L
+
+    /** Our own key-slot list changed, or is about to: a link went through
+     *  (here, or on another session of ours: `device_linked`), or a slot was
+     *  retired. Drop the cached list so the next carbon fan-out re-reads it.
+     *  After a LINK the next readings are also held briefly: `device_linked`
+     *  marks the QR link, and the new install registers its key slot only
+     *  once it has opened the blob and booted, seconds to a minute later. A
+     *  list re-read in between would miss the slot for the full TTL, and
+     *  everything typed here meanwhile would never reach the new device
+     *  unless it sent first. */
+    private fun ownDeviceListChanged(linked: Boolean) {
+        store.uin?.let { peerDeviceCache.remove(it) }
+        if (linked) ownListShortUntil = System.currentTimeMillis() + OWN_DEVICES_SHORT_WINDOW_MS
     }
 
     private suspend fun sendEnvelope(env: Envelope, id: String, toUin: Int) {
@@ -6797,11 +6833,18 @@ class Session(context: Context) {
             // round-trip once the Linked Devices screen has actually been
             // opened — before that there is nothing to keep fresh.
             "device_linked", "device_revoked" -> {
+                // Our own carbon list is stale either way: a linked install
+                // is about to register a key slot, a revoked one just lost it.
+                ownDeviceListChanged(linked = type == "device_linked")
                 if (_devices.value != null) scope.launch { runCatching { refreshDevices() } }
             }
             // A KEY SLOT was retired (пункт 13), possibly from another session
-            // of this account. Just nudge the screen that shows the list.
-            "device_slot_revoked" -> _keySlotsChanged.value++
+            // of this account. Nudge the screen that shows the list, and drop
+            // the carbon list so no copy is sealed to the retired slot.
+            "device_slot_revoked" -> {
+                ownDeviceListChanged(linked = false)
+                _keySlotsChanged.value++
+            }
             "typing" -> {
                 val from = obj.get("from_uin")?.asInt
                 val active = obj.get("active")?.asBoolean ?: false
@@ -7295,12 +7338,15 @@ class Session(context: Context) {
             // A device the cached list does not have is a device linked after
             // the list was read: drop the list, the next send re-reads it and
             // fans out to the new install too. Our own list leaves our own
-            // id out by design, so that id is not a stale-list signal.
+            // id out by design, so that id is not a stale-list signal. Nor is
+            // an EMPTY list: that is the island answering that it keeps no
+            // device registry (every v=2 copy from there names device 1),
+            // and dropping it would re-ask on every inbound message.
             if (dev != null) {
                 val from = d.senderUin
                 peerDeviceCache[from]?.let { (_, known) ->
                     val ours = from == store.uin && dev == myDeviceIdOrNull()
-                    if (dev !in known && !ours) peerDeviceCache.remove(from)
+                    if (known.isNotEmpty() && dev !in known && !ours) peerDeviceCache.remove(from)
                 }
             }
         }
@@ -7358,6 +7404,10 @@ class Session(context: Context) {
          *  [peerDeviceCache] cover the rest. */
         const val PEER_DEVICES_TTL_MS = 15 * 60_000L
         const val PEER_DEVICES_JITTER_MS = 3 * 60_000L
+        /** How often our OWN list is re-read in the window after a link,
+         *  and how long that window lasts (see [ownDeviceListChanged]). */
+        const val OWN_DEVICES_SHORT_TTL_MS = 60_000L
+        const val OWN_DEVICES_SHORT_WINDOW_MS = 15 * 60_000L
         /** Background rounds a sealed copy that no attempt could place gets
          *  before the message it belongs to is failed, and the gap before the
          *  first of them (it widens by that much each round). Long enough to
