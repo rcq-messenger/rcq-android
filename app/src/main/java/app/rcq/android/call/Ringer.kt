@@ -39,25 +39,35 @@ class Ringer private constructor(private val context: Context) {
     @Volatile private var incomingActive = false
 
     /** Which call the current ring belongs to. A stop that names another call
-     *  is a stale surface going away and is ignored. */
+     *  is a stale surface going away and is ignored.
+     *
+     *  ⚠ Every ring MUST name its call. An unowned ring (null here) matches
+     *  every stop, so a stop parked by a surface that died during call A
+     *  would silence the ring of call B a minute later. That is why the
+     *  no-argument start is private: there is no way to ring anonymously. */
     @Volatile private var incomingCallId: String? = null
 
     /** Ring for [callId]. Already ringing for it (a recreated surface, a second
      *  start from the controller) leaves the melody exactly where it is. */
+    @Synchronized
     fun startIncoming(callId: String?) {
         if (incomingActive && (callId == null || incomingCallId == callId)) return
         if (incomingActive) stopIncomingOnly()
         incomingCallId = callId
-        startIncoming()
+        startIncomingNow()
     }
 
-    /** Stop only if the ring still belongs to [callId]. */
+    /** Stop the INCOMING ring, and only if it still belongs to [callId].
+     *  Never the ringback: a surface that names a call must not be able to
+     *  silence the call the user is placing (see [startRingback]). */
+    @Synchronized
     fun stopFor(callId: String?) {
         if (callId != null && incomingCallId != null && incomingCallId != callId) return
-        stop()
+        incomingCallId = null
+        stopIncomingOnly()
     }
 
-    fun startIncoming() {
+    private fun startIncomingNow() {
         if (incomingActive) return
         stopIncomingOnly()
         incomingActive = true
@@ -80,6 +90,7 @@ class Ringer private constructor(private val context: Context) {
      *  shared stop meant an incoming call silenced the ringback of the call
      *  the user was placing, and declining the incoming one left that call
      *  ringing back at nobody for the rest of its life. */
+    @Synchronized
     fun startRingback() {
         stopRingbackOnly()
         runCatching {
@@ -90,6 +101,7 @@ class Ringer private constructor(private val context: Context) {
     }
 
     /** Everything quiet: the end of a call, whichever direction it went. */
+    @Synchronized
     fun stop() {
         incomingCallId = null
         stopIncomingOnly()
