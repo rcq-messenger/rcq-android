@@ -250,6 +250,77 @@ object Multihome {
         runCatching { api.ackQueue(direct, group, deviceId) }
     }
 
+    // ── Stage 5 on a foreign mailbox: the room log of a backup or visited island ──
+
+    /** Per host: does it keep one log per room (`capabilities.group_log`),
+     *  and when we last asked. In memory: a foreign island is asked on the
+     *  first drain of a process and then once per [CAPS_TTL_MS]; an island
+     *  that does not answer is treated as one without a log until it does,
+     *  which is exactly the legacy path it is drained by anyway. */
+    private val groupLogCaps = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
+    private const val CAPS_TTL_MS = 6 * 60 * 60 * 1000L
+
+    /** The strike count of a foreign log row that would not ingest, same
+     *  rule as the primary drain ([GroupLogPage.strike]). In memory here; the
+     *  30-second loop makes the three drains a matter of two minutes. */
+    private val logRowFails = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private suspend fun advertisesGroupLog(api: RcqApi, host: String): Boolean {
+        val now = System.currentTimeMillis()
+        groupLogCaps[host]?.let { (yes, at) -> if (now - at < CAPS_TTL_MS) return yes }
+        val yes = runCatching { api.serverInfo().capabilities.group_log }.getOrNull() ?: return false
+        groupLogCaps[host] = yes to now
+        return yes
+    }
+
+    /** The same drain [Session.drainGroupLog] runs on the primary, for a
+     *  mailbox we hold on another island, right after that island's legacy
+     *  queue was drained (never beside it). Feature-detected per island: the
+     *  rooms a backup or visited island hosts for us live THERE, and only an
+     *  island that advertises the log keeps one. The rows are handed to
+     *  [onRow] exactly as the legacy group rows of the same mailbox are, and
+     *  filed the same way; its answer says whether the row is done with
+     *  (null) or failed in a way that may pass next time, in which case the
+     *  room's ack stops short of it for a few drains, then writes it off. An
+     *  ack that does not land ends the drain. Never throws. */
+    private suspend fun drainGroupLog(
+        api: RcqApi,
+        host: String,
+        onRow: (payload: String, groupId: Int, host: String) -> String?,
+    ) {
+        runCatching {
+            var pages = 0
+            while (true) {
+                val page = api.fetchGroupLog()
+                val acks = GroupLogPage.Acks()
+                page.rows.forEach { r ->
+                    val payload = r.payload
+                    val why = if (payload == null) null else onRow(payload, r.gid, host)
+                    val key = "$host:${r.gid}:${r.seq}"
+                    val done = if (why == null) {
+                        logRowFails.remove(key)
+                        true
+                    } else {
+                        val strike = GroupLogPage.strike(logRowFails[key], why)
+                        if (strike.writtenOff) {
+                            logRowFails.remove(key)
+                            android.util.Log.w("RCQfed", "log row $key written off after ${strike.count} drains ($why)")
+                        } else {
+                            logRowFails[key] = GroupLogPage.encode(strike)
+                        }
+                        strike.writtenOff
+                    }
+                    acks.row(r.gid, r.seq, done)
+                }
+                if (acks.upto.isNotEmpty() && runCatching { api.ackGroupLog(acks.upto) }.isFailure) break
+                pages++
+                if (!page.more || acks.blocked.isNotEmpty() || page.rows.isEmpty() || pages >= 40) break
+            }
+        }.onFailure {
+            android.util.Log.w("RCQfed", "group log drain $host: ${it.javaClass.simpleName}: ${it.message}")
+        }
+    }
+
     /** Drain every backup mailbox, feeding each payload to [onPayload] (the
      *  session's ingest — dedup happens there). A 401 refreshes the token via
      *  recover and retries once. Never throws. */
@@ -262,12 +333,17 @@ object Multihome {
      *  agree. It is a HOME-island fact: on a backup mailbox we hold a separate
      *  alias with no published bundle, so everything spooled there is an
      *  unaddressed v=1 copy that any `dev` is served. What matters is that both
-     *  calls name the same one. */
+     *  calls name the same one.
+     *
+     *  [onLogRow] is the Stage 5 half: on an island that advertises the room
+     *  log, the log is drained right after the queue, through the same filing
+     *  (see [drainGroupLog]). Null leaves the island on the legacy rows. */
     suspend fun drainBackupQueues(
         ownUin: Int,
         signingPriv: ByteArray,
         signingPub: ByteArray,
         deviceId: Int = 1,
+        onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
@@ -292,6 +368,7 @@ object Multihome {
                 }
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
                 ack(api, rows, deviceId)
+                if (onLogRow != null && advertisesGroupLog(api, home.host)) drainGroupLog(api, home.host, onLogRow)
             }.onFailure {
                 android.util.Log.w("RCQfed", "multihome drain ${home.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
@@ -305,6 +382,7 @@ object Multihome {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         deviceId: Int = 1,
+        onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (v in VisitedIslandsStore.list()) {
@@ -323,6 +401,7 @@ object Multihome {
                 }
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
                 ack(api, rows, deviceId)
+                if (onLogRow != null && advertisesGroupLog(api, v.host)) drainGroupLog(api, v.host, onLogRow)
             }.onFailure {
                 android.util.Log.w("RCQfed", "visited drain ${v.host}: ${it.javaClass.simpleName}: ${it.message}")
             }

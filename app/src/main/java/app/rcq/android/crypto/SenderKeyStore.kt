@@ -208,6 +208,22 @@ object SenderKeyStore {
     @Synchronized
     fun knowsKid(ownUin: Int, kid: String): Boolean = loadIn(ownUin).containsKey(kid)
 
+    /** Has the chain for [kid] already moved PAST [index], with no key cached
+     *  for it? Then the message under it was either opened before (the queue
+     *  and the room log both re-serve rows a live frame already delivered, and
+     *  a reconnect re-serves whatever was not acked) or it is a replay, and in
+     *  both cases nothing that can still arrive will ever open it: an SKDM
+     *  answers at the sender's CURRENT index, which is ahead of this one too.
+     *  [deriveInbound] returns null for this case exactly as it does for a kid
+     *  we have never seen, and the caller has to tell the two apart: the
+     *  unknown kid is held for its SKDM, this one is simply done with. */
+    @Synchronized
+    fun isBehind(ownUin: Int, kid: String, epoch: Int, index: Int): Boolean {
+        val c = loadIn(ownUin)[kid] ?: return false
+        if (c.epoch != epoch) return false
+        return index < c.index && !c.skipped.containsKey(index)
+    }
+
     /** True if THIS account on THIS device created [kid] (a gmsg under it is my
      *  own message echoed back; own multi-device sync rides carbons, drop it). */
     @Synchronized
