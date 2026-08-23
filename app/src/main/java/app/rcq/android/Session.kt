@@ -3209,17 +3209,44 @@ class Session(context: Context) {
     suspend fun loadMyReports(): List<RcqApi.MyReport>? =
         runCatching { api.myReports() }.getOrNull()
 
-    /** Take one of my own reports off my own list. False when the server
-     *  refused: an open report about ANOTHER user waits for a verdict, because
-     *  the reporter is a party to that case and the thread is the operator's
-     *  only way to ask them anything.
+    /** The outcome of taking one of my own reports off my own list. Three
+     *  cases, because they are three different sentences: [Refused] is the
+     *  server holding an OPEN report about ANOTHER user until there is a
+     *  verdict, [Removed] is the row leaving the list (including the case where
+     *  it had already left, from another device or from the operator's side),
+     *  and only [Failed] is worth retrying. A flat boolean turned every dead
+     *  network into "still under review", which is a statement about the
+     *  report's status and was simply untrue. */
+    sealed class ReportRemove {
+        object Removed : ReportRemove()
+        object Refused : ReportRemove()
+        object Failed : ReportRemove()
+    }
+
+    /** Take one of my own reports off my own list. [ReportRemove.Refused] when
+     *  the server said no: an open report about ANOTHER user waits for a
+     *  verdict, because the reporter is a party to that case and the thread is
+     *  the operator's only way to ask them anything.
      *
      *  ⚠ Server-side this is a HIDE, not a delete. The row stays and keeps
      *  counting: `hof_stats` reads the reports table live, so erasing the
      *  reports that came back dismissed used to raise the Hall of Fame ratio.
      *  Nothing in the UI may promise the report is destroyed. */
-    suspend fun deleteMyReport(id: Int): Boolean =
-        runCatching { api.deleteMyReport(id) }.isSuccess
+    suspend fun deleteMyReport(id: Int): ReportRemove =
+        runCatching { api.deleteMyReport(id) }.fold(
+            onSuccess = { ReportRemove.Removed },
+            onFailure = {
+                val msg = it.message.orEmpty()
+                when {
+                    msg.startsWith("HTTP 409") -> ReportRemove.Refused
+                    // Already gone: another device removed it, or the operator
+                    // did. Dropping the row is the honest answer, not an error
+                    // and certainly not "still under review".
+                    msg.startsWith("HTTP 404") -> ReportRemove.Removed
+                    else -> ReportRemove.Failed
+                }
+            },
+        )
 
     /** The outcome of rewriting one's own report. Three refusals, because they
      *  need three different sentences: [Locked] is "somebody already answered

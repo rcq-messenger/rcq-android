@@ -62,7 +62,7 @@
     <string name="home_menu_outgoing">Gönderilen istekler</string>
     <string name="outgoing_title">Gönderilen istekler</string>
     <string name="outgoing_empty">Hiç istek göndermedin.</string>
-    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">Başka bir adada #%1$d numaralı bir kişin zaten var. Bir sohbet yalnızca numaraya göre saklandığından ikinci bir #%1$d o geçmişi paylaşırdı. Eklenmedi.</string>
     <string name="share_to_title">Şuraya gönder…</string>
     <string name="share_to_search">Sohbetlerde ara</string>
@@ -87,7 +87,7 @@
     <string name="access_token_label">Erişim jetonu (isteğe bağlı)</string>
     <string name="access_token_hint">Özel (kapalı) bir ada için sana verilen erişim jetonunu yapıştır.</string>
     <string name="access_token_bad">Bu ada için erişim jetonu geçersiz ya da süresi dolmuş.</string>
-    <string name="manage_accounts_intro">Bu cihazdaki hesaplar. Aralarında ana ekrandaki hesap düğmesinden geçebilirsin. Buradan bir hesabı silmek onu yalnızca bu cihazdan kaldırır — kimliği sunucuda kalır.</string>
+    <string name="manage_accounts_intro">Bu cihazdaki hesaplar. Aralarında ana ekrandaki hesap düğmesinden geçebilirsin. Buradan bir hesabı silmek onu yalnızca bu cihazdan kaldırır, kimliği sunucuda kalır.</string>
     <string name="manage_accounts_active">Etkin</string>
     <string name="manage_accounts_add_by_phrase">Kurtarma ifadesiyle hesap ekle</string>
     <string name="manage_accounts_delete">Sil</string>
@@ -134,7 +134,7 @@
     <string name="weblink_body">Bu, tarayıcıdan sohbet edebilmen için siteyi senin hesabınla oturum açtırır. Yalnızca chat.rcq.app üzerindeki QR kodunu kendin açtıysan devam et.</string>
     <string name="weblink_confirm">Bağlan</string>
     <string name="weblink_done">Web bağlandı. Tarayıcın şimdi giriş yapmalı.</string>
-    <string name="weblink_failed">Web\'e bağlanılamadı. Kodun süresi dolmuş olabilir — tekrar dene.</string>
+    <string name="weblink_failed">Web\'e bağlanılamadı. Kodun süresi dolmuş olabilir, tekrar dene.</string>
     <string name="weblink_taken">Bu bağlantı zaten kullanıldı. Sitedeki QR kodunu yenile ve yenisini tara.</string>
     <string name="common_add">Ekle</string>
     <string name="kind_message">Yeni mesaj</string>
@@ -149,7 +149,7 @@
     <string name="addlink_request_sent">İstek gönderildi</string>
     <string name="settings_row_linked_devices">Bağlı cihazlar</string>
     <string name="settings_row_backup_island">Yedek ada</string>
-    <string name="backup_island_body">Otomatik yedek, ikinci bir giriş değil — orada hesap değiştirmez, oturum açmazsın. Ana adan çalışırken gelen her mesajın bir kopyası yedeğe de bırakılır. Ana adan engellenir ya da çökerse uygulama kendiliğinden yedekten almayı sürdürür. Yedek adadaki numaran farklı olabilir (adalar numaraları birbirinden bağımsız verir); ana numaran hiç değişmez.</string>
+    <string name="backup_island_body">Otomatik yedek, ikinci bir giriş değil: orada hesap değiştirmez, oturum açmazsın. Ana adan çalışırken gelen her mesajın bir kopyası yedeğe de bırakılır. Ana adan engellenir ya da çökerse uygulama kendiliğinden yedekten almayı sürdürür. Yedek adadaki numaran farklı olabilir (adalar numaraları birbirinden bağımsız verir); ana numaran hiç değişmez.</string>
     <string name="backup_island_row_uin">bu adadaki posta kutusu: #%1$d</string>
     <string name="home_via_backup">Adan cevap vermiyor. Mesajlar yedek adandan geliyor; oradan göndermek için Ayarlar\'dan onu ana ada yap.</string>
     <string name="backup_island_row_uin_diff">bu adadaki posta kutusu: #%1$d (adalar numaraları bağımsız verir ve #%2$d burada alınmıştı)</string>
@@ -987,7 +987,7 @@
     <string name="add_search_prompt">Eklemek için kişi ve grup ara. Sade bir numara kendi adandadır; başka bir ada için numara@ada yaz.</string>
     <string name="add_on_own_island">İstek gönder · %1$s üzerinde</string>
     <string name="add_ci_row">Başka bir adadaki kişi</string>
-    <string name="add_ci_self">Bu sensin — bu adadaki hesabın</string>
+    <string name="add_ci_self">Bu sensin: bu adadaki hesabın</string>
     <string name="add_searching">Aranıyor…</string>
     <string name="add_no_results">Bir şey bulunamadı.</string>
     <string name="add_scan">QR kodu tara</string>
@@ -1084,6 +1084,7 @@
     <string name="myreports_status_duplicate">Tekrar</string>
     <string name="myreports_delete">Listeden kaldır</string>
     <string name="myreports_delete_refused">Bu hâlâ inceleniyor, o yüzden şimdilik listeden kaldırılamaz.</string>
+    <string name="myreports_delete_error">Listeden kaldırılamadı. Tekrar deneyin.</string>
     <string name="myreports_remove_title">Listeden kaldırılsın mı?</string>
     <string name="myreports_remove_body">Listenden kaybolur. Bildirimin kendisi bizde kalır ve Şöhret Salonu için saymaya devam eder.</string>
     <string name="myreports_number">#%1$d</string>
@@ -1167,7 +1168,7 @@
     <string name="common_homepage">Web sitesi</string>
     <string name="common_real_name">İsim</string>
     <string name="chat_empty_title">Henüz mesaj yok</string>
-    <string name="chat_empty_body">Selam ver — ilk mesajın sohbeti başlatır.</string>
+    <string name="chat_empty_body">Selam ver. İlk mesajın sohbeti başlatır.</string>
     <plurals name="chat_media_sending">
         <item quantity="one">%d dosya gönderiliyor…</item>
         <item quantity="other">%d dosya gönderiliyor…</item>

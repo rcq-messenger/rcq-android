@@ -62,7 +62,7 @@
     <string name="home_menu_outgoing">Надіслані запити</string>
     <string name="outgoing_title">Надіслані запити</string>
     <string name="outgoing_empty">Ти не надсилав запитів.</string>
-    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">У тебе вже є контакт з номером #%1$d на іншому острові. Розмова зберігається лише за номером, тож другий #%1$d ділив би з ним ту саму історію. Не додано.</string>
     <string name="share_to_title">Надіслати…</string>
     <string name="share_to_search">Пошук чатів</string>
@@ -681,14 +681,14 @@
     <string name="snd_message_title">Звуки повідомлень</string>
     <string name="snd_message_desc">Сповіщати про нове повідомлення: сигналом, поки застосунок відкритий, і сповіщенням, коли ні.</string>
     <string name="snd_presence_title">Контакт у мережі та поза нею</string>
-    <string name="snd_presence_desc">«Усі» — сигнал на будь-який контакт. «Обрані» — лише на тих, кого ви позначили зірочкою. «Вимк» — ніколи.</string>
+    <string name="snd_presence_desc">«Усі»: сигнал на будь-який контакт. «Обрані»: лише на тих, кого ви позначили зірочкою. «Вимк»: ніколи.</string>
     <string name="snd_volume_title">Гучність сигналів у застосунку</string>
     <string name="snd_volume_desc">Задає гучність сигналу, який програє відкритий застосунок, відносно системної. Наскільки гучно звучить саме сповіщення, вирішує Android, а не ми.</string>
     <string name="snd_presence_all">Усі</string>
     <string name="snd_presence_favorites">Обрані</string>
     <string name="snd_presence_off">Вимк</string>
     <string name="snd_system_channel">Звук і гучність сповіщення</string>
-    <string name="snd_footer">Відкритий застосунок програє власний сигнал; у фоні той самий сигнал приходить системним сповіщенням. Обидва йдуть на гучності сповіщень і мовчать у беззвучному режимі, у вібрації і в режимі «Не турбувати». Повзунок вище може лише зробити наш сигнал тихішим за системний рівень — сам рівень змінюється в налаштуваннях сповіщень. Вимкнення звуку для окремого чату (довге натискання на головному екрані) глушить і те, і те.</string>
+    <string name="snd_footer">Відкритий застосунок програє власний сигнал; у фоні той самий сигнал приходить системним сповіщенням. Обидва йдуть на гучності сповіщень і мовчать у беззвучному режимі, у вібрації і в режимі «Не турбувати». Повзунок вище може лише зробити наш сигнал тихішим за системний рівень; сам рівень змінюється в налаштуваннях сповіщень. Вимкнення звуку для окремого чату (довге натискання на головному екрані) глушить і те, і те.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Переклади з\'являються поступово. Те, чого бракує, показуємо англійською.</string>
     <string name="notif_push">Push-сповіщення</string>
@@ -1084,6 +1084,7 @@
     <string name="myreports_status_duplicate">Дублікат</string>
     <string name="myreports_delete">Прибрати зі списку</string>
     <string name="myreports_delete_refused">Це звернення ще розглядають, тому прибрати його зі списку поки не можна.</string>
+    <string name="myreports_delete_error">Не вдалося прибрати. Спробуйте ще раз.</string>
     <string name="myreports_remove_title">Прибрати зі списку?</string>
     <string name="myreports_remove_body">Звернення зникне з твого списку. Саме воно лишається у нас і далі рахується в залі слави.</string>
     <string name="myreports_number">#%1$d</string>

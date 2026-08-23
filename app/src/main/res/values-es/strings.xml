@@ -62,7 +62,7 @@
     <string name="home_menu_outgoing">Solicitudes enviadas</string>
     <string name="outgoing_title">Solicitudes enviadas</string>
     <string name="outgoing_empty">No has enviado ninguna solicitud.</string>
-    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">Ya tienes un contacto con el número #%1$d en otra isla. Una conversación se archiva solo por el número, así que un segundo #%1$d compartiría ese historial. No se ha añadido.</string>
     <string name="share_to_title">Enviar a…</string>
     <string name="share_to_search">Buscar chats</string>
@@ -1084,6 +1084,7 @@
     <string name="myreports_status_duplicate">Duplicado</string>
     <string name="myreports_delete">Quitar de la lista</string>
     <string name="myreports_delete_refused">Este todavía está en revisión, así que aún no se puede quitar de la lista.</string>
+    <string name="myreports_delete_error">No se pudo quitar. Inténtalo otra vez.</string>
     <string name="myreports_remove_title">¿Quitar de la lista?</string>
     <string name="myreports_remove_body">Desaparece de tu lista. El informe sigue con nosotros y sigue contando para el salón de la fama.</string>
     <string name="myreports_number">#%1$d</string>

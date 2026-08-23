@@ -82,8 +82,11 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     // The server keeps an OPEN report about another user until a verdict, so
     // taking it off the list can legitimately be refused; say so instead of
-    // failing silently.
+    // failing silently. A refusal is NOT the same thing as a dead network:
+    // "still under review" is a claim about the report, so a request that never
+    // landed says "try again" instead (same split as web and iOS).
     var refused by remember { mutableStateOf(false) }
+    var removeFailed by remember { mutableStateOf(false) }
     // Which ticket has its box open, and what is typed in it. One at a time:
     // this is a list of tickets, not a chat list.
     var replyTo by remember { mutableStateOf<Int?>(null) }
@@ -125,20 +128,22 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
                     onClick = {
                         confirmRemove = null
                         scope.launch {
-                            if (session.deleteMyReport(target.id)) {
-                                items = items?.filterNot { it.id == target.id }
-                                if (replyTo == target.id) {
-                                    replyTo = null
-                                    draft = ""
-                                    sendError = null
+                            when (session.deleteMyReport(target.id)) {
+                                Session.ReportRemove.Removed -> {
+                                    items = items?.filterNot { it.id == target.id }
+                                    if (replyTo == target.id) {
+                                        replyTo = null
+                                        draft = ""
+                                        sendError = null
+                                    }
+                                    if (editingId == target.id) {
+                                        editingId = null
+                                        editDraft = ""
+                                        editError = null
+                                    }
                                 }
-                                if (editingId == target.id) {
-                                    editingId = null
-                                    editDraft = ""
-                                    editError = null
-                                }
-                            } else {
-                                refused = true
+                                Session.ReportRemove.Refused -> refused = true
+                                Session.ReportRemove.Failed -> removeFailed = true
                             }
                         }
                     },
@@ -167,6 +172,14 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
         if (refused) {
             Text(
                 stringResource(R.string.myreports_delete_refused),
+                color = c.statusBusy,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        if (removeFailed) {
+            Text(
+                stringResource(R.string.myreports_delete_error),
                 color = c.statusBusy,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -297,6 +310,7 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
                         },
                         onRemove = {
                             refused = false
+                            removeFailed = false
                             confirmRemove = r
                         },
                     )
@@ -333,11 +347,15 @@ private fun ReportCard(
     val context = LocalContext.current
     val copiedMsg = stringResource(R.string.myreports_copied)
     val reason = report.reason
+    // One conversation, built once and used for both the label and the blocks
+    // below. See [reportTimeline]: the operator's answer arrives in two places
+    // and neither may hide the other.
+    val timeline = reportTimeline(report)
     // "Waiting" is about waiting for an ANSWER, so an answered report must stop
     // saying it even while it is still open on our side: the operator replies
     // first and picks a verdict later, by design. The reporter read the
     // unchanged label as us ignoring him (#417).
-    val answered = !report.reply.isNullOrBlank() || report.thread.any { it.from_admin }
+    val answered = timeline.any { it.from_admin }
     // What the server will actually accept a PATCH for, decided here so a
     // pencil is never offered on a ticket that can only refuse it:
     //  * `number` is the capability probe. It and PATCH /reports/mine/{id}
@@ -448,28 +466,17 @@ private fun ReportCard(
             }
         }
 
-        // The exchange, oldest first. `thread` is what a current island sends;
-        // an older one sends only the single `reply`, and that is the fallback
-        // below: the screen must not go blank against an island that has not
-        // updated. The answer is the whole reason this screen exists, so it
-        // gets its own block rather than a line of small print.
-        if (report.thread.isNotEmpty()) {
-            report.thread.forEach { turn ->
-                TurnBlock(
-                    label = stringResource(
-                        if (turn.from_admin) R.string.myreports_answer else R.string.myreports_you,
-                    ),
-                    labelColor = if (turn.from_admin) c.accent else c.textSecondary,
-                    body = turn.body.orEmpty(),
-                    fromAdmin = turn.from_admin,
-                )
-            }
-        } else if (!report.reply.isNullOrBlank()) {
+        // The exchange, oldest first, as ONE conversation: see [reportTimeline].
+        // The answer is the whole reason this screen exists, so it gets its own
+        // block rather than a line of small print.
+        timeline.forEach { turn ->
             TurnBlock(
-                label = stringResource(R.string.myreports_answer),
-                labelColor = c.accent,
-                body = report.reply,
-                fromAdmin = true,
+                label = stringResource(
+                    if (turn.from_admin) R.string.myreports_answer else R.string.myreports_you,
+                ),
+                labelColor = if (turn.from_admin) c.accent else c.textSecondary,
+                body = turn.body.orEmpty(),
+                fromAdmin = turn.from_admin,
             )
         }
 
@@ -541,6 +548,58 @@ private fun ReportCard(
             Text(error, color = c.statusBusy, fontSize = 12.sp)
         }
     }
+}
+
+/** The report's whole exchange as ONE conversation, oldest first.
+ *
+ * ⚠⚠ THE ANSWER ARRIVES TWICE AND NEITHER COPY MAY BE DROPPED. `reply_text` is
+ * the field every already-installed client reads, and since 16.08 an operator's
+ * reply is ALSO written as an admin turn in `thread`. This screen used to render
+ * the thread when it had anything in it and the answer only otherwise, so on a
+ * report answered before 16.08 the operator's words vanished the moment the
+ * reporter wrote back: the reply lived only in `reply_text`, and the reporter's
+ * own line was enough to make the thread non-empty. Two people reported that as
+ * us deleting an answer, which is the one thing this screen exists not to do.
+ *
+ * So: the thread as the island sent it, plus `reply` folded in as an operator
+ * turn UNLESS an admin turn already carries the same text (on a current island
+ * `reply_text` mirrors the last admin turn, and editing that turn updates it,
+ * so equal text means the same answer and not a second one).
+ *
+ * Where it goes: `replied_at`, before the first turn stamped later than it.
+ * With no usable stamp it goes FIRST, because an unstamped answer can only
+ * predate the thread it is missing from.
+ */
+private fun reportTimeline(report: RcqApi.MyReport): List<RcqApi.ReportTurn> {
+    val reply = report.reply?.trim().orEmpty()
+    val thread = report.thread
+    if (reply.isEmpty()) return thread
+    if (thread.any { it.from_admin && it.body?.trim() == reply }) return thread
+    val answer = RcqApi.ReportTurn(
+        // Not a row on the island: `reply_text` is a column, not a message.
+        // Turn ids are positive, so 0 cannot collide with a real one.
+        id = 0,
+        from_admin = true,
+        body = report.reply,
+        created_at = report.replied_at,
+    )
+    val at = parseReportInstant(report.replied_at) ?: return listOf(answer) + thread
+    val idx = thread.indexOfFirst { parseReportInstant(it.created_at)?.isAfter(at) == true }
+    return if (idx < 0) thread + answer
+    else thread.subList(0, idx) + answer + thread.subList(idx, thread.size)
+}
+
+/** ISO-8601 off the island to an instant, or null when it cannot be read. The
+ *  flagship sends an offset; an island on SQLite can send a naive stamp, and a
+ *  date that cannot be parsed must not throw inside a composable. */
+private fun parseReportInstant(iso: String?): java.time.Instant? {
+    if (iso.isNullOrBlank()) return null
+    return runCatching { java.time.OffsetDateTime.parse(iso).toInstant() }
+        .recoverCatching { java.time.Instant.parse(iso) }
+        .recoverCatching {
+            java.time.LocalDateTime.parse(iso).toInstant(java.time.ZoneOffset.UTC)
+        }
+        .getOrNull()
 }
 
 /** One turn of the exchange. The operator's side sits on the screen background

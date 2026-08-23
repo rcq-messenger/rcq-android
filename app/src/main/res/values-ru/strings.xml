@@ -72,7 +72,7 @@
     <string name="outgoing_title">Исходящие заявки</string>
     <string name="outgoing_empty">Вы не отправляли заявок.</string>
 
-    <!-- "Send to…" — the chat picker another app's share sheet lands on -->
+    <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">У вас уже есть контакт с номером #%1$d на другом острове. Переписка пока хранится по одному номеру, и второй #%1$d попал бы в ту же историю. Не добавлен.</string>
     <string name="share_to_title">Отправить в…</string>
     <string name="share_to_search">Поиск по чатам</string>
@@ -707,14 +707,14 @@
     <string name="snd_message_title">Звуки сообщений</string>
     <string name="snd_message_desc">Сообщать о новом сообщении: сигналом, пока приложение открыто, и уведомлением, когда оно свёрнуто.</string>
     <string name="snd_presence_title">Контакт в сети / не в сети</string>
-    <string name="snd_presence_desc">«Все» — сигнал на любой контакт. «Избранные» — только на тех, кого вы отметили звёздочкой. «Выкл» — никогда.</string>
+    <string name="snd_presence_desc">«Все»: сигнал на любой контакт. «Избранные»: только на тех, кого вы отметили звёздочкой. «Выкл»: никогда.</string>
     <string name="snd_volume_title">Громкость сигнала в приложении</string>
     <string name="snd_volume_desc">Задаёт громкость сигнала, который играет открытое приложение, относительно системной. Насколько громко звучит само уведомление, решает Android, а не мы.</string>
     <string name="snd_presence_all">Все</string>
     <string name="snd_presence_favorites">Избранные</string>
     <string name="snd_presence_off">Выкл</string>
     <string name="snd_system_channel">Звук и громкость уведомления</string>
-    <string name="snd_footer">Открытое приложение играет свой сигнал; когда оно свёрнуто, тот же сигнал приходит системным уведомлением. Оба идут по каналу уведомлений и молчат в беззвучном режиме, в режиме вибрации и в «Не беспокоить». Ползунок выше может только сделать наш сигнал тише системного уровня — сам уровень меняется в настройках уведомлений. Мьют чата (долгое нажатие на главном экране) отключает и то, и другое.</string>
+    <string name="snd_footer">Открытое приложение играет свой сигнал; когда оно свёрнуто, тот же сигнал приходит системным уведомлением. Оба идут по каналу уведомлений и молчат в беззвучном режиме, в режиме вибрации и в «Не беспокоить». Ползунок выше может только сделать наш сигнал тише системного уровня; сам уровень меняется в настройках уведомлений. Мьют чата (долгое нажатие на главном экране) отключает и то, и другое.</string>
 
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Переводы появляются постепенно. Непереведённый текст показывается на английском.</string>
@@ -1118,6 +1118,7 @@
     <string name="myreports_status_duplicate">Дубликат</string>
     <string name="myreports_delete">Убрать из списка</string>
     <string name="myreports_delete_refused">Это обращение ещё рассматривается, поэтому убрать его из списка пока нельзя.</string>
+    <string name="myreports_delete_error">Не удалось убрать. Попробуйте ещё раз.</string>
     <string name="myreports_remove_title">Убрать из списка?</string>
     <string name="myreports_remove_body">Обращение пропадёт из вашего списка. Само оно остаётся у нас и продолжает считаться в зале славы.</string>
     <string name="myreports_number">#%1$d</string>
@@ -1194,7 +1195,7 @@
     <string name="recovery_reveal">Показать фразу</string>
     <string name="settings_anim_avatars_title">Живые аватарки</string>
     <string name="update_available_badge">Обновить до %1$s</string>
-    <string name="settings_anim_avatars_desc">Выключено — только первый кадр, батарея живёт дольше.</string>
+    <string name="settings_anim_avatars_desc">Выключено: только первый кадр, батарея живёт дольше.</string>
     <string name="settings_swipe_reply">Сдвиг сообщения для цитаты</string>
     <string name="settings_swipe_reply_left">Влево</string>
     <string name="settings_swipe_reply_right">Вправо</string>
