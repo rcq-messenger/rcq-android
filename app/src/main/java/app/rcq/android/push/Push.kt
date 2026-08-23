@@ -96,6 +96,11 @@ object Push {
     /** Set when the wake is "we answered your report": the tap should land on
      *  the reports screen, since that answer is the only reason to open. */
     const val EXTRA_OPEN_REPORTS = "open_reports"
+    /** Set when the wake is about the account's own devices ("a new device
+     *  connected", a key slot retired): the tap belongs on the linked-devices
+     *  screen, because checking that list is the only reason to open such a
+     *  notification at all (#672). */
+    const val EXTRA_OPEN_DEVICES = "open_devices"
 
     /** Groups this device posted to a moment ago, keyed by group id →
      *  SystemClock.elapsedRealtime() of the send.
@@ -841,6 +846,7 @@ object Push {
             peerUin = peerUin,
             toUin = toUin,
             openReports = str("notif_kind") == "report_reply",
+            openDevices = str("notif_kind")?.startsWith("device_") == true,
             forceQuiet = repeat,
         )
     }
@@ -868,7 +874,7 @@ object Push {
         // like it used to.
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return false
         ensureChannels(ctx)
-        post(ctx, title, body, groupId, peerUin, toUin, openReports = false, forceQuiet = false)
+        post(ctx, title, body, groupId, peerUin, toUin, openReports = false, openDevices = false, forceQuiet = false)
         return true
     }
 
@@ -881,6 +887,7 @@ object Push {
         peerUin: Int?,
         toUin: Int?,
         openReports: Boolean,
+        openDevices: Boolean = false,
         forceQuiet: Boolean,
     ) {
         // Distinct groups get their own notification, and so does each sender we
@@ -906,6 +913,7 @@ object Push {
             if (toUin != null) putExtra(EXTRA_OPEN_TO_UIN, toUin)
             if (peerUin != null) putExtra(EXTRA_OPEN_PEER_UIN, peerUin)
             if (openReports) putExtra(EXTRA_OPEN_REPORTS, true)
+            if (openDevices) putExtra(EXTRA_OPEN_DEVICES, true)
         }
         val pi = PendingIntent.getActivity(
             ctx, id, tap,

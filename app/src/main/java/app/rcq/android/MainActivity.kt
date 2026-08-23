@@ -214,7 +214,7 @@ object ShareIntake {
  *  consumes this once registered + unlocked, switching to the target account
  *  first when the wake was for a non-active local account. */
 object NotificationOpen {
-    data class Req(val groupId: Int?, val toUin: Int?, val reports: Boolean = false, val peerUin: Int? = null)
+    data class Req(val groupId: Int?, val toUin: Int?, val reports: Boolean = false, val peerUin: Int? = null, val devices: Boolean = false)
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromIntent(i: android.content.Intent?): Req? {
@@ -223,6 +223,7 @@ object NotificationOpen {
         val u = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN, -1).takeIf { it > 0 }
         val rep = i.getBooleanExtra(app.rcq.android.push.Push.EXTRA_OPEN_REPORTS, false)
         val p = i.getIntExtra(app.rcq.android.push.Push.EXTRA_OPEN_PEER_UIN, -1).takeIf { it > 0 }
+        val dev = i.getBooleanExtra(app.rcq.android.push.Push.EXTRA_OPEN_DEVICES, false)
         // Consume: setIntent keeps this intent sticky, so without removing the
         // extras any later activity re-create (language switch calls
         // recreate()) would re-fire the navigation and yank the user back
@@ -231,7 +232,8 @@ object NotificationOpen {
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_TO_UIN)
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_REPORTS)
         i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_PEER_UIN)
-        return if (g != null || u != null || rep || p != null) Req(g, u, rep, p) else null
+        i.removeExtra(app.rcq.android.push.Push.EXTRA_OPEN_DEVICES)
+        return if (g != null || u != null || rep || p != null || dev) Req(g, u, rep, p, dev) else null
     }
 }
 
@@ -409,6 +411,7 @@ private fun RcqApp(session: Session) {
     var settingsToDiagnostics by remember { mutableStateOf(false) }
     // Deep-link Settings straight to "My reports" (a tapped report-reply push).
     var settingsToReports by remember { mutableStateOf(false) }
+    var settingsToDevices by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
     var showManageAccounts by remember { mutableStateOf(false) }
     var showNews by remember { mutableStateOf(false) }
@@ -469,7 +472,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
     }
 
     // #655: the island said the active account no longer exists (burned from
@@ -562,6 +565,11 @@ private fun RcqApp(session: Session) {
         NotificationOpen.pending.value = null
         if (req.reports) {
             settingsToReports = true
+            showSettings = true
+            return@LaunchedEffect
+        }
+        if (req.devices) {
+            settingsToDevices = true
             showSettings = true
             return@LaunchedEffect
         }
@@ -796,12 +804,13 @@ private fun RcqApp(session: Session) {
             s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider("settings") {
                 SettingsScreen(
                     session, s.uin,
-                    onBack = { showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false },
+                    onBack = { showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false },
                     onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
                     onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
                     openDiagnostics = settingsToDiagnostics,
                     openMyReports = settingsToReports,
                     openBackupIsland = settingsToBackupIsland,
+                    openLinkedDevices = settingsToDevices,
                 )
             }
             s is UiState.Registered -> stateHolder.SaveableStateProvider("home") {
@@ -809,7 +818,7 @@ private fun RcqApp(session: Session) {
                     session, s.uin,
                     onOpenChat = { chatTarget = ChatTarget.Peer(it) },
                     onOpenGroup = { chatTarget = ChatTarget.Group(it) },
-                    onOpenSettings = { settingsToDiagnostics = false; settingsToReports = false; settingsToBackupIsland = false; showSettings = true },
+                    onOpenSettings = { settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showSettings = true },
                     onOpenDiagnostics = { settingsToDiagnostics = true; showSettings = true },
                     onOpenBackupIsland = { settingsToBackupIsland = true; showSettings = true },
                     // The header badge asks for the same dialog the launch
