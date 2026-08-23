@@ -137,7 +137,16 @@ object SignalSession {
             // has somewhere to fall back to; a secondary that island does not
             // know about has no bundle there at all.
             if (deviceId != DEVICE_ID) throw e
-            api.fetchPeerBundle(uin)
+            try {
+                api.fetchPeerBundle(uin)
+            } catch (legacy: Exception) {
+                // Surface the PER-DEVICE route's own failure, not the
+                // fallback's: the legacy route is 404 for every account with
+                // a second install, so after a 429 or a timeout on the
+                // per-device route its 404 would reach [ensureSession] as
+                // "no such device" and throw away a list that was fine.
+                throw e
+            }
         }
     }
 
