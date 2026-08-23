@@ -250,11 +250,24 @@ object LocalStores {
     val lockGrace: StateFlow<Int> = _lockGrace.asStateFlow()
     fun lockGraceSeconds(): Int = if (::prefs.isInitialized) _lockGrace.value else 0
 
-    /** Home-list UI flags (set of stable string ids) — currently which sections
-     *  the user has folded. Global UI preference that survives leaving and
-     *  re-entering the home screen, so a collapsed section stays collapsed
+    /** Home-list UI flags (a set of stable string ids): which sections the
+     *  user has folded. Persisted, so a collapsed section stays collapsed
+     *  across leaving and re-entering the home screen and across a cold start
      *  (report: the offline section kept re-expanding because the state was
-     *  only in-memory remember{}). */
+     *  only in-memory remember{}).
+     *
+     *  ⚠ DEVICE-LOCAL on purpose. The sections themselves sync through the
+     *  vault slot; the fold state deliberately sits outside it (sections
+     *  design, 23.08: "the collapse set stays device-local"), because a phone
+     *  where Offline is forty rows and a desktop window are not the same
+     *  screen.
+     *
+     *  ⚠ PER ACCOUNT since it started holding `sec:u:<id>` keys. A user
+     *  section's id means something only inside the account whose tree carries
+     *  it, so the flat key filed one account's fold state against another
+     *  account's sections and handed the real account's to a decoy session.
+     *  Loaded in [bindAccount] like the rest of the per-account block; the flat
+     *  key it used to live under is migrated once, built-ins only. */
     private val _sectionFlags = MutableStateFlow<Set<String>>(emptySet())
     val sectionFlags: StateFlow<Set<String>> = _sectionFlags.asStateFlow()
 
@@ -359,7 +372,6 @@ object LocalStores {
         _soundVolume.value = prefs.getFloat(K_SND_VOL, 1f).coerceIn(0f, 1f)
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
         _pushNudgeDismissed.value = prefs.getBoolean(K_PUSH_NUDGE_DISMISSED, false)
-        _sectionFlags.value = prefs.getStringSet(K_SECTION_FLAGS, emptySet())!!.toSet()
         // Stored as comma-joined asset names (asset names never contain commas).
         // Panel: absent/"" → empty (the CTA shows). Reactions: absent → the
         // default six; "" → the user deliberately cleared them all.
@@ -418,6 +430,7 @@ object LocalStores {
             _threadTtls = emptyMap()
             _aliases.value = emptyMap()
             _reactionUses = emptyMap()
+            _sectionFlags.value = emptySet()
             return
         }
         _favorites.value = prefs.getStringSet(pk(K_FAV), emptySet())!!.toSet()
@@ -447,6 +460,36 @@ object LocalStores {
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
         _reactionUses = loadCounts(pk(K_REACTION_USES))
         _threadTtls = loadCounts(pk(K_THREAD_TTL))
+        _sectionFlags.value = loadSectionFlags()
+    }
+
+    /** The folded sections of the bound account.
+     *
+     *  One-time migration off the flat key this used to live under: an account
+     *  that has never stored a set of its own inherits the BUILT-IN folds
+     *  (`sec:fav`, `sec:offline`, the archive marker...) so nobody's home screen
+     *  rearranges itself on update. The `sec:u:<id>` keys are left behind
+     *  deliberately: those ids belong to whichever account created them and
+     *  name nothing in anybody else's tree. The flat key is not deleted, so the
+     *  second account on this device migrates from it too.
+     *
+     *  ⚠⚠ NOT FOR THE DECOY NAMESPACE. The real user's folds are the real
+     *  user's: inheriting `sec:offline` there would open the duress view on a
+     *  chat list with nothing visible in it, because every seeded decoy contact
+     *  is offline and Offline is the only section they land in. It would also
+     *  leave a write on disk made from inside a duress session. iOS guards the
+     *  same case in `ContactListView.defaultCollapsed` (`!panicPIN.isDecoy`).
+     *  Compared against the id rather than [AccountManager.isDecoyMode]: the
+     *  bind happens BEFORE `enterDecoySession()`, so the mode is not up yet. */
+    private fun loadSectionFlags(): Set<String> {
+        val own = prefs.getStringSet(pk(K_SECTION_FLAGS), null)
+        if (own != null) return own.toSet()
+        if (acct == DecoyStore.STORE_ID) return emptySet()
+        val legacy = prefs.getStringSet(K_SECTION_FLAGS, emptySet())!!
+            .filterNot { it.startsWith("sec:u:") }
+            .toSet()
+        if (legacy.isNotEmpty()) prefs.edit().putStringSet(pk(K_SECTION_FLAGS), legacy).apply()
+        return legacy
     }
 
     fun isThreadSecure(thread: String) = thread in _secureThreads.value
@@ -744,13 +787,23 @@ object LocalStores {
         if (::prefs.isInitialized) prefs.edit().putBoolean(K_PUSH_NUDGE_DISMISSED, true).apply()
     }
 
-    // ── home section fold flags (global UI preference) ────────────────
+    // ── home section fold flags (per-account, device-local) ───────────
     fun isSectionFlag(id: String) = id in _sectionFlags.value
     fun setSectionFlag(id: String, on: Boolean) {
+        /// No account bound means no namespace to file this under, and the flat
+        /// one is the single place it must never land.
+        if (acct == null) return
         val next = if (on) _sectionFlags.value + id else _sectionFlags.value - id
         if (next == _sectionFlags.value) return
         _sectionFlags.value = next
-        prefs.edit().putStringSet(K_SECTION_FLAGS, next.toSet()).apply()
+        prefs.edit().putStringSet(pk(K_SECTION_FLAGS), next.toSet()).apply()
+    }
+
+    /** Drop a deleted section's fold flag. Without this the entry outlives the
+     *  section that owned it and would decide the fold state of a later section
+     *  that drew the same id. */
+    fun forgetSectionFlag(id: String) {
+        setSectionFlag("sec:u:$id", false)
     }
 
     // ── presence stay-online window (removed feature, cleanup only) ──
@@ -1241,7 +1294,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS).forEach { e.remove("$accountId.$it") }
         // The vault floors are keyed by SLOT NAME (see [vaultSlotVersion]), so
         // they cannot be listed by hand: sweep the prefix instead. Leaving one
         // behind would lock a later account on this device out of a slot whose

@@ -458,3 +458,102 @@ internal fun RemoveContactDialog(
         ),
     )
 }
+
+/**
+ * An island's face: its operator's logo, or the lettered tile when it has none.
+ *
+ * Rounded square, not a circle: a person is a circle and a group is a circle,
+ * and an island is neither. Same shape iOS draws (`IslandAvatarView`) and the
+ * desktop draws (`web-chat/src/components/IslandAvatar.tsx`), and the same tint
+ * from the same hash, so an island without a logo looks like the same island on
+ * all four clients.
+ *
+ * ⚠⚠ FALLS BACK IN FOUR DIRECTIONS AND NEVER SHOWS A BROKEN IMAGE:
+ *   * an island with no logo -> [logoVersion] is empty -> the tile;
+ *   * an island too old to know the field -> `logo_version` is absent, which
+ *     Gson fills with its default "" -> the tile;
+ *   * an island that has not answered yet, or at all -> no version -> the
+ *     tile, drawn on the FIRST frame and replaced in place if a logo lands;
+ *   * bytes that arrive but do not decode -> [rememberSampledBitmap] answers
+ *     null -> the tile.
+ * There is no state in which this draws an empty box. The tile is drawn
+ * underneath and the picture covers it, which is the same trick [AccountAvatar]
+ * uses so a missing blob looks exactly like it did before pictures existed.
+ */
+@Composable
+internal fun IslandAvatar(
+    /** The island. Every screen that lists more than one account passes the
+     *  ROW's own host, never the active one: an account living on another
+     *  island keeps its face there. */
+    host: String?,
+    /** `logo_version` from that island's `/server/info`. Empty or null for an
+     *  island with no logo, or one we have not asked yet. */
+    logoVersion: String?,
+    /** What the island calls itself, for the letter on the tile. Falls back to
+     *  the host, which is all anybody honestly knows about an island that has
+     *  never answered. */
+    name: String? = null,
+    size: Dp = 28.dp,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // Seeded from the memory cache rather than from null, the same reason
+    // PersonAvatar is: starting at null redraws the tile on every appearance
+    // and swaps the picture in a frame later.
+    val bytes by produceState<ByteArray?>(
+        initialValue = app.rcq.android.data.IslandLogos.cached(host, logoVersion),
+        host, logoVersion,
+    ) {
+        value = app.rcq.android.data.IslandLogos.load(ctx, host, logoVersion)
+    }
+    // Still frames only: an animated island logo is served as its first frame
+    // here, which is what the phones already do for an animated account avatar
+    // in a list. A 28dp tile is not where an animation is worth a decoder.
+    val image = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 256)
+        ?: rememberGifFirstFrame(bytes)
+    val shape = RoundedCornerShape(size * 0.28f)
+    Box(Modifier.size(size).clip(shape).background(islandTint(host)).then(modifier), contentAlignment = Alignment.Center) {
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text(
+                islandInitial(name, host),
+                color = Color.White,
+                fontSize = (size.value * 0.46f).sp,
+                fontWeight = FontWeight.Bold,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+            )
+        }
+    }
+}
+
+/**
+ * The tile's colour, derived from the host.
+ *
+ * ⚠ FNV-1a over the host, never [String.hashCode]. iOS spells out why for its
+ * own copy: Swift seeds its hashing per process, so an island changed colour on
+ * every launch. Kotlin's hashCode is stable, so ours would not do that, but a
+ * DIFFERENT hash is a different colour from the phone next to it for the same
+ * island, which is the same bug seen from one device over.
+ */
+private fun islandTint(host: String?): Color {
+    var hash = 2166136261u
+    for (byte in (host ?: "").lowercase().toByteArray()) {
+        hash = (hash xor byte.toUByte().toUInt()) * 16777619u
+    }
+    // Off full saturation so the tile reads as chrome rather than as an alert.
+    return Color.hsv((hash % 360u).toFloat(), 0.46f, 0.62f)
+}
+
+/** First LETTER, not first character: a name that opens with an emoji or a
+ *  bracket would otherwise draw a tile with punctuation on it. */
+private fun islandInitial(name: String?, host: String?): String {
+    val source = (name?.takeIf { it.isNotBlank() } ?: host.orEmpty()).trim()
+    val ch = source.firstOrNull { it.isLetter() || it.isDigit() } ?: return "#"
+    return ch.uppercase()
+}

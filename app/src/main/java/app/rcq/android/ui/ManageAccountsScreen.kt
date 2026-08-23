@@ -80,6 +80,10 @@ internal fun ManageAccountsScreen(
     // after a cold start.
     remember { AccountCards.warm(context) }
     val cards by AccountCards.cards.collectAsState()
+    // And the islands those accounts live on, from the same kind of cache, so
+    // a row names its island properly without asking it anything.
+    remember { app.rcq.android.data.IslandCards.warm(context) }
+    val islands by app.rcq.android.data.IslandCards.cards.collectAsState()
 
     // Roster order, not creation order: the list is now reorderable (the
     // switcher renders the same order), and sorting by createdAt here would
@@ -160,7 +164,21 @@ internal fun ManageAccountsScreen(
                                 )
                             }
                         }
-                        Text(host, color = c.textSecondary, fontSize = 12.sp)
+                        // The island, drawn as an island: its own logo (or
+                        // its lettered tile) and the name its operator typed,
+                        // falling back to the bare host for one that has never
+                        // answered. This line was the hostname on its own.
+                        val island = islands[host.lowercase()]
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            IslandAvatar(host, island?.logoVersion, island?.name, size = 14.dp)
+                            Text(
+                                island?.name?.takeIf { it.isNotBlank() } ?: host,
+                                color = c.textSecondary, fontSize = 12.sp,
+                            )
+                        }
                         uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                     }
                     val index = sorted.indexOfFirst { it.id == account.id }

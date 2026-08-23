@@ -145,6 +145,9 @@ class CallController(
     /** When this call began (placed or started ringing), as opposed to when
      *  media connected. The gap between the two is the diagnostic. */
     private var startedAtMs = 0L
+    /** The live ring watchdog. Held so it can be replaced rather than doubled
+     *  (see [armRingTimeout]). */
+    private var ringTimeoutJob: Job? = null
     /** Reentrancy guard: an accept() is mid-flight (TURN fetch + handleOffer).
      *  Blocks a second accept() — a fast double-tap, or the FSI-accept drain
      *  racing an in-app tap — from running handleOffer twice on one connection
@@ -236,6 +239,7 @@ class CallController(
         // backgrounded path uses, and take it back on return. Nothing is posted
         // for a call that is already up: that one has its own ongoing surface.
         app.rcq.android.RcqApp.onForegroundChange = { fg -> onAppForegroundChanged(fg) }
+        shared = this
     }
 
     private fun onAppForegroundChanged(foreground: Boolean) {
@@ -714,6 +718,21 @@ class CallController(
         if (s.info.id != callId) return
         _peerOffline.value = true
         ringer.stop()
+        // #686, the half that is not the missed-call row. This message IS the
+        // island saying it has not rung them yet: it is only now handing the
+        // offer to a push. Their phone starts ringing seconds later, and their
+        // own 60 s window starts THERE, while ours was counted from the offer,
+        // so the caller's watchdog fired and ended the call with the callee's
+        // phone still sounding in their hand. Start our window again from now.
+        //
+        // ⚠ Bounded, or this rings forever. `call_offline` is not a promise of
+        // one delivery (a retried wake, or a second endpoint, sends it again),
+        // and re-arming per copy would push the deadline out indefinitely. The
+        // ring never outlives [RING_TIMEOUT_MAX_MS] from the offer whatever
+        // arrives; past that the timer already running is left to fire.
+        val budget = (RING_TIMEOUT_MAX_MS - (System.currentTimeMillis() - startedAtMs))
+            .coerceAtMost(RING_TIMEOUT_MS)
+        if (budget > 0) armRingTimeout(s.info, budget)
     }
 
     /** A same-island call is signalled over the socket and leaves nothing
@@ -1032,10 +1051,16 @@ class CallController(
      *  lost (peer offline same-island, old peer client ignoring a §5d
      *  cross-island call envelope) — stop ringback after 60s as "no answer".
      *  Incoming: if the caller's app died mid-ring no call_end ever arrives —
-     *  stop ringing after 60s as missed. No-op once the state moved on. */
-    private fun armRingTimeout(call: CallInfo) {
-        scope.launch {
-            delay(60_000)
+     *  stop ringing after 60s as missed. No-op once the state moved on.
+     *
+     *  ⚠ Cancel-and-replace, one timer per call. [handleCalleeOffline] re-arms
+     *  this when it learns the callee has not started ringing yet, and a second
+     *  timer left running beside it would end the call at the first deadline,
+     *  i.e. the re-arm would do nothing at all. */
+    private fun armRingTimeout(call: CallInfo, afterMs: Long = RING_TIMEOUT_MS) {
+        ringTimeoutJob?.cancel()
+        ringTimeoutJob = scope.launch {
+            delay(afterMs)
             if (_state.value.info?.id != call.id) return@launch
             when (_state.value) {
                 is State.Outgoing -> endLocally(call, "unanswered")
@@ -1346,6 +1371,31 @@ class CallController(
     private fun Media.toRtc() = if (this == Media.VIDEO) WebRtcClient.Media.VIDEO else WebRtcClient.Media.AUDIO
 
     companion object {
+        /** The controller of the live Session.
+         *
+         *  The push path has no Session to reach (same reason
+         *  [IncomingCallStore] exists) and still has to know whether a wake
+         *  names a call this process is already ringing (see [ringingInApp]).
+         *  Last one wins: an account switch builds a new Session, and it is
+         *  the new controller a fresh wake must be measured against. */
+        @Volatile
+        private var shared: CallController? = null
+
+        /** True when the live controller is ringing [callId] on the IN-APP
+         *  surface, i.e. its own [Ringer] is the thing making the noise.
+         *
+         *  ⚠ [incomingViaFsi] is half the question, not a detail. When the
+         *  full-screen notification owns the ring the controller is holding
+         *  the very same call id, and answering "yes" there would suppress the
+         *  one surface the user has to answer from, including the re-post
+         *  IncomingCallActivity parks on its way out (#679), which runs with
+         *  the process still in the foreground. */
+        fun ringingInApp(callId: String): Boolean {
+            val c = shared ?: return false
+            val s = c.state.value
+            return s is State.Incoming && s.info.id == callId && !c.incomingViaFsi.value
+        }
+
         private const val TURN_FETCH_ATTEMPTS = 3
         // Long enough for a TURN allocation on a slow mobile link, far short
         // of the connect timeout: the point is to speak up while the user is
@@ -1360,6 +1410,15 @@ class CallController(
         private const val ICE_RESTART_TIMEOUT_MS = 12_000L
         private const val MAX_ICE_RESTARTS = 2
         private const val CALLEE_FAILSAFE_MS = 32_000L
+        /** How long a call rings before it gives up, counted from the moment
+         *  the callee can actually have started ringing. */
+        private const val RING_TIMEOUT_MS = 60_000L
+        /** The ceiling on the whole ring, counted from the offer. The only
+         *  thing that moves the deadline is `call_offline` (the island saying
+         *  it is going out as a push instead), and this bounds how far: one
+         *  full ring window plus the time the wake is allowed to take to land.
+         *  Past it the call ends however many more of those arrive. */
+        private const val RING_TIMEOUT_MAX_MS = 120_000L
     }
 }
 

@@ -845,6 +845,12 @@ private fun SettingsRoot(
                 // No chevron and no tap — the rules line below is the one door
                 // to the sheet, and a second tappable row opening the same
                 // sheet read as a promise of something more (founder, 20.08).
+                //
+                // The server glyph gave way to the island's own picture: it was
+                // the same drawing on every island, on the one row whose whole
+                // job is to say WHICH island. An island with no logo keeps its
+                // lettered tile, which is still a per-island mark rather than
+                // one shared glyph.
                 SettingsRow(
                     Icons.Filled.Dns,
                     islandName ?: islandHost,
@@ -852,6 +858,18 @@ private fun SettingsRoot(
                     // saying the same host is one line of noise.
                     value = if (islandName != null) islandHost else null,
                     chevron = false,
+                    leading = {
+                        IslandAvatar(
+                            host = islandHost,
+                            logoVersion = islandInfo?.logo_version,
+                            name = islandName,
+                            // 20dp, matching the glyph on the row below it:
+                            // a settings label starts at icon width + 12dp, so
+                            // a wider picture on one row alone pushes its text
+                            // out of the column every other row shares.
+                            size = 20.dp,
+                        )
+                    },
                 ) { }
                 if (islandRules != null) {
                     Divider()
@@ -1708,6 +1726,18 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                         islandName != null -> "$islandName · $host"
                         host == RcqApi.DEFAULT_HOST -> stringResource(R.string.pv_default)
                         else -> host
+                    },
+                    leading = {
+                        IslandAvatar(
+                            host = host,
+                            logoVersion = info?.logo_version,
+                            name = islandName,
+                            // 20dp, matching the glyph on the row below it:
+                            // a settings label starts at icon width + 12dp, so
+                            // a wider picture on one row alone pushes its text
+                            // out of the column every other row shares.
+                            size = 20.dp,
+                        )
                     },
                     onClick = onOpenCustomServer,
                 )
@@ -4143,6 +4173,11 @@ private fun SettingsRow(
     /// clickable, so an anchor's flash tint covers the whole row and the ripple
     /// still sits on top of it.
     modifier: Modifier = Modifier,
+    /// Draw something else in place of [icon]. One caller: the island rows,
+    /// which carry that island's own picture rather than a server glyph. The
+    /// glyph is still the parameter and still the default, so every other row
+    /// on the screen is untouched.
+    leading: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val c = RcqTheme.colors
@@ -4152,6 +4187,7 @@ private fun SettingsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (leading != null) leading() else
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
         Text(label, color = if (destructive) Color(0xFFE5484D) else c.textPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
         // ⚠ The value MUST carry a weight too, or a long one ("RCQ Exodus ·

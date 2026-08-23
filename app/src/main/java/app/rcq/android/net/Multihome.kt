@@ -180,9 +180,31 @@ object Multihome {
      *  (fail-safe: never auto-register on an unverified island). Plain OkHttp,
      *  same accepted simplification as the deposit path. Blocking — call from IO. */
     fun autoPickHost(ownHost: String, exclude: Set<String>): String? = runCatching {
-        val islands = signedIslands() ?: return@runCatching null
-        islands.firstOrNull { it != ownHost && it !in exclude && !RelayConfigStore.isFrontHost(it) && healthy(it) }
+        val direct = pickPass(ownHost, exclude)
+        if (direct != null) return@runCatching direct
+        // ⚠ ONE WHOLE PASS, NOT ONE PROBE, is what says the network is the
+        // problem. [http] alone never brings the tunnel up, so on a censored
+        // network the catalogue is unreachable, no island answers and the one
+        // feature whose purpose is "your island may go away, keep a spare"
+        // fails for exactly the people who need a spare (report #726). But a
+        // health probe is a call that is EXPECTED to fail: an island down for
+        // maintenance is not censorship, and engaging on a single IOException
+        // would move every later request in the process onto the relays
+        // because ONE island in the catalogue was offline, on a network that
+        // never blocked anything. Nothing at all answering is a different
+        // statement, and the only one worth a tunnel for. The user asked for
+        // this pass out loud by tapping the toggle.
+        if (SingBoxTransport.proxy() != null) return@runCatching null
+        if (!SingBoxTransport.engageForBlockedDestination("multihome:auto-pick")) return@runCatching null
+        pickPass(ownHost, exclude)
     }.getOrNull()
+
+    /** One catalogue fetch plus one probe of each candidate, over whatever
+     *  route is up right now. */
+    private fun pickPass(ownHost: String, exclude: Set<String>): String? {
+        val islands = signedIslands() ?: return null
+        return islands.firstOrNull { it != ownHost && it !in exclude && !RelayConfigStore.isFrontHost(it) && healthy(it) }
+    }
 
     /** Raw response bytes (the exact bytes the signature covers), or null. */
     private fun httpBytes(url: String): ByteArray? = runCatching {

@@ -1238,7 +1238,22 @@ private fun ServerJoinDialog(host: String, hasInvite: Boolean, onConfirm: () -> 
         title = info?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.join_server_title),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.join_server_body, host), color = c.textSecondary, fontSize = 14.sp)
+            // Picture and name together, on the one screen where somebody
+            // decides whether to go somewhere. An island that set no logo keeps
+            // its lettered tile, and an island that has not answered yet is
+            // drawn by its host, which is all anybody honestly knows about it.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                app.rcq.android.ui.IslandAvatar(
+                    host = host,
+                    logoVersion = info?.logo_version,
+                    name = info?.name,
+                    size = 36.dp,
+                )
+                Text(stringResource(R.string.join_server_body, host), color = c.textSecondary, fontSize = 14.sp)
+            }
             info?.welcome?.takeIf { it.isNotBlank() }?.let { rules ->
                 Text(
                     rules, color = c.textPrimary, fontSize = 13.sp,

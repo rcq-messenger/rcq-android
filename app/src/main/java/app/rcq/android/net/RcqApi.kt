@@ -146,15 +146,21 @@ class RcqApi(
      *
      * Only connection-level failures (IOException from the call itself) count.
      * An HTTP error means the island answered, and a tunnel would not change it.
+     *
+     * [autoEngage] false keeps the ladder's top rung only: ride the tunnel when
+     * one is already up, never raise one. For a call whose failure costs the
+     * person nothing visible, a decoration that falls back to a drawn tile
+     * ([serverLogo]). Bringing the whole process onto the relays because a
+     * picture did not load is not a trade anybody asked for.
      */
-    private fun viaBestRoute(call: (OkHttpClient) -> okhttp3.Response): okhttp3.Response {
+    private fun viaBestRoute(autoEngage: Boolean = true, call: (OkHttpClient) -> okhttp3.Response): okhttp3.Response {
         // ⚠ The single chokepoint for every REST call this client makes, and
         // therefore the place a duress session is stopped. A migrated decoy
         // keeps `Session.store` (and this token) on the REAL account by design,
         // so without this any duress-view screen that fetches would answer with
         // — or write to — the real account. See [DuressGate].
         app.rcq.android.security.DuressGate.check()
-        if (isPrimary) return call(http())
+        if (isPrimary || !autoEngage) return call(http())
         if (host in blockedHosts && SingBoxTransport.engageForBlockedDestination("api:$host")) {
             return call(http())
         }
@@ -1500,6 +1506,21 @@ class RcqApi(
         // existed and no client read it, so the admin panel carried a warning
         // saying that whatever you type here changes nothing.
         val welcome: String = "",
+        /** Digest of the island's logo; "" means it has none and the client
+         *  draws the lettered tile ([app.rcq.android.ui.IslandAvatar]).
+         *
+         *  ⚠ A VERSION, NOT A URL AND NOT THE PICTURE. The island sends twelve
+         *  characters; the client builds `https://<host>/server/logo?v=<this>`
+         *  itself. Two reasons. This reply is read on every boot, and by
+         *  [serverInfoOf] against islands we are only PROBING, so a data URI
+         *  in here would put a picture on all of those paths every time. And a
+         *  URL would let any island, including one we have no account on,
+         *  point the phone at a third-party host and collect the request; an
+         *  island only ever gets to say WHETHER it has a logo and WHICH one.
+         *
+         *  Empty on an island older than the field, which draws the tile:
+         *  the same permissive default the capability flags take. */
+        val logo_version: String = "",
         val capabilities: ServerCapabilities = ServerCapabilities(),
     )
 
@@ -1509,6 +1530,57 @@ class RcqApi(
      *  surface hides. Unauthenticated + stable across versions. */
     suspend fun serverInfo(): ServerInfoResponse = withContext(Dispatchers.IO) {
         get("/server/info", authed = false, ServerInfoResponse::class.java)
+    }
+
+    /** The island's logo, as raw image bytes. Unauthenticated like
+     *  `/server/info`: it is the island's public face, drawn on the confirm
+     *  before anybody has an account there.
+     *
+     *  [version] is the `logo_version` from [ServerInfoResponse]; it rides as
+     *  `?v=` so a changed logo is a changed URL and no cache in the chain, ours
+     *  or a middlebox's, can hold the old one.
+     *
+     *  Null for every failure, 404 included, and 404 is the ORDINARY answer for
+     *  an island whose operator never set one. The caller draws the lettered
+     *  tile; there is no path from here to a broken image. */
+    suspend fun serverLogo(version: String): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            val req = Request.Builder()
+                .url("$baseUrl/server/logo?v=" + java.net.URLEncoder.encode(version, "UTF-8"))
+                .get().build()
+            // ⚠ NO AUTO-ENGAGE. This is drawn by a composition (the account
+            // switcher, the manage-accounts list, the island rows in
+            // Settings), for a row's OWN island rather than the active one, so
+            // an island that is merely down would otherwise start the tunnel
+            // process-wide the moment somebody opened the switcher. A logo
+            // that does not arrive draws the lettered tile and nobody is any
+            // the wiser; the relays are not the price of that.
+            viaBestRoute(autoEngage = false) { mediaClient(it).newCall(req).execute() }.use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val body = resp.body ?: return@use null
+                // ⚠⚠ THE 64 KB CAP IS OURS, NOT THEIRS. It lives in our admin
+                // upload path; the island answering this call is any island the
+                // user typed on a join confirm, and the body is whatever it
+                // chooses to send. `bytes()` would hand a hostile answer
+                // straight into one ByteArray, and this cache is drawn BEFORE
+                // anybody has an account there. Same rule [getBlobToFile]
+                // spells out, and the declared length is only a claim, so the
+                // read loop is bounded too.
+                if (body.contentLength() > MAX_LOGO_BYTES) return@use null
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(16 * 1024)
+                var over = false
+                body.byteStream().use { input ->
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        if (out.size() + n > MAX_LOGO_BYTES) { over = true; break }
+                        out.write(buf, 0, n)
+                    }
+                }
+                if (over) null else out.toByteArray().takeIf { it.isNotEmpty() }
+            }
+        }.getOrNull()
     }
 
     // ── own profile + privacy (GET /users/{uin}/info, PUT /me) ───────
@@ -1988,6 +2060,12 @@ private class SealingBody(
         /** Free space a streamed download leaves behind. A cache write must
          *  not be the thing that fills the phone. */
         const val FREE_SPACE_MARGIN = 256L * 1024 * 1024
+
+        /** Ceiling on an island logo, four times the 64 KB our own admin path
+         *  accepts. Deliberately loose: the point is not to police somebody
+         *  else's operator, it is that [serverLogo] never buffers whatever a
+         *  hostile island feels like sending. */
+        const val MAX_LOGO_BYTES = 256L * 1024
 
         /** A refusal the island spelled out for us to branch on, pulled back
          *  out of the `HTTP <status>: <body>` message [execute] throws.

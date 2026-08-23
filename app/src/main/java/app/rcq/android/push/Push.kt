@@ -1254,6 +1254,21 @@ object Push {
                 sdp = sdp,
             ),
         )
+        // ⚠ TWO RINGTONES AT ONCE (#720). The park above is kept whatever
+        // happens next (the accept path reads it), but the notification below
+        // must not be posted for a call this process is ALREADY ringing in-app.
+        // A same-island offer that arrives over the socket while the app is in
+        // front starts the controller's own Ringer; the island's wake for that
+        // same call then landed here and posted on the audible calls-ring
+        // channel, which carries the system ringtone at IMPORTANCE_HIGH, and
+        // the two played over each other. The message path has had the mirror
+        // of this guard since #553. The screen wake goes with it: a screen the
+        // user is looking at needs no waking.
+        if (app.rcq.android.RcqApp.foreground &&
+            app.rcq.android.call.CallController.ringingInApp(callId)
+        ) {
+            return
+        }
         val full = Intent(ctx, IncomingCallActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION)
         }

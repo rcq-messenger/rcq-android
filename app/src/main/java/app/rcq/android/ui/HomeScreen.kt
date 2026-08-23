@@ -220,6 +220,14 @@ internal data class AccountRow(
     val active: Boolean,
     val avatarMediaId: String? = null,
     val avatarMediaKey: String? = null,
+    /** What that island calls itself, and which logo it is on. From
+     *  [app.rcq.android.data.IslandCards], keyed by HOST rather than by
+     *  account, so two accounts on one island share one entry and an island
+     *  nobody is currently signed into still draws its own face. Empty when
+     *  nothing on this device has ever talked to it, which draws the lettered
+     *  tile: the row never waits on a network call. */
+    val islandName: String = "",
+    val islandLogoVersion: String = "",
 )
 
 /** Open-state and typed query of the "Add" search sheet, kept OUTSIDE
@@ -372,8 +380,11 @@ internal fun HomeScreen(
     var removeTarget by remember { mutableStateOf<Contact?>(null) }
 
     // Section fold state is persisted (LocalStores.sectionFlags) so a collapsed
-    // section stays collapsed across leaving/re-entering home (report: the
-    // offline section kept re-expanding because it was in-memory remember{}).
+    // section stays collapsed across leaving/re-entering home and across a cold
+    // start (report: the offline section kept re-expanding because it was
+    // in-memory remember{}). Device-local by design and per account, like the
+    // tree it folds; iOS keeps the same thing in SectionCollapseStore and web
+    // in local-store's KEYS.collapsed.
     // Set membership = "collapsed", except Archive which defaults to collapsed
     // and stores an "open" marker instead.
     // The per-section flags themselves are read once here; which key belongs to
@@ -565,6 +576,12 @@ internal fun HomeScreen(
     // frame, then read from memory: no island is asked anything to render this.
     remember { app.rcq.android.data.AccountCards.warm(context) }
     val accountCards by app.rcq.android.data.AccountCards.cards.collectAsState()
+    // The same trick for the ISLANDS those accounts live on: warmed from disk
+    // once, then a map lookup per row. `Session.refreshCaps` fills it in from
+    // every `/server/info` the app makes, so an island answers once and every
+    // screen that names it is complete on its first frame afterwards.
+    remember { app.rcq.android.data.IslandCards.warm(context) }
+    val islandCards by app.rcq.android.data.IslandCards.cards.collectAsState()
     val ownAvatarForCard by session.ownAvatar.collectAsState()
     // The active account describes ITSELF into the cache, and only itself: it
     // is the only one this process can speak for. Every other row then draws
@@ -611,7 +628,7 @@ internal fun HomeScreen(
             )
         }
     }
-    val accountRows = remember(accountList, activeId, session.nickname, inOwnStoreDecoy, accountCards) {
+    val accountRows = remember(accountList, activeId, session.nickname, inOwnStoreDecoy, accountCards, islandCards) {
         if (inOwnStoreDecoy) listOf(
             AccountRow(
                 id = app.rcq.android.data.DecoyStore.STORE_ID,
@@ -634,6 +651,8 @@ internal fun HomeScreen(
                 active = a.id == activeId,
                 avatarMediaId = card?.avatarMediaId,
                 avatarMediaKey = card?.avatarMediaKey,
+                islandName = islandCards[(a.serverHost ?: card?.host ?: app.rcq.android.net.RcqApi.DEFAULT_HOST).lowercase()]?.name.orEmpty(),
+                islandLogoVersion = islandCards[(a.serverHost ?: card?.host ?: app.rcq.android.net.RcqApi.DEFAULT_HOST).lowercase()]?.logoVersion.orEmpty(),
             )
         }
     }
@@ -1384,6 +1403,10 @@ internal fun HomeScreen(
                         // members fall back into their derived sections on the
                         // next render.
                         editSections { tree -> Sections.deleteSection(tree, t.id) }
+                        // Its fold flag goes with it; nothing else refers to
+                        // the id once the record is gone.
+                        LocalStores.forgetSectionFlag(t.id)
+                        unlockedSections = unlockedSections - t.id
                         sectionDelete = null
                     },
                 ),
@@ -1721,11 +1744,19 @@ private fun HomeHeader(
         // Left — account switcher: tap a row to hot-swap identities, or
         // add / manage local accounts (iOS AccountManager parity).
         Box(Modifier.align(Alignment.CenterStart)) {
-            Icon(
-                // Black (textPrimary), not accent green, per founder — but the
-                // theme's black only while the theme is what it stands on.
-                Icons.Outlined.AccountCircle, "Accounts", tint = chrome.textPrimary,
-                modifier = Modifier.size(28.dp).clip(CircleShape).clickable { accountMenu = true },
+            // Was a bare account glyph: the same picture whichever island you
+            // were on, which made the one control that says WHERE YOU ARE say
+            // nothing at all. It carries the island's own logo now, or its
+            // lettered tile, straight off the cache: no fetch, and a cold start
+            // on a plane still knows which island it is on. Same fix iOS made
+            // to its switcher pill (`accountSwitcherPill`).
+            val here = accounts.firstOrNull { it.active }
+            IslandAvatar(
+                host = here?.host ?: session.currentServer,
+                logoVersion = here?.islandLogoVersion,
+                name = here?.islandName,
+                size = 28.dp,
+                modifier = Modifier.clickable(onClickLabel = "Accounts") { accountMenu = true },
             )
             DropdownMenu(expanded = accountMenu, onDismissRequest = { accountMenu = false }) {
                 accounts.forEach { a ->
@@ -1733,7 +1764,22 @@ private fun HomeHeader(
                         text = {
                             Column {
                                 Text(a.nickname, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-                                Text(a.host, color = c.textSecondary, fontSize = 12.sp)
+                                // The island, drawn as an island: its picture
+                                // and the name its operator typed, falling back
+                                // to the lettered tile and the bare host for one
+                                // that has never answered. The row used to carry
+                                // the hostname alone, which is the one line here
+                                // that a person cannot read at a glance.
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    IslandAvatar(a.host, a.islandLogoVersion, a.islandName, size = 14.dp)
+                                    Text(
+                                        a.islandName.ifBlank { a.host },
+                                        color = c.textSecondary, fontSize = 12.sp,
+                                    )
+                                }
                                 a.uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                             }
                         },

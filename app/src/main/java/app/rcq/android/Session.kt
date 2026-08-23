@@ -1864,8 +1864,18 @@ class Session(context: Context) {
                 // rebuilds `api` on an onion entry-guard rotation, and that
                 // answer is still this island's.
                 val askedHost = serverHost()
-                val caps = api.serverInfo().capabilities
+                val info = api.serverInfo()
+                val caps = info.capabilities
                 if (serverHost() != askedHost) return@launch
+                // The island's own description, kept per HOST so the switcher
+                // and the account manager can draw an island nobody is signed
+                // into at the moment. Not in a decoy session: nothing about
+                // one is written to disk, here as everywhere.
+                if (!app.rcq.android.data.AccountManager.isDecoyMode) {
+                    app.rcq.android.data.IslandCards.record(
+                        appCtx, askedHost, info.name, info.logo_version,
+                    )
+                }
                 val wasLogReader = groupLogReader
                 val wasVault = vaultEnabled
                 applyCaps(caps, live = true)
@@ -4657,6 +4667,14 @@ class Session(context: Context) {
             app.rcq.android.data.VisitStore.bindAccount(null)
             CrossIslandStore.bindAccount(null)
             VisitedIslandsStore.bindAccount(null)
+            // Nothing is signed in any more, so the two device-wide island
+            // caches are now a plaintext list of every island this device ever
+            // talked to and one file per host on disk, outliving the
+            // per-account record of the same islands that was just deleted.
+            // Not touched while another account remains: it still needs its own
+            // island drawn on the first frame.
+            app.rcq.android.data.IslandCards.wipe(appCtx)
+            app.rcq.android.data.IslandLogos.clear(appCtx)
             null
         }
     }
