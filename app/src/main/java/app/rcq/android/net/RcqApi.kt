@@ -802,10 +802,12 @@ class RcqApi(
      *  a crash between fetch and persist re-serves the rows, and the UUID
      *  dedupe collapses a repeat.
      *
-     *  ⚠ The first call flips the ACCOUNT to a log reader on that island:
-     *  from then on new room posts for it exist only in the log. Only ever
-     *  called on an island that advertises `group_log`, and always next to
-     *  the legacy drain, which keeps serving whatever was written before. */
+     *  ⚠ The call marks THIS DEVICE a log reader on that island (server
+     *  2026.08.23.7): once every device that drains the account's legacy
+     *  queue is one, new room posts for the account exist only in the log.
+     *  Only ever called on an island that advertises `group_log`, and always
+     *  next to the legacy drain, which keeps serving whatever was written
+     *  before. */
     suspend fun fetchGroupLog(limit: Int = 500): GroupLogFetchOut = withContext(Dispatchers.IO) {
         request("POST", "/messages/group-log/fetch", gson.toJson(GroupLogFetchIn(limit = limit)), authed = true, GroupLogFetchOut::class.java)
     }
