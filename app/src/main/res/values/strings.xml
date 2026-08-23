@@ -192,8 +192,8 @@
     <string name="backup_island_err_unreachable">Island unreachable. Nothing was changed.</string>
     <string name="linked_devices_hint">Browsers connected to your account. To connect one, open chat.rcq.app, choose Connect phone, tap Scan QR below, and point at the code.</string>
     <string name="linked_devices_slots_title">Device keys</string>
-    <string name="linked_devices_slots_hint">Every install of this account holding its own encryption keys. A recovery-phrase login shows up here.</string>
-    <string name="linked_devices_slots_primary">Primary device</string>
+    <string name="linked_devices_slots_hint">Every install of this account holding its own encryption keys. A recovery-phrase login shows up here. The shared slot is the keys the account started with: any install that has not claimed its own speaks through them.</string>
+    <string name="linked_devices_slots_primary">Shared key slot</string>
     <string name="linked_devices_slots_unnamed">Unnamed</string>
     <string name="linked_devices_slots_this">this device</string>
     <string name="linked_devices_revoke">Revoke</string>

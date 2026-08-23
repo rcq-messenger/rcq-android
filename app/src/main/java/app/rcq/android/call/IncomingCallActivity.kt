@@ -82,7 +82,7 @@ class IncomingCallActivity : ComponentActivity() {
         // The ring itself starts in onStart, which runs right after this and
         // again on every return to the screen — one place, so coming back from
         // the home button cannot leave a silent incoming call.
-        ringer = Ringer(this)
+        ringer = Ringer.shared(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(cancelReceiver, IntentFilter(ACTION_CANCEL), Context.RECEIVER_NOT_EXPORTED)
@@ -137,8 +137,7 @@ class IncomingCallActivity : ComponentActivity() {
         // still alive from the previous call (singleTask re-delivers here rather
         // than creating a new one) would show the second call on a dark screen.
         showOverLockscreen()
-        ringer?.stop()
-        ringer = Ringer(this).also { it.startIncoming() }
+        ringer = Ringer.shared(this).also { it.startIncoming(callId) }
         window.decorView.removeCallbacks(watchdog)
         window.decorView.postDelayed(watchdog, 60_000)
     }
@@ -244,7 +243,7 @@ class IncomingCallActivity : ComponentActivity() {
         val leavingRinger = ringer
         val repost = Runnable {
             pendingRepost = null
-            leavingRinger?.stop()
+            leavingRinger?.stopFor(p.callId)
             if (IncomingCallStore.pending?.callId != p.callId) return@Runnable
             Push.showIncomingCall(
                 appCtx,
@@ -274,12 +273,18 @@ class IncomingCallActivity : ComponentActivity() {
         val p = IncomingCallStore.pending ?: return
         if (p.callId != callId || isFinishing) return
         Push.cancelCallNotification(this)
-        if (ringer == null) ringer = Ringer(this)
-        ringer?.startIncoming()
+        if (ringer == null) ringer = Ringer.shared(this)
+        ringer?.startIncoming(callId)
     }
 
     override fun onDestroy() {
         IncomingCallStore.fsiSurfaceActive = false
+        // ⚠ A destroy is NOT a departure. Unlocking the phone recreates this
+        // activity on MIUI, and stopping the ring here started the melody over
+        // in the new instance (#710, #711). Only a finishing destroy silences
+        // it, and even then only if the ring still belongs to this call; a
+        // non-finishing one leaves the ring to the next instance or to the
+        // re-posted notification that onStop parked.
         if (isFinishing) {
             // Answered, declined, or dismissed — a parked re-post would revive a
             // notification for a call that is already over. A non-finishing
@@ -289,7 +294,7 @@ class IncomingCallActivity : ComponentActivity() {
         }
         window.decorView.removeCallbacks(watchdog)
         if (receiverRegistered) runCatching { unregisterReceiver(cancelReceiver) }
-        ringer?.stop()
+        if (isFinishing) ringer?.stopFor(callId)
         super.onDestroy()
     }
 

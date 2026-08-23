@@ -76,7 +76,7 @@ class CallController(
     }
 
     val rtc = WebRtcClient(appContext)
-    private val ringer = Ringer(appContext)
+    private val ringer = Ringer.shared(appContext)
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()

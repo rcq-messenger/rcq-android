@@ -1164,7 +1164,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     )
                     if (!isGroup && !isSelf && peer != null) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(if (chatSecure) R.string.chat_secure_off else R.string.chat_secure_on), color = c.textPrimary) },
+                            // ⚠ One name, always. It used to read "Уведомлять"
+                            // when off and "Не уведомлять" when on, and a menu
+                            // row that renames itself says nothing about which
+                            // of the two it is describing: the current state or
+                            // what the tap will do (#713). The name is what the
+                            // row DOES; the state is the tick and the tint.
+                            text = { Text(stringResource(R.string.chat_secure_on), color = c.textPrimary) },
+                            trailingIcon = {
+                                if (chatSecure) Icon(Icons.Filled.Check, null, tint = c.accent)
+                            },
                             // A camera-with-a-cross, not a shield: this mode
                             // BLOCKS nothing, it only tells the peer when a
                             // screenshot is taken (the blocking one is Settings
@@ -3767,12 +3776,16 @@ private fun AlbumPagerViewer(
                 }
             }
             val current = items.getOrNull(pager.currentPage)
+            // ⚠ Close on the LEFT, the two actions on the right (#703). Back is
+            // in the top-left corner of every screen in the system, closing a
+            // picture is the same gesture, and it is the one people reach for
+            // most often here.
             ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopEnd).padding(16.dp), onDismiss)
+                Modifier.align(Alignment.TopStart).padding(16.dp), onDismiss)
             if (current != null) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
                 ) {
                     // Save and share act on the page you are looking at. A photo
                     // page has its bytes already; a clip is fetched on the tap.
@@ -3852,11 +3865,13 @@ private fun FullscreenImageViewer(
             // one — "не видно или видно еле-еле, смотря какой фон" (tester).
             // A scrim behind each one makes them legible over anything, and
             // makes the tap target the whole disc rather than the strokes.
+            // Close on the left, the two actions on the right: see the album
+            // viewer above (#703).
             ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopEnd).padding(16.dp), onDismiss)
+                Modifier.align(Alignment.TopStart).padding(16.dp), onDismiss)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
             ) {
                 ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(bytes) }
                 ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(bytes) }
