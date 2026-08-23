@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -281,7 +280,9 @@ internal fun FullscreenVideoViewer(
                             listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)),
                         ),
                     )
-                    .navigationBarsPadding()
+                    // `navigationBarsPadding()` is zero inside a Dialog; the
+                    // activity's window knows the bar's real height.
+                    .padding(bottom = activityNavigationBarBottom())
                     .padding(horizontal = 16.dp, vertical = 20.dp),
             ) {
                 ViewerAction(

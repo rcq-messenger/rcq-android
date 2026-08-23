@@ -3733,9 +3733,10 @@ private fun AlbumPagerViewer(
                 Text(
                     "${pager.currentPage + 1} / ${items.size}",
                     color = Color.White, fontSize = 13.sp,
-                    // The dialog is laid out under the gesture bar; 28dp put the
-                    // counter right on the handle.
-                    modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 40.dp)
+                    // The dialog is laid out under the system bar and its own
+                    // insets read zero (see activityNavigationBarBottom): the
+                    // bar's real height plus a margin, whatever kind of bar.
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = activityNavigationBarBottom() + 16.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(Color.Black.copy(alpha = 0.5f))
                         .padding(horizontal = 10.dp, vertical = 4.dp),
