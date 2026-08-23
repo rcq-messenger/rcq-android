@@ -176,7 +176,7 @@
     <string name="linked_devices_hint">Hesabına bağlı tarayıcılar. Bir tane bağlamak için chat.rcq.app adresini aç, Telefonu bağla\'yı seç, aşağıdaki QR tara\'ya dokun ve kodu göster.</string>
     <string name="linked_devices_slots_title">Cihaz anahtarları</string>
     <string name="linked_devices_slots_hint">Bu hesabın kendi şifreleme anahtarlarına sahip her kurulumu. Kurtarma ifadesiyle yapılan giriş burada görünür.</string>
-    <string name="linked_devices_slots_primary">Birincil cihaz</string>
+    <string name="linked_devices_slots_primary">Ortak anahtar yuvası</string>
     <string name="linked_devices_slots_unnamed">Adsız</string>
     <string name="linked_devices_slots_this">bu cihaz</string>
     <string name="linked_devices_web_title">Web oturumları</string>
@@ -196,6 +196,7 @@
     <string name="linked_devices_connect_steps">1. Bilgisayarında chat.rcq.app adresini aç\n2. \"Telefonu bağla\"yı seç\n3. \"QR tara\"ya dokunup orada görünen koda tut\n\nTelefonun onaylamanı isteyecek.</string>
     <string name="linked_devices_connected">%1$s bağlandı</string>
     <string name="common_close">Kapat</string>
+    <string name="common_on">Açık</string>
     <string name="common_done">Tamam</string>
     <string name="common_save">Kaydet</string>
     <string name="common_ok">Tamam</string>
@@ -793,7 +794,7 @@
     <string name="random_err_other">Bir şeyler ters gitti. Tekrar dene.</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">Bu sohbette ara</string>
-    <string name="chat_secure_on">Bu sohbeti güvenceye al</string>
+    <string name="chat_secure_on">Ekran görüntüsü uyarıları</string>
     <string name="chat_secure_off">Güvenli sohbeti kapat</string>
     <string name="secscreen_peer_screenshot">%1$s ekran görüntüsü aldı</string>
     <string name="chat_menu_cd">Sohbet işlemleri</string>

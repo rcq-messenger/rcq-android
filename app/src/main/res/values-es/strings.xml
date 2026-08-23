@@ -176,7 +176,7 @@
     <string name="linked_devices_hint">Navegadores conectados a tu cuenta. Para conectar uno, abre chat.rcq.app, elige Conectar teléfono, toca Escanear QR aquí abajo y apunta al código.</string>
     <string name="linked_devices_slots_title">Claves de dispositivos</string>
     <string name="linked_devices_slots_hint">Cada instalación de esta cuenta con sus propias claves de cifrado. Un inicio de sesión con la frase de recuperación aparece aquí.</string>
-    <string name="linked_devices_slots_primary">Dispositivo principal</string>
+    <string name="linked_devices_slots_primary">Ranura de claves compartida</string>
     <string name="linked_devices_slots_unnamed">Sin nombre</string>
     <string name="linked_devices_slots_this">este dispositivo</string>
     <string name="linked_devices_web_title">Sesiones web</string>
@@ -196,6 +196,7 @@
     <string name="linked_devices_connect_steps">1. En tu ordenador, abre chat.rcq.app\n2. Elige \"Conectar teléfono\"\n3. Toca \"Escanear QR\" y apunta al código que aparece allí\n\nTu teléfono te pedirá que lo confirmes.</string>
     <string name="linked_devices_connected">Conectado %1$s</string>
     <string name="common_close">Cerrar</string>
+    <string name="common_on">Activado</string>
     <string name="common_done">Listo</string>
     <string name="common_save">Guardar</string>
     <string name="common_ok">OK</string>
@@ -793,7 +794,7 @@
     <string name="random_err_other">Algo salió mal. Inténtalo de nuevo.</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">Buscar en este chat</string>
-    <string name="chat_secure_on">Proteger este chat</string>
+    <string name="chat_secure_on">Avisos de captura de pantalla</string>
     <string name="chat_secure_off">Desactivar el chat protegido</string>
     <string name="secscreen_peer_screenshot">%1$s hizo una captura de pantalla</string>
     <string name="chat_menu_cd">Acciones del chat</string>

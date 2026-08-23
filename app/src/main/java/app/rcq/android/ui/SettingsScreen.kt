@@ -163,16 +163,20 @@ internal fun SettingsScreen(
     // used to land on the chat list and leave the person to find it (#672).
     openLinkedDevices: Boolean = false,
 ) {
-    var route by remember {
-        mutableStateOf(
-            when {
-                openMyReports -> SettingsRoute.MY_REPORTS
-                openLinkedDevices -> SettingsRoute.LINKED_DEVICES
-                openDiagnostics -> SettingsRoute.DIAGNOSTICS
-                openBackupIsland -> SettingsRoute.BACKUP_ISLAND
-                else -> SettingsRoute.ROOT
-            },
-        )
+    fun deepLinkRoute() = when {
+        openMyReports -> SettingsRoute.MY_REPORTS
+        openLinkedDevices -> SettingsRoute.LINKED_DEVICES
+        openDiagnostics -> SettingsRoute.DIAGNOSTICS
+        openBackupIsland -> SettingsRoute.BACKUP_ISLAND
+        else -> SettingsRoute.ROOT
+    }
+    var route by remember { mutableStateOf(deepLinkRoute()) }
+    // ⚠ Not only the initial value. Settings is kept alive by the state holder,
+    // so a notification tapped while it is already open changes the flags and
+    // nothing else: the screen sat where it was and the tap did nothing.
+    LaunchedEffect(openMyReports, openLinkedDevices, openDiagnostics, openBackupIsland) {
+        val wanted = deepLinkRoute()
+        if (wanted != SettingsRoute.ROOT) route = wanted
     }
     // System-back parity with the in-screen ← arrow: pop ONE settings level
     // instead of letting back fall through to the activity (which dumped the

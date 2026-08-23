@@ -176,7 +176,7 @@
     <string name="linked_devices_hint">已连接到你账号的浏览器。要连接一个，请打开 chat.rcq.app，选择“连接手机”，点下面的“扫描 QR”，对准页面上的码。</string>
     <string name="linked_devices_slots_title">设备密钥</string>
     <string name="linked_devices_slots_hint">此账号每个持有自己加密密钥的安装。用恢复短语登录的会话也会出现在这里。</string>
-    <string name="linked_devices_slots_primary">主设备</string>
+    <string name="linked_devices_slots_primary">共享密钥槽</string>
     <string name="linked_devices_slots_unnamed">未命名</string>
     <string name="linked_devices_slots_this">本设备</string>
     <string name="linked_devices_web_title">网页会话</string>
@@ -196,6 +196,7 @@
     <string name="linked_devices_connect_steps">1. 在电脑上打开 chat.rcq.app\n2. 选择“连接手机”\n3. 点“扫描 QR”，对准那里显示的码\n\n手机会请你确认。</string>
     <string name="linked_devices_connected">已连接 %1$s</string>
     <string name="common_close">关闭</string>
+    <string name="common_on">已开启</string>
     <string name="common_done">完成</string>
     <string name="common_save">保存</string>
     <string name="common_ok">确定</string>
@@ -793,7 +794,7 @@
     <string name="random_err_other">出了点问题。请再试一次。</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">搜索这个聊天</string>
-    <string name="chat_secure_on">保护这个聊天</string>
+    <string name="chat_secure_on">截屏提醒</string>
     <string name="chat_secure_off">关闭聊天保护</string>
     <string name="secscreen_peer_screenshot">%1$s 截了屏</string>
     <string name="chat_menu_cd">聊天操作</string>

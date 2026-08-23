@@ -569,6 +569,22 @@ private fun RcqApp(session: Session) {
             return@LaunchedEffect
         }
         if (req.devices) {
+            // ⚠ Everything else first. Settings renders BELOW an open chat, a
+            // room, a profile or an info screen in the `when` that draws them,
+            // so setting the flag while one of those is up did nothing at the
+            // time and then dropped the user into Linked devices when they
+            // pressed Back minutes later.
+            chatTarget = null
+            groupInfoId = null
+            peerInfoUin = null
+            showAudioRooms = false
+            showNews = false
+            showRandom = false
+            showNearby = false
+            showRadio = false
+            showProfile = false
+            showManageAccounts = false
+            showOutgoing = false
             settingsToDevices = true
             showSettings = true
             return@LaunchedEffect
@@ -626,7 +642,16 @@ private fun RcqApp(session: Session) {
                 showNearby -> showNearby = false
                 showRadio -> showRadio = false
                 showProfile -> showProfile = false
-                showSettings -> showSettings = false
+                // ⚠ The flags go with it. Leaving them set meant the NEXT
+                // time Settings was opened by hand it jumped straight back
+                // into the deep-linked section.
+                showSettings -> {
+                    showSettings = false
+                    settingsToDiagnostics = false
+                    settingsToReports = false
+                    settingsToDevices = false
+                    settingsToBackupIsland = false
+                }
                 showRestore -> showRestore = false
             }
         }

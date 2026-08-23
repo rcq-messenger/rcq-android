@@ -40,6 +40,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -969,12 +970,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
         val atBottom = prevRow >= 0 && lastVisible >= prevRow
         if (last.fromMe || atBottom) {
+            // ⚠ No try/finally here. This composable is enormous, and wrapping
+            // a suspending call in one made the Kotlin compiler emit a frame
+            // the ART verifier rejects outright: VerifyError on ChatScreen,
+            // i.e. the chat screen crashes the moment it is opened. Caught on
+            // the emulator before release. The flag is cleared on the next
+            // arrival and by the effect restarting, and the arrow's own delay
+            // (below) is what actually keeps it from blinking.
             autoFollowing = true
-            try {
-                listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
-            } finally {
-                autoFollowing = false
-            }
+            listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+            autoFollowing = false
         }
     }
     // 13a: persist where reading stopped. The resting scroll position, written
@@ -1172,7 +1177,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             // row DOES; the state is the tick and the tint.
                             text = { Text(stringResource(R.string.chat_secure_on), color = c.textPrimary) },
                             trailingIcon = {
-                                if (chatSecure) Icon(Icons.Filled.Check, null, tint = c.accent)
+                                // The tick carries the state, so it is the tick
+                                // that has to say so out loud: with the label
+                                // fixed, a screen reader had nothing left to
+                                // read the on/off from.
+                                if (chatSecure) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        stringResource(R.string.common_on),
+                                        tint = c.accent,
+                                    )
+                                }
                             },
                             // A camera-with-a-cross, not a shield: this mode
                             // BLOCKS nothing, it only tells the peer when a
@@ -3806,11 +3821,11 @@ private fun AlbumPagerViewer(
             // picture is the same gesture, and it is the one people reach for
             // most often here.
             ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopStart).padding(16.dp), onDismiss)
+                Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp), onDismiss)
             if (current != null) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
                 ) {
                     // Save and share act on the page you are looking at. A photo
                     // page has its bytes already; a clip is fetched on the tap.
@@ -3893,10 +3908,10 @@ private fun FullscreenImageViewer(
             // Close on the left, the two actions on the right: see the album
             // viewer above (#703).
             ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopStart).padding(16.dp), onDismiss)
+                Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp), onDismiss)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
             ) {
                 ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(bytes) }
                 ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(bytes) }

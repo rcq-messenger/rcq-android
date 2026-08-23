@@ -508,7 +508,13 @@ class CallController(
             // instead of playing a ringback for thirty seconds and calling it
             // "no answer" — the caller was being told they are being ignored
             // when they were not being reached (user request).
-            "call_unreachable" -> handleRemoteEnd(callId, "unreachable")
+            "call_unreachable" -> {
+                // No socket and no way to wake them either. Same as
+                // `call_offline` for our purposes: nothing rang over there, so
+                // the missed call has to wait for them in the queue (#678).
+                peerWasUnreachable = true
+                handleRemoteEnd(callId, "unreachable")
+            }
             // Reachable, but not connected: the offer went out as a push, and
             // until that push wakes their phone nothing is ringing anywhere.
             // The tone was inventing an alerting phone on the other end, so it
@@ -690,11 +696,45 @@ class CallController(
      *  — a tone that means "their phone is ringing" must not play while nothing
      *  is ringing — but do NOT end the call: the push may still wake them inside
      *  the ring window, and answering has to keep working. */
+    /** The island said the callee has no live socket: the offer left as a push
+     *  and nothing is ringing over there yet. Remembered because it decides
+     *  whether this call leaves a durable trace on their side (see
+     *  [depositMissedIfUnreachable]). */
+    @Volatile private var peerWasUnreachable = false
+
     private fun handleCalleeOffline(callId: String) {
         val s = _state.value as? State.Outgoing ?: return
         if (s.info.id != callId) return
         _peerOffline.value = true
+        peerWasUnreachable = true
         ringer.stop()
+    }
+
+    /** A same-island call is signalled over the socket and nothing durable is
+     *  left behind, so a callee whose app was force-stopped (MIUI does it the
+     *  moment the app is swiped away) learns nothing at all: no ring, no
+     *  push that survives, and an empty chat when they next open the app.
+     *  Report #678 is exactly that, and #686 is its other half.
+     *
+     *  So the CALLER leaves the trace, as a sealed envelope in their offline
+     *  queue, and only when the island said they were not there: a callee who
+     *  WAS online rang and filed its own row, and a second one from here would
+     *  be a duplicate. Cross-island calls already work this way, because over
+     *  there every signal is a deposit ([Session.routeCallSignal]) and a stale
+     *  offer is filed as missed on arrival. */
+    private fun depositMissedIfUnreachable(call: CallInfo, reason: String, durationMs: Long) {
+        if (!call.outgoing || !peerWasUnreachable) return
+        if (durationMs >= 1000 || answered) return
+        if (reason in setOf("declined", "declinedElsewhere", "busy", "answered_elsewhere")) return
+        // "cancelled" is the caller hanging up before the ring timed out. It
+        // still counts: from the callee's side somebody called and they were
+        // not there, which is exactly what a missed call is.
+        send(
+            signal(
+                "call_missed", call.peerUin, call.id,
+                mapOf("media" to if (call.media == Media.VIDEO) "video" else "audio"),
+            ),
+        )
     }
 
     fun handleRemoteEnd(callId: String, reason: String) {
@@ -781,6 +821,7 @@ class CallController(
             ),
         )
         if (!answeredElsewhere) logHistory(call, reason, duration)
+        depositMissedIfUnreachable(call, reason, duration)
         // An incoming call that rang out leaves a row in the chat and, until
         // this, nothing anywhere else: the ringing notification is cancelled as
         // the ring ends, so someone who was away from the phone learned they
@@ -833,6 +874,7 @@ class CallController(
         accepting = false
         answered = false
         outgoingVideoUpgradePending = false
+        peerWasUnreachable = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
         resetRecoveryState()
@@ -1078,6 +1120,7 @@ class CallController(
         accepting = false
         answered = false
         outgoingVideoUpgradePending = false
+        peerWasUnreachable = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
         resetRecoveryState()

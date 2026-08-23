@@ -212,6 +212,7 @@
     <string name="linked_devices_connect_steps">1. На компьютере откройте chat.rcq.app\n2. Выберите «Connect phone»\n3. Нажмите «Сканировать QR» и наведите на показанный код\n\nТелефон попросит подтвердить.</string>
     <string name="linked_devices_connected">Подключено %1$s</string>
     <string name="common_close">Закрыть</string>
+    <string name="common_on">Включено</string>
     <string name="common_done">Готово</string>
     <string name="common_save">Сохранить</string>
     <string name="common_ok">ОК</string>

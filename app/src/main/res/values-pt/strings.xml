@@ -176,7 +176,7 @@
     <string name="linked_devices_hint">Navegadores conectados à sua conta. Para conectar um, abra chat.rcq.app, escolha Conectar celular, toque em Escanear QR abaixo e aponte para o código.</string>
     <string name="linked_devices_slots_title">Chaves de dispositivos</string>
     <string name="linked_devices_slots_hint">Cada instalação desta conta com suas próprias chaves de criptografia. Um login pela frase de recuperação aparece aqui.</string>
-    <string name="linked_devices_slots_primary">Dispositivo principal</string>
+    <string name="linked_devices_slots_primary">Espaço de chaves partilhado</string>
     <string name="linked_devices_slots_unnamed">Sem nome</string>
     <string name="linked_devices_slots_this">este dispositivo</string>
     <string name="linked_devices_web_title">Sessões web</string>
@@ -196,6 +196,7 @@
     <string name="linked_devices_connect_steps">1. No seu computador, abra chat.rcq.app\n2. Escolha \"Conectar celular\"\n3. Toque em \"Escanear QR\" e aponte para o código que aparece lá\n\nSeu celular vai pedir para você confirmar.</string>
     <string name="linked_devices_connected">Conectado %1$s</string>
     <string name="common_close">Fechar</string>
+    <string name="common_on">Ativado</string>
     <string name="common_done">Pronto</string>
     <string name="common_save">Salvar</string>
     <string name="common_ok">OK</string>
@@ -793,7 +794,7 @@
     <string name="random_err_other">Algo deu errado. Tente de novo.</string>
     <!-- In-chat message search -->
     <string name="chat_search_hint">Buscar nesta conversa</string>
-    <string name="chat_secure_on">Proteger esta conversa</string>
+    <string name="chat_secure_on">Avisos de captura de ecrã</string>
     <string name="chat_secure_off">Desligar a conversa protegida</string>
     <string name="secscreen_peer_screenshot">%1$s fez uma captura de tela</string>
     <string name="chat_menu_cd">Ações da conversa</string>

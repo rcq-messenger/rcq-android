@@ -894,6 +894,12 @@ object Push {
         // could identify. Wakes we could not open still collapse into one shared
         // "New message" — there is no sender to separate them by.
         val id = when {
+            // ⚠ Its own slot, and BEFORE the message ids: a device
+            // announcement is not a message, and sharing the anonymous "dm"
+            // slot with unopenable wakes meant the next such wake replaced
+            // "a new device connected to this account" with "New message" —
+            // a security notice quietly overwritten by ordinary traffic.
+            openDevices -> "devices".hashCode()
             groupId != null -> groupId.toString().hashCode()
             peerUin != null -> "peer:$peerUin".hashCode()
             else -> "dm".hashCode()
@@ -907,7 +913,7 @@ object Push {
             // authority matches no VIEW filter and the intent is explicit,
             // so this never collides with real deep links.
             data = android.net.Uri.parse(
-                "rcq://notif/${groupId ?: peerUin?.let { "p$it" } ?: "dm"}/${toUin ?: 0}",
+                "rcq://notif/${if (openDevices) "devices" else groupId ?: peerUin?.let { "p$it" } ?: "dm"}/${toUin ?: 0}",
             )
             if (groupId != null) putExtra(EXTRA_OPEN_GROUP_ID, groupId)
             if (toUin != null) putExtra(EXTRA_OPEN_TO_UIN, toUin)
