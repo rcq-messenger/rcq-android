@@ -63,7 +63,14 @@ class RoomMeshClient(
         _speakerOn.value = true
         configureAudio()
         val factory = WebRtcClient.peerConnectionFactory()
-        val audioSource = factory.createAudioSource(MediaConstraints())
+        // Same explicit processing as a 1:1 call (WebRtcClient.audioConstraints):
+        // a room is where an unprocessed microphone is heard by everyone at once.
+        val audioSource = factory.createAudioSource(MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+        })
         localAudio = factory.createAudioTrack("rcq_room_audio0", audioSource)
     }
 
