@@ -81,8 +81,13 @@ import androidx.compose.ui.input.pointer.pointerInput
  */
 internal object Emoticons {
     /** Default reactions when the user hasn't customised their set (mirrors the
-     *  historical fixed list). The user can now pick up to 6 of their own in the
-     *  emoji-customise sheet; see LocalStores.reactionEmojis. */
+     *  historical fixed list). The user can pick up to 40 of their own in the
+     *  emoji-customise sheet; see LocalStores.reactionEmojis, which reads this
+     *  list rather than keeping a second copy of it.
+     *
+     *  ⚠ Every name must be in [standardPack], i.e. must have a bundled GIF.
+     *  The copy that used to live in LocalStores did not, and three of its six
+     *  slots drew nothing. */
     val defaultReactions = listOf("good", "give_heart", "laugh1", "scare", "cray", "ireful1")
 
     /** The "standart" Kolobok set (258 glyphs), bundled on every client.

@@ -516,11 +516,18 @@
     <string name="my_uins_footer">While you answer as one number, the rest are simply reserved for you. Nobody else can take them.</string>
     <string name="settings_foot_appearance">Choose light, dark, or follow the system theme.</string>
     <string name="settings_text_size">Text size</string>
+    <string name="settings_row_theme">Theme</string>
+    <string name="settings_search_hint">Search settings</string>
     <string name="settings_row_app_icon">App icon</string>
     <string name="settings_row_chat_bg">Chat background</string>
     <string name="settings_row_home_bg">Home background</string>
     <string name="chat_bg_none">None</string>
     <string name="chat_bg_custom">Gallery</string>
+    <!-- Under the wallpaper grid: the built-in gradients are filtered
+         to the ones drawn for the theme in use (the selected one is always
+         kept). Without this line a shorter grid reads as wallpapers having
+         gone missing. -->
+    <string name="chat_bg_theme_set_note">Wallpapers made for the current theme. A custom image is always available.</string>
     <string name="app_icon_default">Default</string>
     <string name="app_icon_footer">Pick a different launcher icon. The home screen may flicker for a moment while it updates.</string>
     <string name="settings_foot_privacy">Control who can see you and who can reach you. Server, proxy and RCQ relays are under Network.</string>
@@ -547,6 +554,9 @@
     <string name="common_copy_uin">Copy UIN</string>
     <string name="common_uin_copied">UIN copied</string>
     <plurals name="members"><item quantity="one">%1$d member</item><item quantity="other">%1$d members</item></plurals>
+    <!-- Same row once the count reaches 1000 and compactCount() takes
+         over (999, then 1K, 2.1K); the argument is already formatted. -->
+    <string name="members_compact">%1$s members</string>
 
     <!-- Last seen -->
     <string name="last_seen_fmt">last seen %1$s</string>
@@ -594,14 +604,8 @@
     <!-- Settings: privacy -->
     <string name="pv_last_seen">Last seen</string>
     <string name="pv_last_seen_desc">Who can see when you were last online.</string>
-    <string name="pv_stay_visible">Stay visible after you leave</string>
-    <string name="pv_stay_visible_desc">Keep showing as recently online for a while after the app closes.</string>
-    <string name="presence_countdown_hm">%1$dh %2$dm</string>
-    <string name="presence_countdown_h">%1$dh</string>
-    <string name="presence_countdown_m">%1$dm</string>
-    <string name="presence_countdown_lt1m">&lt;1m</string>
-    <string name="presence_info_title">Stay visible after you leave</string>
-    <string name="presence_info_body">You keep showing as online for this long after you close the app. Change it in Settings, Privacy &amp; Network.</string>
+    <string name="pv_card_side_lists">Keep my card out of side lists</string>
+    <string name="pv_card_side_lists_desc">Anyone who meets you in a reaction list, a media viewer or a member list can tap through to your profile card. This records that you would rather they could not. It is kept on this device: your island does not check it yet, so an app that ignores it still opens the card. Profile card above is the one the island enforces.</string>
     <string name="stealth_info_title">Through relays</string>
     <string name="stealth_info_body_manual">You switched RCQ relays on yourself from the menu. Traffic goes through our relays instead of straight to the island: the island does not see your address, and the network between you and the island does not see that you are using RCQ. While this is on, the app does not try a direct connection. Switch it off in the same menu.</string>
     <string name="stealth_shield_green">Green shield: traffic through the relays is confirmed to reach the island.</string>
@@ -665,6 +669,21 @@
     <string name="poll_who_voted">Who voted</string>
     <string name="poll_voters_title">Votes</string>
     <string name="poll_no_voters">No votes</string>
+    <!-- Polls were removed (item 14a): the ballots were never E2EE.
+         Kept so an old peer's poll still renders instead of vanishing. -->
+    <string name="poll_removed_title">Poll</string>
+    <string name="poll_removed_body">Polls have been removed: the votes were not encrypted. This one can no longer be answered.</string>
+    <!-- Disappearing messages (item 20), option set mirrored from iOS. -->
+    <string name="chat_ttl_menu">Disappearing messages</string>
+    <string name="chat_ttl_menu_on">Disappearing: %1$s</string>
+    <string name="chat_ttl_body">New messages you send here disappear on both sides when the time runs out. The countdown starts when the message is sent, so time offline does not add to it.</string>
+    <string name="chat_ttl_off">Off</string>
+    <string name="chat_ttl_quoted">Disappearing message</string>
+    <string name="chat_ttl_1m">1 minute</string>
+    <string name="chat_ttl_5m">5 minutes</string>
+    <string name="chat_ttl_1h">1 hour</string>
+    <string name="chat_ttl_24h">24 hours</string>
+    <string name="chat_ttl_7d">7 days</string>
     <!-- Connection diagnostics -->
     <string name="diag_title">Connection diagnostics</string>
     <string name="diag_transport">Route</string>
@@ -754,6 +773,25 @@
     <string name="gi_perm_delete">Delete</string>
     <string name="gi_perm_members">Members</string>
     <string name="gi_perm_info">Info</string>
+
+    <!-- Handing the group over (founder item 23). Owner only, own-island
+         only, and one way: the caller keeps membership and loses both the
+         owner seat and every moderator capability. -->
+    <string name="gi_transfer">Hand over ownership</string>
+    <string name="gi_transfer_q">Hand over ownership?</string>
+    <string name="gi_transfer_body">Hand this group over to %1$s? You stay in the group as an ordinary member, and you lose owner rights along with any moderator capabilities you hold. Only the new owner can hand it back.</string>
+    <string name="gi_transfer_cta">Hand over</string>
+    <string name="gi_transfer_done_title">Ownership transferred</string>
+    <string name="gi_transfer_done">%1$s owns this group now. You are still a member: you can leave, or stay as one.</string>
+    <string name="gi_transfer_stay">Stay</string>
+    <string name="gi_transfer_err_owner_only">Only the owner can hand the group over.</string>
+    <string name="gi_transfer_err_already_owner">They already own this group.</string>
+    <string name="gi_transfer_err_not_a_member">They are not in this group any more.</string>
+    <string name="gi_transfer_err_no_such_user">This island does not know them.</string>
+    <string name="gi_transfer_err_target_suspended">That account is suspended.</string>
+    <string name="gi_transfer_err_rate_limited_in">Too many attempts. Try again in %1$d s.</string>
+    <string name="gi_transfer_err_rate_limited">Too many attempts. Try again later.</string>
+    <string name="gi_transfer_err_failed">Could not hand the group over.</string>
     <string name="gi_you"> (you)</string>
     <string name="gi_delete">Delete group</string>
     <string name="gi_leave">Leave group</string>
@@ -851,6 +889,9 @@
     <string name="media_save_failed">Couldn\'t save</string>
     <string name="media_fetching">Fetching the file…</string>
     <string name="media_fetch_failed">Could not fetch the file. Check the connection and try again.</string>
+    <string name="media_video_too_old">This video was sent in the old format and is too big to open here (%1$d MB). Ask the sender to send it again from a newer version.</string>
+    <string name="media_video_damaged">This video did not arrive in one piece and stopped part way. Ask the sender to send it again.</string>
+    <string name="media_too_large_for_island">This video is %1$d MB — this server takes at most %2$d MB.</string>
     <string name="chat_pin">Pin</string>
     <string name="chat_pinned_media">📎 Attachment</string>
     <string name="chat_pin_failed">Could not pin that message.</string>
@@ -1073,7 +1114,7 @@
     <string name="emoji_tab_panel">Panel</string>
     <string name="emoji_tab_reactions">Reactions</string>
     <string name="emoji_pick_panel_hint">Tap to add emoticons to your composer panel (up to 40).</string>
-    <string name="emoji_pick_reactions_hint">Tap to choose your quick reactions (up to 6).</string>
+    <string name="emoji_pick_reactions_hint">Tap to choose your quick reactions (up to 40).</string>
     <string name="myreports_title">My reports</string>
     <string name="myreports_empty">You have not sent any reports. If you do, the answer appears here.</string>
     <string name="myreports_answer">Answer</string>
@@ -1083,8 +1124,16 @@
     <string name="myreports_status_resolved">Resolved</string>
     <string name="myreports_status_dismissed">Declined</string>
     <string name="myreports_status_duplicate">Duplicate</string>
-    <string name="myreports_delete">Delete</string>
-    <string name="myreports_delete_refused">This one is still under review, so it cannot be deleted yet.</string>
+    <string name="myreports_delete">Remove from list</string>
+    <string name="myreports_delete_refused">This one is still under review, so it cannot be removed from the list yet.</string>
+    <string name="myreports_remove_title">Remove from list?</string>
+    <string name="myreports_remove_body">It disappears from your list. The report itself stays with us and still counts toward the Hall of Fame.</string>
+    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_edit">Edit</string>
+    <string name="myreports_edited">edited</string>
+    <string name="myreports_edit_locked">This report already has an answer, so its text is fixed now.</string>
+    <string name="myreports_edit_not_editable">This one cannot be edited.</string>
+    <string name="myreports_edit_error">Could not save the change. Try again.</string>
     <string name="myreports_you">You</string>
     <string name="myreports_reply">Write back</string>
     <string name="myreports_reply_placeholder">Add something to this report</string>
@@ -1180,4 +1229,44 @@
     <string name="how_a5">Your island knows an envelope is addressed to someone, and does not know it came from you: your name is not on the outside of it.\n\nWhen RCQ relays are on, the way in is split between two relays. The first one sees you and does not know which island you are reaching; the second one reaches the island and does not know who you are. Putting the two halves together takes both of them, and they belong to different people in different countries.\n\nWhat nobody can hide: the fact that you use RCQ at all is visible to whoever runs your network, unless RCQ relays are on.</string>
     <string name="how_more">More questions on rcq.app/faq →</string>
     <string name="how_copy">Copy this text</string>
+
+    <!-- Chat-list sections (founder item 1 of 23.08, RCQ/docs/sections-design-2026-08-23.md).
+         The list of sections and which chat sits in which lives in the account's
+         "sections" vault slot, so the same sections are on every device.
+         The PIN copy says one thing and must go on saying it: the FLAG syncs, the
+         PROTECTION is local. Never "protects", never "encrypts": anyone holding the
+         account reads every section name and every member uin out of the slot. -->
+    <string name="sections_add">Add chats</string>
+    <string name="sections_empty">Empty. Use + to move a chat here.</string>
+    <string name="sections_reorder_hint">Drag a section, or use the arrows.</string>
+    <string name="sections_reorder_done">Done</string>
+    <string name="sections_move_up">Move up</string>
+    <string name="sections_move_down">Move down</string>
+    <string name="sections_menu_reorder">Reorder sections</string>
+    <string name="sections_menu_new">New section</string>
+    <string name="sections_menu_rename">Rename</string>
+    <string name="sections_menu_delete">Delete section</string>
+    <string name="sections_delete_confirm">Delete this section? The chats stay where they are and go back to their usual place.</string>
+    <string name="sections_menu_pin">Ask for a PIN</string>
+    <string name="sections_menu_pin_off">Stop asking for a PIN</string>
+    <string name="sections_pin_note">Hides this section until you enter your PIN on this device. The chats themselves are not encrypted by it.</string>
+    <string name="sections_new_title">New section</string>
+    <string name="sections_new_placeholder">Section name</string>
+    <string name="sections_new_save">Create</string>
+    <string name="sections_rename_title">Rename section</string>
+    <string name="sections_rename_save">Save</string>
+    <string name="sections_locked_title">Asks for a PIN</string>
+    <string name="sections_locked_enter">Your PIN</string>
+    <string name="sections_locked_open">Open</string>
+    <string name="sections_locked_wrong">Wrong PIN.</string>
+    <string name="sections_locked_nopin">Hidden on another device. This one has no PIN set.</string>
+    <string name="sections_locked_open_anyway">Open anyway</string>
+    <string name="sections_picker_title">Add to %1$s</string>
+    <string name="sections_picker_save">Save</string>
+    <string name="sections_picker_nobody">Nobody to add yet.</string>
+    <string name="sections_err_too_many_sections">That is as many sections as one account can hold.</string>
+    <string name="sections_err_section_full">This section is full.</string>
+    <string name="sections_err_too_many_members">Too many chats across your sections.</string>
+    <string name="sections_err_too_large">The section list is too large to save.</string>
+    <string name="sections_err_unreadable">Your sections were written by a newer version of RCQ.</string>
 </resources>

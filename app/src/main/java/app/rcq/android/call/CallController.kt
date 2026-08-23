@@ -39,6 +39,9 @@ class CallController(
         missed: Boolean,
         /** Epoch ms the call STARTED, which is what the history row shows. */
         startedAt: Long,
+        /** Which call this row records. Kept so the callee can tell a caller's
+         *  missed-call marker apart from the row it already filed (#678). */
+        callId: String?,
     ) -> Unit,
 ) {
     enum class Media(val wire: String) {
@@ -151,6 +154,17 @@ class CallController(
      *  ever started flowing. An answered call is not a missed one — see
      *  [isMissed]. Cleared with the rest of the per-call state. */
     private var answered = false
+
+    /** The OUTGOING half of [answered]: the peer's `call_answer` reached us, so
+     *  somebody picked up over there, whether or not media then formed.
+     *
+     *  ⚠ This is the whole of what the caller knows about "was it answered".
+     *  [answered] is set in [accept] and therefore only ever on the receiving
+     *  side, so an outgoing call had no notion of having been picked up at
+     *  all. That is the mistake that made the first attempt at #678 file
+     *  answered calls as missed, which is #472 from the other direction. Set
+     *  from the socket thread, read from the call coroutines, hence @Volatile. */
+    @Volatile private var remoteAnswered = false
     /** Carry a relay waiver across the redial in [retryWithoutRelay]; the
      *  per-connection flag cannot survive the teardown that redial needs. */
     private var waiveRelayOnNextCall = false
@@ -636,6 +650,11 @@ class CallController(
         val s = _state.value as? State.Outgoing ?: return
         if (s.info.id != callId) return
         val call = s.info
+        // ⚠ Set here, not after the setup below succeeds. The answer arriving IS
+        // the callee having picked up; a `setup_failed` a moment later is our
+        // media dying, and a call somebody answered must never afterwards be
+        // deposited on their phone as one they missed.
+        remoteAnswered = true
         scope.launch {
             try {
                 rtc.handleAnswer(sdp)
@@ -695,6 +714,41 @@ class CallController(
         if (s.info.id != callId) return
         _peerOffline.value = true
         ringer.stop()
+    }
+
+    /** A same-island call is signalled over the socket and leaves nothing
+     *  durable behind, so a callee whose app was force-stopped (MIUI does it
+     *  the moment the app is swiped away) learns nothing at all: no ring, no
+     *  push that outlives the kill, and an empty chat when the app is next
+     *  opened. Report #678 is exactly that, and #686 is its other half.
+     *
+     *  So the CALLER leaves the trace, as a sealed envelope in the callee's
+     *  offline queue, and the callee dedupes it by call id on arrival
+     *  ([Session.ingest]). Cross-island calls already work this way for free,
+     *  because over there every signal is a deposit and a stale offer is filed
+     *  as missed when the queue drains.
+     *
+     *  ⚠⚠ Only on `call_unreachable`, which is the island saying it has neither
+     *  a socket nor a push endpoint for them: nothing can possibly have rung.
+     *  NOT on `call_offline`. That one means the offer went out as a wake-up
+     *  push, so the callee may well be ringing this second and about to file
+     *  its own row, and depositing there is how the first attempt at this fix
+     *  produced two missed calls for one call. The dedupe would now survive
+     *  that, but a marker that is usually redundant is still a push and a queue
+     *  row per unanswered call, so the narrow trigger stands.
+     *
+     *  ⚠ [remoteAnswered], not [answered]. `answered` is the receiving side's
+     *  flag and is false for every outgoing call there has ever been, so
+     *  testing it here would mean nothing at all. */
+    private fun depositMissedIfUnreachable(call: CallInfo, reason: String, durationMs: Long) {
+        if (!call.outgoing || reason != "unreachable") return
+        if (durationMs >= 1000 || remoteAnswered || answered) return
+        send(
+            signal(
+                "call_missed", call.peerUin, call.id,
+                mapOf("media" to if (call.media == Media.VIDEO) "video" else "audio"),
+            ),
+        )
     }
 
     fun handleRemoteEnd(callId: String, reason: String) {
@@ -781,6 +835,7 @@ class CallController(
             ),
         )
         if (!answeredElsewhere) logHistory(call, reason, duration)
+        depositMissedIfUnreachable(call, reason, duration)
         // An incoming call that rang out leaves a row in the chat and, until
         // this, nothing anywhere else: the ringing notification is cancelled as
         // the ring ends, so someone who was away from the phone learned they
@@ -832,6 +887,7 @@ class CallController(
         rtc.clearRelayWaiver()
         accepting = false
         answered = false
+        remoteAnswered = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
@@ -1077,6 +1133,7 @@ class CallController(
         rtc.clearRelayWaiver()
         accepting = false
         answered = false
+        remoteAnswered = false
         outgoingVideoUpgradePending = false
         connectedSince = 0L
         _connectedAtMs.value = 0L
@@ -1261,6 +1318,7 @@ class CallController(
             text,
             missed,
             System.currentTimeMillis() - durationMs,
+            call.id,
         )
     }
 

@@ -21,11 +21,21 @@ object MediaSaver {
 
     /** Hand decrypted bytes to the system share sheet (ACTION_SEND). No storage
      *  permission needed — the file lives in our cache, exposed via FileProvider. */
-    fun share(context: Context, bytes: ByteArray, fileName: String, mime: String) {
+    fun share(context: Context, bytes: ByteArray, fileName: String, mime: String) =
+        share(context, { out -> out.write(bytes); true }, fileName, mime)
+
+    /** [share] for media too big to hold: [write] streams the plaintext into
+     *  the file we are about to hand out and answers false if it could not
+     *  produce all of it (a chunk that failed authentication, a read error).
+     *  A refusal deletes the half-written file instead of sharing it. A clip
+     *  that stops in the middle looks to the recipient like a clip we sent,
+     *  and it is not one. */
+    fun share(context: Context, write: (java.io.OutputStream) -> Boolean, fileName: String, mime: String) {
         runCatching {
             val dir = File(context.cacheDir, "share").apply { mkdirs() }
             val f = File(dir, fileName.replace('/', '_'))
-            f.writeBytes(bytes)
+            val ok = java.io.FileOutputStream(f).use { out -> write(out) }
+            if (!ok) { f.delete(); return }
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = mime
@@ -42,7 +52,19 @@ object MediaSaver {
 
     /** Save an image or video into the device gallery (Pictures/RCQ or
      *  Movies/RCQ). Returns true on success. */
-    fun saveToGallery(context: Context, bytes: ByteArray, fileName: String, mime: String): Boolean = runCatching {
+    fun saveToGallery(context: Context, bytes: ByteArray, fileName: String, mime: String): Boolean =
+        saveToGallery(context, { out -> out.write(bytes); true }, fileName, mime)
+
+    /** [saveToGallery] for media too big to hold. [write] streams the plaintext
+     *  into the pending MediaStore row and answers false if it could not
+     *  produce all of it; a false deletes the row rather than publishing a
+     *  truncated file into the person's gallery.
+     *
+     *  ⚠ This is where whole-file integrity is paid for on a chunk-sealed
+     *  container: the writer walks every chunk to the end, so by the time the
+     *  row is published every byte has been verified. Playback is the only
+     *  place that starts using a chunk before the last one is checked. */
+    fun saveToGallery(context: Context, write: (java.io.OutputStream) -> Boolean, fileName: String, mime: String): Boolean = runCatching {
         val isVideo = mime.startsWith("video")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val collection = if (isVideo) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -55,13 +77,17 @@ object MediaSaver {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val uri = context.contentResolver.insert(collection, values) ?: return false
-            context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
+            val ok = context.contentResolver.openOutputStream(uri)?.use { write(it) } ?: false
+            if (!ok) {
+                runCatching { context.contentResolver.delete(uri, null, null) }
+                return false
+            }
             values.clear(); values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             context.contentResolver.update(uri, values, null, null)
             true
         } else {
             val pubDir = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-            saveLegacy(context, bytes, fileName, mime, pubDir)
+            saveLegacy(context, write, fileName, mime, pubDir)
         }
     }.getOrDefault(false)
 
@@ -111,10 +137,14 @@ object MediaSaver {
         true
     }.getOrDefault(false)
 
-    private fun saveLegacy(context: Context, bytes: ByteArray, fileName: String, mime: String, publicDir: String): Boolean {
+    private fun saveLegacy(context: Context, bytes: ByteArray, fileName: String, mime: String, publicDir: String): Boolean =
+        saveLegacy(context, { out -> out.write(bytes); true }, fileName, mime, publicDir)
+
+    private fun saveLegacy(context: Context, write: (java.io.OutputStream) -> Boolean, fileName: String, mime: String, publicDir: String): Boolean {
         val dir = File(Environment.getExternalStoragePublicDirectory(publicDir), "RCQ").apply { mkdirs() }
         val f = File(dir, fileName)
-        f.writeBytes(bytes)
+        val ok = java.io.FileOutputStream(f).use { out -> write(out) }
+        if (!ok) { f.delete(); return false }
         MediaScannerConnection.scanFile(context, arrayOf(f.absolutePath), arrayOf(mime), null)
         return true
     }

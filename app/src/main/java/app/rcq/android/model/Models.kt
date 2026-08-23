@@ -108,4 +108,11 @@ data class ChatMessage(
     val spoiler: Boolean = false, // photo/video sent blurred; tap-to-reveal
     val albumId: String? = null,  // photo/video grouped into a media album
     val expiresAt: Long? = null,  // disappearing message: epoch ms after which it's swept (null = permanent)
+    /** kind == "call": which call this history row records. It is the dedupe
+     *  key, not decoration: a same-island call leaves no durable trace, so the
+     *  CALLER deposits a "you were called" marker for a callee that was not
+     *  reachable, and the callee has to be able to tell that marker apart from
+     *  a call it already filed itself (#678/#686). Null on every other kind,
+     *  and on call rows written before this column existed. */
+    val callId: String? = null,
 )

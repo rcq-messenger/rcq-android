@@ -5,6 +5,7 @@ import android.util.Base64
 import app.rcq.android.crypto.Envelope
 import app.rcq.android.crypto.IdentityKeys
 import app.rcq.android.crypto.MediaCrypto
+import app.rcq.android.crypto.MediaStream
 import app.rcq.android.crypto.Reply
 import app.rcq.android.crypto.SealedSender
 import app.rcq.android.crypto.SenderKeyStore
@@ -174,6 +175,27 @@ class Session(context: Context) {
      *  [mirrorContactsToVault]; an island without one is left alone. */
     @Volatile private var vaultEnabled: Boolean =
         capsCache(serverHost())?.vault ?: false
+
+    /**
+     * The same question the chat list asks, with THREE answers rather than two:
+     * true, false, and **null = not answered yet**.
+     *
+     * ⚠⚠ The third state is not a nicety. Sections are hidden entirely on an
+     * island with no vault, and treating "we have not asked yet" as "no" takes
+     * the members of a PIN-gated section and draws them, by name and with their
+     * unread badges, in Online / Offline / Cross-island, while the section's
+     * own header disappears from the list. That is a cold start, and every
+     * stretch where the island is unreachable. A chat can only BE filed if the
+     * island had a vault when it was filed, so unknown keeps the cached tree
+     * exactly as it is; only an explicit "no vault" un-files anything.
+     *
+     * A cached `true` counts as an answer (the slot was there last time and the
+     * feature is not destructive); a cached `false` does NOT, because an island
+     * that has since upgraded would otherwise spill a hidden section for as
+     * long as it takes /server/info to answer.
+     */
+    private val _vaultAvailable = MutableStateFlow<Boolean?>(if (capsCache(serverHost())?.vault == true) true else null)
+    val vaultAvailable: StateFlow<Boolean?> = _vaultAvailable.asStateFlow()
     /** The island whose LIVE /server/info answer this process has applied.
      *  Null until one lands: a boot with the radios off keeps the cached (or
      *  default) flags, and the first socket that comes up asks again. */
@@ -208,8 +230,8 @@ class Session(context: Context) {
         send = { obj -> routeCallSignal(obj) },
         turn = { api.turnCredentials() },
         nameFor = { contactName(it) },
-        appendHistory = { peer, fromMe, text, missed, startedAt ->
-            logCallHistory(peer, fromMe, text, missed, startedAt)
+        appendHistory = { peer, fromMe, text, missed, startedAt, callId ->
+            logCallHistory(peer, fromMe, text, missed, startedAt, callId)
         },
     )
 
@@ -266,6 +288,22 @@ class Session(context: Context) {
     private fun routeCallSignal(obj: JsonObject) {
         val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val ci = toUin?.let { CrossIslandStore.findByUin(it) }
+        // ⚠ `call_missed` is the one call signal that must NOT ride the socket
+        // on our own island. Every other one is live: it means nothing to a
+        // peer who is not there. This one exists precisely because they were
+        // not there ([CallController.depositMissedIfUnreachable]), so it has to
+        // wait for them in the offline queue the way a message does. Deposited
+        // sealed, same as the cross-island path below does with everything.
+        if (ci == null && toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_missed") {
+            val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
+            val data = mutableMapOf<String, String>()
+            for ((k, v) in obj.entrySet()) {
+                if (k == "type" || k == "to_uin" || k == "call_id") continue
+                if (v.isJsonPrimitive) data[k] = v.asString
+            }
+            scope.launch { runCatching { sendControl(toUin, Envelope.callSignal("call_missed", callId, data)) } }
+            return
+        }
         if (ci == null) {
             // same-island: unchanged plaintext WS relay, but no longer fire and
             // forget — a refused frame waits for the socket instead of vanishing.
@@ -532,9 +570,12 @@ class Session(context: Context) {
     private val _nearbyEnabled = MutableStateFlow(cachedCaps?.nearby ?: true)
     val nearbyEnabled: StateFlow<Boolean> = _nearbyEnabled.asStateFlow()
 
-    /** Apply an island's answer (live or cached) to the five surface flags
-     *  and to the wire switches: anonymous key lookups and the room log. */
-    private fun applyCaps(c: RcqApi.ServerCapabilities) {
+    /** Apply an island's answer to the five surface flags and to the wire
+     *  switches: anonymous key lookups and the room log.
+     *
+     *  @param live this is the island's OWN answer, not the cached one. Only a
+     *  live answer may say "no vault" out loud: see [vaultAvailable]. */
+    private fun applyCaps(c: RcqApi.ServerCapabilities, live: Boolean = false) {
         _uinShopEnabled.value = c.uin_shop
         _hallOfFameEnabled.value = c.hall_of_fame
         _nearbyEnabled.value = c.nearby
@@ -546,6 +587,11 @@ class Session(context: Context) {
         anonKeyLookup = c.anon_keys && c.deposit_auth
         groupLogReader = c.group_log
         vaultEnabled = c.vault
+        if (live || c.vault) _vaultAvailable.value = c.vault
+        // Zero means the island did not say, and the shipped default stands.
+        // An island that DID say wins even when it says something smaller than
+        // ours: refusing a video it would refuse anyway is the honest answer.
+        if (c.media_max_blob_bytes > 0) mediaMaxBlobBytes = c.media_max_blob_bytes
     }
 
     /** After an account switch the flags still say what the PREVIOUS island
@@ -557,6 +603,12 @@ class Session(context: Context) {
         // omitted the field", while the never-asked default here is the
         // permissive one the flags are born with.
         val cached = capsCache(serverHost())
+        // ⚠ Back to "not answered yet" FIRST: the flag still says what the
+        // previous island said, and carrying a `true` across a switch would let
+        // the new account's chat list offer a menu that writes to a slot the
+        // new island has no room for. applyCaps below raises it again when the
+        // cached answer for THIS island says yes.
+        _vaultAvailable.value = null
         applyCaps(cached ?: RcqApi.ServerCapabilities(
             uin_shop = true, hall_of_fame = true, nearby = true, random_chat = true, reports = true,
         ))
@@ -740,6 +792,17 @@ class Session(context: Context) {
     // start, gates whether we emit read receipts. Default everyone.
     @Volatile
     private var readReceiptsVisibility: String = "everyone"
+
+    // Own "who may open my profile card" policy, memoised over the on-disk
+    // privacy cache so a picker or a screen can ask without a round trip and
+    // without a Gson parse. null = not read yet this session; cleared on every
+    // account switch, because the cache it memoises is per account and a stale
+    // answer here would show one identity's privacy under another's name.
+    @Volatile
+    private var profileVisibilityMemo: String? = null
+
+    /** The three answers the island accepts for any of the visibility policies. */
+    private val visibilityValues = setOf("everyone", "contacts", "nobody")
     // 1:1 inbound message ids we've already acked with a read receipt
     // (in-memory; re-acking after restart is harmless/idempotent).
     private val ackedReads = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -1191,6 +1254,7 @@ class Session(context: Context) {
         app.rcq.android.data.VisitStore.wipeAccount(DecoyStore.STORE_ID)
         CrossIslandStore.wipeAccount(DecoyStore.STORE_ID)
         VisitedIslandsStore.wipeAccount(DecoyStore.STORE_ID)
+        app.rcq.android.data.AccountCards.forget(appCtx, DecoyStore.STORE_ID)
     }
 
     /** Tear the in-memory session state down and re-point every per-account
@@ -1235,11 +1299,29 @@ class Session(context: Context) {
         _randomMessages.value = emptyList()
         _random.value = RandomState.Idle
         _typingFrom.value = null
+        // ⚠⚠ MY OWN PICTURE IS PER ACCOUNT TOO, and this reset was missing.
+        // The home screen records the ACTIVE account's face into that account's
+        // switcher card, preferring this live flow over the new account's
+        // profile on disk. Left set across a rebind it wrote the PREVIOUS
+        // account's avatar id + key under the NEW account's id: account A's
+        // real face, persisted, on account B's row, healed only if and when B's
+        // island answers with a profile. Switch while offline and it survives
+        // the cold start. The legacy duress unlock switches accounts the same
+        // way, so this one line is also what put the real user's face on the
+        // decoy row of the switcher.
+        _ownAvatar.value = null
         _status.value = UserStatus.ONLINE
         readReceiptsVisibility = "everyone"
+        profileVisibilityMemo = null
         activeThread = null
         started = false
         everConnected = false
+        // Both vault slots are per account: the retirement latches and the
+        // sections debounce belong to whoever we were, not to whoever we are
+        // about to be.
+        contactsVaultRetired = false
+        lastVaultSweep = 0L
+        app.rcq.android.data.SectionsVault.resetState()
         reseedCaps()
     }
 
@@ -1722,6 +1804,12 @@ class Session(context: Context) {
                     // turned on since, the room log above all, would wait for
                     // the NEXT reconnect. Ask once more now.
                     else if (capsLiveHost != serverHost()) refreshCaps()
+                    // The vault nudge is pub/sub with NO REPLAY: a slot another
+                    // device wrote while this socket was down is never
+                    // announced again. A reconnect is exactly the moment that
+                    // gap closes, and it is also where a write of OURS that
+                    // never landed gets its retry (see [sweepVaultSlots]).
+                    sweepVaultSlots(force = !everConnected)
                     everConnected = true
                     // The silence probe measures how long a PEER has been quiet,
                     // and a stretch when THIS side had no socket measures
@@ -1779,7 +1867,8 @@ class Session(context: Context) {
                 val caps = api.serverInfo().capabilities
                 if (serverHost() != askedHost) return@launch
                 val wasLogReader = groupLogReader
-                applyCaps(caps)
+                val wasVault = vaultEnabled
+                applyCaps(caps, live = true)
                 capsLiveHost = askedHost
                 app.rcq.android.data.AccountManager.serverMaxAccounts = caps.max_accounts_per_device
                 rememberCaps(askedHost, caps)
@@ -1793,6 +1882,13 @@ class Session(context: Context) {
                 if (groupLogReader && !wasLogReader) {
                     runCatching { withRetry { drainGroupLog() } }
                 }
+                // Same story for the vault: the sweep on the first connect ran
+                // on the CACHED flag, and on an island we had never asked (a
+                // fresh install, the first start after the island upgraded, a
+                // boot with the radios off) that flag was false, so the
+                // sections slot was never read. Sweep now that the island has
+                // said yes; from the next start on the cached answer covers it.
+                if (vaultEnabled && !wasVault) sweepVaultSlots(force = true)
                 // The island takes anonymous key lookups: mint the first
                 // batch of deposit tokens now, in the background, so the
                 // first v=2 session start does not pay the PoW on the send
@@ -2288,6 +2384,11 @@ class Session(context: Context) {
         _connected.value = false
         _messages.value = emptyMap()
         _groupMessages.value = emptyMap()
+        // Same reason as in [rebindTo]: a lock can be followed by an unlock
+        // into a DIFFERENT identity, and a live avatar left over from the
+        // locked one is what the switcher-card recorder would write onto that
+        // identity's row.
+        _ownAvatar.value = null
         if (::db.isInitialized) { db.close() }
         started = false
         everConnected = false
@@ -2365,6 +2466,12 @@ class Session(context: Context) {
                     CrossIslandStore.wipeAccount(acc.id)
                     VisitedIslandsStore.wipeAccount(acc.id)
                     LocalStores.clearAccount(acc.id)
+                    // The switcher's cached face for that account: a nickname,
+                    // a uin, an island and an avatar id. Written outside
+                    // LocalStores, so clearAccount does not reach it, and a
+                    // wipe that leaves the name and picture of the account it
+                    // just destroyed sitting in preferences is not a wipe.
+                    app.rcq.android.data.AccountCards.forget(appCtx, acc.id)
                 }
                 AccountManager.remove(acc.id)
             }
@@ -2431,6 +2538,9 @@ class Session(context: Context) {
                 CrossIslandStore.wipeAccount(acc.id)
                 VisitedIslandsStore.wipeAccount(acc.id)
                 LocalStores.clearAccount(acc.id)
+                // See the note in removePin: the switcher card lives outside
+                // LocalStores and has to be forgotten by name.
+                app.rcq.android.data.AccountCards.forget(appCtx, acc.id)
             }
             AccountManager.remove(acc.id)
         }
@@ -2526,6 +2636,9 @@ class Session(context: Context) {
                 CrossIslandStore.wipeAccount(acc.id)
                 VisitedIslandsStore.wipeAccount(acc.id)
                 LocalStores.clearAccount(acc.id)
+                // See the note in removePin: the switcher card lives outside
+                // LocalStores and has to be forgotten by name.
+                app.rcq.android.data.AccountCards.forget(appCtx, acc.id)
             }
             AccountManager.remove(acc.id)
         }
@@ -3013,6 +3126,12 @@ class Session(context: Context) {
         val ci = CrossIslandStore.findByUin(uin)
         if (ci != null) CrossIslandStore.remove(ci.uin, ci.host)
         else runCatching { api.removeContact(uin) }
+        // Take them out of whatever section they were filed in. ⚠ This is the
+        // ONLY pruning there is: nothing prunes because a chat failed to
+        // resolve while rendering. ⚠⚠ And it runs whether or not they WERE
+        // filed: see [SectionsVault.forgetMember] on why the timing of this
+        // write is itself the leak.
+        forgetSectionMember(app.rcq.android.data.Sections.peerKey(uin, ci?.host))
         // Opt-in, because removing a contact and erasing what they wrote you
         // are different intentions and only the user knows which one this is.
         // The caller asks; nothing here decides on their behalf.
@@ -3090,10 +3209,45 @@ class Session(context: Context) {
     suspend fun loadMyReports(): List<RcqApi.MyReport>? =
         runCatching { api.myReports() }.getOrNull()
 
-    /** Delete one of my own reports. False when the server refused: an open
-     *  report about ANOTHER user waits for a verdict, so it can't be erased. */
+    /** Take one of my own reports off my own list. False when the server
+     *  refused: an open report about ANOTHER user waits for a verdict, because
+     *  the reporter is a party to that case and the thread is the operator's
+     *  only way to ask them anything.
+     *
+     *  ⚠ Server-side this is a HIDE, not a delete. The row stays and keeps
+     *  counting: `hof_stats` reads the reports table live, so erasing the
+     *  reports that came back dismissed used to raise the Hall of Fame ratio.
+     *  Nothing in the UI may promise the report is destroyed. */
     suspend fun deleteMyReport(id: Int): Boolean =
         runCatching { api.deleteMyReport(id) }.isSuccess
+
+    /** The outcome of rewriting one's own report. Three refusals, because they
+     *  need three different sentences: [Locked] is "somebody already answered
+     *  this, the text they answered is frozen", [NotEditable] is a crash dump
+     *  (never editable by hand), and only [Failed] is worth retrying. */
+    sealed class ReportEdit {
+        data class Saved(val report: RcqApi.MyReport) : ReportEdit()
+        object Locked : ReportEdit()
+        object NotEditable : ReportEdit()
+        object Failed : ReportEdit()
+    }
+
+    /** Fix the typo, the missing version number, or the wrong screen name in a
+     *  report nobody has answered yet. Without it the only correction was a
+     *  second report saying "sorry, I meant", which is how the queue collected
+     *  the same issue three times from one person. */
+    suspend fun editMyReport(id: Int, reason: String): ReportEdit =
+        runCatching { api.editMyReport(id, reason) }.fold(
+            onSuccess = { ReportEdit.Saved(it) },
+            onFailure = {
+                val msg = it.message.orEmpty()
+                when {
+                    msg.startsWith("HTTP 409") -> ReportEdit.Locked
+                    msg.startsWith("HTTP 400") -> ReportEdit.NotEditable
+                    else -> ReportEdit.Failed
+                }
+            },
+        )
 
     /** The outcome of writing back on one's own report. [Closed] is not a
      *  failure, it is an answer: the operator finished the ticket, so the
@@ -3355,6 +3509,35 @@ class Session(context: Context) {
             .sortedByDescending { it.createdAt ?: 0L }
     }
 
+    /** Move the crown on a locally-held group, for the COMPACT
+     *  `group_membership_changed` a big room gets (id + `owner_uin`, no
+     *  roster). The number is the half that re-gates every screen, and it is
+     *  right there in the frame.
+     *
+     *  The two role rows are normalised with it rather than left for the next
+     *  `/groups`: they are already in memory, the list is a copy either way,
+     *  and a roster carrying two `role == "owner"` rows badges two owners.
+     *  Nothing else is refetched here — the event exists precisely because a
+     *  room this size is too expensive to move, and re-fetching the roster
+     *  would spend exactly what the compact form saved. */
+    private fun applyOwnerLocally(groupId: Int, ownerUin: Int) {
+        _groups.value = _groups.value.map { g ->
+            if (g.id != groupId || g.ownerUin == ownerUin) return@map g
+            g.copy(
+                ownerUin = ownerUin,
+                members = g.members.map { m ->
+                    when (m.uin) {
+                        // A capability is a grant FROM the owner, and the owner
+                        // is somebody else now: the island cleared both lists.
+                        ownerUin -> m.copy(role = "owner", permissions = emptyList())
+                        g.ownerUin -> m.copy(role = "member", permissions = emptyList())
+                        else -> m
+                    }
+                },
+            )
+        }
+    }
+
     /** Optimistically swap a group's pinned text in the local state so the chat
      *  banner updates INSTANTLY when pinning from a message, before patchGroup
      *  round-trips. The PATCH response reconciles it. Blank clears the pin. */
@@ -3496,7 +3679,14 @@ class Session(context: Context) {
         if (cached.members.isNotEmpty() && id in rosterFetched) return cached
         val full = runCatching { mapGroup(api.groupInfo(id)) }.getOrNull() ?: return cached
         rosterFetched.add(id)
-        val merged = cached.copy(members = full.members, memberCount = full.memberCount)
+        // ⚠ `ownerUin` comes from the ANSWER, not from the cached row. The
+        // roster and the crown are one fact: a handover we missed (socket down,
+        // an island too old to put the owner in the compact frame) is on this
+        // fetch, and keeping the cached number here would have this very screen
+        // draw the roles it just fetched under the owner it already had.
+        val merged = cached.copy(
+            members = full.members, memberCount = full.memberCount, ownerUin = full.ownerUin,
+        )
         _groups.value = _groups.value.map { if (it.id == id) merged else it }
         // #650: the fetch/parse above already runs on IO inside RcqApi, but this
         // disk snapshot serializes EVERY group, and a roster can carry 2000+
@@ -3615,6 +3805,53 @@ class Session(context: Context) {
         runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.setMemberPermissions(ctx.gid, memberUin, permissions))) }
     }
 
+    /** Owner: hand the whole group to [toUin] (founder item 23). Owner only,
+     *  and one way from here. Returns null when the island took it, else the
+     *  sentence to show.
+     *
+     *  ⚠ The answer replaces the WHOLE local group, not just [RcqGroup.ownerUin].
+     *  Both roles moved with it and both `permissions` lists were cleared, so
+     *  patching the single field would leave our own row still drawn with
+     *  rights it no longer has, and the client-enforced `delete` cap still
+     *  honouring them.
+     *
+     *  ⚠ Own-island only: see [RcqApi.transferGroupOwner]. A cross-island
+     *  group's id here is a local alias, and the island the group lives on has
+     *  no account for a member of ours to become its owner. */
+    suspend fun transferGroupOwner(id: Int, toUin: Int): String? {
+        val ctx = groupCtx(id)
+        if (ctx.host != null) return appCtx.getString(R.string.gi_transfer_err_failed)
+        return runCatching {
+            upsertGroup(mapGroupCtx(ctx, ctx.api.transferGroupOwner(ctx.gid, toUin)))
+            null
+        }.getOrElse { transferOwnerReason(it) }
+    }
+
+    /** One sentence for each way the island can refuse a handover. Every code
+     *  is a fact about the TARGET or about us rather than a network hiccup, so
+     *  each gets its own line instead of a shared "could not". The status is
+     *  consulted only for a 429 that reached us through something that ate the
+     *  body (a proxy, an older limiter): the ceiling is still what happened. */
+    fun transferOwnerReason(e: Throwable): String {
+        val refusal = RcqApi.refusalOf(e.message)
+        val res = when (refusal.code) {
+            "owner_only" -> R.string.gi_transfer_err_owner_only
+            "already_owner" -> R.string.gi_transfer_err_already_owner
+            "not_a_member" -> R.string.gi_transfer_err_not_a_member
+            "no_such_user" -> R.string.gi_transfer_err_no_such_user
+            "target_suspended" -> R.string.gi_transfer_err_target_suspended
+            "rate_limited" -> return rateLimitedSentence(refusal.retryAfter)
+            else -> if (refusal.status == 429) return rateLimitedSentence(refusal.retryAfter)
+                else R.string.gi_transfer_err_failed
+        }
+        return appCtx.getString(res)
+    }
+
+    private fun rateLimitedSentence(retryAfter: Int?): String =
+        if (retryAfter != null && retryAfter > 0)
+            appCtx.getString(R.string.gi_transfer_err_rate_limited_in, retryAfter)
+        else appCtx.getString(R.string.gi_transfer_err_rate_limited)
+
     /** Fetch a group invite-card snapshot (no membership needed). */
     suspend fun previewGroup(id: Int): RcqApi.GroupPreviewOut? =
         runCatching { api.previewGroup(id) }.getOrNull()
@@ -3630,15 +3867,26 @@ class Session(context: Context) {
     suspend fun leaveGroup(id: Int) {
         val ctx = groupCtx(id)
         if (ctx.myUin == 0) return
+        val key = sectionKeyForGroupId(id)
         runCatching { ctx.api.leaveGroup(ctx.gid, ctx.myUin) }
         _groups.value = _groups.value.filterNot { it.id == id }
+        forgetSectionMember(key)
     }
 
     suspend fun deleteGroup(id: Int) {
         val ctx = groupCtx(id)
+        val key = sectionKeyForGroupId(id)
         runCatching { ctx.api.deleteGroup(ctx.gid) }
         _groups.value = _groups.value.filterNot { it.id == id }
+        forgetSectionMember(key)
     }
+
+    /** The section member key for a group by its LOCAL id, read while the row
+     *  is still in the roster. ⚠ A negative id is an alias this device made up;
+     *  [app.rcq.android.data.SectionsVault.keyForGroup] is the edge that turns
+     *  it back into (remoteId, host). */
+    private fun sectionKeyForGroupId(id: Int): String? =
+        _groups.value.firstOrNull { it.id == id }?.let { app.rcq.android.data.SectionsVault.keyForGroup(it) }
 
     /** Owner/admin: compress + encrypt + upload an avatar blob, then PATCH
      *  the group with the new media id + per-blob key. Throws on failure
@@ -3755,7 +4003,35 @@ class Session(context: Context) {
             hof_avatar = net.hof_avatar ?: cached?.hof_avatar,
         )
         LocalStores.setCachedProfileJson(profileGson.toJson(merged))
+        merged.profile_visibility?.let { profileVisibilityMemo = it }
         return merged
+    }
+
+    /** Who may open MY profile card: "everyone" | "contacts" | "nobody"
+     *  (founder item 22). Non-suspend and free to call from a composition: it
+     *  memoises over the on-disk privacy cache, which [loadProfile] and
+     *  [updateProfile] both keep current.
+     *
+     *  ⚠ Answers "everyone" when nothing is known yet, because that is what the
+     *  island does with an unset field. A gate that guessed "nobody" instead
+     *  would hide a card the user never asked to hide, and the user would have
+     *  no way to tell it apart from a broken fetch. */
+    fun profileVisibility(): String =
+        profileVisibilityMemo
+            ?: (cachedProfile()?.profile_visibility?.takeIf { it in visibilityValues } ?: "everyone")
+                .also { profileVisibilityMemo = it }
+
+    /** Set it, island first, cache after. Returns false when the island refused
+     *  or never answered.
+     *
+     *  ⚠ The caller must NOT paint the new value as applied on a false: this is
+     *  the switch that decides whether strangers can read someone's city and
+     *  age, and a privacy control that shows a setting the island never received
+     *  is worse than one that visibly fails. */
+    suspend fun setProfileVisibility(value: String): Boolean {
+        val v = value.trim().lowercase()
+        if (v !in visibilityValues) return false
+        return updateProfile(RcqApi.UpdateMeBody(profile_visibility = v)) != null
     }
 
     suspend fun updateProfile(body: RcqApi.UpdateMeBody): RcqApi.MeProfile? {
@@ -3771,6 +4047,12 @@ class Session(context: Context) {
         }
         // Keep the read-receipt gate in sync when the user changes it.
         if (updated != null) body.read_receipts_visibility?.let { readReceiptsVisibility = it }
+        // Same for the profile-card gate. Keyed off what the ISLAND echoed back
+        // where it echoed one, so the memo can never be more permissive than
+        // what was actually stored.
+        if (updated != null) {
+            (updated.profile_visibility ?: body.profile_visibility)?.let { profileVisibilityMemo = it }
+        }
         // The PUT response is the full owner-self profile — refresh the cache
         // so the next Privacy-screen open re-seeds from the new choice even
         // offline.
@@ -3792,17 +4074,18 @@ class Session(context: Context) {
     }
 
     suspend fun sendGroupText(groupId: Int, text: String, replyTo: app.rcq.android.crypto.Reply? = null) {
-        val env = Envelope.text(text, replyTo)
+        val env = Envelope.text(text, replyTo, groupTtl(groupId))
         sendGroupEnvelope(groupId, env, env.id, text, kind = "text", replyTo = replyTo)
     }
 
     suspend fun sendGroupPhoto(groupId: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
+        val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, jpeg)
-        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId)
+        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId)
     }
 
@@ -3854,16 +4137,22 @@ class Session(context: Context) {
         albumId: String? = null,
     ) {
         val me = store.uin ?: return
+        // The sender's own copy dies with the recipients' — read off the very
+        // envelope going out, so the room's timer cannot be honoured on every
+        // device except the one it was set on. See the note on [sendText].
+        val (ttl, ts) = dyingOf(env)
+        val now = System.currentTimeMillis()
         storeGroup(
             ChatMessage(
                 id = id, peerUin = 0, fromMe = true, body = body,
-                sentAt = System.currentTimeMillis(), state = DeliveryState.SENDING,
+                sentAt = now, state = DeliveryState.SENDING,
                 kind = kind, mediaId = mediaId, mediaKey = mediaKey,
                 replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id,
                 groupId = groupId, senderUin = me,
                 fileName = fileName, fileMime = fileMime, fileSize = fileSize,
                 durationSec = durationSec, thumbB64 = thumbB64, lat = lat, lng = lng,
                 spoiler = spoiler, albumId = albumId,
+                expiresAt = expiryFor(ttl, ts, now),
             )
         )
         fanOutGroup(groupId, env, id)
@@ -3983,7 +4272,11 @@ class Session(context: Context) {
      *  failure may be transient (a store that would not open, a session that
      *  is still being set up) must not be acked past yet, see [drainGroupLog].
      *  Every other caller ignores the value, as before. */
-    private fun ingestGroup(payloadB64: String, groupId: Int): String? {
+    /** [depositAtMs] is the island's own stamp on the queue row this payload
+     *  came off, epoch ms, and is the FALLBACK anchor for a disappearing
+     *  message whose sender was too old to put a `ts` in the envelope. Null on
+     *  a live socket delivery (where now IS arrival) and on a replay. */
+    private fun ingestGroup(payloadB64: String, groupId: Int, depositAtMs: Long? = null): String? {
         if (duressViewUp) return null   // see ingest(): `db` is the duress store here
         return runCatching {
             val me = store.uin ?: return null
@@ -4000,7 +4293,7 @@ class Session(context: Context) {
                     if (ok) replayHeldGmsg(env.kid)
                 }
                 is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
-                else -> routeGroupEnvelope(env, groupId, dec.senderUin)
+                else -> routeGroupEnvelope(env, groupId, dec.senderUin, depositAtMs)
             }
             null
         }.getOrElse { e ->
@@ -4018,7 +4311,7 @@ class Session(context: Context) {
      *  replayed message. Same return as [ingestGroup]: null when done with the
      *  row (a held broadcast counts as done, its SKDM rides its own row), a
      *  tag when the row may still pass on a later delivery. */
-    private fun ingestGmsg(payloadB64: String, groupId: Int): String? {
+    private fun ingestGmsg(payloadB64: String, groupId: Int, depositAtMs: Long? = null): String? {
         return runCatching {
             val me = store.uin ?: return null
             val hdr = SenderKeys.parseGmsgHeader(payloadB64) ?: return null
@@ -4059,7 +4352,7 @@ class Session(context: Context) {
                 android.util.Log.w("RCQgroup", "gmsg sig did not verify; dropping gid=$groupId kid=${hdr.kid}")
                 return null
             }
-            routeGroupEnvelope(opened.envelope, groupId, key.senderUin)
+            routeGroupEnvelope(opened.envelope, groupId, key.senderUin, depositAtMs)
             null
         }.getOrElse { e ->
             logDecryptFailure(payloadB64, e)
@@ -4070,7 +4363,7 @@ class Session(context: Context) {
     /** Store a decoded group envelope under its thread. Shared by the legacy
      *  per-member path (ingestGroup) and the sender-keys broadcast (ingestGmsg);
      *  [senderUin] is the authenticated sender from either path. */
-    private fun routeGroupEnvelope(envelope: Envelope, groupId: Int, senderUin: Int) {
+    private fun routeGroupEnvelope(envelope: Envelope, groupId: Int, senderUin: Int, depositAtMs: Long? = null) {
         // Blocked sender → drop their group content entirely (messages,
         // reactions, edits, deletes). Sealed sender means the server can't
         // filter, so we gate on the decrypted sender here. Sender-key control
@@ -4080,22 +4373,22 @@ class Session(context: Context) {
         val now = System.currentTimeMillis()
         when (val env = envelope) {
                 is Envelope.Text -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.text, now, kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, now))
+                    ChatMessage(env.id, 0, false, env.text, now, kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
                 )
                 is Envelope.Photo -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
                 )
                 is Envelope.File -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, now))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
                 )
                 is Envelope.Voice -> storeGroup(
-                    ChatMessage(env.id, 0, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, now))
+                    ChatMessage(env.id, 0, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
                 )
                 is Envelope.Video -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
                 )
                 is Envelope.Location -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, now))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, groupId = groupId, senderUin = dec.senderUin, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
                 )
                 is Envelope.Poll -> storeGroup(
                     ChatMessage(env.id, 0, false, app.rcq.android.model.PollContent(env.pollId, env.question, env.options, env.singleChoice, env.anonymous).toJson(), now, kind = "poll", groupId = groupId, senderUin = dec.senderUin)
@@ -4291,6 +4584,7 @@ class Session(context: Context) {
             CrossIslandStore.wipeAccount(burnedId)
             VisitedIslandsStore.wipeAccount(burnedId)
             LocalStores.clearAccount(burnedId)
+            app.rcq.android.data.AccountCards.forget(appCtx, burnedId)
             AccountManager.remove(burnedId)   // active falls back to first remaining (or null)
         } else {
             store.wipe()
@@ -4320,6 +4614,10 @@ class Session(context: Context) {
         _randomMessages.value = emptyList()
         _random.value = RandomState.Idle
         _typingFrom.value = null
+        // See [rebindTo]. Cleared here as well because the branch below only
+        // reaches that reset when there IS another account to switch to; the
+        // last account being deleted must not leave its face in the flow.
+        _ownAvatar.value = null
         started = false
         everConnected = false
         val next = AccountManager.activeId.value
@@ -4404,6 +4702,7 @@ class Session(context: Context) {
         CrossIslandStore.wipeAccount(accountId)
         VisitedIslandsStore.wipeAccount(accountId)
         LocalStores.clearAccount(accountId)
+        app.rcq.android.data.AccountCards.forget(appCtx, accountId)
         AccountManager.remove(accountId)
     }
 
@@ -4650,9 +4949,18 @@ class Session(context: Context) {
 
     // ── messaging ────────────────────────────────────────────────────
 
+    /** ⚠ THE SENDER'S OWN ROW CARRIES THE TIMER TOO, here and in every send
+     *  path below. Wiring only the envelope gives a message that vanishes off
+     *  the recipient's device and lives on mine for ever — and worse,
+     *  [allMessagesForBackup] keeps exactly the rows whose `expiresAt` is null,
+     *  so my copy of a message the other side was told had disappeared would be
+     *  written into the export in the clear, which is the one guarantee that
+     *  function exists to make. The deadline comes off `env.ts`, so both copies
+     *  die at the same instant. */
     suspend fun sendText(toUin: Int, text: String, replyTo: Reply? = null) {
-        val env = Envelope.text(text, replyTo)
-        store(ChatMessage(env.id, toUin, fromMe = true, body = text, sentAt = System.currentTimeMillis(), state = DeliveryState.SENDING, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id))
+        val env = Envelope.text(text, replyTo, peerTtl(toUin))
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, fromMe = true, body = text, sentAt = now, state = DeliveryState.SENDING, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
     }
 
@@ -4825,117 +5133,158 @@ class Session(context: Context) {
     }
 
     suspend fun sendPhoto(toUin: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
+        // ⚠ Read BEFORE the upload, which can take a while on a bad line. The
+        // timer that counts is the one the thread had when the user pressed
+        // send; turning it off while their picture is still going up must not
+        // quietly strip the promise off a message already on its way.
+        val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)      // throws on failure (caller catches)
         imageCache.put(upload.media_id, jpeg)            // own bubble renders without re-download
-        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId)
-        store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId))
+        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl)
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Encrypt+upload arbitrary file bytes, then send a file envelope (same
      *  blob path as photos; rcq-spec 9). [fileName]/[mime]/size describe it. */
     suspend fun sendFile(toUin: Int, bytes: ByteArray, fileName: String, mime: String) {
+        val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
-        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null)
-        store(ChatMessage(env.id, toUin, true, "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size))
+        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null, ttl)
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, "", now, DeliveryState.SENDING, kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Group file: encrypt once, fan out per member (same as group photo). */
     suspend fun sendGroupFile(groupId: Int, bytes: ByteArray, fileName: String, mime: String) {
+        val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
-        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null)
+        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null, ttl)
         sendGroupEnvelope(groupId, env, env.id, "", kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size)
     }
 
     /** Encrypt+upload a recorded voice clip, then send a voice envelope. */
     suspend fun sendVoice(toUin: Int, bytes: ByteArray, durationSec: Int) {
+        val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble())
-        store(ChatMessage(env.id, toUin, true, "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec))
+        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble(), ttl)
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, "", now, DeliveryState.SENDING, kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Group voice note: encrypt once, fan out per member. */
     suspend fun sendGroupVoice(groupId: Int, bytes: ByteArray, durationSec: Int) {
+        val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble())
+        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble(), ttl)
         sendGroupEnvelope(groupId, env, env.id, "", kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec)
     }
 
     /** Encrypt+upload a picked video, then send a video envelope carrying a
      *  base64 poster thumbnail so the bubble renders before download. */
     suspend fun sendVideo(toUin: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
+        val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId)
-        store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId))
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl)
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Group video: encrypt once, fan out per member. */
     suspend fun sendGroupVideo(groupId: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
+        val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId)
     }
 
     /** Share a geographic point (no blob, just coordinates in the envelope). */
     suspend fun sendLocation(toUin: Int, lat: Double, lng: Double, caption: String?) {
-        val env = Envelope.location(lat, lng, caption)
-        store(ChatMessage(env.id, toUin, true, caption ?: "", System.currentTimeMillis(), DeliveryState.SENDING, kind = "location", lat = lat, lng = lng))
+        val env = Envelope.location(lat, lng, caption, peerTtl(toUin))
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "location", lat = lat, lng = lng, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
     }
 
     suspend fun sendGroupLocation(groupId: Int, lat: Double, lng: Double, caption: String?) {
-        val env = Envelope.location(lat, lng, caption)
+        val env = Envelope.location(lat, lng, caption, groupTtl(groupId))
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "location", lat = lat, lng = lng)
     }
 
+    /** The ttl (seconds) a stored outgoing row was SENT with, recovered from
+     *  its absolute deadline so a resend puts the same instruction back on the
+     *  wire. Without this a message that failed and retried would land on the
+     *  recipient as a permanent one, in a thread the sender had set to
+     *  five minutes, and only the retry would give it away.
+     *
+     *  `expiresAt` was `(sentAt / 1000) * 1000 + ttl * 1000`, so the difference
+     *  is the ttl less a sub-second remainder: ceil recovers it exactly.
+     *  A row already past its deadline resends with the floor of one second
+     *  rather than with nothing — a retry is not the moment to turn somebody's
+     *  disappearing message into a permanent one, and the sweeper takes both
+     *  copies within the second anyway. */
+    private fun resendTtl(msg: ChatMessage): Int? {
+        val exp = msg.expiresAt ?: return null
+        return kotlin.math.ceil((exp - msg.sentAt) / 1000.0).toInt().coerceAtLeast(1)
+    }
+
     /** Rebuild the wire envelope for a stored outgoing message (resend). */
-    private fun resendEnvelope(msg: ChatMessage): Envelope = when {
+    private fun resendEnvelope(msg: ChatMessage): Envelope {
+        val ttl = resendTtl(msg)
+        // The ORIGINAL anchor, not this instant: a resend is the same message
+        // making a second attempt, not a new one, and re-dating it would hand
+        // the recipient a fresh lifetime for words the sender already started
+        // the clock on.
+        val ts = ttl?.let { msg.sentAt / 1000 }
+        return when {
         msg.kind == "photo" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.Photo(msg.id, msg.mediaId, msg.mediaKey, msg.body.ifEmpty { null }, msg.spoiler, msg.albumId)
+            Envelope.Photo(msg.id, msg.mediaId, msg.mediaKey, msg.body.ifEmpty { null }, msg.spoiler, msg.albumId, ttl, ts)
         msg.kind == "file" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.File(msg.id, msg.mediaId, msg.mediaKey, msg.fileName ?: "file", msg.fileMime ?: "application/octet-stream", msg.fileSize ?: 0L, msg.body.ifEmpty { null })
+            Envelope.File(msg.id, msg.mediaId, msg.mediaKey, msg.fileName ?: "file", msg.fileMime ?: "application/octet-stream", msg.fileSize ?: 0L, msg.body.ifEmpty { null }, ttl, ts)
         msg.kind == "voice" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.Voice(msg.id, msg.mediaId, msg.mediaKey, (msg.durationSec ?: 0).toDouble())
+            Envelope.Voice(msg.id, msg.mediaId, msg.mediaKey, (msg.durationSec ?: 0).toDouble(), ttl, ts)
         msg.kind == "video" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.Video(msg.id, msg.mediaId, msg.mediaKey, msg.thumbB64 ?: "", (msg.durationSec ?: 0).toDouble(), msg.body.ifEmpty { null }, msg.spoiler, msg.albumId)
+            Envelope.Video(msg.id, msg.mediaId, msg.mediaKey, msg.thumbB64 ?: "", (msg.durationSec ?: 0).toDouble(), msg.body.ifEmpty { null }, msg.spoiler, msg.albumId, ttl, ts)
         msg.kind == "location" && msg.lat != null && msg.lng != null ->
-            Envelope.Location(msg.id, msg.lat, msg.lng, msg.body.ifEmpty { null })
+            Envelope.Location(msg.id, msg.lat, msg.lng, msg.body.ifEmpty { null }, ttl, ts)
         msg.kind == "poll" -> app.rcq.android.model.PollContent.fromJson(msg.body)?.let {
             Envelope.Poll(msg.id, it.pollId, it.question, it.options, it.singleChoice, it.anonymous)
-        } ?: Envelope.Text(msg.id, msg.body)
-        else -> Envelope.Text(msg.id, msg.body)
+        } ?: Envelope.Text(msg.id, msg.body, null, ttl, ts)
+        else -> Envelope.Text(msg.id, msg.body, null, ttl, ts)
+        }
     }
 
     /** Auto-retry every message stuck in FAILED, fired on each (re)connect. A
@@ -5722,6 +6071,20 @@ class Session(context: Context) {
         is Envelope.Edit -> "edit"
         is Envelope.Visit -> "visit"
         is Envelope.SecureScreen, is Envelope.ScreenshotTaken -> "secscreen"
+        // A missed-call marker (#678) is labelled like a receipt on the OUTER
+        // envelope, which is the label the island does not push for. That is
+        // deliberate: the call is already over, so a wake would ring nothing
+        // and a "new message" banner would name it wrong. It waits in the
+        // queue, and the drain that runs when the app is next opened files the
+        // row and raises the missed-call notification there, which is the
+        // moment the person actually wanted to be told.
+        //
+        // ⚠ ONLY this one signal. Every other CallSignal is a live cross-island
+        // signal that goes out through CrossIslandSender.deliverCall with its
+        // own type, and never reaches this function. But labelling the whole
+        // class "read" here would be one refactor away from silencing a
+        // cross-island call offer, so the test names the signal.
+        is Envelope.CallSignal -> if (env.sig == "call_missed") "read" else "message"
         else -> "message"
     }.takeIf { TYPED_CONTROL_SENDS } ?: "message"
 
@@ -5904,6 +6267,311 @@ class Session(context: Context) {
         }
     }
 
+    // ── large media: streamed in, streamed out ──────────────────────────
+    //
+    // #691 item 3, "long videos do not download". [fetchImage] above is the
+    // only download path there has ever been, and it holds the WHOLE file
+    // four times over: the blob, the copy `MediaCrypto.open` makes of the
+    // ciphertext, the provider's own buffer (AES-GCM cannot release a byte
+    // before it has checked the tag at the end), and the plaintext. Past
+    // roughly a 60-100 MB clip that is an OutOfMemoryError, and because the
+    // body sits inside `runCatching {}.getOrNull()`, and Kotlin's
+    // `runCatching` catches Throwable, Errors included, so the user got a
+    // silent null. Not a failed download: nothing at all.
+    //
+    // Everything below is the way out: an RCQM1 container
+    // (crypto/MediaStream.kt) sealed and opened one megabyte at a time. It is
+    // chosen by SIZE on the way out and by MAGIC on the way in, so photos,
+    // voice notes and ordinary clips keep the byte-identical single-seal
+    // layout every shipped client already reads, and only files past the
+    // point where the old path was going to die anyway take the new one.
+
+    /** Encrypted containers too big for the 200 MB blob cache above, which is
+     *  sized for pictures and would evict a film the moment it landed. Its own
+     *  directory, its own ceiling, its own eviction. */
+    private val mediaBigDir: java.io.File by lazy {
+        java.io.File(appCtx.cacheDir, "media-big").apply { mkdirs() }
+    }
+    private val mediaBigCapBytes = 1536L * 1024 * 1024
+    private fun mediaBigFile(mediaId: String): java.io.File =
+        java.io.File(mediaBigDir, mediaId.replace(Regex("[^A-Za-z0-9_-]"), "_"))
+
+    /** The most this client will pull down for one media blob.
+     *
+     *  ⚠⚠ Two ceilings, and the smaller wins. The island's own cap is what it
+     *  will ACCEPT, and a self-hosted island sets that to whatever it likes;
+     *  the cache cap is what this phone will HOLD. Taking the island's number
+     *  alone means a hostile or simply generous island decides how many
+     *  gigabytes land in a cache directory on somebody's phone, and
+     *  [trimMediaBigCache] cannot undo it, because the file it must not evict
+     *  is the oversized one. Bounding the download is the only place this can
+     *  be settled. */
+    private val mediaDownloadCeilingBytes: Long
+        get() = minOf(mediaMaxBlobBytes, mediaBigCapBytes)
+
+    /** Evict oldest containers until under the cap. [keep] is never evicted:
+     *  it is the one that was just downloaded or is being played right now,
+     *  and oldest-first would otherwise delete a 1.4 GB film to make room for
+     *  itself.
+     *
+     *  ⚠ That exemption is only safe because the download is bounded by
+     *  [mediaDownloadCeilingBytes], which is at most the cap: a kept file can
+     *  never be so big that the loop below empties the whole directory and
+     *  still cannot get under it. */
+    private fun trimMediaBigCache(keep: java.io.File? = null) {
+        runCatching {
+            val files = mediaBigDir.listFiles()?.toList() ?: return
+            var total = files.sumOf { it.length() }
+            if (total <= mediaBigCapBytes) return
+            for (f in files.sortedBy { it.lastModified() }) {
+                if (total <= mediaBigCapBytes) break
+                if (keep != null && f.absolutePath == keep.absolutePath) continue
+                total -= f.length()
+                f.delete()
+            }
+        }
+    }
+
+    /** Plaintext bytes past which an outgoing file is sealed chunk by chunk
+     *  instead of all at once.
+     *
+     *  ⚠ Deliberately ABOVE the point where the old path works, not below it.
+     *  A new container is a blob an older client cannot open, so the switch
+     *  has to land where the alternative is not "an older client opens it"
+     *  but "nobody opens it, on any client, including the sender's own": at
+     *  96 MB the single-seal path asks for something like 380 MB of transient
+     *  heap on top of a running Compose app, on a heap that is 256-512 MB
+     *  total. Below this line nothing changes for anyone; above it, this is
+     *  the difference between a video and a silence. Around 45 s of 1080p
+     *  phone footage, or six minutes at 720p. */
+    private val streamThresholdBytes = 96L * 1024 * 1024
+
+    /** Legacy single-seal blobs bigger than this are not opened, they are
+     *  reported. Same arithmetic in the other direction: attempting it is an
+     *  OOM, and an OOM here reads as "nothing happened". */
+    private val legacyInMemoryCeilingBytes = 96L * 1024 * 1024
+
+    /** The island's `/media` blob cap, as it advertises it. Used to refuse an
+     *  oversize video BEFORE uploading it rather than after. The whole point
+     *  of a pre-flight is that the person is not asked to spend twenty minutes
+     *  of uplink to be told no. 512 MB is what every RCQ island has shipped
+     *  with; an island that does not advertise the field keeps that guess. */
+    @Volatile
+    var mediaMaxBlobBytes: Long = 512L * 1024 * 1024
+        private set
+
+    /** Nothing on this device could hold it, and nothing will try. Carries the
+     *  numbers so the message can name them. */
+    class MediaTooLargeException(val bytes: Long, val maxBytes: Long) :
+        java.io.IOException("media is $bytes bytes, island takes at most $maxBytes")
+
+    /** A media blob ready to be used, without the caller having had to know in
+     *  advance how heavy it was. */
+    sealed class MediaSource {
+        /** Small enough to hold, and held: the existing behaviour, byte for
+         *  byte, for everything that already worked. */
+        class InMemory(val bytes: ByteArray) : MediaSource()
+
+        /** An RCQM1 container on disk plus the key that opens it. The bytes
+         *  stay encrypted at rest and are decrypted a chunk at a time as they
+         *  are played, so, as before, no plaintext copy of a private video is
+         *  ever written anywhere. */
+        class Streamed(val file: java.io.File, val key: ByteArray, val plainLen: Long) : MediaSource()
+
+        /** A single-seal blob from before this existed, too heavy to open on
+         *  this device. There is no way to read one incrementally: the tag is
+         *  at the end and the provider will not release plaintext before it. */
+        class TooLargeLegacy(val bytes: Long) : MediaSource()
+    }
+
+    /** How far the media currently being downloaded has got, `mediaId to
+     *  0f..1f`, or null when nothing is downloading. A 300 MB clip used to
+     *  fetch behind a bubble that showed absolutely nothing, which is half of
+     *  what "does not download" meant. */
+    private val _mediaDownload = MutableStateFlow<Pair<String, Float>?>(null)
+    val mediaDownload: StateFlow<Pair<String, Float>?> = _mediaDownload.asStateFlow()
+
+    /**
+     * Fetch a media blob in whatever shape it can actually be used in.
+     *
+     * Unlike [fetchImage] this never assumes the file fits: the download goes
+     * to disk as it arrives, and only then is the container inspected. Callers
+     * that can handle both shapes (the video path) use this; photo, voice and
+     * document bubbles are unchanged and still go through [fetchImage].
+     */
+    suspend fun fetchMediaSource(
+        mediaId: String,
+        mediaKey: String,
+        host: String? = null,
+    ): MediaSource? = withContext(Dispatchers.IO) {
+        imageCache.get(mediaId)?.let { return@withContext MediaSource.InMemory(it) }
+        val key = runCatching { Base64.decode(mediaKey, Base64.NO_WRAP) }.getOrNull() ?: return@withContext null
+
+        // Either cache may already hold the encrypted bytes: the small one from
+        // a fetchImage that ran before this path existed, the large one from a
+        // previous open of this very clip.
+        val cached = listOf(mediaBigFile(mediaId), mediaDiskFile(mediaId))
+            .firstOrNull { it.isFile && it.length() > 0L }
+        val blobFile = cached ?: run {
+            val dest = mediaBigFile(mediaId)
+            val client = if (host != null) RcqApi("https://$host") else api
+            // Throttled to whole percents. The reader calls back every 64 KB,
+            // which for a 300 MB clip is five thousand writes to a flow the UI
+            // recomposes from; a bar cannot show more than a hundred positions
+            // anyway.
+            var lastPct = -1
+            val ok = runCatching {
+                client.getBlobToFile(mediaId, dest, mediaDownloadCeilingBytes) { got, total ->
+                    if (total > 0) {
+                        val pct = ((got * 100) / total).toInt().coerceIn(0, 100)
+                        if (pct != lastPct) {
+                            lastPct = pct
+                            _mediaDownload.value = mediaId to pct / 100f
+                        }
+                    }
+                }
+            }
+            _mediaDownload.value = null
+            if (ok.isFailure) {
+                android.util.Log.w("RCQmedia", "streamed fetch of $mediaId failed", ok.exceptionOrNull())
+                return@withContext null
+            }
+            trimMediaBigCache(keep = dest)
+            dest
+        }
+
+        if (MediaStream.looksChunked(blobFile)) {
+            val len = runCatching { MediaStream.Reader(blobFile, key).use { it.plainLen } }.getOrElse {
+                android.util.Log.w("RCQmedia", "unreadable container for $mediaId", it)
+                return@withContext null
+            }
+            return@withContext MediaSource.Streamed(blobFile, key, len)
+        }
+
+        if (blobFile.length() > legacyInMemoryCeilingBytes) {
+            return@withContext MediaSource.TooLargeLegacy(blobFile.length())
+        }
+        val plain = runCatching { MediaCrypto.open(blobFile.readBytes(), key) }.getOrNull()
+            ?: return@withContext null
+        // ⚠ Only if it FITS. The cache is at most 96 MB and evicts by total
+        // size, so putting something near that in it throws every picture in
+        // the thread away to hold one clip that is about to be played once.
+        if (plain.size <= 16 * 1024 * 1024) imageCache.put(mediaId, plain)
+        MediaSource.InMemory(plain)
+    }
+
+    /** [uploadBlobFor] for a source too big to hold: same routing decision
+     *  (own island, or deposit-the-blob to a cross-island peer's island plus a
+     *  best-effort copy on ours), with the sealing done on the socket.
+     *
+     *  [openSource] is called once per attempt, so it must open a FRESH stream
+     *  every time: the route ladder may run the call again through the tunnel,
+     *  and the two cross-island deposits are two separate uploads. */
+    private suspend fun uploadStreamedFor(
+        toUin: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        key: ByteArray,
+    ): RcqApi.UploadResponse {
+        preflightBlobSize(plainLen)
+        // ⚠⚠ Same rule as every other upload: a duress session puts nothing on
+        // any island, and returns an id so the decoy's own bubble still looks
+        // like a sent one.
+        if (app.rcq.android.security.DuressGate.isActive) {
+            // ⚠ Unlike the in-memory path this seeds no local copy, because
+            // there is no copy: the decoy's own bubble draws its poster from
+            // the row and a tap on play reports a fetch that did not come
+            // back, which is what a real session on a bad line looks like
+            // too, so it tells an observer nothing they could act on.
+            return RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), 0)
+        }
+        val ci = CrossIslandStore.findByUin(toUin)
+            ?: return api.uploadBlobStreaming(openSource, plainLen, key, ::reportUpload)
+        return withContext(Dispatchers.IO) {
+            val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
+            // The peer-island copy is REQUIRED: that is the one they read.
+            if (!CrossIslandSender.depositBlobStreaming(ci.host, mediaId, openSource, plainLen, key, ::reportUpload)) {
+                throw java.io.IOException("cross-island media deposit failed (${ci.host})")
+            }
+            // Our own island's copy, for carbons and for our own bubble to play
+            // from. Best-effort, exactly as the in-memory path has it.
+            runCatching { api.putBlobStreaming(mediaId, openSource, plainLen, key) }
+            RcqApi.UploadResponse(mediaId, 0)
+        }
+    }
+
+    /** §5c: media in a group lives on the GROUP's island. */
+    private suspend fun uploadStreamedForGroup(
+        groupId: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        key: ByteArray,
+    ): RcqApi.UploadResponse {
+        preflightBlobSize(plainLen)
+        if (app.rcq.android.security.DuressGate.isActive) {
+            return RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), 0)
+        }
+        return groupCtx(groupId).api.uploadBlobStreaming(openSource, plainLen, key, ::reportUpload)
+    }
+
+    /** Refuse an oversize blob here, where nothing has been sent yet, instead
+     *  of at byte 536,870,913 of an upload the person has been watching for
+     *  twenty minutes. */
+    private fun preflightBlobSize(plainLen: Long) {
+        val encoded = MediaStream.blobLength(plainLen)
+        if (encoded > mediaMaxBlobBytes) throw MediaTooLargeException(plainLen, mediaMaxBlobBytes)
+    }
+
+    /** True when a video of this size must take the streamed path. */
+    fun needsStreamedSend(plainLen: Long): Boolean = plainLen > streamThresholdBytes
+
+    /** [sendVideo] for a clip too big to hold in memory: read, sealed and
+     *  uploaded a megabyte at a time straight from the picked content URI.
+     *
+     *  ⚠ No `imageCache.put` here, because there is no plaintext to put: the
+     *  sender's own bubble plays by fetching the container back from the
+     *  island, the same way the recipient does. That is the price of never
+     *  holding the film, and it is the right way round: a copy of it is
+     *  already sitting in the gallery this was picked from. */
+    suspend fun sendVideoStreamed(
+        toUin: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        thumbB64: String,
+        durationSec: Int,
+        caption: String?,
+        spoiler: Boolean = false,
+        albumId: String? = null,
+    ) {
+        val ttl = peerTtl(toUin)
+        val key = MediaCrypto.newKey()
+        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val upload = uploadStreamedFor(toUin, openSource, plainLen, key)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl)
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        sendEnvelope(env, env.id, toUin)
+    }
+
+    /** Group twin of [sendVideoStreamed]. */
+    suspend fun sendGroupVideoStreamed(
+        groupId: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        thumbB64: String,
+        durationSec: Int,
+        caption: String?,
+        spoiler: Boolean = false,
+        albumId: String? = null,
+    ) {
+        val ttl = groupTtl(groupId)
+        val key = MediaCrypto.newKey()
+        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val upload = uploadStreamedForGroup(groupId, openSource, plainLen, key)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl)
+        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId)
+    }
+
     fun sendTyping(toUin: Int, active: Boolean) {
         socket.send("{\"type\":\"typing\",\"to_uin\":$toUin,\"active\":$active}")
     }
@@ -5916,7 +6584,8 @@ class Session(context: Context) {
         return Base64.decode(keyB64, Base64.NO_WRAP).also { peerIdentityCache[uin] = it }
     }
 
-    private fun ingest(payloadB64: String) {
+    /** [depositAtMs]: see [ingestGroup]. */
+    private fun ingest(payloadB64: String, depositAtMs: Long? = null) {
         // Last line of defence: in a migrated decoy session `db` is the duress
         // store, and a real message written there is a real message lost.
         if (duressViewUp) return
@@ -5932,6 +6601,81 @@ class Session(context: Context) {
             // (old ts — offline-queue drains deliver hours-old rows) is filed
             // as a missed call instead of ringing.
             (dec.envelope as? Envelope.CallSignal)?.let { cs ->
+                // ⚠ Before the same-island early return below. A missed call is
+                // the one call signal that arrives as an envelope from our OWN
+                // island: the caller leaves it when the island told them we
+                // were not reachable at all, so that a phone whose app was
+                // force-stopped still learns it was called (#678/#686). It
+                // never rings, because the call is long over: it files the row
+                // and raises the same missed-call notification the live path
+                // would have raised.
+                if (cs.sig == "call_missed") {
+                    // ⚠⚠ NONE OF THE CONSENT GATES BELOW COVER THIS BRANCH.
+                    // It sits above the same-island early return on purpose,
+                    // and above it there is nothing but the removed/blocked
+                    // test: the cross-island accepted-contact gate, the
+                    // Variant A quarantine and the same-island stranger gate
+                    // are all further down and not one of them is reached. A
+                    // marker is an ORDINARY SEALED DEPOSIT, so any number on
+                    // any island can compose one, and believing it costs a row
+                    // in a thread, an unread badge and a missed-call banner.
+                    // So the question those gates ask is asked here, in the
+                    // one form that fits a call.
+                    if (!mayLeaveCallMarker(dec.senderUin, dec.senderHost)) return@runCatching
+                    // ⚠ A marker with no call id has no dedupe key at all, and
+                    // acks are best-effort: the same envelope redelivered would
+                    // file the row again, every time, for ever.
+                    if (cs.cid.isEmpty()) return@runCatching
+                    // The dedupe the whole design rests on. This marker is a
+                    // guess by the CALLER about what we do not know, and the
+                    // island can be wrong about us: a registration that had
+                    // gone stale, or our socket coming back inside the same
+                    // second, means we may have rung and filed this very call
+                    // ourselves. The call id is the only thing our row and this
+                    // envelope share, so it is what decides. The probe here
+                    // only saves the work; what makes it SAFE against the two
+                    // ingest threads is that the row id is derived from the
+                    // call id, so the insert itself collapses the repeat (see
+                    // [logCallHistory]).
+                    // ⚠ `!::db.isInitialized` too, and before the
+                    // notification. The store is closed while the account is
+                    // PIN-locked, and [logCallHistory] silently writes nothing
+                    // in that state, so without this the banner announced a
+                    // missed call that left no row behind it.
+                    if (!::db.isInitialized || haveCallRow(cs.cid)) return@runCatching
+                    val filed = logCallHistory(
+                        dec.senderUin,
+                        fromMe = false,
+                        text = appCtx.getString(
+                            if (cs.data["media"] == "video") app.rcq.android.R.string.call_missed_video_push
+                            else app.rcq.android.R.string.call_missed_push,
+                        ),
+                        missed = true,
+                        // ⚠ RAILED, like every other stamp that came off a
+                        // wire somebody else composed. `Envelope.parse`
+                        // defaults a missing or non-numeric `ts` to 0, and 0
+                        // filed a row at the epoch: [store] sorts the thread by
+                        // sentAt, so it landed below the entire history where
+                        // nobody will ever scroll, with a permanent unread
+                        // badge above it and nothing visible to clear it. Same
+                        // three tiers, in the same order, as the disappearing
+                        // anchor in [disappearAnchorMs].
+                        startedAt = callStartedAtMs(cs.ts, depositAtMs),
+                        callId = cs.cid,
+                    )
+                    // Only when a row actually landed. The insert is what
+                    // decides, so a losing thread in the race above gets false
+                    // here, and a banner for a call with no row behind it is
+                    // the bug the PIN-lock guard already exists to stop.
+                    if (!filed) return@runCatching
+                    app.rcq.android.push.Push.showMissedCall(
+                        appCtx,
+                        peerUin = dec.senderUin,
+                        nickname = contactName(dec.senderUin),
+                        video = cs.data["media"] == "video",
+                    )
+                    return@runCatching
+                }
                 val host = dec.senderHost ?: return@runCatching // same-island calls use the WS, not envelopes
                 // ⚠ The Cloudflare FRONT is OUR island by another road, and a
                 // build that stamps `cdn.rcq.app` instead of the island is not
@@ -5944,6 +6688,13 @@ class Session(context: Context) {
                 if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
                 if (CrossIslandStore.get(dec.senderUin, host) == null) return@runCatching
                 if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
+                    // Same dedupe as the marker above: a cross-island offer can
+                    // reach us twice (the live drain and a later one), and the
+                    // caller may also have deposited a marker for it. Same
+                    // requirement of a call id, too, and for the same reason:
+                    // without one there is no dedupe key and every redelivery
+                    // files the row again.
+                    if (cs.cid.isEmpty() || haveCallRow(cs.cid)) return@runCatching
                     // A cross-island offer we only learned about after it went
                     // stale: genuinely missed, so it does count as unread. Its
                     // start is the offer's own timestamp, not now. One label,
@@ -5956,7 +6707,10 @@ class Session(context: Context) {
                             else app.rcq.android.R.string.call_missed_push,
                         ),
                         missed = true,
-                        startedAt = cs.ts * 1000L,
+                        // Railed, for the reason spelled out on the marker
+                        // above: `ts` is a number a peer put on a wire.
+                        startedAt = callStartedAtMs(cs.ts, depositAtMs),
+                        callId = cs.cid,
                     )
                     return@runCatching
                 }
@@ -6052,17 +6806,17 @@ class Session(context: Context) {
             }
             when (val env = dec.envelope) {
                 is Envelope.Text ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.text, now, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, now)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.text, now, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
                 is Envelope.Photo ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
                 is Envelope.File ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, expiresAt = expiryFor(env.ttl, now)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
                 is Envelope.Voice ->
-                    store(ChatMessage(env.id, dec.senderUin, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), expiresAt = expiryFor(env.ttl, now)))
+                    store(ChatMessage(env.id, dec.senderUin, false, "", now, kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
                 is Envelope.Video ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, now)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
                 is Envelope.Location ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, expiresAt = expiryFor(env.ttl, now)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", now, kind = "location", lat = env.lat, lng = env.lng, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
                 is Envelope.Reaction -> applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
                     // Author-only: a peer can only retract their own message.
@@ -6097,7 +6851,7 @@ class Session(context: Context) {
                     // A message I sent from ANOTHER device, echoed to my own uin.
                     // Only honour my own carbon; file the inner message as fromMe
                     // in its destination thread (dedup by id; no badge/sound).
-                    if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now)
+                    if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
                 is Envelope.Skdm -> Unit       // sender-keys distribution is group-only
                 is Envelope.Sknack -> Unit     // sender-keys recovery is group-only
                 is Envelope.RelayShare ->
@@ -6115,16 +6869,16 @@ class Session(context: Context) {
      *  (group [gid] or peer [to]). Mirrors the incoming construction but marks
      *  it ours. store()/storeGroup() dedup by id (INSERT-OR-IGNORE), so the
      *  origin device's own carbon and any queue redelivery are no-ops. */
-    private fun storeCarbon(to: Int?, gid: Int?, inner: Envelope, now: Long) {
+    private fun storeCarbon(to: Int?, gid: Int?, inner: Envelope, now: Long, depositAtMs: Long? = null) {
         val me = store.uin ?: return
         if (gid != null) {
             when (inner) {
-                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, now, kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, now, kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
                 // Control carbons: an edit/retraction made on ANOTHER of our
                 // devices targets a row this device already has — apply it,
                 // never file it as a new message. The carbon is authenticated
@@ -6135,12 +6889,12 @@ class Session(context: Context) {
             }
         } else if (to != null) {
             when (inner) {
-                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, now, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, now)))
-                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, expiresAt = expiryFor(inner.ttl, now)))
+                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, now, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", now, kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
                 is Envelope.Edit -> editInFlow(_messages, to, inner.targetId, inner.text)
                 is Envelope.Delete -> deleteInFlow(_messages, to, inner.targetId)
                 else -> Unit
@@ -6221,10 +6975,15 @@ class Session(context: Context) {
                     return@forEach
                 }
                 guard.edit().putString("attempt", rowKey).commit()
+                // The island's stamp on this row: for a disappearing message
+                // from a peer too old to send its own `ts`, the moment it
+                // reached the SERVER is much nearer the send than the moment
+                // this phone came back online and drained is.
+                val depositAt = parseIso(q.received_at)
                 when {
-                    q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id)
-                    q.group_id != null -> ingestGroup(payload, q.group_id)
-                    else -> ingest(payload)
+                    q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id, depositAt)
+                    q.group_id != null -> ingestGroup(payload, q.group_id, depositAt)
+                    else -> ingest(payload, depositAt)
                 }
                 // Survived — a stale strike from an interrupted PREVIOUS run
                 // (the between-rows window marks the row already ingested)
@@ -6351,8 +7110,8 @@ class Session(context: Context) {
                         // group rows: a broadcast opens through the chain,
                         // everything else is a sealed per-member envelope.
                         val why = when (r.envelope_type) {
-                            "gmsg" -> ingestGmsg(payload, r.gid)
-                            else -> ingestGroup(payload, r.gid)
+                            "gmsg" -> ingestGmsg(payload, r.gid, parseIso(r.received_at))
+                            else -> ingestGroup(payload, r.gid, parseIso(r.received_at))
                         }
                         if (guard.contains("strikes:$rowKey")) guard.edit().remove("strikes:$rowKey").apply()
                         if (why == null && guard.contains("fail:$rowKey")) guard.edit().remove("fail:$rowKey").apply()
@@ -7083,8 +7842,12 @@ class Session(context: Context) {
      *  a roster refresh that changed nothing (every presence frame launches
      *  one) costs no vault read. Keyed by island and account. */
     @Volatile private var vaultMirrored: String? = null
+    /** Set for the rest of the session when the island served a contacts-slot
+     *  version below the floor, or when `vault_reset` said this derivation was
+     *  retired. Nothing is written under a retired derivation. */
+    @Volatile private var contactsVaultRetired: Boolean = false
     private fun mirrorContactsToVault(list: List<Contact>, fetchedFor: Int?) {
-        if (!vaultEnabled) return
+        if (!vaultEnabled || contactsVaultRetired) return
         if (fetchedFor == null || store.uin != fetchedFor) return
         val ik = store.identityPrivate ?: return
         val servedBy = serverHost()
@@ -7098,6 +7861,10 @@ class Session(context: Context) {
                 if (serverHost() != servedBy || store.uin != fetchedFor) return@launch
                 val out = app.rcq.android.data.ContactsVault.mirror(apiNow, ik, own) { store.uin == fetchedFor }
                 when (out) {
+                    is app.rcq.android.data.ContactsVault.Outcome.RolledBack -> {
+                        contactsVaultRetired = true
+                        android.util.Log.w("RCQvault", "contacts slot rolled back; mirror stopped for this session")
+                    }
                     is app.rcq.android.data.ContactsVault.Outcome.Failed ->
                         android.util.Log.w("RCQvault", "contacts mirror: ${out.why}")
                     else -> vaultMirrored = key
@@ -7106,6 +7873,183 @@ class Session(context: Context) {
                 vaultMirrorInFlight.set(false)
             }
         }
+    }
+
+    // ── chat-list sections (founder item 1 of 23.08) ──────────────────────
+    //
+    // A SECOND vault slot, so the same sections, in the same order, with the
+    // same chats filed into them, are on the phone, the desktop and the web.
+    // The tree itself lives in [LocalStores.sections]; everything here is the
+    // plumbing between that cache and the island. See data/Sections.kt for the
+    // format and the merge, and RCQ/docs/sections-design-2026-08-23.md.
+
+    /** Everything [app.rcq.android.data.SectionsVault] needs, or null when this
+     *  session has nothing to seal with. Rebuilt per call: the route watchdog
+     *  swaps [api] under us on an entry-guard rotation, and an account switch
+     *  mid-flight must not seal this account's sections into the next one's
+     *  slot ([SectionsVault.Ctx.stillOurs] is what asks). */
+    private fun sectionsCtx(): app.rcq.android.data.SectionsVault.Ctx? {
+        // ⚠ Never from a duress view. A migrated decoy keeps `store` (and its
+        // bearer token) pointed at the REAL account while the local stores move,
+        // so a write from here would seal the decoy's empty tree over the real
+        // account's sections.
+        if (duressViewUp) return null
+        val ik = store.identityPrivate ?: return null
+        val who = store.uin ?: return null
+        // ⚠⚠ The per-account STORE id, which is the thing the duress PIN moves
+        // and `store.uin` is not. Every cache read and write in SectionsVault
+        // is scoped to it; see the note on SectionsVault.Ctx.
+        val acct = AccountManager.activeId.value ?: return null
+        val host = serverHost()
+        return app.rcq.android.data.SectionsVault.Ctx(api, ik, who, acct, scope) {
+            // `!duressViewUp` is not redundant with the guard above: the guard
+            // only refuses to BUILD a ctx, and a sync that was already in
+            // flight when the decoy opened resumes with this one still true.
+            !duressViewUp && store.uin == who && serverHost() == host &&
+                AccountManager.activeId.value == acct
+        }
+    }
+
+    /** Apply one local edit to the sections tree and get it to the island.
+     *  Throws [app.rcq.android.data.Sections.SectionsException] from the caps
+     *  before anything is saved, so the caller can say "this section is full".
+     *  [defer] coalesces a burst (a drag reorder, a picker sheet) into one put. */
+    fun editSections(defer: Boolean = false, edit: (JsonObject) -> JsonObject) {
+        app.rcq.android.data.SectionsVault.mutate(sectionsCtx(), defer, edit)
+    }
+
+    /** Read the island's copy and fold it into the cache. Boot, the
+     *  `vault_changed` nudge and every socket reconnect. */
+    fun syncSections() {
+        if (!vaultEnabled) return
+        val ctx = sectionsCtx() ?: return
+        scope.launch { app.rcq.android.data.SectionsVault.sync(ctx) }
+    }
+
+    /** A chat is going away on THIS device on purpose. See the write-timing
+     *  note on [app.rcq.android.data.SectionsVault.forgetMember]: the write
+     *  happens whether or not the chat was filed. */
+    private fun forgetSectionMember(key: String?) {
+        if (!vaultEnabled) return
+        app.rcq.android.data.SectionsVault.forgetMember(sectionsCtx(), key)
+    }
+
+    /** A socket that keeps dying redials on a curve that starts at one second,
+     *  and each redial that succeeds would otherwise be a sweep. One every
+     *  fifteen seconds is plenty for a change another device just made. */
+    @Volatile private var lastVaultSweep = 0L
+    private val vaultSweepInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Boot and every reconnect: ask the island which slots moved and re-read
+     * the ones that did.
+     *
+     * The `vault_changed` nudge covers the device that is connected right now,
+     * but it is pub/sub with NO REPLAY: a device whose socket was down when the
+     * other one wrote never hears it, and a reconnect is exactly the moment
+     * that gap closes. One `GET /vault` (slots and versions, no blobs) says
+     * what moved.
+     *
+     * ⚠ The version is not the only reason to sync. A device that owes the
+     * island a write (offline when the section was made, a 429, a 5xx) has to
+     * be let in even though the island's copy has not moved: [SectionsVault.sync]
+     * merges both ways and sends what is outstanding. Without this the sweep
+     * looks at an unchanged version, decides there is nothing to do, and the
+     * section stays on one device forever.
+     */
+    fun sweepVaultSlots(force: Boolean = false) {
+        if (!vaultEnabled) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastVaultSweep < VAULT_SWEEP_FLOOR_MS) return
+        val ctx = sectionsCtx() ?: return
+        if (!vaultSweepInFlight.compareAndSet(false, true)) return
+        lastVaultSweep = now
+        scope.launch {
+            try {
+                val slots = runCatching { ctx.api.vaultList() }.getOrNull() ?: return@launch
+                if (!ctx.stillOurs()) return@launch
+                val byName = slots.associate { it.slot to it.version }
+                val sectionsSlot = app.rcq.android.data.SectionsVault.slotOf(ctx.identityPriv)
+                val seen = LocalStores.vaultSlotVersion(sectionsSlot)
+                if ((byName[sectionsSlot] ?: 0L) > seen || LocalStores.sectionsPushPending()) {
+                    app.rcq.android.data.SectionsVault.sync(ctx)
+                }
+                if (!ctx.stillOurs()) return@launch
+                val contactsSlot = app.rcq.android.crypto.Vault.slotId(ctx.identityPriv, app.rcq.android.crypto.Vault.CONTACTS)
+                if ((byName[contactsSlot] ?: 0L) > LocalStores.vaultContactsVersion()) {
+                    // Still a MIRROR of the island's own list in this phase, so
+                    // re-reading it does not change what the chat list draws.
+                    // What it does do is move the floor up to what another
+                    // device just wrote, which is what keeps this install's
+                    // next mirror write from opening with a 409, and drop the
+                    // "already folded this list" fingerprint so the next
+                    // /contacts refresh folds against the fresh copy.
+                    runCatching { app.rcq.android.data.ContactsVault.read(ctx.api, ctx.identityPriv) }
+                    vaultMirrored = null
+                }
+            } finally {
+                vaultSweepInFlight.set(false)
+            }
+        }
+    }
+
+    /**
+     * `vault_changed {slot, version}` from the socket (SPEC §4.9). Until 23.08
+     * NO client listened for it, so a section made on the desktop reached this
+     * phone on its next cold start and not before.
+     *
+     * ⚠ Slot names are hashes. `slot` on the wire is 32 hex characters that
+     * mean nothing without the account's identity key, so the frame is matched
+     * by deriving both names locally rather than by comparing strings to
+     * "contacts". The writer hears its own nudge too and drops it by version.
+     */
+    private fun onVaultChanged(obj: JsonObject) {
+        if (!vaultEnabled) return
+        val slot = obj.get("slot")?.takeIf { !it.isJsonNull }?.asString ?: return
+        val version = obj.get("version")?.takeIf { !it.isJsonNull }?.asLong ?: 0L
+        val ctx = sectionsCtx() ?: return
+        if (slot == app.rcq.android.data.SectionsVault.slotOf(ctx.identityPriv)) {
+            if (version > 0L && version <= LocalStores.vaultSlotVersion(slot)) return
+            scope.launch { app.rcq.android.data.SectionsVault.sync(ctx) }
+            return
+        }
+        if (slot == app.rcq.android.crypto.Vault.slotId(ctx.identityPriv, app.rcq.android.crypto.Vault.CONTACTS)) {
+            if (version > 0L && version <= LocalStores.vaultContactsVersion()) return
+            scope.launch {
+                runCatching { app.rcq.android.data.ContactsVault.read(ctx.api, ctx.identityPriv) }
+                vaultMirrored = null
+            }
+        }
+    }
+
+    /**
+     * `vault_reset {reason: "identity_reissued"}`: `POST /auth/reissue` on
+     * another device rotated the account's identity, and the island emptied the
+     * vault in the same transaction. One account-level frame, not a
+     * `vault_changed` per slot, because the NAMES changed rather than the
+     * versions.
+     *
+     * ⚠ NOT a wipe, and not a republish either. Slot names and seal keys are
+     * derived from `identity_priv`, and this install is holding the retired
+     * one: it cannot write anything the new derivation will ever read, and what
+     * it CAN still write is the whole sections tree and contact list, sealed
+     * with the key the user has just declared compromised, under the old name.
+     * So both slots stop for this session and the local caches are left exactly
+     * as they are, because until a device with the new identity publishes the
+     * sections tree exists nowhere else.
+     *
+     * The stored floors go, because they belong to names that will never be
+     * read again and a stale floor is what locks a fresh derivation out of its
+     * own slot for good.
+     */
+    private fun onVaultReset() {
+        val ik = store.identityPrivate ?: return
+        val who = store.uin ?: return
+        LocalStores.forgetVaultSlotVersion(app.rcq.android.data.SectionsVault.slotOf(ik))
+        LocalStores.setVaultContactsVersion(0)
+        app.rcq.android.data.SectionsVault.retire(who)
+        contactsVaultRetired = true
+        android.util.Log.w("RCQvault", "the account rotated its identity elsewhere; this derivation is retired")
     }
 
     private suspend fun refreshPending() {
@@ -7160,20 +8104,97 @@ class Session(context: Context) {
          *  the time beside the duration, and "10:10 · 1:53" only reads right if
          *  the timestamp is the beginning of that 1:53. */
         startedAt: Long,
-    ) {
-        if (!::db.isInitialized) return
-        store(
+        /** Which call this row records, so a later marker for the same call can
+         *  be recognised as already known (#678/#686). */
+        callId: String? = null,
+    ): Boolean {
+        if (!::db.isInitialized) return false
+        val cid = callId?.takeIf { it.isNotEmpty() }
+        return store(
             ChatMessage(
-                id = java.util.UUID.randomUUID().toString(),
+                // ⚠⚠ DERIVED FROM THE CALL ID, never a fresh UUID when there
+                // is one. `INSERT OR IGNORE` on the primary key is the
+                // mechanism this codebase leans on everywhere else to collapse
+                // the live-socket-versus-queue-drain overlap (see [store]), and
+                // a random id opted call rows out of it: the only dedupe left
+                // was a `haveCallRow` probe followed by an unsynchronised
+                // insert, and the two ingest paths run on DIFFERENT THREADS:
+                // `handleEvent` on OkHttp's websocket reader, `drainQueueLocked`
+                // in a coroutine, with `drainLock` guarding drain against drain
+                // and nothing else. Both read "no row" and both wrote one,
+                // which is two "Missed call" lines for one call. One row per
+                // call now, by construction rather than by timing.
+                //
+                // The call id is unique per call and each side files its own
+                // copy on its own device, so there is nothing for it to
+                // collide with. A call that has no id (a local end that never
+                // got one) keeps a fresh UUID.
+                id = cid?.let { "call:$it" } ?: java.util.UUID.randomUUID().toString(),
                 peerUin = peerUin,
                 fromMe = fromMe,
                 body = text,
                 sentAt = startedAt,
                 state = DeliveryState.DELIVERED,
                 kind = "call",
+                callId = cid,
             ),
             countsUnread = missed,
         )
+    }
+
+    /** Do we already hold a history row for this call? The test the callee runs
+     *  before filing a caller-written missed-call marker (#678/#686). */
+    private fun haveCallRow(callId: String): Boolean =
+        callId.isNotEmpty() && ::db.isInitialized && db.hasCallId(callId)
+
+    /** When a call announced by a sealed envelope STARTED, in epoch ms.
+     *
+     *  Three tiers, in the same order and for the same reasons as
+     *  [disappearAnchorMs]: the sender's own `ts` when it survives
+     *  [Envelope.anchorFromTs]; failing that the island's deposit stamp, which
+     *  is not the send time but is far closer to it than the moment this phone
+     *  came back online; failing that now. */
+    private fun callStartedAtMs(tsSec: Long, depositAtMs: Long?): Long {
+        val now = System.currentTimeMillis()
+        return Envelope.anchorFromTs(tsSec, now)
+            ?: Envelope.saneAnchorMs(depositAtMs, now)
+            ?: now
+    }
+
+    /** May [senderUin] on [host] leave a MISSED-CALL MARKER in our history?
+     *
+     *  The marker (#678/#686) is a claim by the caller about a call this
+     *  device never saw. Nothing ties it to a call that happened: it is an
+     *  ordinary sealed deposit, which any number on any island can compose,
+     *  and there is no live signalling behind it for the island to have
+     *  policed. So the gate is the same question the island asks before it
+     *  lets a `call_offer` through (`_caller_allowed` in `routers/ws.py`),
+     *  asked here because the island enforces `call_policy` on the WS path
+     *  ONLY and a deposit never goes near it. Without this, a `nobody` policy
+     *  meant nothing at all against a marker, and a stranger on another island
+     *  could file rows and raise banners without limit.
+     *
+     *  ⚠ Under `everyone` a stranger passes, and that is the honest answer
+     *  rather than a hole: the very same stranger may ring this phone for
+     *  real, and a ring nobody picks up leaves the very same row. What the
+     *  policy stops is a number the user has already told the island may not
+     *  call them.
+     *
+     *  ⚠ The policy is read from the cached profile, which is a mirror of a
+     *  server value and can be stale on a phone that has not fetched since the
+     *  setting changed. Stale in the permissive direction costs one row the
+     *  island would have refused; the enforcement that matters is still the
+     *  island's, on the path a real call takes. */
+    private fun mayLeaveCallMarker(senderUin: Int, host: String?): Boolean {
+        val ownHosts = setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
+        // Cross-island: exactly the gate every other cross-island call signal
+        // passes a few lines below, since nothing else over there may ring us.
+        if (host != null && host !in ownHosts) return CrossIslandStore.get(senderUin, host) != null
+        return when (cachedProfile()?.call_policy ?: "everyone") {
+            "nobody" -> false
+            "contacts" -> isSameIslandContact(senderUin)
+            else -> true
+        }
     }
 
     fun contact(uin: Int): Contact? = _contacts.value.firstOrNull { it.uin == uin }
@@ -7225,8 +8246,10 @@ class Session(context: Context) {
                     if (why == null) obj.get("seq")?.takeIf { !it.isJsonNull }?.asLong?.let { ackLiveGmsg(gid, it) }
                 }
             }
+            // Two shapes, and the second one is NOT a no-op (see below).
             "group_created", "group_membership_changed" -> {
-                obj.getAsJsonObject("group")?.let { gj ->
+                val gj = obj.get("group")?.takeIf { it.isJsonObject }?.asJsonObject
+                if (gj != null) {
                     scope.launch {
                         val g = runCatching { mapGroup(gson.fromJson(gj, RcqApi.GroupOut::class.java)) }.getOrNull() ?: return@launch
                         // New to this account (we were added, or this is the
@@ -7235,14 +8258,47 @@ class Session(context: Context) {
                         // those over per registration, and every member
                         // fetching on each of them would be a fan-out of its own.
                         val joined = _groups.value.none { it.id == g.id }
+                        // The whole snapshot, so `ownerUin` and every member's
+                        // role come with it: `upsertGroup` REPLACES the row
+                        // rather than diffing the roster, which is what makes a
+                        // handover land here live.
                         runCatching { upsertGroup(g) }
                         if (joined) roomJoined()
                     }
+                } else {
+                    // The COMPACT form: above SNAPSHOT_BROADCAST_LIMIT members
+                    // the island cannot afford to push a whole roster to
+                    // everyone, so it sends the group id and `owner_uin` alone.
+                    //
+                    // ⚠ Ignoring it is not harmless, and ignoring it is exactly
+                    // what this branch did until founder item 23 shipped. Every
+                    // other owner-only lever is enforced by the island, which
+                    // 403s a stale client the moment it pulls one; the
+                    // moderator `delete` cap is honoured by the RECEIVING
+                    // client against its cached roster, because sealed sender
+                    // leaves the island no sender to check. So a stale owner is
+                    // a revoked owner whose deletes still land on every big
+                    // group, with the crown drawn on the wrong row and the
+                    // composer of an owner-only room shut for the person who
+                    // now runs it, until the next boot.
+                    val gid = obj.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
+                    val owner = obj.get("owner_uin")?.takeIf { !it.isJsonNull }?.asInt
+                    // Both or nothing: an older island sends the bare id (the
+                    // beta-group broadcast), and there is nothing to apply.
+                    if (gid != null && owner != null) applyOwnerLocally(gid, owner)
                 }
             }
             "group_deleted" -> {
                 obj.get("group_id")?.asInt?.let { gid -> _groups.value = _groups.value.filterNot { it.id == gid } }
             }
+            // The vault moved on some device of this account (SPEC §4.9).
+            // ⚠ The frame names the slot by its HASH, which means nothing
+            // without the identity key, so it is matched by deriving both names
+            // locally. Nobody on Android listened for this at all until 23.08.
+            "vault_changed" -> onVaultChanged(obj)
+            // /auth/reissue elsewhere: the slot NAMES changed and the island
+            // emptied the vault. Not a wipe: see [onVaultReset].
+            "vault_reset" -> onVaultReset()
             "contact_request", "contact_response", "contact_removed" -> {
                 scope.launch { runCatching { refreshContacts() }; runCatching { refreshPending() }; runCatching { refreshOutgoing() } }
             }
@@ -7324,18 +8380,121 @@ class Session(context: Context) {
         // Reap any disappearing messages whose TTL lapsed while the app was
         // closed BEFORE seeding the flows, so an expired message never flashes
         // on launch.
-        db.deleteExpired(System.currentTimeMillis())
+        //
+        // ⚠ READ FIRST, DELETE SECOND, AND TELL THE SHADE. This used to be a
+        // bare `deleteExpired` whose returned ids went nowhere, and that left
+        // the exact banner the sweeper exists to take down: offline for an
+        // hour, a message with a one-minute timer arrives and posts a wake
+        // carrying its FULL body, the app is opened later, the row is reaped
+        // here — and the banner stays on the lock screen and on any paired
+        // watch until somebody swipes it away. The 10-second sweeper cannot
+        // clean up after this one either: by the time it first runs the row is
+        // already gone from the table, so it finds nothing expired and returns.
+        // Same `now` for the partition and the delete, so the two agree exactly.
+        val now = System.currentTimeMillis()
         val all = db.all()
-        _messages.value = all.filter { it.groupId == null }.groupBy { it.peerUin }
-        _groupMessages.value = all.filter { it.groupId != null }.groupBy { it.groupId!! }
+        val (doomed, live) = all.partition { it.expiresAt != null && it.expiresAt!! <= now }
+        if (doomed.isNotEmpty()) db.deleteExpired(now)
+        // The badge goes with them, exactly as in [sweepExpiredMessages] and
+        // for the same reason. This is the path that handles the case the
+        // whole thing is about, a message that lapsed while the app was shut,
+        // so a badge left standing here survives every restart.
+        val doomedIds = doomed.map { it.id }.toSet()
+        if (doomedIds.isNotEmpty()) {
+            val hitPeers = doomed.filter { it.groupId == null }.map { it.peerUin }.toSet()
+            val hitGroups = doomed.mapNotNull { it.groupId }.toSet()
+            for ((uin, rows) in all.filter { it.groupId == null && it.peerUin in hitPeers }.groupBy { it.peerUin })
+                shedLapsedUnread(LocalStores.peerThread(uin), rows, doomedIds)
+            for ((gid, rows) in all.filter { it.groupId in hitGroups }.groupBy { it.groupId!! })
+                shedLapsedUnread(LocalStores.groupThread(gid), rows, doomedIds)
+        }
+        _messages.value = live.filter { it.groupId == null }.groupBy { it.peerUin }
+        _groupMessages.value = live.filter { it.groupId != null }.groupBy { it.groupId!! }
+        cancelShadeFor(
+            peers = doomed.filter { it.groupId == null }.map { it.peerUin }.distinct(),
+            groups = doomed.mapNotNull { it.groupId }.distinct(),
+        )
     }
 
-    /** Disappearing messages: seconds-since-receipt TTL the sender packed into
-     *  the envelope, turned into an absolute epoch-ms expiry. null ttl (or a
-     *  non-positive value) → permanent. Anchored to receipt time, so a message
-     *  vanishes [ttl] seconds after it lands on this device. */
-    private fun expiryFor(ttl: Int?, nowMs: Long): Long? =
-        ttl?.takeIf { it > 0 }?.let { nowMs + it * 1000L }
+    /** The disappearing-message timer this 1:1 thread is set to, in seconds,
+     *  or null when it is off.
+     *
+     *  ⚠ READ HERE, at the moment of sending, and NOT taken as an argument
+     *  from whoever is sending. Every screen that can put a message into a
+     *  thread would otherwise have to remember to look it up, and the web
+     *  already learned what that costs: forwarding one line into a room set to
+     *  five minutes left a permanent message in it, on every participant's
+     *  device, in a conversation whose header says everything disappears. A
+     *  send path that reads the destination's own setting cannot be forgotten
+     *  by a caller, and the destination is the thread that gets to decide. */
+    private fun peerTtl(uin: Int): Int? = LocalStores.threadTtl(LocalStores.peerThread(uin))
+
+    /** The same, for a room. [groupId] is this device's local group id, which
+     *  is what the chat screen keys its picker on too (a foreign room's alias
+     *  id on both sides). */
+    private fun groupTtl(groupId: Int): Int? = LocalStores.threadTtl(LocalStores.groupThread(groupId))
+
+    /** The (ttl, sender timestamp) a content envelope is carrying, so the
+     *  sender's OWN row can be dated from the very same numbers that went on
+     *  the wire instead of a second clock reading. (null, null) for every kind
+     *  that has no timer on it (polls, relay cards, control envelopes). */
+    private fun dyingOf(env: Envelope): Pair<Int?, Long?> = when (env) {
+        is Envelope.Text -> env.ttl to env.ts
+        is Envelope.Photo -> env.ttl to env.ts
+        is Envelope.File -> env.ttl to env.ts
+        is Envelope.Voice -> env.ttl to env.ts
+        is Envelope.Video -> env.ttl to env.ts
+        is Envelope.Location -> env.ttl to env.ts
+        else -> null to null
+    }
+
+    /** Disappearing messages: the TTL (seconds) the sender packed into the
+     *  envelope, turned into an absolute epoch-ms deadline. A null or
+     *  non-positive [ttl] is permanent.
+     *
+     *  ⚠⚠ THE COUNTDOWN RUNS FROM WHEN THE MESSAGE WAS SENT, NOT FROM WHEN
+     *  THIS DEVICE HAPPENED TO GET IT. This used to be plain `nowMs + ttl`, and
+     *  that is a real bug and not a shortcut: a phone offline for a week drains
+     *  the queue and then keeps a "vanishes in 5 minutes" message for five
+     *  minutes MORE, a week after its author was told it was gone. Three
+     *  anchors, best first — see [disappearAnchorMs].
+     *
+     *  ⚠ NOTHING ALREADY ON DISK IS RE-DATED. Rows written before this change
+     *  keep the absolute `expires_at` the receipt anchor gave them, and there
+     *  is no migration in [MessageDb]. Not because their ttl is unrecoverable
+     *  (for an inbound row it is: `expiresAt - sentAt`, since `sentAt` WAS the
+     *  anchor) but because the number a correction would need is the SEND time,
+     *  and that was never on the wire for those rows and is not on this disk.
+     *  A rewrite could therefore only guess, and both guesses are worse than
+     *  leaving it: guess early and a message vanishes out from under someone
+     *  mid-sentence, guess late and one the sender was promised was gone comes
+     *  back. Every row written from here on is anchored properly and the old
+     *  ones age out on their own. */
+    private fun expiryFor(ttl: Int?, sentAtSec: Long?, nowMs: Long, depositAtMs: Long? = null): Long? =
+        ttl?.takeIf { it > 0 }?.let { disappearAnchorMs(sentAtSec, depositAtMs, nowMs) + it * 1000L }
+
+    /** The instant a disappearing message's countdown starts, in epoch ms.
+     *
+     *  (a) [sentAtSec], the sender's own `ts` from inside the ciphertext. The
+     *      truth, when it is there. Absent from every client build older than
+     *      this one, so it cannot be relied on.
+     *  (b) [depositAtMs], the island's `received_at` on the queue row. Not the
+     *      send time, but the moment the message reached the SERVER, which for
+     *      an old peer is far closer to it than the moment this phone finally
+     *      came back online and drained.
+     *  (c) [nowMs]. The honest "we do not know", and what every build before
+     *      this one used for everything.
+     *
+     *  ⚠ NEITHER (a) NOR (b) IS OUR OWN CLOCK, so both go through
+     *  `Envelope.saneAnchorMs` before they are believed — see the rails and
+     *  what they are for over there. (b) is our own island's stamp rather than
+     *  a peer's, but "our own island" is 165.232.69.229 to some people and a
+     *  box in somebody's flat to others, and a wrong stamp does the same damage
+     *  whoever set it. */
+    private fun disappearAnchorMs(sentAtSec: Long?, depositAtMs: Long?, nowMs: Long): Long =
+        Envelope.anchorFromTs(sentAtSec, nowMs)
+            ?: Envelope.saneAnchorMs(depositAtMs, nowMs)
+            ?: nowMs
 
     /** Delete every message whose TTL elapsed, from the DB and both in-memory
      *  message flows, so disappearing messages actually disappear from open
@@ -7343,8 +8502,65 @@ class Session(context: Context) {
     private fun sweepExpiredMessages() {
         val expired = db.deleteExpired(System.currentTimeMillis()).toSet()
         if (expired.isEmpty()) return
+        // Which threads just lost a row. Read BEFORE the flows are filtered,
+        // because afterwards there is nothing left to read it from — and the
+        // badge arithmetic below needs the rows in their pre-sweep order, for
+        // the same reason.
+        val peers = _messages.value.filterValues { l -> l.any { it.id in expired } }.keys.toList()
+        val groups = _groupMessages.value.filterValues { l -> l.any { it.id in expired } }.keys.toList()
+        for (p in peers) shedLapsedUnread(LocalStores.peerThread(p), _messages.value[p].orEmpty(), expired)
+        for (g in groups) shedLapsedUnread(LocalStores.groupThread(g), _groupMessages.value[g].orEmpty(), expired)
         _messages.value = _messages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
         _groupMessages.value = _groupMessages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
+        cancelShadeFor(peers, groups)
+    }
+
+    /** Take off [thread]'s badge the rows [expired] just removed from [rows]
+     *  that had never been read. [rows] is the thread as it stood BEFORE the
+     *  sweep, oldest first.
+     *
+     *  ⚠⚠ Only the rows INSIDE the unread run may be subtracted, and expiry
+     *  systematically takes the OLDEST ones, which are exactly the rows
+     *  already read. Subtracting all of them zeroes a live badge: a thread
+     *  where six read messages lapse and two unread ones remain would go to
+     *  0, and a zero on open means no divider at all, so the two waiting
+     *  messages get scrolled past with no marker.
+     *
+     *  The run starts where counting back [n] of the OTHER side's rows lands,
+     *  which is the same walk `ChatScreen`'s `unreadAnchorId` performs: my own
+     *  rows (and, in a room, the carbons of them) were never waiting to be
+     *  read, so they do not count. web-chat does this arithmetic in
+     *  `incoming-store.ts` `sweepExpiredIncoming`. */
+    private fun shedLapsedUnread(thread: String, rows: List<ChatMessage>, expired: Set<String>) {
+        val n = LocalStores.unreadOf(thread)
+        if (n <= 0) return
+        var unreadFrom = rows.size
+        var counted = 0
+        for (i in rows.indices.reversed()) {
+            if (rows[i].fromMe) continue
+            counted++
+            unreadFrom = i
+            if (counted == n) break
+        }
+        var gone = 0
+        for (i in unreadFrom until rows.size) if (rows[i].id in expired) gone++
+        LocalStores.decUnread(thread, gone)
+    }
+
+    /** ⚠ THE CHAT IS NOT THE ONLY PLACE THE TEXT IS. A message that arrived
+     *  while the app was in the background is sitting in the shade with its
+     *  FULL body, and deleting the row does nothing to that copy: it stays on
+     *  the lock screen, and on any paired watch, until somebody happens to
+     *  swipe it away, hours after the sender was told it had disappeared. So
+     *  the thread's notification goes down with the message.
+     *
+     *  Shared by BOTH reapers on purpose. It was written into the timer sweep
+     *  alone, and the cold-start reap — the path that handles exactly the case
+     *  this is about, a message that expired while the app was closed — walked
+     *  straight past it. */
+    private fun cancelShadeFor(peers: Collection<Int>, groups: Collection<Int>) {
+        for (p in peers) app.rcq.android.push.Push.cancelMessageThread(appCtx, null, p)
+        for (g in groups) app.rcq.android.push.Push.cancelMessageThread(appCtx, g, null)
     }
 
     /** Seed the contact/group roster from the on-disk cache so the chat list
@@ -7393,7 +8609,10 @@ class Session(context: Context) {
         return senderUin == me
     }
 
-    private fun store(msg: ChatMessage, countsUnread: Boolean = true) {
+    /** File one received (or locally-minted) row. Answers true when the row was
+     *  NEW, false when the UUID was already on this device or is tombstoned,
+     *  which is what lets a caller tell a first delivery from a repeat. */
+    private fun store(msg: ChatMessage, countsUnread: Boolean = true): Boolean {
         // ★★ A note I wrote on my OTHER device (#599: "заметка, написанная из
         // веба, приходит в приложение как новое сообщение со звуком и пушем, а
         // должно быть просто синхронизировано"). It reaches this device as an
@@ -7409,7 +8628,7 @@ class Session(context: Context) {
         val ownNote = !msg.fromMe && msg.groupId == null && msg.peerUin == store.uin
         val row = if (ownNote) msg.copy(fromMe = true) else msg
         // INSERT OR IGNORE dedups by envelope UUID (WS vs queue overlap).
-        if (!db.insert(row)) return
+        if (!db.insert(row)) return false
         val cur = _messages.value.toMutableMap()
         cur[row.peerUin] = ((cur[row.peerUin] ?: emptyList()) + row).sortedBy { it.sentAt }
         _messages.value = cur
@@ -7433,11 +8652,21 @@ class Session(context: Context) {
         //
         // 1:1 only. A group message has as many recipients as members and one
         // tick cannot mean all of them; the phones have never claimed otherwise.
-        if (!row.fromMe && row.groupId == null && row.peerUin != store.uin) {
+        //
+        // ⚠⚠ NEVER FOR A CALL SUMMARY. That row is minted HERE, on this device,
+        // out of a call id, and the peer has never seen its message id: the
+        // receipt names nothing they can match and moves no tick anywhere. All
+        // it does is answer, on the sealed channel, "a human's phone has this
+        // open", which is precisely the confirmation the stranger quarantine a
+        // few hundred lines up refuses to give and for exactly the same
+        // reason. A missed-call marker (#678/#686) turned that into a liveness
+        // oracle anyone could poll: deposit a marker, watch for the receipt.
+        if (!row.fromMe && row.groupId == null && row.peerUin != store.uin && row.kind != "call") {
             scope.launch {
                 runCatching { sendControl(row.peerUin, Envelope.deliveredReceipt(listOf(row.id))) }
             }
         }
+        return true
     }
 
     /** A transient in-app notification banner (#11): shown at the top while the
@@ -7569,7 +8798,16 @@ class Session(context: Context) {
             "voice" -> "🎤 " + r(app.rcq.android.R.string.kind_voice)
             "file" -> "📎 " + (text ?: r(app.rcq.android.R.string.kind_file))
             "location" -> "📍 " + r(app.rcq.android.R.string.kind_location)
-            "poll" -> "📊 " + (text ?: r(app.rcq.android.R.string.kind_message))
+            // ⚠ NEVER `text` here: for a poll the body is the SERIALIZED
+            // BALLOT (PollContent.toJson), so this printed a line of raw JSON
+            // into the shade. This build can no longer create a poll, which
+            // means every poll it will ever announce comes from an old peer and
+            // this is the only poll preview left. Same shape the wake gives
+            // (PushEnvelope reads env.question).
+            "poll" -> "📊 " + (
+                app.rcq.android.model.PollContent.fromJson(msg.body)?.question?.takeIf { it.isNotBlank() }
+                    ?: r(app.rcq.android.R.string.kind_message)
+                )
             "relay" -> "🛡️ " + r(app.rcq.android.R.string.push_kind_relay_share)
             else -> text ?: r(app.rcq.android.R.string.kind_message)
         }
@@ -7839,5 +9077,10 @@ class Session(context: Context) {
          *  the red cross still arrives while the user is looking at the chat. */
         const val COPY_RETRY_ROUNDS = 3
         const val COPY_RETRY_BASE_MS = 5_000L
+        /** A socket that keeps dying redials on a curve that starts at one
+         *  second, and every redial that succeeds would otherwise be a vault
+         *  sweep. One every fifteen seconds is plenty for a change another
+         *  device just made. */
+        const val VAULT_SWEEP_FLOOR_MS = 15_000L
     }
 }

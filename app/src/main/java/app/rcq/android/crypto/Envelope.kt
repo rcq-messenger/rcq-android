@@ -15,7 +15,7 @@ import java.util.UUID
  * its JSONDecoder to parse, and vice versa):
  *   {"kind":"text","id":"<UUID>","text":"<string>"}
  * iOS uses uppercase UUID strings; we emit the same. Optional fields
- * (ttl, fwdName, reply) are omitted, matching iOS `encodeIfPresent`.
+ * (ttl, ts, fwdName, reply) are omitted, matching iOS `encodeIfPresent`.
  */
 /** Quoted-message context, matching the iOS ReplyContext Codable
  *  ({id, snippet, authorName}), carried under the "reply" key. */
@@ -23,14 +23,32 @@ data class Reply(val id: String, val snippet: String, val authorName: String)
 
 sealed interface Envelope {
     /** Disappearing-message TTL in seconds carried by the sender inside the
-     *  encrypted envelope (iOS key "ttl"); null = permanent. The receiver
-     *  expires the local copy [ttl] seconds after receipt. Only the content
-     *  kinds below carry it. */
-    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null) : Envelope
+     *  encrypted envelope (iOS/web key "ttl"); null = permanent. Only the
+     *  content kinds below carry it.
+     *
+     *  Every one of them also carries `ts` — the SENDER'S epoch SECONDS, the
+     *  instant the countdown runs from. Same field name and units the `call`,
+     *  `contactreq` and `profile` envelopes have always used, and the shape the
+     *  web settled on (`web-chat/src/lib/crypto.ts`).
+     *
+     *  ⚠ WHY THE TIMESTAMP EXISTS. Without it a receiver can only count from
+     *  the moment the bytes landed on ITS device, and a phone that was offline
+     *  for a week drains the queue and then keeps a "vanishes in 5 minutes"
+     *  message for five minutes MORE, a week after its author was told it was
+     *  gone. It rides INSIDE the ciphertext, so the island learns nothing from
+     *  it.
+     *
+     *  ⚠ EMITTED ONLY BESIDE A ttl. A timestamp on every message would be a
+     *  new piece of metadata inside the envelope for no one's benefit, and the
+     *  metadata plan spends its budget the other way. Same rule on the web.
+     *
+     *  ⚠ ATTACKER-CONTROLLED. It is a number a peer's client chose; the reader
+     *  (`Session.expiryFor`) rails it before trusting it. Nothing here does. */
+    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null, val ts: Long? = null) : Envelope
     /** Photo. `mediaId`/`mediaKey` point at the out-of-band encrypted
      *  blob (rcq-spec 9). caption may be empty. [spoiler] = sent blurred,
      *  the recipient taps to reveal (Android-only flag; iOS ignores it). */
-    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null) : Envelope
+    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null, val ts: Long? = null) : Envelope
     /** A reaction to another message (iOS kind "reaction"). Carries no own
      *  message id; [targetId] is the reacted message's UUID, [asset] the
      *  emoji (null clears, currently treated as a no-op on receipt). */
@@ -70,6 +88,7 @@ sealed interface Envelope {
         val sizeBytes: Long,
         val caption: String?,
         val ttl: Int? = null,
+        val ts: Long? = null,
     ) : Envelope
     /** Voice note (iOS kind "voice"). Audio bytes live in an encrypted
      *  blob; [durationSec] drives the bubble timer. */
@@ -79,6 +98,7 @@ sealed interface Envelope {
         val mediaKey: String,
         val durationSec: Double,
         val ttl: Int? = null,
+        val ts: Long? = null,
     ) : Envelope
     /** Video (iOS kind "video"). Bytes in an encrypted blob; [thumbnailB64]
      *  is a base64 JPEG poster frame shown before download, [durationSec]
@@ -93,9 +113,10 @@ sealed interface Envelope {
         val spoiler: Boolean = false,
         val albumId: String? = null,
         val ttl: Int? = null,
+        val ts: Long? = null,
     ) : Envelope
     /** Shared location (iOS kind "location"). */
-    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null) : Envelope
+    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null, val ts: Long? = null) : Envelope
     /** Profile-view ping (iOS kind "visit"). Fire-and-forget, no bubble:
      *  the recipient tallies it locally for the "profile views" stat.
      *  [at] is seconds since the 2001 reference date, matching the iOS
@@ -230,7 +251,11 @@ sealed interface Envelope {
             addProperty("kind", "text")
             addProperty("id", id)
             addProperty("text", text)
-            ttl?.let { addProperty("ttl", it) }
+            ttl?.let {
+                addProperty("ttl", it)
+                // Beside the ttl and never on its own — see the interface note.
+                ts?.let { sec -> addProperty("ts", sec) }
+            }
             replyTo?.let {
                 add("reply", JsonObject().apply {
                     addProperty("id", it.id)
@@ -247,7 +272,11 @@ sealed interface Envelope {
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
             if (spoiler) addProperty("spoiler", true)
             albumId?.let { addProperty("album", it) }
-            ttl?.let { addProperty("ttl", it) }
+            ttl?.let {
+                addProperty("ttl", it)
+                // Beside the ttl and never on its own — see the interface note.
+                ts?.let { sec -> addProperty("ts", sec) }
+            }
         }.toString().toByteArray(Charsets.UTF_8)
         is Reaction -> JsonObject().apply {
             addProperty("kind", "reaction")
@@ -280,7 +309,11 @@ sealed interface Envelope {
             addProperty("mime", mime)
             addProperty("size", sizeBytes)
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
-            ttl?.let { addProperty("ttl", it) }
+            ttl?.let {
+                addProperty("ttl", it)
+                // Beside the ttl and never on its own — see the interface note.
+                ts?.let { sec -> addProperty("ts", sec) }
+            }
         }.toString().toByteArray(Charsets.UTF_8)
         is Voice -> JsonObject().apply {
             addProperty("kind", "voice")
@@ -288,7 +321,11 @@ sealed interface Envelope {
             addProperty("mediaID", mediaId)
             addProperty("mediaKey", mediaKey)
             addProperty("durationSec", durationSec)
-            ttl?.let { addProperty("ttl", it) }
+            ttl?.let {
+                addProperty("ttl", it)
+                // Beside the ttl and never on its own — see the interface note.
+                ts?.let { sec -> addProperty("ts", sec) }
+            }
         }.toString().toByteArray(Charsets.UTF_8)
         is Video -> JsonObject().apply {
             addProperty("kind", "video")
@@ -300,7 +337,11 @@ sealed interface Envelope {
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
             if (spoiler) addProperty("spoiler", true)
             albumId?.let { addProperty("album", it) }
-            ttl?.let { addProperty("ttl", it) }
+            ttl?.let {
+                addProperty("ttl", it)
+                // Beside the ttl and never on its own — see the interface note.
+                ts?.let { sec -> addProperty("ts", sec) }
+            }
         }.toString().toByteArray(Charsets.UTF_8)
         is Location -> JsonObject().apply {
             addProperty("kind", "location")
@@ -308,7 +349,11 @@ sealed interface Envelope {
             addProperty("lat", lat)
             addProperty("lng", lng)
             if (!caption.isNullOrEmpty()) addProperty("caption", caption)
-            ttl?.let { addProperty("ttl", it) }
+            ttl?.let {
+                addProperty("ttl", it)
+                // Beside the ttl and never on its own — see the interface note.
+                ts?.let { sec -> addProperty("ts", sec) }
+            }
         }.toString().toByteArray(Charsets.UTF_8)
         is Visit -> JsonObject().apply {
             addProperty("kind", "visit")
@@ -418,14 +463,70 @@ sealed interface Envelope {
          *  as seconds since 2001, so visit timestamps cross the wire that way. */
         const val APPLE_EPOCH_OFFSET_SEC = 978_307_200.0
 
+        /** How far AHEAD of now a disappearing-message anchor may sit and
+         *  still be believed: clock skew between two devices, plus the seconds
+         *  a large upload spends between the stamp and the send. */
+        const val TTL_ANCHOR_SKEW_MS = 60_000L
+
+        /** ...and how far behind. A year is far past the longest timer any
+         *  client offers (7 days), so anything older is not skew. */
+        const val TTL_ANCHOR_MAX_AGE_MS = 365L * 24 * 3600 * 1000
+
+        /** An epoch-ms instant a disappearing message's countdown may be
+         *  anchored to, or null when it must not be believed.
+         *
+         *  ⚠ THE VALUES THIS RAILS ARE NOT OURS. A `ts` is a number a peer's
+         *  client chose, and the island's deposit stamp is a clock somebody
+         *  else runs. An anchor in the FUTURE extends a message's life past
+         *  what its own sender promised; an anchor from 1970 (a zero, or a
+         *  client sending milliseconds where seconds belong) expires everything
+         *  on arrival, which as a way to delete somebody's conversation for
+         *  them costs one crafted envelope. Outside the window the caller falls
+         *  through to something it trusts more.
+         *
+         *  Mirrors the web's `sendAnchorMs` (`web-chat/src/lib/disappearing.ts`)
+         *  window for window, so the same envelope dies at the same moment on
+         *  both clients. */
+        fun saneAnchorMs(ms: Long?, nowMs: Long): Long? = ms?.takeIf {
+            it > 0 && it <= nowMs + TTL_ANCHOR_SKEW_MS && it >= nowMs - TTL_ANCHOR_MAX_AGE_MS
+        }
+
+        /** [saneAnchorMs] applied to the wire's `ts`, which is epoch SECONDS.
+         *  Converted BEFORE railing so a millisecond value from a confused
+         *  client lands centuries in the future and is refused, rather than
+         *  passing as a plausible second count. Overflow lands negative and is
+         *  refused by the same test. */
+        fun anchorFromTs(ts: Long?, nowMs: Long): Long? =
+            saneAnchorMs(ts?.takeIf { it > 0 }?.times(1000L), nowMs)
+
         /** Build a visit ping stamped at [epochMillis] (epoch ms). */
         fun visit(epochMillis: Long): Visit = Visit(epochMillis / 1000.0 - APPLE_EPOCH_OFFSET_SEC)
 
-        fun text(body: String, replyTo: Reply? = null): Text =
-            Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo)
+        /** The two fields a thread with a disappearing-message timer on it
+         *  stamps onto everything it sends: the ttl the sender promises, and
+         *  the instant it is counted from.
+         *
+         *  ⚠ ONE CLOCK READING PER MESSAGE, taken here. The sender's own row
+         *  is built from `env.ts` rather than from a second `currentTimeMillis`
+         *  at the call site, so both copies of the message die at the same
+         *  absolute instant instead of drifting apart by however long the
+         *  media upload in between took.
+         *
+         *  A non-positive ttl is "off": no ttl, and therefore no timestamp. */
+        private fun dying(ttl: Int?): Pair<Int?, Long?> {
+            val t = ttl?.takeIf { it > 0 } ?: return null to null
+            return t to System.currentTimeMillis() / 1000
+        }
 
-        fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null): Photo =
-            Photo(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, caption, spoiler, albumId)
+        fun text(body: String, replyTo: Reply? = null, ttl: Int? = null): Text {
+            val (t, ts) = dying(ttl)
+            return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts)
+        }
+
+        fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null): Photo {
+            val (t, ts) = dying(ttl)
+            return Photo(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, caption, spoiler, albumId, t, ts)
+        }
 
         fun reaction(targetId: String, asset: String?): Reaction = Reaction(targetId, asset)
 
@@ -437,17 +538,25 @@ sealed interface Envelope {
 
         fun deliveredReceipt(targetIds: List<String>): DeliveredReceipt = DeliveredReceipt(targetIds)
 
-        fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?): File =
-            File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption)
+        fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?, ttl: Int? = null): File {
+            val (t, ts) = dying(ttl)
+            return File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption, t, ts)
+        }
 
-        fun voice(mediaId: String, mediaKey: String, durationSec: Double): Voice =
-            Voice(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, durationSec)
+        fun voice(mediaId: String, mediaKey: String, durationSec: Double, ttl: Int? = null): Voice {
+            val (t, ts) = dying(ttl)
+            return Voice(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, durationSec, t, ts)
+        }
 
-        fun video(mediaId: String, mediaKey: String, thumbnailB64: String, durationSec: Double, caption: String?, spoiler: Boolean = false, albumId: String? = null): Video =
-            Video(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, thumbnailB64, durationSec, caption, spoiler, albumId)
+        fun video(mediaId: String, mediaKey: String, thumbnailB64: String, durationSec: Double, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null): Video {
+            val (t, ts) = dying(ttl)
+            return Video(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, thumbnailB64, durationSec, caption, spoiler, albumId, t, ts)
+        }
 
-        fun location(lat: Double, lng: Double, caption: String?): Location =
-            Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption)
+        fun location(lat: Double, lng: Double, caption: String?, ttl: Int? = null): Location {
+            val (t, ts) = dying(ttl)
+            return Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption, t, ts)
+        }
 
         fun secureScreen(on: Boolean): SecureScreen = SecureScreen(on)
 
@@ -513,8 +622,16 @@ sealed interface Envelope {
             // envelope; absent/JSON-null → permanent. Only the content kinds
             // read it — control envelopes ignore any stray value.
             val ttl = obj.get("ttl")?.takeIf { it.isJsonPrimitive }?.asInt
+            // The sender's epoch SECONDS, what the countdown is anchored to.
+            // Absent from every build older than this one, so the reader must
+            // survive its absence; `asLong` on a non-primitive throws, hence the
+            // same guard as everything else decoded out of a stranger's bytes.
+            // NOT sanity-checked here: this class parses, `Session.expiryFor`
+            // decides what to believe.
+            val ts = obj.get("ts")?.takeIf { it.isJsonPrimitive }
+                ?.let { runCatching { it.asLong }.getOrNull() }
             return when (val kind = obj.get("kind")?.asString) {
-                "text" -> Text(id, obj.get("text")?.asString.orEmpty(), reply, ttl)
+                "text" -> Text(id, obj.get("text")?.asString.orEmpty(), reply, ttl, ts)
                 "photo" -> Photo(
                     id = id,
                     mediaId = obj.get("mediaID")?.asString.orEmpty(),
@@ -523,6 +640,7 @@ sealed interface Envelope {
                     spoiler = obj.get("spoiler")?.asBoolean ?: false,
                     albumId = obj.get("album")?.asString,
                     ttl = ttl,
+                    ts = ts,
                 )
                 "reaction" -> Reaction(
                     targetId = obj.get("targetID")?.asString.orEmpty(),
@@ -548,6 +666,7 @@ sealed interface Envelope {
                     sizeBytes = obj.get("size")?.asLong ?: 0L,
                     caption = obj.get("caption")?.asString,
                     ttl = ttl,
+                    ts = ts,
                 )
                 "voice" -> Voice(
                     id = id,
@@ -555,6 +674,7 @@ sealed interface Envelope {
                     mediaKey = obj.get("mediaKey")?.asString.orEmpty(),
                     durationSec = obj.get("durationSec")?.asDouble ?: 0.0,
                     ttl = ttl,
+                    ts = ts,
                 )
                 "video" -> Video(
                     id = id,
@@ -566,6 +686,7 @@ sealed interface Envelope {
                     spoiler = obj.get("spoiler")?.asBoolean ?: false,
                     albumId = obj.get("album")?.asString,
                     ttl = ttl,
+                    ts = ts,
                 )
                 "location" -> Location(
                     id = id,
@@ -573,6 +694,7 @@ sealed interface Envelope {
                     lng = obj.get("lng")?.asDouble ?: 0.0,
                     caption = obj.get("caption")?.asString,
                     ttl = ttl,
+                    ts = ts,
                 )
                 "visit" -> Visit(obj.get("at")?.asDouble ?: 0.0)
                 "poll" -> Poll(

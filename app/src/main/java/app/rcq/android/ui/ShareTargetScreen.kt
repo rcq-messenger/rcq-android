@@ -152,7 +152,9 @@ fun ShareTargetScreen(
             items(rooms, key = { "g${it.id}" }) { g ->
                 ShareRow(
                     title = g.name,
-                    subtitle = pluralStringResource(R.plurals.members, g.memberCount, g.memberCount),
+                    // Founder item 27: same shared formatter as the chat list
+                    // and the group screen, so one room never reads two ways.
+                    subtitle = memberCountLabel(g.memberCount),
                     onClick = { onPick(ChatTarget.Group(g.id)) },
                 ) {
                     GroupAvatar(g, session, 36.dp)

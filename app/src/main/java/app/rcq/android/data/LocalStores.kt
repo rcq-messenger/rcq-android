@@ -62,6 +62,20 @@ object LocalStores {
     private val _archived = MutableStateFlow<Set<String>>(emptySet())
     val archived: StateFlow<Set<String>> = _archived.asStateFlow()
 
+    /** The cached chat-list SECTIONS tree (founder item 1 of 23.08). Unlike
+     *  every other flow here this is not a device preference: it is a copy of
+     *  the account's `sections` vault slot, folded in by [SectionsVault] and
+     *  pushed back out by it. The chat list renders from this cache and never
+     *  waits on the island.
+     *
+     *  ⚠ Per-account, like the rest of this block and unlike the collapse set
+     *  next door: it holds section NAMES and the uin of every filed chat, so a
+     *  flat key would hand one account's list to the next one signed in here.
+     *  [bindAccount] is what points it at an account, and nothing may read or
+     *  write it before that has run. */
+    private val _sections = MutableStateFlow(app.rcq.android.data.Sections.emptyTree())
+    val sections: StateFlow<com.google.gson.JsonObject> = _sections.asStateFlow()
+
     /** Threads the user locked behind the app PIN ("peer:<uin>"/"group:<id>").
      *  Opening a locked chat prompts for the existing PIN first. Only offered
      *  when a PIN is configured; cleared automatically if the PIN is removed. */
@@ -145,14 +159,6 @@ object LocalStores {
      *  opening at the newest message. Plain map, no flow: read once on chat
      *  open, nothing observes it. */
     private var _chatPos: Map<String, Pair<Int, Int>> = emptyMap()
-
-    /** Presence "stay online for N hours after exit" window: the epoch-millis
-     *  moment that window EXPIRES, or null when the feature is off. Local-only
-     *  affordance anchored when the user enables/changes it in Privacy
-     *  settings, so the home header can show a live countdown of when they
-     *  drop back to offline. Reset (re-anchored) on every active change. */
-    private val _presenceWindow = MutableStateFlow<Long?>(null)
-    val presenceWindow: StateFlow<Long?> = _presenceWindow.asStateFlow()
 
     // ── global flows ─────────────────────────────────────────────────────
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
@@ -261,10 +267,17 @@ object LocalStores {
 
     /** Historical fixed reaction set — the default until the user customises
      *  their own. Asset names match iOS exactly so a reaction renders the same
-     *  GIF on both clients. Defined inline (not imported from the `ui`
-     *  Emoticons) to keep this `data` store free of UI deps. MUST stay declared
-     *  before [_reactionEmojis] so it's initialised first. */
-    private val DEFAULT_REACTION_EMOJIS = listOf("good", "give_heart", "biggrin", "shok", "cray", "mad")
+     *  GIF on both clients.
+     *
+     *  ⚠⚠ EVERY NAME HERE MUST HAVE `assets/emoticons/<name>.gif` BEHIND IT.
+     *  This list was written out inline "to keep this `data` store free of UI
+     *  deps" and then drifted: `biggrin`, `shok` and `mad` name glyphs this app
+     *  has never bundled, so half of the reaction row was BLANK on every fresh
+     *  install, for as long as the row has existed. The one list that is drawn
+     *  from the bundled pack owns it now. A getter, not a val, so it cannot
+     *  depend on which object initialises first. */
+    private val DEFAULT_REACTION_EMOJIS: List<String>
+        get() = app.rcq.android.ui.Emoticons.defaultReactions
 
     /** The user's chosen composer-panel emoticons (asset names, in pick order).
      *  EMPTY by default → the composer panel shows a "Choose" CTA until the user
@@ -274,11 +287,52 @@ object LocalStores {
     private val _panelEmojis = MutableStateFlow<List<String>>(emptyList())
     val panelEmojis: StateFlow<List<String>> = _panelEmojis.asStateFlow()
 
-    /** The user's chosen quick reactions (asset names, ≤6) offered on the
+    /** The user's chosen quick reactions (asset names, ≤40) offered on the
      *  long-press reaction row. Defaults to [DEFAULT_REACTION_EMOJIS] until
      *  customised. */
     private val _reactionEmojis = MutableStateFlow(DEFAULT_REACTION_EMOJIS)
     val reactionEmojis: StateFlow<List<String>> = _reactionEmojis.asStateFlow()
+
+    /** How many times I have used each reaction asset (founder item 21).
+     *
+     *  ⚠ PER ACCOUNT, and loaded in [bindAccount] rather than [init]: the same
+     *  trap the roster flows above are prefixed for. Which faces a person
+     *  reaches for is a portrait of who they talk to, and a global counter would
+     *  carry one identity's habits straight onto another identity's reaction
+     *  bar, where the other person can watch it change.
+     *
+     *  A plain map and no flow, like [_chatPos]: the bar reads this once when it
+     *  opens and nothing observes it in between. Reading it is a hash lookup, so
+     *  a long-press pays nothing.
+     *
+     *  Bounded twice over: at most [REACTION_USE_MAX_KEYS] assets are kept (the
+     *  least-used fall out when a new one pushes past the cap) and one count
+     *  stops climbing at [REACTION_USE_MAX_COUNT], so neither the prefs entry
+     *  nor a single tally can grow without end. */
+    private var _reactionUses: Map<String, Int> = emptyMap()
+
+    /** Disappearing messages (founder item 20): the per-thread timer, in
+     *  SECONDS, keyed by the same `peer:<uin>` / `group:<id>` thread key
+     *  [_secureThreads] uses — and that iOS and the web use for their own copy
+     *  of this setting, so a thread reads the same on all three while it is
+     *  being debugged.
+     *
+     *  ⚠ PER ACCOUNT, which is the whole reason it lives here rather than in
+     *  the picker that sets it. "peer:5" IS NOT A PERSON: two local identities
+     *  each have a #5, and on two islands those are two different people. Held
+     *  in the screen's own process-global map it was unscoped, so one
+     *  identity's timer appeared preselected in another identity's chat with
+     *  the same number — and with the send path wired that is not a cosmetic
+     *  bug at all, it is a ttl on messages that identity never asked to
+     *  disappear. [bindAccount] repoints it and [clearAccount] wipes it.
+     *
+     *  A plain map and no flow, like [_chatPos]: the chat reads it when it
+     *  opens and when the user picks, and nothing observes it in between.
+     *
+     *  "Off" REMOVES the entry rather than storing a zero — "off" and "never
+     *  touched" are one state and should not be two shapes on disk. Same rule
+     *  as the web's `setThreadTtl`. */
+    private var _threadTtls: Map<String, Int> = emptyMap()
 
     fun init(context: Context) {
         if (::prefs.isInitialized) return
@@ -321,15 +375,25 @@ object LocalStores {
         val storedReactions = prefs.getString(K_REACTION_EMOJI, null)
             ?.split(",")?.filter { it.isNotBlank() }
         val liveReactions = storedReactions?.filter { it in valid }
+        // ⚠ The defaults go through `valid` too. They did not, which is how
+        // three names with no glyph behind them survived: a stored set was
+        // checked against the pack and the fallback never was. Filtered, a
+        // future drift costs a slot instead of showing an empty one.
         _reactionEmojis.value = when {
-            storedReactions == null -> DEFAULT_REACTION_EMOJIS
-            liveReactions!!.isEmpty() && storedReactions.isNotEmpty() -> DEFAULT_REACTION_EMOJIS
+            storedReactions == null -> DEFAULT_REACTION_EMOJIS.filter { it in valid }
+            liveReactions!!.isEmpty() && storedReactions.isNotEmpty() -> DEFAULT_REACTION_EMOJIS.filter { it in valid }
             else -> liveReactions
         }
     }
 
     /** Point the per-account flows at [accountId]'s slots and reload them.
-     *  null (no active account) resets the flows to empty. */
+     *  null (no active account) resets the flows to empty.
+     *
+     *  ⚠⚠ Takes the same monitor as [updateSectionsTree] and its neighbours, so
+     *  a vault answer that is in flight while the account switcher (or the
+     *  duress PIN) rebinds cannot land between the scope test and the write.
+     *  See the note there. */
+    @Synchronized
     fun bindAccount(accountId: String?) {
         acct = accountId
         if (accountId == null) {
@@ -337,6 +401,7 @@ object LocalStores {
             _muted.value = emptySet()
             _mentionsOnly.value = emptySet()
             _archived.value = emptySet()
+            _sections.value = Sections.emptyTree()
             _locked.value = emptySet()
             _removed.value = emptySet()
             _blocked.value = emptySet()
@@ -349,9 +414,10 @@ object LocalStores {
             _mentionInbox.value = emptySet()
             _mentionSeenAt.value = emptyMap()
             _chatPos = emptyMap()
-            _presenceWindow.value = null
             _secureThreads.value = emptySet()
+            _threadTtls = emptyMap()
             _aliases.value = emptyMap()
+            _reactionUses = emptyMap()
             return
         }
         _favorites.value = prefs.getStringSet(pk(K_FAV), emptySet())!!.toSet()
@@ -365,20 +431,22 @@ object LocalStores {
         _muted.value = prefs.getStringSet(pk(K_MUTE), emptySet())!!.toSet()
         _mentionsOnly.value = prefs.getStringSet(pk(K_MENTIONS), emptySet())!!.toSet()
         _archived.value = prefs.getStringSet(pk(K_ARCH), emptySet())!!.toSet()
+        _sections.value = parseSections(prefs.getString(pk(K_SECTIONS), null))
         _locked.value = prefs.getStringSet(pk(K_LOCKED), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _strangerQuarantine.value = prefs.getBoolean(pk(K_STRANGER_Q), false)
         _allowedStrangers.value = prefs.getStringSet(pk(K_STRANGER_ALLOW), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
-        _unread.value = loadUnread(pk(K_UNREAD))
+        _unread.value = loadCounts(pk(K_UNREAD))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
         _mentionSeenAt.value = loadMentionSeen(pk(K_MENTION_SEEN))
         _chatPos = loadChatPos(pk(K_CHAT_POS))
-        _presenceWindow.value = prefs.getLong(pk(K_PRES_WIN), 0L).takeIf { it > 0L }
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
+        _reactionUses = loadCounts(pk(K_REACTION_USES))
+        _threadTtls = loadCounts(pk(K_THREAD_TTL))
     }
 
     fun isThreadSecure(thread: String) = thread in _secureThreads.value
@@ -389,6 +457,27 @@ object LocalStores {
         if (acct == null) return
         _secureThreads.value = if (on) _secureThreads.value + thread else _secureThreads.value - thread
         prefs.edit().putStringSet(pk(K_SECURE), _secureThreads.value).apply()
+    }
+
+    // ── disappearing messages: the per-thread timer (founder item 20) ──
+
+    /** This thread's timer in seconds, or null when disappearing is off here.
+     *  Null before an account is bound, so a caller never inherits a timer from
+     *  whoever was signed in last. */
+    fun threadTtl(thread: String): Int? =
+        if (acct == null) null else _threadTtls[thread]?.takeIf { it > 0 }
+
+    /** Set or clear this thread's timer. Anything non-positive is "off" and
+     *  removes the entry. A no-op before an account is bound: there is no
+     *  identity to file it under, and the flat namespace is the one place it
+     *  must never land. */
+    fun setThreadTtl(thread: String, seconds: Int?) {
+        if (acct == null) return
+        val next = if (seconds != null && seconds > 0) _threadTtls + (thread to seconds)
+                   else _threadTtls - thread
+        if (next == _threadTtls) return
+        _threadTtls = next
+        prefs.edit().putStringSet(pk(K_THREAD_TTL), next.map { "${it.key}=${it.value}" }.toSet()).apply()
     }
 
     /** Per-account key for the currently-bound account. */
@@ -584,18 +673,30 @@ object LocalStores {
     }
 
     // ── emoji customisation (global) ─────────────────────────────────────
+    /** How many emoticons the composer panel keeps. */
+    const val PANEL_EMOJI_CAP = 40
+
+    /** How many quick reactions the long-press row keeps.
+     *
+     *  ⚠⚠ THE PICKER MUST NOT ENFORCE ITS OWN NUMBER. This used to be 6 here
+     *  while the picker let 40 through, so the store silently threw away most
+     *  of what the user had just chosen. Both caps live here, where the
+     *  truncation actually happens, and EmojiPicker reads them. */
+    const val REACTION_EMOJI_CAP = 40
+
     /** Set the composer-panel emoticon set (asset names, pick order; capped at
-     *  40, de-duplicated). Persisted as a comma-joined string. */
+     *  [PANEL_EMOJI_CAP], de-duplicated). Persisted as a comma-joined string. */
     fun setPanelEmojis(list: List<String>) {
-        val capped = list.distinct().take(40)
+        val capped = list.distinct().take(PANEL_EMOJI_CAP)
         _panelEmojis.value = capped
         if (::prefs.isInitialized) prefs.edit().putString(K_PANEL_EMOJI, capped.joinToString(",")).apply()
     }
 
-    /** Set the quick-reaction set (asset names, pick order; capped at 6,
-     *  de-duplicated). Persisted as a comma-joined string. */
+    /** Set the quick-reaction set (asset names, pick order; capped at
+     *  [REACTION_EMOJI_CAP], de-duplicated). Persisted as a comma-joined
+     *  string. */
     fun setReactionEmojis(list: List<String>) {
-        val capped = list.distinct().take(6)
+        val capped = list.distinct().take(REACTION_EMOJI_CAP)
         _reactionEmojis.value = capped
         if (::prefs.isInitialized) prefs.edit().putString(K_REACTION_EMOJI, capped.joinToString(",")).apply()
     }
@@ -652,21 +753,44 @@ object LocalStores {
         prefs.edit().putStringSet(K_SECTION_FLAGS, next.toSet()).apply()
     }
 
-    // ── presence stay-online window ──────────────────────────────────
-    /** (Re)anchor the stay-online window to now + [ttlMinutes], so the home
-     *  countdown restarts from the full duration. Called whenever the user
-     *  enables the feature or changes the duration in Privacy settings. */
-    fun setPresenceWindow(ttlMinutes: Int) {
-        if (acct == null) return
-        val expires = System.currentTimeMillis() + ttlMinutes.toLong() * 60_000L
-        _presenceWindow.value = expires
-        prefs.edit().putLong(pk(K_PRES_WIN), expires).apply()
+    // ── presence stay-online window (removed feature, cleanup only) ──
+    /** Drop the leftover "stay visible after you leave" anchor from disk.
+     *
+     *  The feature itself is gone (it never worked: the client sent
+     *  presence_persistent without presence_ttl_minutes, and the island's own
+     *  window was anchored on a last_seen the heartbeat rewrites every 25s).
+     *  Nothing reads the anchor any more, so this is not a state change, it is
+     *  housekeeping: a phone that had the switch on is carrying a stored
+     *  timestamp about its owner's habits, and it should not keep it. Called
+     *  once per settings open; safe to call when there is nothing to remove.
+     *  Delete this, the key below and the call in SettingsRoot together once
+     *  enough time has passed that no installed build still has the anchor. */
+    fun clearPresenceWindow() {
+        if (acct != null) prefs.edit().remove(pk(K_PRES_WIN)).apply()
     }
 
-    /** Clear the window (the feature was turned off). */
-    fun clearPresenceWindow() {
-        _presenceWindow.value = null
-        if (acct != null) prefs.edit().remove(pk(K_PRES_WIN)).apply()
+    /** Whether this account has already told its island that the removed
+     *  "stay visible after you leave" flag is OFF.
+     *
+     *  ⚠⚠ A REMOVED FEATURE HAS TO ANSWER false, NOT VANISH. Dropping the
+     *  switch from Privacy took away the only way to turn the flag off, but a
+     *  phone that had it ON left `presence_persistent = true` on its island,
+     *  and an island that has not taken the 23.08 update still honours it with
+     *  a NULL ttl it reads as "forever". That account goes on being reported as
+     *  recently-online after it closes the app, with nothing anywhere in the
+     *  build able to stop it. So the retirement is SAID once, per account, and
+     *  the fact that it was said is remembered here rather than re-sent on
+     *  every settings open. Against the updated backend, which pins both fields
+     *  to false, the call is a no-op. Delete this together with the rest of the
+     *  block once no island in the wild still holds the flag. */
+    fun presenceRetired(): Boolean =
+        acct != null && ::prefs.isInitialized && prefs.getBoolean(pk(K_PRES_RETIRED), false)
+
+    /** Record that the island acknowledged the retirement (see [presenceRetired]).
+     *  Only ever called after a SUCCESSFUL profile update, so a phone that was
+     *  offline when Settings opened tries again on the next visit. */
+    fun markPresenceRetired() {
+        if (acct != null && ::prefs.isInitialized) prefs.edit().putBoolean(pk(K_PRES_RETIRED), true).apply()
     }
 
     // ── unread counters ──────────────────────────────────────────────
@@ -686,13 +810,38 @@ object LocalStores {
         persistUnread()
     }
 
+    /** Take [by] off a thread's badge, for rows that left the thread without
+     *  ever being read.
+     *
+     *  ⚠ The counter is STORED, not derived from the rows, so anything that
+     *  removes a row has to say so here or the badge outlives what it was
+     *  counting. A disappearing message that lapses in the background is
+     *  exactly that: the row is swept, the badge keeps its "1", and the chat
+     *  list offers a conversation with nothing new in it until the user opens
+     *  it and [clearUnread] fires. Which rows may be subtracted is the
+     *  caller's problem and a real one (expiry takes the OLDEST rows, which
+     *  are the ones already read). See `Session.shedLapsedUnread`.
+     *
+     *  A thread that reaches zero loses its entry entirely, the same shape
+     *  [clearUnread] leaves behind. */
+    fun decUnread(thread: String, by: Int) {
+        if (acct == null || by <= 0) return
+        val cur = _unread.value[thread] ?: return
+        val next = cur - by
+        _unread.value = if (next > 0) _unread.value + (thread to next) else _unread.value - thread
+        persistUnread()
+    }
+
     /** Encode the map as a CSV "thread=count" StringSet for SharedPreferences. */
     private fun persistUnread() {
         if (acct == null) return
         prefs.edit().putStringSet(pk(K_UNREAD), _unread.value.map { "${it.key}=${it.value}" }.toSet()).apply()
     }
 
-    private fun loadUnread(key: String): Map<String, Int> =
+    /** Decode a "name=count" StringSet. Shared by the unread counters and the
+     *  reaction tally: same shape, same split-on-the-LAST-'=' rule (a thread key
+     *  cannot hold one, but the decoder must not depend on that). */
+    private fun loadCounts(key: String): Map<String, Int> =
         prefs.getStringSet(key, emptySet())!!.mapNotNull { entry ->
             val i = entry.lastIndexOf('=')
             if (i <= 0) return@mapNotNull null
@@ -754,6 +903,79 @@ object LocalStores {
             val off = v.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
             entry.substring(0, i) to (dist to off)
         }.toMap()
+
+    // ── reaction usage tally (per account) ───────────────────────────
+    // Founder item 21: the reaction bar should lead with what this person
+    // actually uses instead of a fixed order they have to read past every time.
+    // Entirely device-local: the island is never told which face anybody
+    // likes, and it does not need to be, because the bar is drawn here.
+
+    /** How many times [asset] has been used from this account. 0 when never. */
+    fun reactionUseCount(asset: String): Int = _reactionUses[asset] ?: 0
+
+    /** The whole tally, for a picker that wants to show it. Already in memory. */
+    fun reactionUses(): Map<String, Int> = _reactionUses
+
+    /** The [limit] most-used assets, most-used first; may be shorter, and is
+     *  empty on a fresh account. NOT filtered against the current emoticon pack
+     *  or the user's chosen set. The caller knows which list it is drawing, and
+     *  an asset that has since left the pack must not silently take a slot in
+     *  it. Intersect before use, or use [byMostUsed]. */
+    fun topReactions(limit: Int): List<String> =
+        if (limit <= 0) emptyList()
+        else _reactionUses.entries.sortedByDescending { it.value }.take(limit).map { it.key }
+
+    /** [assets] reordered most-used first.
+     *
+     *  ⚠ STABLE on purpose. Assets with the same tally (on a fresh account, all
+     *  of them) keep exactly the order they arrived in, so the bar opens as the
+     *  user's own chosen set and only ever re-sorts because they really did use
+     *  something. An unstable sort would shuffle six identical zeroes into a
+     *  different arrangement on each open, which reads as the app being broken.
+     *  `sortedByDescending` is TimSort underneath, which is stable. */
+    fun byMostUsed(assets: List<String>): List<String> =
+        assets.sortedByDescending { _reactionUses[it] ?: 0 }
+
+    /** Record one use of [asset]. Cheap, fire-and-forget, safe to call from the
+     *  tap handler. A no-op before an account is bound (the trap this whole
+     *  block is guarded for) and for a name the encoding cannot round-trip. */
+    fun bumpReactionUse(asset: String) {
+        if (acct == null || asset.isBlank() || '=' in asset) return
+        val bumped = (reactionUseCount(asset) + 1).coerceAtMost(REACTION_USE_MAX_COUNT)
+        val next = _reactionUses.toMutableMap()
+        next[asset] = bumped
+        if (next.size > REACTION_USE_MAX_KEYS) {
+            // Evict the LEAST-used, never the oldest. The cap is only ever
+            // reached by someone who has tried a lot of faces once each, and the
+            // one they send every day must not be the one that falls out.
+            //
+            // ⚠ AND NEVER THE ONE WE JUST RECORDED. A brand-new asset enters
+            // with a count of 1, which is the minimum, and `sortedByDescending`
+            // is stable while the copy above puts the new key LAST in iteration
+            // order, so "keep the top N" always threw away the very tap that
+            // caused the eviction. The tally froze at the cap for good: nothing
+            // new could ever reach 1 on disk, and the "most used first" order
+            // stopped learning while 64 slots stayed occupied by faces the user
+            // may have dropped from their set long ago. Take the new key out of
+            // the running, keep the best N-1 of the rest, put it back.
+            next.remove(asset)
+            val keep = next.entries.sortedByDescending { it.value }.take(REACTION_USE_MAX_KEYS - 1)
+            next.clear()
+            keep.forEach { next[it.key] = it.value }
+            next[asset] = bumped
+        }
+        _reactionUses = next
+        prefs.edit().putStringSet(pk(K_REACTION_USES), next.map { "${it.key}=${it.value}" }.toSet()).apply()
+    }
+
+    /** Forget the tally (the reaction bar goes back to the user's own order).
+     *  Offered because a usage history is a history: someone handing their phone
+     *  over should be able to clear it without clearing everything else. */
+    fun clearReactionUses() {
+        if (acct == null || _reactionUses.isEmpty()) return
+        _reactionUses = emptyMap()
+        prefs.edit().remove(pk(K_REACTION_USES)).apply()
+    }
 
     // ── reaction / mention home-row inboxes ──────────────────────────
     fun markReaction(thread: String) = addTo(_reactionInbox, K_REACT_INBOX, thread)
@@ -887,6 +1109,127 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putLong(pk(K_VAULT_CONTACTS_VERSION), version).apply()
     }
 
+    // ── the chat-list sections slot (founder item 1 of 23.08) ────────────
+
+    /** Replace the cached sections tree from a LOCAL edit, which by definition
+     *  belongs to whatever these stores are bound to right now (the tap and the
+     *  write are the same turn of the main thread). Anything that comes back
+     *  from the island must use [updateSectionsTree] instead. */
+    @Synchronized
+    fun setSectionsTree(tree: com.google.gson.JsonObject) {
+        if (acct == null) return
+        _sections.value = tree
+        if (::prefs.isInitialized) prefs.edit().putString(pk(K_SECTIONS), tree.toString()).apply()
+    }
+
+    /**
+     * Read-modify-write the cached tree, but ONLY while these stores are still
+     * bound to [forAccount]. Returns the stored tree, or null when the scope
+     * moved under the caller and nothing was written.
+     *
+     * ⚠⚠ THE SCOPE IS THE POINT, and `acct != null` is not it. A vault read is
+     * a network round trip, and the account these stores answer for can move
+     * while it is in the air, in two ways that both end badly:
+     *
+     * - the account switcher ([Session.rebindTo]) points every per-account
+     *   store at the next account, and Session's scope is never cancelled, so
+     *   the in-flight coroutine comes back holding account A's tree and would
+     *   file it under B. The union merge never unlearns that: B's next push
+     *   seals A's section names, and A's filed peer uins, into B's slot.
+     * - the duress PIN binds them to [DecoyStore.STORE_ID]. That one is worse.
+     *   A MIGRATED decoy leaves `store` (and therefore uin, host and token) on
+     *   the REAL account on purpose, so every "is this still us" test the
+     *   caller can run says yes, and the real account's section NAMES land on
+     *   the flow the duress home screen is drawing, PIN gate and all (gating is
+     *   off inside a decoy), and on disk in the decoy's namespace.
+     *
+     * The caller cannot close either window by testing first and writing after:
+     * the rebind runs on the main thread while this runs on IO. The test has to
+     * be inside the write, which is what this is, and why it and [bindAccount]
+     * take the same monitor.
+     */
+    @Synchronized
+    fun updateSectionsTree(
+        forAccount: String,
+        transform: (com.google.gson.JsonObject) -> com.google.gson.JsonObject,
+    ): com.google.gson.JsonObject? {
+        if (acct == null || acct != forAccount) return null
+        val next = transform(_sections.value)
+        _sections.value = next
+        if (::prefs.isInitialized) prefs.edit().putString(pk(K_SECTIONS), next.toString()).apply()
+        return next
+    }
+
+    /** The cached tree while these stores are still bound to [forAccount], null
+     *  otherwise. The read half of [updateSectionsTree]: a tree that is about to
+     *  be SEALED for [forAccount]'s slot must not be taken from another
+     *  account's cache, or from the decoy's. */
+    @Synchronized
+    fun sectionsTreeFor(forAccount: String): com.google.gson.JsonObject? =
+        if (acct != null && acct == forAccount) _sections.value else null
+
+    private fun parseSections(raw: String?): com.google.gson.JsonObject {
+        if (raw.isNullOrEmpty()) return Sections.emptyTree()
+        val parsed = runCatching { com.google.gson.JsonParser.parseString(raw) }.getOrNull()
+        val o = parsed as? com.google.gson.JsonObject ?: return Sections.emptyTree()
+        // A cache this build cannot read is a cache from a newer build. It is
+        // NOT overwritten (that is the whole point of the `v > 1` rule): it is
+        // simply not rendered, and the tree stays on disk for the build that
+        // wrote it.
+        val v = runCatching { o.get("v")?.asInt }.getOrNull()
+        return if (v == 1 && o.get("s")?.isJsonArray == true) o else Sections.emptyTree()
+    }
+
+    /** The highest version of the `sections` slot this install has seen, per
+     *  account. ⚠⚠ Keyed by SLOT NAME, not by the account alone: a slot name is
+     *  HKDF(identity_priv, ...), so `POST /auth/reissue` does not move the
+     *  account's slots to a new version, it moves them to NEW NAMES and empties
+     *  the vault in the same transaction. A floor filed under the account then
+     *  outlives the derivation it belonged to, the fresh names answer at
+     *  version 1, `1 < 12` reads as a rollback, and because the floor is
+     *  persisted every later session repeats it, and the account's vault is dead
+     *  on this device for good. Keyed by name, a new derivation starts at 0,
+     *  which is what it actually is. */
+    fun vaultSlotVersion(slot: String): Long =
+        if (::prefs.isInitialized && acct != null) prefs.getLong(pk("$K_VAULT_SLOT_VERSION.$slot"), 0L) else 0L
+
+    /** [forAccount], when given, is the account the read this floor came from
+     *  was made for; the write is dropped when the stores have moved on since.
+     *  Same reason as [updateSectionsTree]. */
+    @Synchronized
+    fun setVaultSlotVersion(slot: String, version: Long, forAccount: String? = null) {
+        if (forAccount != null && forAccount != acct) return
+        if (::prefs.isInitialized && acct != null) {
+            prefs.edit().putLong(pk("$K_VAULT_SLOT_VERSION.$slot"), version).apply()
+        }
+    }
+
+    /** Forget a slot's floor. Only on `vault_reset`: the name belongs to a
+     *  derivation that will never be read again, and a stale floor is what
+     *  locks a fresh derivation out of its own slot for good. */
+    fun forgetVaultSlotVersion(slot: String) {
+        if (::prefs.isInitialized && acct != null) {
+            prefs.edit().remove(pk("$K_VAULT_SLOT_VERSION.$slot")).apply()
+        }
+    }
+
+    /** "This device has a sections edit the island has not confirmed."
+     *  Persisted, because the case that matters most outlives the process: a
+     *  section made on a train, a write that failed, the app killed, and on the
+     *  next cold start the island's VERSION has not moved either, so the
+     *  reconnect sweep would skip the slot entirely. */
+    fun sectionsPushPending(): Boolean =
+        ::prefs.isInitialized && acct != null && prefs.getBoolean(pk(K_SECTIONS_PENDING), false)
+
+    /** [forAccount]: see [setVaultSlotVersion]. Clearing this flag on behalf of
+     *  an account the stores no longer answer for would drop the other
+     *  account's outstanding write on the floor. */
+    @Synchronized
+    fun setSectionsPushPending(on: Boolean, forAccount: String? = null) {
+        if (forAccount != null && forAccount != acct) return
+        if (::prefs.isInitialized && acct != null) prefs.edit().putBoolean(pk(K_SECTIONS_PENDING), on).apply()
+    }
+
     fun cachedGroupsJson(): String? =
         if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_GROUPS_CACHE), null) else null
 
@@ -898,7 +1241,12 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING).forEach { e.remove("$accountId.$it") }
+        // The vault floors are keyed by SLOT NAME (see [vaultSlotVersion]), so
+        // they cannot be listed by hand: sweep the prefix instead. Leaving one
+        // behind would lock a later account on this device out of a slot whose
+        // name it re-derived.
+        prefs.all.keys.filter { it.startsWith("$accountId.$K_VAULT_SLOT_VERSION.") }.forEach { e.remove(it) }
         e.apply()
     }
 
@@ -922,9 +1270,18 @@ object LocalStores {
     private const val K_UNREAD = "unread"
     private const val K_REACT_INBOX = "reaction_inbox"
     private const val K_REACTED_MSGS = "reacted_msg_ids"
+    private const val K_REACTION_USES = "reaction_uses"
+    /** Distinct assets the tally keeps. 40 is the picker's own ceiling for a
+     *  reaction set, so this holds a full custom set plus a working margin of
+     *  faces used from the full picker. */
+    private const val REACTION_USE_MAX_KEYS = 64
+    /** Where one tally stops counting. Only the ORDER matters, and nothing
+     *  changes order past four digits. */
+    private const val REACTION_USE_MAX_COUNT = 9_999
     private const val K_MENTION_INBOX = "mention_inbox"
     private const val K_MENTION_SEEN = "mention_seen_at"
     private const val K_CHAT_POS = "chat_scroll_pos"
+    private const val K_THREAD_TTL = "thread_ttl"
     private const val K_ALIAS = "contact_aliases"
     private const val K_ANIM_AVATARS = "animate_avatars"
     private const val K_SWIPE_SIDE = "swipe_reply_side"
@@ -936,10 +1293,14 @@ object LocalStores {
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PUSH_NUDGE_DISMISSED = "push_nudge_dismissed"
     private const val K_PRES_WIN = "presence_window"
+    private const val K_PRES_RETIRED = "presence_retired"
     private const val K_SECURE = "secure_threads"
     private const val K_SECTION_FLAGS = "section_flags"
     private const val K_PRIVACY_CACHE = "privacy_cache"
     private const val K_CONTACTS_CACHE = "contacts_cache"
     private const val K_GROUPS_CACHE = "groups_cache"
     private const val K_VAULT_CONTACTS_VERSION = "vault_contacts_version"
+    private const val K_SECTIONS = "sections_tree"
+    private const val K_SECTIONS_PENDING = "sections_push_pending"
+    private const val K_VAULT_SLOT_VERSION = "vault_slot_version"
 }

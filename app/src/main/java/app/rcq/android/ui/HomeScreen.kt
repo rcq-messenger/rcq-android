@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -49,6 +50,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Newspaper
@@ -95,6 +98,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -107,6 +112,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -115,6 +121,7 @@ import app.rcq.android.Session
 import app.rcq.android.net.CrossIslandRequestsStore
 import app.rcq.android.security.PanicPinService
 import app.rcq.android.data.LocalStores
+import app.rcq.android.data.Sections
 import app.rcq.android.model.Contact
 import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
@@ -127,6 +134,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** The chat list, already sliced into its sections and sorted.
+ *
+ *  One object rather than nine loose values so the whole thing can hang off a
+ *  single [androidx.compose.runtime.remember] in [HomeScreen]: see the comment
+ *  at its call site for why recomputing these on every recomposition was worth
+ *  removing. */
+private data class HomeLists(
+    val fav: List<Contact>,
+    val crossIsland: List<Contact>,
+    val online: List<Contact>,
+    val offline: List<Contact>,
+    val archivedContacts: List<Contact>,
+    val visibleGroups: List<RcqGroup>,
+    val archivedGroups: List<RcqGroup>,
+    val favGroups: List<RcqGroup>,
+    /// Chats filed into one of the user's OWN sections, by section id (founder
+    /// item 1 of 23.08). A chat in here has already left every derived section
+    /// above: it renders once, where the user put it, and nowhere else.
+    val filedContacts: Map<String, List<Contact>> = emptyMap(),
+    val filedGroups: Map<String, List<RcqGroup>> = emptyMap(),
+)
+
 /** One row's worth of long-press action, mirrors iOS ContextAction. */
 internal data class ContextAction(
     val title: String,
@@ -135,13 +164,62 @@ internal data class ContextAction(
     val onClick: () -> Unit,
 )
 
-/** A row in the account switcher: live nick/UIN peeked per local account. */
+/** A LazyColumn key for a contact row.
+ *
+ *  ⚠ The uin ALONE is not unique and never was. Islands number independently,
+ *  so two cross-island contacts living on two different islands can both be
+ *  #5, and `mergeCrossIslandContacts` only de-duplicates the foreign list
+ *  against the LOCAL roster, not against itself. Two rows with the same key in
+ *  one LazyColumn is not a cosmetic problem: Compose throws on the duplicate
+ *  and the whole chat list goes down with it. The island is part of who the
+ *  row is about, so it is part of the key. A local contact keeps an empty
+ *  island, so its key is what it always was plus a trailing "@".
+ */
+private fun contactKey(prefix: String, contact: Contact) = "${prefix}_${contact.uin}@${contact.host ?: ""}"
+
+/**
+ * One local edit to the sections tree: patch the cache, repaint at the speed of
+ * the tap, push to the island behind the paint.
+ *
+ * The caps throw BEFORE anything is saved, so the user is told "this section is
+ * full" instead of the app writing a blob the island refuses. Deliberately a
+ * top-level function: see the note at its call site in [HomeScreen].
+ */
+private fun applySectionEdit(
+    session: Session,
+    context: android.content.Context,
+    defer: Boolean,
+    edit: (com.google.gson.JsonObject) -> com.google.gson.JsonObject,
+) {
+    try {
+        session.editSections(defer, edit)
+    } catch (e: Sections.SectionsException) {
+        val msg = when (e.code) {
+            "too_many_sections" -> R.string.sections_err_too_many_sections
+            "section_full" -> R.string.sections_err_section_full
+            "too_many_members" -> R.string.sections_err_too_many_members
+            "too_large" -> R.string.sections_err_too_large
+            else -> R.string.sections_err_unreadable
+        }
+        android.widget.Toast.makeText(context, context.getString(msg), android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+/** A row in the account switcher: live nick/UIN peeked per local account, plus
+ *  that account's cached face.
+ *
+ *  The picture comes from [app.rcq.android.data.AccountCards], never from the
+ *  network: only ONE of these accounts has a session behind it, so asking an
+ *  island for the others' profiles is not something this row can do. Same shape
+ *  the desktop settled on (see the file comment on AccountCards). */
 internal data class AccountRow(
     val id: String,
     val nickname: String,
     val uin: Int?,
     val host: String,
     val active: Boolean,
+    val avatarMediaId: String? = null,
+    val avatarMediaKey: String? = null,
 )
 
 /** Open-state and typed query of the "Add" search sheet, kept OUTSIDE
@@ -298,13 +376,10 @@ internal fun HomeScreen(
     // offline section kept re-expanding because it was in-memory remember{}).
     // Set membership = "collapsed", except Archive which defaults to collapsed
     // and stores an "open" marker instead.
+    // The per-section flags themselves are read once here; which key belongs to
+    // which section is decided in the render loop, because the list of sections
+    // is no longer a fixed six (see [Sections.orderedSections]).
     val sectionFlags by LocalStores.sectionFlags.collectAsState()
-    val collapsedFavorites = "sec:fav" in sectionFlags
-    val collapsedGroups = "sec:grp" in sectionFlags
-    val collapsedOnline = "sec:online" in sectionFlags
-    val collapsedOffline = "sec:offline" in sectionFlags
-    val collapsedCrossIsland = "sec:ci" in sectionFlags
-    val collapsedArchive = "sec:archive:open" !in sectionFlags
     // #593: both request headers drew the same chevron as every other section
     // and then ignored the tap ("выглядят сворачиваемыми, но не сворачиваются").
     // They fold and persist like the rest now; the count in the header keeps
@@ -312,27 +387,167 @@ internal fun HomeScreen(
     val collapsedRequests = "sec:req" in sectionFlags
     val collapsedCiRequests = "sec:cireq" in sectionFlags
 
-    // Unread threads float to the top (iOS parity), then by recency.
-    fun byRecency(list: List<Contact>) =
-        list.sortedWith(
-            compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
-                .thenByDescending { messages[it.uin]?.lastOrNull()?.sentAt ?: 0L },
-        )
+    // ── The user's own sections (founder item 1 of 23.08) ────────────────
+    //
+    // Not a seventh hardcoded bucket: they live in the account's "sections"
+    // vault slot, so the same sections, in the same order, with the same chats
+    // filed into them, are on the phone, the desktop and the web. The whole
+    // feature is gated on `capabilities.vault`; a local-only fallback would
+    // create state that syncs badly the day the island upgrades.
+    val sectionsTree by LocalStores.sections.collectAsState()
+    /// ⚠⚠ THREE states, not two: true, false, and **null = not answered yet**.
+    /// See [Session.vaultAvailable]. Only an explicit "no vault" un-files.
+    val sectionsOk by session.vaultAvailable.collectAsState()
+    /// In a DECOY session no section is gated: asking for the real PIN there
+    /// rejects the coercer's decoy PIN as "wrong" and thereby announces that a
+    /// second PIN exists. Exactly what iOS `ContactListView.archiveLocked`
+    /// already does (`if isDecoy { return false }`).
+    val inDecoy = remember { PanicPinService.inDecoySession }
+    /// A real PIN this device can check against. A device with none cannot
+    /// honour the flag, so it does not offer to set one either (§3).
+    val canPin = remember(inDecoy) { !inDecoy && PanicPinService.isConfigured(context) }
+    /// Sections whose PIN has been answered, for THIS visit to the chat list.
+    /// Never persisted and never in the collapse set: it resets when the
+    /// section is collapsed, when the app goes to the background, and on every
+    /// cold start. A gate that survives those is not a gate.
+    var unlockedSections by remember { mutableStateOf(emptySet<String>()) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) unlockedSections = emptySet()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    var sectionMenu by remember { mutableStateOf<SectionMenuTarget?>(null) }
+    var sectionRename by remember { mutableStateOf<SectionMenuTarget?>(null) }
+    var sectionDelete by remember { mutableStateOf<SectionMenuTarget?>(null) }
+    var sectionPicker by remember { mutableStateOf<String?>(null) }
+    var sectionPinPrompt by remember { mutableStateOf<SectionMenuTarget?>(null) }
+    var creatingSection by remember { mutableStateOf(false) }
+    var reorderingSections by remember { mutableStateOf(false) }
+    var draggingSection by remember { mutableStateOf<String?>(null) }
+    var dragDy by remember { mutableStateOf(0f) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    val nonArchived = contacts.filterNot { LocalStores.peerThread(it.uin) in archived }
-    val favContacts = byRecency(nonArchived.filter { LocalStores.peerThread(it.uin) in favorites })
-    // Cross-island contacts live in their own section — presence isn't tracked
-    // across islands, so filing them under online/offline would be a lie.
-    val crossIslandContacts = byRecency(nonArchived.filter { it.host != null })
-    val onlineContacts = byRecency(nonArchived.filter { it.host == null && it.presence != UserStatus.OFFLINE })
-    val offlineContacts = byRecency(nonArchived.filter { it.host == null && it.presence == UserStatus.OFFLINE })
-    val archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived })
-    val visibleGroups = groups.filterNot { LocalStores.groupThread(it.id) in archived }
-    val archivedGroups = groups.filter { LocalStores.groupThread(it.id) in archived }
-    // Favorited groups — surfaced in the Favorites section (the toggle already
-    // persisted, but the section only rendered contacts so a favorited group
-    // never showed, reading as "favoriting does nothing").
-    val favGroups = visibleGroups.filter { LocalStores.groupThread(it.id) in favorites }
+    /// Every local edit goes through here: it patches the cached tree, repaints
+    /// at the speed of the tap, and pushes to the island behind the paint.
+    /// [defer] coalesces a burst (a drag reorder, the picker sheet) into one
+    /// put against the account's 240-an-hour budget.
+    /// ⚠ The try/catch lives in [applySectionEdit], OUTSIDE this composable
+    /// frame, and that placement is not tidiness. A `try` in the body of a
+    /// large composable is how ChatScreen produced a frame ART rejects, and the
+    /// app died on opening a chat. Nothing here builds an exception table.
+    fun editSections(defer: Boolean = false, edit: (com.google.gson.JsonObject) -> com.google.gson.JsonObject) =
+        applySectionEdit(session, context, defer, edit)
+
+    // The whole chat list, sliced and sorted, computed ONCE per change of the
+    // things it is made of.
+    //
+    // ⚠ These used to be plain `val`s in the body of this composable, which
+    // meant five full sorts plus nine filters over the entire roster on EVERY
+    // recomposition of the home screen. That is not a rare event: this body
+    // reads presence, connectivity, the relay shield, the news badge, the
+    // update badge, the account roster and the stealth flag, so a single
+    // presence tick from one contact, or the socket blinking, re-sorted
+    // everything. The founder's iOS report is about the main screen stuttering
+    // while scrolling, and a burst of presence during a scroll is exactly when
+    // this cost lands. Keyed now on the six inputs that can actually change the
+    // result and on nothing else. (Scrolling itself never recomposes this body,
+    // which is why the fix is worth having and also why it is not the whole of
+    // the answer; see the notes on the row composables.)
+    val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk) {
+        // Unread threads float to the top (iOS parity), then by recency.
+        fun byRecency(list: List<Contact>) =
+            list.sortedWith(
+                compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
+                    .thenByDescending { messages[it.uin]?.lastOrNull()?.sentAt ?: 0L },
+            )
+        // Inside a user section: unread first, then favorite, then the sort
+        // this client already uses. Favoriting is NOT cleared when a chat is
+        // filed; it just has no section of its own to render into any more, so
+        // it goes on doing the only other thing it ever did.
+        fun bySectionOrder(list: List<Contact>) =
+            list.sortedWith(
+                compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
+                    .thenByDescending { LocalStores.peerThread(it.uin) in favorites }
+                    .thenByDescending { messages[it.uin]?.lastOrNull()?.sentAt ?: 0L },
+            )
+        fun groupsBySectionOrder(list: List<RcqGroup>) =
+            list.sortedWith(
+                compareByDescending<RcqGroup> { (unread[LocalStores.groupThread(it.id)] ?: 0) > 0 }
+                    .thenByDescending { LocalStores.groupThread(it.id) in favorites }
+                    .thenBy { it.name.lowercase() },
+            )
+
+        // ⚠⚠ `!= false`, not `== true`. An unanswered /server/info keeps the
+        // filing exactly as the cache has it: a chat can only BE filed if the
+        // island had a vault when it was filed, so "we have not asked yet" is
+        // never a reason to spill one. Treating unknown as "no vault" takes the
+        // members of a PIN-gated section and draws them, by name and with their
+        // unread badges, in Online / Offline / Cross-island while the section's
+        // own header disappears. Only an explicit "no vault" un-files anything.
+        val filing = if (sectionsOk == false) emptyMap() else Sections.memberIndex(sectionsTree)
+        val userSecIds = Sections.userSections(sectionsTree).map { Sections.idOf(it) }.toSet()
+        // A membership pointing at a section this build does not hold (deleted
+        // elsewhere, not synced yet) reads as "not filed" and the chat falls
+        // back to its derived section. Rendering is where a stale membership is
+        // forgiven, NEVER where it is deleted.
+        fun sectionOfContact(ct: Contact): String? =
+            // ⚠ The key carries the HOST. LocalStores.peerThread does not, and
+            // two people numbered the same on two islands have bitten this
+            // project twice already.
+            filing[Sections.peerKey(ct.uin, ct.host)]?.takeIf { it in userSecIds }
+        fun sectionOfGroup(g: RcqGroup): String? =
+            app.rcq.android.data.SectionsVault.keyForGroup(g)?.let { filing[it] }?.takeIf { it in userSecIds }
+
+        val nonArchived = contacts.filterNot { LocalStores.peerThread(it.uin) in archived }
+        val visible = groups.filterNot { LocalStores.groupThread(it.id) in archived }
+        // Archive beats a user section, which beats every derived one. The
+        // membership is KEPT in the slot while a chat is archived, so
+        // un-archiving puts it straight back where the user filed it.
+        val filedContacts = LinkedHashMap<String, MutableList<Contact>>()
+        val looseContacts = ArrayList<Contact>()
+        for (ct in nonArchived) {
+            val sid = sectionOfContact(ct)
+            if (sid != null) filedContacts.getOrPut(sid) { ArrayList() }.add(ct) else looseContacts.add(ct)
+        }
+        val filedGroups = LinkedHashMap<String, MutableList<RcqGroup>>()
+        val looseGroups = ArrayList<RcqGroup>()
+        for (g in visible) {
+            val sid = sectionOfGroup(g)
+            if (sid != null) filedGroups.getOrPut(sid) { ArrayList() }.add(g) else looseGroups.add(g)
+        }
+        HomeLists(
+            fav = byRecency(looseContacts.filter { LocalStores.peerThread(it.uin) in favorites }),
+            // Cross-island contacts live in their own section: presence isn't
+            // tracked across islands, so filing them under online/offline would
+            // be a lie.
+            crossIsland = byRecency(looseContacts.filter { it.host != null }),
+            online = byRecency(looseContacts.filter { it.host == null && it.presence != UserStatus.OFFLINE }),
+            offline = byRecency(looseContacts.filter { it.host == null && it.presence == UserStatus.OFFLINE }),
+            archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived }),
+            visibleGroups = looseGroups,
+            archivedGroups = groups.filter { LocalStores.groupThread(it.id) in archived },
+            // Favorited groups are surfaced in the Favorites section (the toggle
+            // already persisted, but the section only rendered contacts so a
+            // favorited group never showed, reading as "favoriting does
+            // nothing").
+            favGroups = looseGroups.filter { LocalStores.groupThread(it.id) in favorites },
+            filedContacts = filedContacts.mapValues { bySectionOrder(it.value) },
+            filedGroups = filedGroups.mapValues { groupsBySectionOrder(it.value) },
+        )
+    }
+    val favContacts = lists.fav
+    val crossIslandContacts = lists.crossIsland
+    val onlineContacts = lists.online
+    val offlineContacts = lists.offline
+    val archivedContacts = lists.archivedContacts
+    val visibleGroups = lists.visibleGroups
+    val archivedGroups = lists.archivedGroups
+    val favGroups = lists.favGroups
+    val filedContacts = lists.filedContacts
+    val filedGroups = lists.filedGroups
 
     // Local account roster for the switcher (live nick/UIN peeked per account).
     // Decoy-aware roster: in decoy mode only the decoy account is visible, so
@@ -345,7 +560,58 @@ internal fun HomeScreen(
     // header showed a name, which is the kind of inconsistency the duress view
     // exists to avoid.
     val inOwnStoreDecoy = session.inDecoySession
-    val accountRows = remember(accountList, activeId, session.nickname, inOwnStoreDecoy) {
+    // Each account's cached face + name (founder item 7). Warmed from disk once
+    // per process so a cold start draws the switcher complete on its first
+    // frame, then read from memory: no island is asked anything to render this.
+    remember { app.rcq.android.data.AccountCards.warm(context) }
+    val accountCards by app.rcq.android.data.AccountCards.cards.collectAsState()
+    val ownAvatarForCard by session.ownAvatar.collectAsState()
+    // The active account describes ITSELF into the cache, and only itself: it
+    // is the only one this process can speak for. Every other row then draws
+    // from what that account wrote the last time it was the active one.
+    //
+    // ⚠ Skipped entirely in a migrated decoy session. There is no roster
+    // account behind that identity, and writing a card for it would put a
+    // fabricated face in a store the real switcher reads.
+    LaunchedEffect(activeId, inOwnStoreDecoy, session.nickname, uin, ownAvatarForCard, session.currentServer) {
+        val id = activeId
+        if (id != null && !inOwnStoreDecoy) {
+            // The live picture if the session has one, else the one the last
+            // profile load left on disk. `ownAvatar` is null both when there is
+            // no picture and for the whole stretch of a launch before the
+            // island has answered, and only the persisted profile can tell
+            // those apart: no profile on disk means we do not know yet, and the
+            // stored card keeps whatever face it had (see AccountCards.record).
+            val profile = session.cachedProfile()
+            val fromDisk = profile?.avatar_media_id?.takeIf { it.isNotEmpty() }?.let { mid ->
+                profile.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { mid to it }
+            }
+            val avatar = ownAvatarForCard ?: fromDisk
+            app.rcq.android.data.AccountCards.record(
+                context = context,
+                accountId = id,
+                nickname = session.nickname,
+                uin = session.uin,
+                avatarMediaId = avatar?.first,
+                avatarMediaKey = avatar?.second,
+                avatarKnown = ownAvatarForCard != null || profile != null,
+                host = session.currentServer,
+            )
+        }
+    }
+    // A card outlives its account otherwise: the account manager forgets one on
+    // its own delete, but burning an account from Privacy and a duress wipe do
+    // not pass through that screen. Skipped while any decoy mode is on, where
+    // the real roster is not a thing this screen may act on.
+    LaunchedEffect(accountList) {
+        if (!app.rcq.android.data.AccountManager.isDecoyMode) {
+            app.rcq.android.data.AccountCards.prune(
+                context,
+                app.rcq.android.data.AccountManager.accounts.value.map { it.id }.toSet(),
+            )
+        }
+    }
+    val accountRows = remember(accountList, activeId, session.nickname, inOwnStoreDecoy, accountCards) {
         if (inOwnStoreDecoy) listOf(
             AccountRow(
                 id = app.rcq.android.data.DecoyStore.STORE_ID,
@@ -355,12 +621,19 @@ internal fun HomeScreen(
                 active = true,
             )
         ) else accountList.sortedBy { it.createdAt }.map { a ->
+            val card = accountCards[a.id]
             AccountRow(
                 id = a.id,
-                nickname = app.rcq.android.data.SecureStore.peekNickname(context, a.id) ?: "—",
-                uin = app.rcq.android.data.SecureStore.peekUin(context, a.id),
-                host = a.serverHost ?: app.rcq.android.net.RcqApi.DEFAULT_HOST,
+                // SecureStore stays the first source for the name: it is
+                // written on every rename by the account itself and the card is
+                // only the fallback for a roster entry that predates the cache.
+                nickname = app.rcq.android.data.SecureStore.peekNickname(context, a.id)
+                    ?: card?.nickname ?: "—",
+                uin = app.rcq.android.data.SecureStore.peekUin(context, a.id) ?: card?.uin,
+                host = a.serverHost ?: card?.host ?: app.rcq.android.net.RcqApi.DEFAULT_HOST,
                 active = a.id == activeId,
+                avatarMediaId = card?.avatarMediaId,
+                avatarMediaKey = card?.avatarMediaKey,
             )
         }
     }
@@ -371,11 +644,115 @@ internal fun HomeScreen(
     val secOffline = stringResource(R.string.home_sec_offline)
     val secCrossIsland = stringResource(R.string.home_sec_cross_island)
     val secArchive = stringResource(R.string.home_sec_archive)
+    val secGroups = stringResource(R.string.home_sec_groups)
 
+    // ── Which sections render, in which order ────────────────────────────
+    //
+    // `o` ascending, ties by id: one total order every device agrees on. The
+    // built-ins are records in the SAME array as the user's own sections (that
+    // is how their order syncs), so this is one list and not two.
+    //
+    // All-empty either because we genuinely have nothing, OR because the first
+    // connect/sync hasn't landed yet (tester #4/#9/#13). Hoisted out of the
+    // list because the Groups section's own visibility turns on it.
+    val connecting = !connected && contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()
+    /// ⚠ `!= false` again: unknown renders the cached tree as it is.
+    val gatingOn = sectionsOk != false
+    val userSectionIds = remember(sectionsTree) {
+        Sections.userSections(sectionsTree).map { Sections.idOf(it) }.toSet()
+    }
+    val orderedSections = remember(sectionsTree) { Sections.orderedSections(sectionsTree) }
+    val renderedSections: List<com.google.gson.JsonObject> = orderedSections.filter { rec ->
+        val id = Sections.idOf(rec)
+        when {
+            id == Sections.SYS_SAVED -> savedCount > 0
+            Sections.kindOf(rec) == "u" -> gatingOn && id in userSectionIds
+            // A section behind a PIN keeps its header whether or not it holds
+            // anything: a header that appears only when there is something
+            // inside announces exactly what the user asked to hide.
+            gatingOn && Sections.isPinnedRecord(rec) -> true
+            id == Sections.SYS_FAV -> favContacts.isNotEmpty() || favGroups.isNotEmpty()
+            id == Sections.SYS_CI -> crossIslandContacts.isNotEmpty()
+            id == Sections.SYS_GROUPS -> !connecting
+            id == Sections.SYS_ONLINE -> onlineContacts.isNotEmpty()
+            id == Sections.SYS_OFFLINE -> offlineContacts.isNotEmpty()
+            id == Sections.SYS_ARCHIVE -> archivedContacts.isNotEmpty() || archivedGroups.isNotEmpty()
+            // A built-in id from a newer client: keep the record, draw nothing.
+            else -> false
+        }
+    }
+
+    /// The rendered order as one string, so a drag gesture can be keyed on it.
+    val sectionOrderKey = renderedSections.joinToString(",") { Sections.idOf(it) }
+
+    /// Move [id] next to [anchorId] and write the new order once.
+    ///
+    /// `o` moves in steps of 1024 and a drop between two neighbours takes the
+    /// midpoint. When the neighbours are less than 2 apart there is no room
+    /// left, so every section is renormalised to `index * 1024`: a normal
+    /// last-writer-wins write, rare, and it converges.
+    fun placeSection(id: String, anchorId: String, after: Boolean) {
+        val rest = orderedSections.filter { Sections.idOf(it) != id }
+        val ai = rest.indexOfFirst { Sections.idOf(it) == anchorId }
+        if (ai < 0) return
+        val at = if (after) ai + 1 else ai
+        val before = rest.getOrNull(at - 1)
+        val next = rest.getOrNull(at)
+        val lo = before?.let { Sections.orderOf(it) }
+            ?: next?.let { Sections.orderOf(it) - 2 * Sections.ORDER_STEP } ?: 0L
+        val hi = next?.let { Sections.orderOf(it) }
+            ?: before?.let { Sections.orderOf(it) + 2 * Sections.ORDER_STEP } ?: Sections.ORDER_STEP
+        if (hi - lo < 2L) {
+            val ids = rest.take(at).map { Sections.idOf(it) } + id + rest.drop(at).map { Sections.idOf(it) }
+            editSections(defer = true) { t ->
+                Sections.setOrder(t, ids.mapIndexed { i, x -> x to i * Sections.ORDER_STEP }.toMap())
+            }
+            return
+        }
+        editSections(defer = true) { t -> Sections.setOrder(t, mapOf(id to (lo + hi) / 2L)) }
+    }
+    fun moveSection(id: String, dir: Int) {
+        val at = renderedSections.indexOfFirst { Sections.idOf(it) == id }
+        if (at < 0) return
+        val neighbour = renderedSections.getOrNull(at + dir) ?: return
+        placeSection(id, Sections.idOf(neighbour), after = dir > 0)
+    }
+    fun dropSection(from: String, over: String) {
+        val a = renderedSections.indexOfFirst { Sections.idOf(it) == from }
+        val b = renderedSections.indexOfFirst { Sections.idOf(it) == over }
+        if (a < 0 || b < 0 || a == b) return
+        placeSection(from, over, after = a < b)
+    }
+    /// A drag ends on whichever HEADER the dragged one now sits closest to.
+    /// The list is a LazyColumn, so the positions come from its own layout
+    /// rather than from anything this screen tracks.
+    fun commitSectionDrag(id: String) {
+        val info = listState.layoutInfo
+        val me = info.visibleItemsInfo.firstOrNull { it.key == "h_$id" }
+        if (me != null) {
+            val centre = me.offset + dragDy + me.size / 2f
+            val target = renderedSections
+                .mapNotNull { r ->
+                    val k = "h_" + Sections.idOf(r)
+                    info.visibleItemsInfo.firstOrNull { it.key == k }?.let { r to (it.offset + it.size / 2f) }
+                }
+                .minByOrNull { kotlin.math.abs(it.second - centre) }
+            if (target != null && Sections.idOf(target.first) != id) dropSection(id, Sections.idOf(target.first))
+        }
+        draggingSection = null
+        dragDy = 0f
+    }
+
+    // Founder item 18: with a wallpaper set, everything the list draws over it
+    // goes translucent so the picture is actually visible through the chat list
+    // instead of being covered edge to edge by opaque rows. 1f (and therefore
+    // no change at all) when there is no wallpaper. See [LocalHomeVeil].
+    val veil = homeVeil()
+    androidx.compose.runtime.CompositionLocalProvider(LocalHomeVeil provides veil) {
     Box(Modifier.fillMaxSize().background(c.bgPrimary)) {
-        // Optional home/chat-list wallpaper (separate from the chat one). Renders
-        // behind the list; transparent rows show it, headers stay opaque. No-op
-        // on the default ("").
+        // Optional home/chat-list wallpaper (separate from the chat one).
+        // Renders behind the list; every container above it is veiled rather
+        // than opaque so it shows through. No-op on the default ("").
         HomeBackground()
         Column(Modifier.fillMaxSize()) {
             HomeHeader(
@@ -433,13 +810,13 @@ internal fun HomeScreen(
                     lineHeight = 16.sp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(c.bgSecondary)
+                        .background(c.bgSecondary.copy(alpha = LocalHomeVeil.current))
                         .clickable(onClick = onOpenBackupIsland)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
             }
 
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
                 if (fsiLost) {
                     item(key = "fsi-lost") {
                         FullScreenIntentBanner(
@@ -515,11 +892,8 @@ internal fun HomeScreen(
                     }
                 }
 
-                // All-empty either because we genuinely have nothing, OR because
-                // the first connect/sync hasn't landed yet (tester #4/#9/#13). In
-                // the latter case show a "connecting" state with the petal loader
-                // instead of the misleading "no contacts" prompt.
-                val connecting = !connected && contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()
+                // In the "connecting" case show a "connecting" state with the
+                // petal loader instead of the misleading "no contacts" prompt.
                 if (contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()) {
                     item(key = "empty") {
                         if (connecting) ConnectingState(stealth = stealthActive) else EmptyState(onAdd = { showAdd = true }, myUin = uin)
@@ -540,93 +914,250 @@ internal fun HomeScreen(
                     }
                 }
 
-                // Saved Messages as a real row, but ONLY once there is something
-                // in it (founder). An always-present row would cost a line
-                // forever to the many people who never write a note; it stays
-                // reachable from the overflow menu when empty.
+                // ── The sections, in the order the vault slot says ──────
                 //
-                // It sits at the TOP, above Favourites: it is your own shelf,
-                // not a conversation, and it used to render after Groups, which
-                // put it in the middle of the list with headers above and below
-                // (vss: "why is it in the middle, it belongs at the very top
-                // next to favourites").
-                if (savedCount > 0) {
-                    item(key = "saved") {
-                        SavedRow(
-                            count = savedCount,
-                            unread = 0,
-                            onClick = onOpenSaved,
-                        )
-                    }
+                // One loop over `orderedSections`, built-ins and the user's own
+                // together, because that is the only way their ORDER can sync:
+                // a built-in is a record in the same array as a user section
+                // and carries nothing but its `o` (and, since 23.08, its `p`).
+                //
+                // ⚠ A chat filed into a user section has already left every
+                // derived one, in `lists` above. It renders once, where the user
+                // put it, and nowhere else.
+                if (reorderingSections) {
+                    item(key = "reorder-bar") { SectionReorderBar(onDone = { reorderingSections = false }) }
                 }
-
-                // Favorites holds BOTH favorited contacts AND groups (mirrors
-                // the Archive section). A favorited group used to vanish because
-                // this section rendered only contacts.
-                if (favContacts.isNotEmpty() || favGroups.isNotEmpty()) {
-                    val favUnread = favContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
-                        favGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
-                    item(key = "h_fav") {
-                        SectionHeader(secFavorites, favContacts.size + favGroups.size, collapsedFavorites, { LocalStores.setSectionFlag("sec:fav", !collapsedFavorites) }) {
-                            UnreadBadge(favUnread)
+                for (rec in renderedSections) {
+                    val sid = Sections.idOf(rec)
+                    val isUser = Sections.kindOf(rec) == "u"
+                    // Saved Messages is a ROW here, not a section: `sys.saved`
+                    // holds its ORDER only (design §7), which is exactly why it
+                    // is inside this loop rather than pinned above it.
+                    //
+                    // It has been at the TOP since vss asked ("why is it in the
+                    // middle, it belongs at the very top next to favourites"),
+                    // and its default `o` of 0 is what keeps it there.
+                    if (sid == Sections.SYS_SAVED) {
+                        item(key = "saved") { SavedRow(count = savedCount, unread = 0, onClick = onOpenSaved) }
+                        continue
+                    }
+                    val title = when (sid) {
+                        Sections.SYS_FAV -> secFavorites
+                        Sections.SYS_CI -> secCrossIsland
+                        Sections.SYS_GROUPS -> secGroups
+                        Sections.SYS_ONLINE -> secOnline
+                        Sections.SYS_OFFLINE -> secOffline
+                        Sections.SYS_ARCHIVE -> secArchive
+                        else -> Sections.nameOf(rec) ?: ""
+                    }
+                    // ⚠ The gate is per DEVICE and it is a collapsed header, not
+                    // a key. In a decoy session nothing is gated at all: asking
+                    // for the real PIN there rejects the coercer's decoy PIN as
+                    // "wrong" and announces that a second PIN exists.
+                    val pinnedRec = gatingOn && !inDecoy && Sections.isPinnedRecord(rec)
+                    val unlockedNow = pinnedRec && sid in unlockedSections
+                    val locked = pinnedRec && !unlockedNow
+                    val isArchive = sid == Sections.SYS_ARCHIVE
+                    val collapseKey = when (sid) {
+                        Sections.SYS_FAV -> "sec:fav"
+                        Sections.SYS_GROUPS -> "sec:grp"
+                        Sections.SYS_ONLINE -> "sec:online"
+                        Sections.SYS_OFFLINE -> "sec:offline"
+                        Sections.SYS_CI -> "sec:ci"
+                        else -> "sec:u:$sid"
+                    }
+                    val collapsed = when {
+                        locked -> true
+                        pinnedRec -> false
+                        isArchive -> "sec:archive:open" !in sectionFlags
+                        else -> collapseKey in sectionFlags
+                    }
+                    val target = SectionMenuTarget(sid, title, isUser, Sections.isPinnedRecord(rec))
+                    val onToggle: () -> Unit = {
+                        when {
+                            locked -> sectionPinPrompt = target
+                            // Collapsing a section the user got past the PIN for
+                            // puts the gate back. The unlocked set is view
+                            // memory and nothing else.
+                            pinnedRec -> unlockedSections = unlockedSections - sid
+                            isArchive -> LocalStores.setSectionFlag("sec:archive:open", collapsed)
+                            else -> LocalStores.setSectionFlag(collapseKey, !collapsed)
                         }
                     }
-                    if (!collapsedFavorites) {
-                        items(favContacts, key = { "fav_${it.uin}" }) { ct ->
-                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
-                        }
-                        items(favGroups, key = { "favg_${it.id}" }) { g ->
-                            GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
-                        }
+                    // ⚠⚠ NO MENU ON A LOCKED SECTION, and this is the gate
+                    // itself rather than a nicety. The menu carries "stop asking
+                    // for a PIN" and "delete section", and neither asks for the
+                    // PIN: on a locked header they turn the gate off in two
+                    // taps, with no verify call, no failure counter and no
+                    // cooldown, and then sync p:0 to every other device. The
+                    // plus button and the rename are suppressed for the same
+                    // reason. Unlock first, then the menu.
+                    val onLongPress: (() -> Unit)? =
+                        if (sectionsOk == true && !locked && !reorderingSections) ({ sectionMenu = target }) else null
+                    val cs = filedContacts[sid].orEmpty()
+                    val gs = filedGroups[sid].orEmpty()
+                    val count = when (sid) {
+                        Sections.SYS_FAV -> favContacts.size + favGroups.size
+                        Sections.SYS_CI -> crossIslandContacts.size
+                        Sections.SYS_GROUPS -> visibleGroups.size
+                        Sections.SYS_ONLINE -> onlineContacts.size
+                        Sections.SYS_OFFLINE -> offlineContacts.size
+                        Sections.SYS_ARCHIVE -> archivedContacts.size + archivedGroups.size
+                        else -> cs.size + gs.size
                     }
-                }
-
-                // Groups — header always shows a "+" to create, like iOS. Hidden
-                // while connecting so the "create a group" prompt doesn't flash
-                // before the real groups arrive (tester #13).
-                if (!connecting) {
-                    item(key = "grp-h") {
-                        SectionHeader(stringResource(R.string.home_sec_groups), visibleGroups.size, collapsedGroups, { LocalStores.setSectionFlag("sec:grp", !collapsedGroups) }) {
-                            Icon(Icons.Filled.Add, "New group", tint = c.accent, modifier = Modifier.size(20.dp).clip(CircleShape).clickable { showCreateGroup = true })
-                        }
+                    // ⚠ While locked, no member count and no unread badge. A
+                    // badge is a leak of exactly what the user hid.
+                    val headerUnread = if (locked) 0 else when (sid) {
+                        Sections.SYS_FAV -> favContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
+                            favGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
+                        Sections.SYS_CI -> crossIslandContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 }
+                        Sections.SYS_GROUPS -> 0
+                        Sections.SYS_ONLINE -> onlineContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 }
+                        Sections.SYS_OFFLINE -> offlineContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 }
+                        Sections.SYS_ARCHIVE -> archivedContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
+                            archivedGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
+                        else -> cs.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
+                            gs.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
                     }
-                    if (!collapsedGroups) {
-                        if (visibleGroups.isEmpty()) {
-                            item(key = "grp-empty") {
-                                Row(Modifier.fillMaxWidth().clickable { showCreateGroup = true }.padding(horizontal = 10.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Filled.Add, null, tint = c.accent, modifier = Modifier.size(18.dp))
-                                    Text(stringResource(R.string.home_create_group), color = c.textPrimary, fontSize = 13.sp)
+                    item(key = "h_$sid") {
+                        val dragging = draggingSection == sid
+                        Box(
+                            Modifier
+                                .graphicsLayer { translationY = if (dragging) dragDy else 0f }
+                                .then(
+                                    // ⚠⚠ KEYED ON THE ORDER, not on the id alone.
+                                    // `pointerInput` does NOT restart its
+                                    // coroutine when the key is unchanged, so
+                                    // the running gesture goes on using the
+                                    // lambdas captured by the composition that
+                                    // started it -- including the section list
+                                    // as it stood THEN. Keyed on `sid` only,
+                                    // the first drop after an arrow move
+                                    // computed "is the target above or below
+                                    // me" from the order before the arrow, put
+                                    // the section back where it already was,
+                                    // and looked like a drag that does nothing
+                                    // (seen on the emulator, 23.08). The order
+                                    // can only change between drags, never
+                                    // during one, so restarting on it is free.
+                                    if (!reorderingSections) Modifier else Modifier.pointerInput(sid, sectionOrderKey) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { draggingSection = sid; dragDy = 0f },
+                                            onDrag = { change, amount -> change.consume(); dragDy += amount.y },
+                                            onDragEnd = { commitSectionDrag(sid) },
+                                            onDragCancel = { draggingSection = null; dragDy = 0f },
+                                        )
+                                    },
+                                ),
+                        ) {
+                            SectionHeader(
+                                title = title,
+                                count = count,
+                                collapsed = collapsed,
+                                onToggle = onToggle,
+                                onLongPress = onLongPress,
+                                showCount = !locked,
+                                locked = pinnedRec,
+                            ) {
+                                when {
+                                    reorderingSections -> {
+                                        Icon(
+                                            Icons.Filled.KeyboardArrowUp,
+                                            stringResource(R.string.sections_move_up),
+                                            tint = c.accent,
+                                            modifier = Modifier.size(22.dp).clip(CircleShape).clickable { moveSection(sid, -1) },
+                                        )
+                                        Spacer(Modifier.size(6.dp))
+                                        Icon(
+                                            Icons.Filled.KeyboardArrowDown,
+                                            stringResource(R.string.sections_move_down),
+                                            tint = c.accent,
+                                            modifier = Modifier.size(22.dp).clip(CircleShape).clickable { moveSection(sid, 1) },
+                                        )
+                                    }
+                                    // The plus that files a chat into this
+                                    // section. Suppressed while locked, same
+                                    // rule as the menu.
+                                    isUser && !locked -> Icon(
+                                        Icons.Filled.Add,
+                                        stringResource(R.string.sections_add),
+                                        tint = c.accent,
+                                        modifier = Modifier.size(20.dp).clip(CircleShape).clickable { sectionPicker = sid },
+                                    )
+                                    sid == Sections.SYS_GROUPS -> Icon(
+                                        Icons.Filled.Add,
+                                        "New group",
+                                        tint = c.accent,
+                                        modifier = Modifier.size(20.dp).clip(CircleShape).clickable { showCreateGroup = true },
+                                    )
+                                    else -> UnreadBadge(headerUnread)
                                 }
                             }
-                        } else {
-                            items(items = visibleGroups, key = { it.id }) { g: RcqGroup ->
+                        }
+                    }
+                    if (collapsed) continue
+                    when (sid) {
+                        // Favorites holds BOTH favorited contacts AND groups
+                        // (mirrors Archive). A favorited group used to vanish
+                        // because this section rendered only contacts.
+                        Sections.SYS_FAV -> {
+                            items(favContacts, key = { contactKey("fav", it) }) { ct ->
+                                ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            }
+                            items(favGroups, key = { "favg_${it.id}" }) { g ->
                                 GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
                             }
                         }
-                    }
-                }
-
-                contactSection(secOnline, onlineContacts, collapsedOnline, "on", unread, session, { LocalStores.setSectionFlag("sec:online", !collapsedOnline) }, onOpenChat, onLongPress = { previewContact = it })
-                contactSection(secOffline, offlineContacts, collapsedOffline, "off", unread, session, { LocalStores.setSectionFlag("sec:offline", !collapsedOffline) }, onOpenChat, onLongPress = { previewContact = it })
-                contactSection(secCrossIsland, crossIslandContacts, collapsedCrossIsland, "cisl", unread, session, { LocalStores.setSectionFlag("sec:ci", !collapsedCrossIsland) }, onOpenChat, onLongPress = { previewContact = it })
-                // Archive holds BOTH archived contacts AND archived groups.
-                // (Bug fix: an archived group was filtered out of the main list
-                // but never rendered here, so it vanished entirely and couldn't
-                // be un-archived. Now it shows here, long-press to unarchive.)
-                if (archivedContacts.isNotEmpty() || archivedGroups.isNotEmpty()) {
-                    val archUnread = archivedContacts.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 } +
-                        archivedGroups.sumOf { unread[LocalStores.groupThread(it.id)] ?: 0 }
-                    item(key = "h_arch") {
-                        SectionHeader(secArchive, archivedContacts.size + archivedGroups.size, collapsedArchive, { LocalStores.setSectionFlag("sec:archive:open", collapsedArchive) }) {
-                            UnreadBadge(archUnread)
+                        Sections.SYS_GROUPS -> {
+                            if (visibleGroups.isEmpty()) {
+                                item(key = "grp-empty") {
+                                    Row(Modifier.fillMaxWidth().clickable { showCreateGroup = true }.padding(horizontal = 10.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Icon(Icons.Filled.Add, null, tint = c.accent, modifier = Modifier.size(18.dp))
+                                        Text(stringResource(R.string.home_create_group), color = c.textPrimary, fontSize = 13.sp)
+                                    }
+                                }
+                            } else {
+                                items(items = visibleGroups, key = { it.id }) { g: RcqGroup ->
+                                    GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                                }
+                            }
                         }
-                    }
-                    if (!collapsedArchive) {
-                        items(archivedContacts, key = { "arch_${it.uin}" }) { ct ->
+                        Sections.SYS_ONLINE -> items(onlineContacts, key = { contactKey("on", it) }) { ct ->
                             ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
                         }
-                        items(archivedGroups, key = { "archg_${it.id}" }) { g ->
-                            GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                        Sections.SYS_OFFLINE -> items(offlineContacts, key = { contactKey("off", it) }) { ct ->
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                        }
+                        Sections.SYS_CI -> items(crossIslandContacts, key = { contactKey("cisl", it) }) { ct ->
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                        }
+                        // Archive holds BOTH archived contacts AND archived
+                        // groups. (An archived group was filtered out of the
+                        // main list but never rendered here, so it vanished
+                        // entirely and could not be un-archived.)
+                        Sections.SYS_ARCHIVE -> {
+                            items(archivedContacts, key = { contactKey("arch", it) }) { ct ->
+                                ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            }
+                            items(archivedGroups, key = { "archg_${it.id}" }) { g ->
+                                GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                            }
+                        }
+                        else -> {
+                            // An EMPTY user section still renders, header, plus
+                            // button and hint: the user made it on purpose. This
+                            // is where it differs from Archive and Favorites,
+                            // which hide when empty.
+                            if (cs.isEmpty() && gs.isEmpty()) {
+                                item(key = "u-empty-$sid") { SectionEmptyHint() }
+                            } else {
+                                items(gs, key = { "u${sid}g${it.id}" }) { g ->
+                                    GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                                }
+                                items(cs, key = { contactKey("u$sid", it) }) { ct ->
+                                    ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                                }
+                            }
                         }
                     }
                 }
@@ -671,7 +1202,7 @@ internal fun HomeScreen(
         previewGroup?.let { g ->
             PreviewOverlay(
                 title = g.name,
-                subtitle = pluralStringResource(R.plurals.members, g.memberCount, g.memberCount),
+                subtitle = memberCountLabel(g.memberCount),
                 avatar = { GroupAvatar(g, session, 36.dp) },
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
                     onClearThread = { clearGroupTarget = it }),
@@ -679,6 +1210,7 @@ internal fun HomeScreen(
             )
         }
     }
+    } // CompositionLocalProvider(LocalHomeVeil)
 
     if (showAdd) {
         AddContactDialog(
@@ -800,6 +1332,127 @@ internal fun HomeScreen(
             },
         )
     }
+    // ── The sections sheets (founder item 1 of 23.08) ─────────────────────
+    sectionMenu?.let { t ->
+        SectionMenuSheet(
+            target = t,
+            canPin = canPin,
+            onReorder = { reorderingSections = true },
+            onTogglePin = {
+                val on = !t.pinned
+                editSections { tree -> Sections.setPinned(tree, t.id, on) }
+                // Turning the gate ON closes it here and now; leaving it on an
+                // open section until the next cold start is a gate the user
+                // watched not happen.
+                if (on) unlockedSections = unlockedSections - t.id
+            },
+            onNew = { creatingSection = true },
+            onRename = { sectionRename = t },
+            onDelete = { sectionDelete = t },
+            onDismiss = { sectionMenu = null },
+        )
+    }
+    if (creatingSection) {
+        SectionNameSheet(
+            title = stringResource(R.string.sections_new_title),
+            initial = "",
+            saveLabel = stringResource(R.string.sections_new_save),
+            onSave = { name -> editSections { tree -> Sections.createSection(tree, name) } },
+            onDismiss = { creatingSection = false },
+        )
+    }
+    sectionRename?.let { t ->
+        SectionNameSheet(
+            title = stringResource(R.string.sections_rename_title),
+            initial = t.title,
+            saveLabel = stringResource(R.string.sections_rename_save),
+            onSave = { name -> editSections { tree -> Sections.renameSection(tree, t.id, name) } },
+            onDismiss = { sectionRename = null },
+        )
+    }
+    sectionDelete?.let { t ->
+        RcqAskSheet(
+            onDismiss = { sectionDelete = null },
+            title = t.title,
+            body = stringResource(R.string.sections_delete_confirm),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.sections_menu_delete),
+                    destructive = true,
+                    onClick = {
+                        // Deleting a section does not touch the chats: its
+                        // members fall back into their derived sections on the
+                        // next render.
+                        editSections { tree -> Sections.deleteSection(tree, t.id) }
+                        sectionDelete = null
+                    },
+                ),
+            ),
+        )
+    }
+    sectionPinPrompt?.let { t ->
+        SectionPinSheet(
+            title = t.title,
+            onUnlocked = { unlockedSections = unlockedSections + t.id },
+            onDismiss = { sectionPinPrompt = null },
+        )
+    }
+    sectionPicker?.let { id ->
+        val rec = remember(sectionsTree, id) { Sections.recordFor(sectionsTree, id) }
+        // ⚠ Seeded ONCE per opening of the sheet, keyed on the section and not
+        // on the tree. The sheet hands back what the USER did, relative to the
+        // membership it opened on: re-seeding this when the tree moves (the
+        // desktop files a chat here, the nudge folds it into the cache) turns a
+        // row the user never touched into a removal, with a tombstone newer
+        // than the other device's add, and the merge keeps the undo.
+        val initial = remember(id) { Sections.membersOf(sectionsTree, id) }
+        val candidates = remember(contacts, groups) {
+            val byKey = LinkedHashMap<String, SectionCandidate>()
+            for (ct in contacts) {
+                val key = Sections.peerKey(ct.uin, ct.host)
+                if (byKey.containsKey(key)) continue
+                byKey[key] = SectionCandidate(
+                    key = key,
+                    title = session.contactName(ct.uin).ifBlank { "#${ct.uin}" },
+                    subtitle = if (ct.host != null) "#${ct.uin} \u00b7 ${ct.host}" else "#${ct.uin}",
+                    group = false,
+                    avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 30.dp) },
+                )
+            }
+            for (g in groups) {
+                // ⚠⚠ Never the local id for a foreign group: it is a negative
+                // alias this device made up.
+                val key = app.rcq.android.data.SectionsVault.keyForGroup(g) ?: continue
+                if (byKey.containsKey(key)) continue
+                byKey[key] = SectionCandidate(
+                    key = key,
+                    title = g.name,
+                    subtitle = g.host ?: secGroups,
+                    group = true,
+                    avatar = { GroupAvatar(g, session, 30.dp) },
+                )
+            }
+            byKey.values.toList()
+        }
+        SectionPickerSheet(
+            sectionName = Sections.nameOf(rec ?: com.google.gson.JsonObject()) ?: "",
+            candidates = candidates,
+            initial = initial,
+            onSave = { added, removed ->
+                // ⚠ What the USER did, never "the membership is now exactly
+                // this list": the sheet's checkboxes are seeded once and the
+                // tree moves under an open sheet.
+                if (added.isNotEmpty() || removed.isNotEmpty()) {
+                    editSections { tree ->
+                        var out = if (added.isNotEmpty()) Sections.addMembers(tree, id, added) else tree
+                        for (k in removed) out = Sections.removeMemberFrom(out, id, k)
+                        out
+                    }
+                }
+            },
+            onDismiss = { sectionPicker = null },
+        )
+    }
     comingSoon?.let { feature ->
         // Nothing to decide here, so OK IS the way out: it becomes the sheet's
         // own dismissal row instead of a second row that closes the same thing.
@@ -813,13 +1466,81 @@ internal fun HomeScreen(
     }
 }
 
+/**
+ * One account's face in the switcher and in the account manager (founder
+ * item 7).
+ *
+ * The picture, when that account has one cached, otherwise the generic account
+ * glyph this slot has always shown. Nothing here can fail into a blank: the
+ * glyph is drawn first and the picture covers it, so an account whose blob is
+ * not on this device yet looks exactly like it did before this existed.
+ *
+ * ⚠ The island is passed down to the fetch, and it matters. The desktop hands
+ * its avatar component the ROW's own `apiBase` for the same reason: a row for
+ * an account living on another island must not ask the ACTIVE island for a
+ * picture it has never held. Skipped when the row is already on our island, so
+ * the common single-island case keeps using the session's own configured client
+ * rather than a second one built for the same host. Media reads are
+ * unauthenticated, so no token belonging to any account is involved either way.
+ */
+@Composable
+internal fun AccountAvatar(
+    mediaId: String?,
+    mediaKey: String?,
+    host: String?,
+    active: Boolean,
+    session: Session,
+    size: Dp,
+) {
+    val c = RcqTheme.colors
+    val foreign = host?.takeIf { it.isNotBlank() && it != session.currentServer }
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Icon(
+            Icons.Outlined.AccountCircle, null,
+            tint = if (active) c.accent else c.textSecondary,
+            modifier = Modifier.size(size),
+        )
+        // Presence is deliberately absent: this is a list of MY identities, and
+        // a status flower on an account that is not the mounted one would be
+        // reporting a presence nothing is keeping up to date. `showStatus =
+        // false` also makes the no-picture case draw nothing at all, which is
+        // what lets the glyph above show through.
+        PersonAvatar(
+            mediaId, mediaKey, UserStatus.OFFLINE, session, size,
+            host = foreign, showStatus = false,
+        )
+        if (active) {
+            Box(
+                Modifier.align(Alignment.BottomEnd)
+                    .size(size * 0.42f)
+                    .clip(CircleShape)
+                    .background(c.bgSecondary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(size * 0.34f))
+            }
+        }
+    }
+}
+
+/** [AccountAvatar] for a switcher row that has already been assembled. */
+@Composable
+private fun AccountAvatar(row: AccountRow, session: Session, size: Dp) =
+    AccountAvatar(row.avatarMediaId, row.avatarMediaKey, row.host, row.active, session, size)
+
 /** Saved Messages in the chat list. Same shape as a contact row so it does not
  *  read as a special banner, with a bookmark instead of an avatar. */
 @Composable
 private fun SavedRow(count: Int, unread: Int, onClick: () -> Unit) {
     val c = RcqTheme.colors
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
+        // A fill of its own, because it is a list row and every other list row
+        // has one. Identical to the screen's background without a wallpaper;
+        // with one it takes the same veil as its neighbours instead of leaving
+        // its two lines of text standing on the picture (founder item 18b).
+        Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -955,21 +1676,9 @@ private fun HomeHeader(
     var statusMenu by remember { mutableStateOf(false) }
     var accountMenu by remember { mutableStateOf(false) }
     var overflowMenu by remember { mutableStateOf(false) }
-    var showPresenceInfo by remember { mutableStateOf(false) }
     var showStealthInfo by remember { mutableStateOf(false) }
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
-    if (showPresenceInfo) {
-        // OK is the only way out of an explanation, so it is the sheet's own
-        // dismissal row rather than an extra one next to it.
-        RcqAskSheet(
-            onDismiss = { showPresenceInfo = false },
-            title = stringResource(R.string.presence_info_title),
-            body = stringResource(R.string.presence_info_body),
-            actions = emptyList(),
-            cancelLabel = stringResource(R.string.common_ok),
-        )
-    }
     if (showStealthInfo) {
         // Two paragraphs with their own colours, so the bare sheet rather than
         // the ask-sheet's single body line.
@@ -1028,10 +1737,12 @@ private fun HomeHeader(
                                 a.uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
                             }
                         },
-                        leadingIcon = {
-                            if (a.active) Icon(Icons.Filled.Check, null, tint = c.accent)
-                            else Icon(Icons.Outlined.AccountCircle, null, tint = c.textSecondary)
-                        },
+                        // The account's own face, from the cache it wrote when it
+                        // was last active (founder item 7). The tick that used to
+                        // be the whole of this slot moves onto the picture as a
+                        // corner badge, so "which one am I on" is still answered
+                        // without spending the only place a face can go.
+                        leadingIcon = { AccountAvatar(a, session, 30.dp) },
                         onClick = { accountMenu = false; if (!a.active) onSwitchAccount(a.id) },
                     )
                 }
@@ -1091,12 +1802,10 @@ private fun HomeHeader(
                     )
                 }
                 DropdownMenu(expanded = statusMenu, onDismissRequest = { statusMenu = false }) {
-                    // "Stay visible after you leave" countdown, top-right of the
-                    // status menu (moved here from the home header).
-                    PresenceCountdownChip(
-                        modifier = Modifier.align(Alignment.End).padding(end = 10.dp, top = 4.dp, bottom = 2.dp),
-                        onClick = { statusMenu = false; showPresenceInfo = true },
-                    )
+                    // ⚠ The "stay visible after you leave" countdown used to sit
+                    // here and is gone with the feature (founder, 23.08): Privacy
+                    // no longer offers the switch, so nothing anchors a window and
+                    // the chip could only ever draw nothing.
                     listOf(UserStatus.ONLINE, UserStatus.AWAY, UserStatus.DND, UserStatus.INVISIBLE, UserStatus.OFFLINE).forEach { st ->
                         DropdownMenuItem(
                             text = { Text(stringResource(st.labelRes), color = c.textPrimary) },
@@ -1268,91 +1977,15 @@ private fun HomeHeader(
     }
 }
 
-/** Compact "stay visible" countdown shown left of the home status icon:
- *  how long until presence drops back to offline after the user leaves. The
- *  window is anchored in Privacy settings (LocalStores.presenceWindow) and
- *  re-anchored whenever the user changes it; hidden when off or elapsed. */
-@Composable
-private fun PresenceCountdownChip(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
-    val c = RcqTheme.colors
-    val window by app.rcq.android.data.LocalStores.presenceWindow.collectAsState()
-    val remaining by produceState<Long?>(
-        initialValue = window?.minus(System.currentTimeMillis())?.takeIf { it > 0 },
-        window,
-    ) {
-        val w = window
-        if (w == null) { value = null; return@produceState }
-        while (true) {
-            val r = w - System.currentTimeMillis()
-            value = if (r > 0) r else null
-            if (r <= 0) return@produceState
-            kotlinx.coroutines.delay(15_000L)
-        }
-    }
-    val r = remaining ?: return
-    val mod = modifier
-        .clip(RoundedCornerShape(50))
-        .background(c.bgSecondary)
-        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-        .padding(horizontal = 7.dp, vertical = 3.dp)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        modifier = mod,
-    ) {
-        Icon(Icons.Outlined.Schedule, contentDescription = null, tint = c.accent, modifier = Modifier.size(12.dp))
-        Text(presenceCountdownLabel(r), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-    }
-}
-
-@Composable
-private fun presenceCountdownLabel(ms: Long): String {
-    val totalMin = (ms / 60_000L).toInt()
-    val h = totalMin / 60
-    val m = totalMin % 60
-    return when {
-        h > 0 && m > 0 -> stringResource(R.string.presence_countdown_hm, h, m)
-        h > 0 -> stringResource(R.string.presence_countdown_h, h)
-        totalMin > 0 -> stringResource(R.string.presence_countdown_m, m)
-        else -> stringResource(R.string.presence_countdown_lt1m)
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-private fun LazyListScope.contactSection(
-    title: String,
-    rows: List<Contact>,
-    collapsed: Boolean,
-    keyPrefix: String,
-    unread: Map<String, Int>,
-    session: Session,
-    onToggle: () -> Unit,
-    onOpenChat: (Int) -> Unit,
-    onLongPress: (Contact) -> Unit,
-) {
-    if (rows.isEmpty()) return
-    // Aggregate unread for the section header badge (shown when collapsed
-    // so a folded section still signals new messages — iOS parity).
-    val sectionUnread = rows.sumOf { unread[LocalStores.peerThread(it.uin)] ?: 0 }
-    item(key = "h_$keyPrefix") {
-        SectionHeader(title, rows.size, collapsed, onToggle) {
-            UnreadBadge(sectionUnread)
-        }
-    }
-    if (!collapsed) {
-        items(rows, key = { "${keyPrefix}_${it.uin}" }) { ct ->
-            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { onLongPress(ct) })
-        }
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int, onClick: () -> Unit, onLongPress: () -> Unit) {
     val c = RcqTheme.colors
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
+    // NOT `by`: the animated value is read inside the graphicsLayer block
+    // below, in the draw phase, so a press animates without recomposing the row.
+    val scale = animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
     // Observe the mute set so toggling mute reflects on the row immediately
     // (was a one-shot read → the bell only appeared after leaving + re-entering).
     val mutedSet by LocalStores.muted.collectAsState()
@@ -1363,9 +1996,15 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
     val hasReaction = thread in reactSet
     val hasMention = thread in mentionSet
     Row(
-        Modifier.fillMaxWidth().scale(scale)
+        Modifier.fillMaxWidth()
+            // graphicsLayer, not Modifier.scale: `scale` is read here in the
+            // modifier chain, so every frame of the press animation invalidated
+            // this row's COMPOSITION. Read inside the layer block instead and
+            // the animation costs a redraw, which is what it is.
+            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
             .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
-            .background(c.bgPrimary).padding(horizontal = 10.dp, vertical = 7.dp),
+            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -1385,8 +2024,7 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
             }
             Text(
-                pluralStringResource(R.plurals.members, group.memberCount, group.memberCount) +
-                    (group.host?.let { " · $it" } ?: ""),
+                memberCountLabel(group.memberCount) + (group.host?.let { " · $it" } ?: ""),
                 color = c.textSecondary, fontSize = 12.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
@@ -1411,7 +2049,9 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
     val c = RcqTheme.colors
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
+    // NOT `by`: the animated value is read inside the graphicsLayer block
+    // below, in the draw phase, so a press animates without recomposing the row.
+    val scale = animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
     val mutedSet by LocalStores.muted.collectAsState()
     val muted = LocalStores.peerThread(contact.uin) in mutedSet
     val reactSet by LocalStores.reactionInbox.collectAsState()
@@ -1423,9 +2063,11 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
+            // See [GroupRow]: read the press animation in the draw phase, not
+            // in composition.
+            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
             .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
-            .background(c.bgPrimary)
+            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1494,7 +2136,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
 private fun PendingRow(name: String, fromUin: Int, onOpenProfile: (Int) -> Unit, onAccept: () -> Unit, onDecline: () -> Unit) {
     val c = RcqTheme.colors
     Row(
-        Modifier.fillMaxWidth().background(c.bgPrimary).padding(horizontal = 10.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().background(c.bgPrimary.copy(alpha = LocalHomeVeil.current)).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
@@ -1541,7 +2183,7 @@ private fun CiPendingRow(
 ) {
     val c = RcqTheme.colors
     Row(
-        Modifier.fillMaxWidth().background(c.bgPrimary).padding(horizontal = 10.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().background(c.bgPrimary.copy(alpha = LocalHomeVeil.current)).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
@@ -1567,7 +2209,7 @@ private fun FullScreenIntentBanner(onFix: () -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary.copy(alpha = LocalHomeVeil.current)).padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Notifications, null, tint = c.accent, modifier = Modifier.size(20.dp))
@@ -1595,7 +2237,7 @@ private fun PushNudgeBanner(onSetup: () -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary.copy(alpha = LocalHomeVeil.current)).padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Notifications, null, tint = c.accent, modifier = Modifier.size(20.dp))
@@ -1626,7 +2268,11 @@ private fun InviteNudge(myUin: Int, onAdd: () -> Unit) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+        // Veiled like a row rather than left bare on the wallpaper: this block
+        // is prose, and prose is the first thing a busy picture eats.
+        Modifier.fillMaxWidth()
+            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
+            .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
@@ -1719,7 +2365,7 @@ private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onNearby: () -> Unit,
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(percent = 50))
-            .background(c.bgSecondary)
+            .background(c.bgSecondary.copy(alpha = LocalHomeVeil.current))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -1852,7 +2498,7 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
         }
         Spacer(Modifier.height(8.dp))
         LazyColumn(Modifier.weight(1f)) {
-            items(filtered, key = { it.uin }) { ct ->
+            items(filtered, key = { contactKey("search", it) }) { ct ->
                 Row(
                     Modifier.fillMaxWidth().clickable { onSelect(ct) }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2071,7 +2717,7 @@ private fun AddContactDialog(
                                 pv?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_loading),
                                 when {
                                     closed -> stringResource(R.string.group_invite_closed)
-                                    pv != null -> pluralStringResource(R.plurals.members, pv.member_count, pv.member_count)
+                                    pv != null -> memberCountLabel(pv.member_count)
                                     foreignHost != null -> foreignHost
                                     else -> stringResource(R.string.group_invite_tap_join)
                                 },
@@ -2265,7 +2911,7 @@ private fun AddContactDialog(
                         groups.forEach { g ->
                             AddResultRow(
                                 g.name ?: "#${g.id}",
-                                pluralStringResource(R.plurals.members, g.member_count, g.member_count),
+                                memberCountLabel(g.member_count),
                                 isGroup = true,
                                 session = session,
                                 avatarMediaId = g.avatar_media_id,
@@ -2338,7 +2984,7 @@ private fun GroupJoinConfirmSheet(
                     maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    pluralStringResource(R.plurals.members, preview.member_count, preview.member_count),
+                    memberCountLabel(preview.member_count),
                     color = c.textSecondary, fontSize = 12.sp,
                 )
             }
@@ -2531,7 +3177,7 @@ private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<C
             )
             Text(stringResource(R.string.home_add_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                items(contacts, key = { it.uin }) { ct ->
+                items(contacts, key = { contactKey("grp", it) }) { ct ->
                     Row(
                         Modifier.fillMaxWidth().clickable { selected[ct.uin] = !(selected[ct.uin] ?: false) }.padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,

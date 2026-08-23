@@ -494,11 +494,18 @@
     <string name="my_uins_footer">当你用其中一个号码对外回应时，其余号码只是为你保留。别人无法占用。</string>
     <string name="settings_foot_appearance">选择浅色、深色，或跟随系统主题。</string>
     <string name="settings_text_size">文字大小</string>
+    <string name="settings_row_theme">主题</string>
+    <string name="settings_search_hint">搜索设置</string>
     <string name="settings_row_app_icon">应用图标</string>
     <string name="settings_row_chat_bg">聊天背景</string>
     <string name="settings_row_home_bg">主界面背景</string>
     <string name="chat_bg_none">无</string>
     <string name="chat_bg_custom">相册</string>
+    <!-- Under the wallpaper grid: the built-in gradients are filtered
+         to the ones drawn for the theme in use (the selected one is always
+         kept). Without this line a shorter grid reads as wallpapers having
+         gone missing. -->
+    <string name="chat_bg_theme_set_note">适合当前主题的壁纸。自定义图片始终可用。</string>
     <string name="app_icon_default">默认</string>
     <string name="app_icon_footer">选择另一个启动器图标。更新时主屏幕可能会闪一下。</string>
     <string name="settings_foot_privacy">控制谁能看到你、谁能联系你。服务器、代理和 RCQ 中继在“网络”里。</string>
@@ -524,6 +531,9 @@
     <string name="common_copy_uin">复制 UIN</string>
     <string name="common_uin_copied">UIN 已复制</string>
     <plurals name="members"><item quantity="other">%1$d 名成员</item></plurals>
+    <!-- Same row once the count reaches 1000 and compactCount() takes
+         over (999, then 1K, 2.1K); the argument is already formatted. -->
+    <string name="members_compact">%1$s 名成员</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">最后上线 %1$s</string>
     <string name="last_seen_just_now">刚刚</string>
@@ -566,14 +576,8 @@
     <!-- Settings: privacy -->
     <string name="pv_last_seen">最后上线</string>
     <string name="pv_last_seen_desc">谁可以看到你最后一次在线的时间。</string>
-    <string name="pv_stay_visible">离开后继续显示在线</string>
-    <string name="pv_stay_visible_desc">应用关闭后，仍在一段时间内显示为最近在线。</string>
-    <string name="presence_countdown_hm">%1$d 小时 %2$d 分钟</string>
-    <string name="presence_countdown_h">%1$d 小时</string>
-    <string name="presence_countdown_m">%1$d 分钟</string>
-    <string name="presence_countdown_lt1m">&lt;1 分钟</string>
-    <string name="presence_info_title">离开后继续显示在线</string>
-    <string name="presence_info_body">关闭应用后，你会在这段时间内继续显示为在线。可在“设置”→“隐私与网络”中修改。</string>
+    <string name="pv_card_side_lists">不要从附带列表打开我的名片</string>
+    <string name="pv_card_side_lists_desc">在表情回应列表、媒体查看器或成员列表里看到你的人，都可以点进你的资料卡。这个开关记录下你并不希望如此。它只保存在本机：你的岛屿还不会校验它，所以忽略它的客户端照样能打开资料卡。真正由岛屿强制执行的是上面的「个人资料卡」。</string>
     <string name="stealth_info_title">走中继</string>
     <string name="stealth_info_body_manual">你在菜单里自己打开了 RCQ 中继。流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。开启期间，应用不会尝试直连。在同一个菜单里可以关闭。</string>
     <string name="stealth_shield_green">绿色盾牌：已确认走中继的流量能到达岛。</string>
@@ -636,6 +640,21 @@
     <string name="poll_who_voted">谁投了票</string>
     <string name="poll_voters_title">票数</string>
     <string name="poll_no_voters">暂无投票</string>
+    <!-- Polls were removed (item 14a): the ballots were never E2EE.
+         Kept so an old peer's poll still renders instead of vanishing. -->
+    <string name="poll_removed_title">投票</string>
+    <string name="poll_removed_body">投票功能已下线：票选内容没有加密。这条投票已经无法作答。</string>
+    <!-- Disappearing messages (item 20), option set mirrored from iOS. -->
+    <string name="chat_ttl_menu">消失的消息</string>
+    <string name="chat_ttl_menu_on">消失：%1$s</string>
+    <string name="chat_ttl_body">在这里发出的新消息，到时间后两边都会消失。计时从消息发出时开始，离线的时间不会延长它。</string>
+    <string name="chat_ttl_off">关闭</string>
+    <string name="chat_ttl_quoted">阅后即焚消息</string>
+    <string name="chat_ttl_1m">1 分钟</string>
+    <string name="chat_ttl_5m">5 分钟</string>
+    <string name="chat_ttl_1h">1 小时</string>
+    <string name="chat_ttl_24h">24 小时</string>
+    <string name="chat_ttl_7d">7 天</string>
     <!-- Connection diagnostics -->
     <string name="diag_title">连接诊断</string>
     <string name="diag_transport">线路</string>
@@ -720,6 +739,25 @@
     <string name="gi_perm_delete">删除</string>
     <string name="gi_perm_members">成员</string>
     <string name="gi_perm_info">信息</string>
+
+    <!-- Handing the group over (founder item 23). Owner only, own-island
+         only, and one way: the caller keeps membership and loses both the
+         owner seat and every moderator capability. -->
+    <string name="gi_transfer">转让群主</string>
+    <string name="gi_transfer_q">转让群主？</string>
+    <string name="gi_transfer_body">把这个群转让给 %1$s？你仍留在群里，只是普通成员，会失去群主权限和所有管理员权限。只有新群主才能转让回来。</string>
+    <string name="gi_transfer_cta">转让</string>
+    <string name="gi_transfer_done_title">群主已转让</string>
+    <string name="gi_transfer_done">现在的群主是 %1$s。你仍是成员：可以退出，也可以留下。</string>
+    <string name="gi_transfer_stay">留下</string>
+    <string name="gi_transfer_err_owner_only">只有群主才能转让群组。</string>
+    <string name="gi_transfer_err_already_owner">他已经是这个群的群主。</string>
+    <string name="gi_transfer_err_not_a_member">他已经不在这个群里。</string>
+    <string name="gi_transfer_err_no_such_user">这座岛不认识他。</string>
+    <string name="gi_transfer_err_target_suspended">该账号已被停用。</string>
+    <string name="gi_transfer_err_rate_limited_in">尝试次数过多，请在 %1$d 秒后重试。</string>
+    <string name="gi_transfer_err_rate_limited">尝试次数过多，请稍后再试。</string>
+    <string name="gi_transfer_err_failed">无法转让群组。</string>
     <string name="gi_you">（你）</string>
     <string name="gi_delete">删除群组</string>
     <string name="gi_leave">退出群组</string>
@@ -814,6 +852,9 @@
     <string name="media_save_failed">保存失败</string>
     <string name="media_fetching">正在下载文件…</string>
     <string name="media_fetch_failed">没能下载文件。检查一下网络再试。</string>
+    <string name="media_video_too_old">这个视频用旧格式发送，太大了打不开（%1$d MB）。请对方用新版本重新发一次。</string>
+    <string name="media_video_damaged">这个视频传输时损坏了，播到一半就断了。请对方重新发一次。</string>
+    <string name="media_too_large_for_island">这个视频有 %1$d MB，服务器最多接收 %2$d MB。</string>
     <string name="chat_pin">置顶</string>
     <string name="chat_pinned_media">📎 附件</string>
     <string name="chat_pin_failed">无法置顶这条消息。</string>
@@ -1031,7 +1072,7 @@
     <string name="emoji_tab_panel">面板</string>
     <string name="emoji_tab_reactions">回应</string>
     <string name="emoji_pick_panel_hint">点一下即可把表情加入输入面板，最多 40 个。</string>
-    <string name="emoji_pick_reactions_hint">点一下即可设为快捷回应，最多 6 个。</string>
+    <string name="emoji_pick_reactions_hint">点一下即可设为快捷回应，最多 40 个。</string>
     <string name="myreports_title">我的反馈</string>
     <string name="myreports_empty">你还没有发送过反馈。发送之后，回复会出现在这里。</string>
     <string name="myreports_answer">回复</string>
@@ -1041,8 +1082,16 @@
     <string name="myreports_status_resolved">已解决</string>
     <string name="myreports_status_dismissed">已谢绝</string>
     <string name="myreports_status_duplicate">重复</string>
-    <string name="myreports_delete">删除</string>
-    <string name="myreports_delete_refused">这条还在处理中，暂时无法删除。</string>
+    <string name="myreports_delete">从列表中移除</string>
+    <string name="myreports_delete_refused">这条还在处理中，暂时无法从列表中移除。</string>
+    <string name="myreports_remove_title">要从列表中移除吗？</string>
+    <string name="myreports_remove_body">它会从你的列表中消失。反馈本身仍留在我们这里，也仍然计入名人堂。</string>
+    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_edit">编辑</string>
+    <string name="myreports_edited">已编辑</string>
+    <string name="myreports_edit_locked">这条反馈已经有回复了，正文不能再改。</string>
+    <string name="myreports_edit_not_editable">这条不能编辑。</string>
+    <string name="myreports_edit_error">没能保存修改，请再试一次。</string>
     <string name="myreports_you">你</string>
     <string name="myreports_reply">补充</string>
     <string name="myreports_reply_placeholder">给这条反馈补充点什么</string>
@@ -1134,4 +1183,44 @@
     <string name="how_q5">有人能知道我在跟谁聊天吗？</string>
     <string name="how_a5">你的岛知道有个信封寄给了某人，却不知道它出自你手：外面没有你的名字。\n\nRCQ 中继打开时，出口的路被分给两台中继。第一台看得见你，却不知道你要去哪个岛；第二台到得了岛，却不知道你是谁。把两半拼起来需要它们两个，而它们属于不同国家的不同人。\n\n藏不住的是：只要 RCQ 中继没开，你在用 RCQ 这件事，掌管你网络的人就看得到。</string>
     <string name="how_more">更多问题见 rcq.app/faq →</string>
+
+    <!-- Chat-list sections (founder item 1 of 23.08, RCQ/docs/sections-design-2026-08-23.md).
+         The list of sections and which chat sits in which lives in the account's
+         "sections" vault slot, so the same sections are on every device.
+         The PIN copy says one thing and must go on saying it: the FLAG syncs, the
+         PROTECTION is local. Never "protects", never "encrypts": anyone holding the
+         account reads every section name and every member uin out of the slot. -->
+    <string name="sections_add">添加聊天</string>
+    <string name="sections_empty">空的。用 + 把聊天移到这里。</string>
+    <string name="sections_reorder_hint">拖动分组，或者用箭头。</string>
+    <string name="sections_reorder_done">完成</string>
+    <string name="sections_move_up">上移</string>
+    <string name="sections_move_down">下移</string>
+    <string name="sections_menu_reorder">重新排序分组</string>
+    <string name="sections_menu_new">新建分组</string>
+    <string name="sections_menu_rename">重命名</string>
+    <string name="sections_menu_delete">删除分组</string>
+    <string name="sections_delete_confirm">删除这个分组？聊天不会动，会回到原来的位置。</string>
+    <string name="sections_menu_pin">询问 PIN</string>
+    <string name="sections_menu_pin_off">不再询问 PIN</string>
+    <string name="sections_pin_note">在你于本设备输入 PIN 之前隐藏这个分组。聊天本身不会因此被加密。</string>
+    <string name="sections_new_title">新建分组</string>
+    <string name="sections_new_placeholder">分组名称</string>
+    <string name="sections_new_save">创建</string>
+    <string name="sections_rename_title">重命名分组</string>
+    <string name="sections_rename_save">保存</string>
+    <string name="sections_locked_title">需要 PIN</string>
+    <string name="sections_locked_enter">你的 PIN</string>
+    <string name="sections_locked_open">打开</string>
+    <string name="sections_locked_wrong">PIN 不对。</string>
+    <string name="sections_locked_nopin">在另一台设备上被隐藏。这台没有设置 PIN。</string>
+    <string name="sections_locked_open_anyway">仍然打开</string>
+    <string name="sections_picker_title">添加到 %1$s</string>
+    <string name="sections_picker_save">保存</string>
+    <string name="sections_picker_nobody">暂时没有可添加的人。</string>
+    <string name="sections_err_too_many_sections">一个账号最多只能有这么多分组。</string>
+    <string name="sections_err_section_full">这个分组满了。</string>
+    <string name="sections_err_too_many_members">所有分组里的聊天太多了。</string>
+    <string name="sections_err_too_large">分组列表太大，保存不了。</string>
+    <string name="sections_err_unreadable">你的分组是更新版本的 RCQ 写的。</string>
 </resources>

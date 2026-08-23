@@ -199,6 +199,50 @@ object CrossIslandSender {
         return runCatching { viaBestRoute(host) { c -> c.newCall(req).execute() }.use { it.isSuccessful } }.getOrDefault(false)
     }
 
+    /** [depositBlob] for a file too big to hold: the source is read a chunk at
+     *  a time, sealed chunk by chunk into an RCQM1 container
+     *  (`crypto/MediaStream.kt`), and written straight to the socket.
+     *
+     *  ⚠ The whole-call ceiling is taken off for this one call. The 30 seconds
+     *  every other cross-island call runs under is right for a signed JSON card
+     *  and absurd for a film: a cross-island video would have been cut off at
+     *  thirty seconds no matter how healthy the link. Stalls are still caught,
+     *  by the per-socket read/write timeouts. */
+    fun depositBlobStreaming(
+        host: String,
+        mediaId: String,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        key: ByteArray,
+        onProgress: ((sent: Long, total: Long) -> Unit)? = null,
+    ): Boolean {
+        val part = object : okhttp3.RequestBody() {
+            override fun contentType() = OCTET
+            override fun contentLength() = app.rcq.android.crypto.MediaStream.blobLength(plainLen)
+            override fun writeTo(sink: okio.BufferedSink) {
+                openSource().use { input ->
+                    app.rcq.android.crypto.MediaStream.seal(
+                        input, sink.outputStream(), key, plainLen, onProgress = onProgress,
+                    )
+                }
+            }
+        }
+        val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("blob", "media.bin", part)
+            .build()
+        val req = Request.Builder().url("https://$host/media/$mediaId").put(body).build()
+        return runCatching {
+            viaBestRoute(host) { c ->
+                c.newBuilder()
+                    .callTimeout(0, TimeUnit.MILLISECONDS)
+                    .writeTimeout(60, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS)
+                    .build()
+                    .newCall(req).execute()
+            }.use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     /** §5d cross-island call signaling: v=1-seal a call envelope and deposit it
      *  to the contact's PRIMARY island only. No backup-home copies — backup
      *  mailboxes are polled (~30s), useless for real-time signaling, and if the
