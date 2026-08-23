@@ -563,17 +563,13 @@ private fun RcqApp(session: Session) {
             }
         }
         NotificationOpen.pending.value = null
-        if (req.reports) {
-            settingsToReports = true
-            showSettings = true
-            return@LaunchedEffect
-        }
-        if (req.devices) {
-            // ⚠ Everything else first. Settings renders BELOW an open chat, a
-            // room, a profile or an info screen in the `when` that draws them,
-            // so setting the flag while one of those is up did nothing at the
-            // time and then dropped the user into Linked devices when they
-            // pressed Back minutes later.
+        // ⚠ Everything else first, for BOTH deep links. Settings renders
+        // BELOW an open chat, a room, a profile or an info screen in the
+        // `when` that draws them, so setting the flag while one of those was
+        // up did nothing at the time and then dropped the user into that
+        // section when they pressed Back minutes later. Reported for the
+        // report-answer notification (#716) and true of the device one too.
+        if (req.reports || req.devices) {
             chatTarget = null
             groupInfoId = null
             peerInfoUin = null
@@ -585,7 +581,8 @@ private fun RcqApp(session: Session) {
             showProfile = false
             showManageAccounts = false
             showOutgoing = false
-            settingsToDevices = true
+            settingsToReports = req.reports
+            settingsToDevices = req.devices
             showSettings = true
             return@LaunchedEffect
         }
