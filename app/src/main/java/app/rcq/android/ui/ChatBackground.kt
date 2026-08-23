@@ -337,6 +337,30 @@ internal fun HomeBackgroundScreen(onBack: () -> Unit) = BackgroundPickerScreen(
     onBack,
 )
 
+/** How big a picked wallpaper is kept, in pixels on its longest side.
+ *
+ *  ⚠ NOT the avatar's 640 (#725, filed with a photo that arrived smeared).
+ *  A wallpaper is drawn [ContentScale.Crop] across the whole window, so 640
+ *  had to be blown up three to four times to cover an ordinary 1080 x 2400
+ *  screen. At 1920 the same photo covers that screen from a downscale on the
+ *  width and about 1.25x on the height, which is the difference between
+ *  "sharp" and "obviously resampled".
+ *
+ *  ⚠ And not larger than that either. [WallpaperBackground] decodes this file
+ *  with a plain `decodeFile`, no subsampling, and holds the bitmap for as long
+ *  as the screen is up, for BOTH selections at once when the chat and the
+ *  home list each have one. 1920 costs at most 1920 x 1920 x 4 = 14.7 MB
+ *  decoded (a 4:3 photo, 1440 x 1920, is 11 MB); the 2560 the full-screen
+ *  photo viewer uses would be 26 MB apiece, and those bitmaps are transient
+ *  while a wallpaper is resident. */
+private const val WALLPAPER_MAX_SIDE = 1920
+
+/** JPEG quality for a picked wallpaper. Above the avatar's 85 because a
+ *  wallpaper is mostly large flat gradients seen full size, where 85 bands
+ *  visibly; the file lives on this device only and never goes on the wire, so
+ *  the extra few hundred KB buys the banding away for nothing. */
+private const val WALLPAPER_QUALITY = 92
+
 @Composable
 private fun BackgroundPickerScreen(
     title: String,
@@ -351,7 +375,9 @@ private fun BackgroundPickerScreen(
     val selected by selectedFlow.collectAsState()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
-            val bytes = withContext(Dispatchers.IO) { compressImageFor(context, uri) }
+            val bytes = withContext(Dispatchers.IO) {
+                compressImageFor(context, uri, maxSide = WALLPAPER_MAX_SIDE, quality = WALLPAPER_QUALITY)
+            }
             if (bytes != null) onSaveImage(context, bytes)
         }
     }

@@ -779,8 +779,20 @@ private fun GroupToggleRow(title: String, subtitle: String, checked: Boolean, on
 
 /** Shared downscale+compress for picked images (avatars). A small animated GIF
  *  is kept as-is so it still animates instead of being flattened to a static
- *  JPEG; everything else is downscaled + JPEG-compressed. */
-internal fun compressImageFor(context: android.content.Context, uri: android.net.Uri): ByteArray? {
+ *  JPEG; everything else is downscaled + JPEG-compressed.
+ *
+ *  [maxSide] and [quality] default to the avatar numbers this has always used.
+ *  ⚠ They are parameters because an avatar is not the only thing picked
+ *  through here: a chat wallpaper goes through the same helper and is then
+ *  drawn EDGE TO EDGE with a cropping content scale, so 640 px was blown up
+ *  three or four times on an ordinary phone screen and the picture arrived
+ *  smeared (#725). Pass what the destination actually paints. */
+internal fun compressImageFor(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    maxSide: Int = 640,
+    quality: Int = 85,
+): ByteArray? {
     val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
     // "GIF8" magic — keep an animated GIF raw (capped) so it animates.
     val isGif = raw.size >= 4 && raw[0] == 0x47.toByte() && raw[1] == 0x49.toByte() &&
@@ -791,13 +803,12 @@ internal fun compressImageFor(context: android.content.Context, uri: android.net
     // Same orientation rule as the chat photo path (#527): a selfie set as an
     // avatar was rotated for exactly the same reason.
     val src = (if (isGif) gifFirstFrame(raw) else decodeUpright(raw)) ?: return null
-    val maxSide = 640
     val longest = maxOf(src.width, src.height)
     val scaled = if (longest > maxSide) {
         val f = maxSide.toFloat() / longest
         android.graphics.Bitmap.createScaledBitmap(src, (src.width * f).toInt(), (src.height * f).toInt(), true)
     } else src
     val out = java.io.ByteArrayOutputStream()
-    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out)
     return out.toByteArray()
 }

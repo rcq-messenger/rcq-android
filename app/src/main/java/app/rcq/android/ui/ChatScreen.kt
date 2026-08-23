@@ -1617,14 +1617,23 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // while not one line of the text had appeared — "текст даже не начал
             // виднеться, а сообщение уже считается прочитанным".
             //
-            // ⚠ `afterContentPadding` is not optional: the list carries 8.dp of
-            // bottom padding, and without subtracting it the very last message can
-            // never be fully visible, leaving the badge stuck at one forever.
+            // ⚠ The floor is the viewport's own bottom edge, with NOTHING
+            // subtracted for `afterContentPadding`. The list carries 8.dp of
+            // bottom padding against 6.dp of row spacing, so a floor lifted by
+            // the padding sits 2.dp BELOW the next row's top edge: the badge
+            // ticked down at the moment the following message began to appear,
+            // not when the row being counted was fully on screen (#705, which
+            // is exactly how the reporter measured it). The padding was
+            // subtracted to keep the very last row reachable, since a row
+            // whose bottom is flush with the viewport can never clear a floor
+            // that sits above it, and that is no longer this test's job: the
+            // `canScrollForward` branch below has said "the end of the list is
+            // read" since #676, and it covers the last row whatever its height.
             var deepestSeen by remember(threadKey) { mutableStateOf(-1) }
             LaunchedEffect(threadKey) {
                 snapshotFlow {
                     val info = listState.layoutInfo
-                    val floor = info.viewportEndOffset - info.afterContentPadding
+                    val floor = info.viewportEndOffset
                     // Reaching the end of the list IS reading it to the end, and
                     // it has to be said separately: a message taller than the
                     // screen is never "fully visible", so a chat whose last
@@ -3442,6 +3451,7 @@ private fun UnreadDividerRow(count: Int = 0) {
         Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             Text(
                 label, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.bgSecondary.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 3.dp),
             )
         }
@@ -3449,7 +3459,16 @@ private fun UnreadDividerRow(count: Int = 0) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.accent.copy(alpha = 0.5f)))
-        Text(label, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+        // One line, always. Row measures the unweighted label against the full
+        // width before the two weighted rules are given the remainder, so the
+        // rules are what give way. maxLines covers the one case the width
+        // cannot: the largest accessibility font scale on a narrow phone, where
+        // the label is wider than the whole row and would otherwise wrap.
+        Text(
+            label, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
         androidx.compose.foundation.layout.Box(Modifier.weight(1f).height(1.dp).background(c.accent.copy(alpha = 0.5f)))
     }
 }
