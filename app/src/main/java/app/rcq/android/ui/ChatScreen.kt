@@ -191,6 +191,8 @@ import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -805,7 +807,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val msgsForMentionSeen by androidx.compose.runtime.rememberUpdatedState(messages)
     DisposableEffect(target) {
         session.openThread(thisThread)
-        if (!isGroup && !isSelf && peer != null) session.sendReadReceipts(peer)
         onDispose {
             // Mark the loaded @mentions as seen so re-entering this chat doesn't
             // resurface the @-jump FAB for mentions already viewed (iOS parity).
@@ -940,6 +941,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // the "opens and scrolls straight to the end" report. So: adopt the tail
     // silently the first time, and only react to a genuinely newer message.
     var stickyAnchorId by remember(target) { mutableStateOf<String?>(null) }
+    // True while the list is animating down to a message that just arrived.
+    // For those frames the newest row is below the fold by construction, and
+    // the jump-down arrow with its badge showed up for an instant on every
+    // incoming message while the reader sat at the very bottom (#708). The
+    // arrow stays hidden until the follow has landed.
+    var autoFollowing by remember(target) { mutableStateOf(false) }
     LaunchedEffect(messages.lastOrNull()?.id) {
         if (!didInitialScroll) return@LaunchedEffect
         val last = messages.lastOrNull() ?: return@LaunchedEffect
@@ -949,8 +956,26 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         val info = listState.layoutInfo
         // No measured items = no basis to claim the user is at the bottom.
         val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
-        val nearBottom = lastVisible >= info.totalItemsCount - 3
-        if (last.fromMe || nearBottom) listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+        // "At the bottom" means the message that WAS the newest is on screen,
+        // at least in part. It used to be "within three rows of the end",
+        // which yanked the view away from somebody reading the second or
+        // third message from the end (#706: "I am reading, then I have to
+        // find where I was interrupted"); Telegram only follows when the
+        // newest message is in view, and so does this now. Measured against
+        // the previous newest row rather than the count, so it reads the same
+        // whether or not this frame's layout already holds the new row.
+        val prevRow = rows.indexOfLast { r ->
+            (r is ChatRow.Single && r.m.id == previous) || (r is ChatRow.Album && r.items.any { it.id == previous })
+        }
+        val atBottom = prevRow >= 0 && lastVisible >= prevRow
+        if (last.fromMe || atBottom) {
+            autoFollowing = true
+            try {
+                listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+            } finally {
+                autoFollowing = false
+            }
+        }
     }
     // 13a: persist where reading stopped. The resting scroll position, written
     // debounced to prefs (per thread, per account) as rows-from-end + offset;
@@ -1358,6 +1383,33 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // bottom edge arrives, which is the asked-for behaviour.
                     .collect { last -> if (last > deepestSeen) deepestSeen = last }
             }
+            // Read receipts follow the same mark, a little behind it: a row
+            // counts as read by the peer's ticks only once its whole height
+            // has been on this screen (#707), and a burst of scrolling sends
+            // one receipt, not one per frame.
+            if (!isGroup && !isSelf && peer != null) {
+                // `rows` is rebuilt on every message; the collector must see
+                // the current one, not the one captured when it started.
+                val rowsNow by androidx.compose.runtime.rememberUpdatedState(rows)
+                LaunchedEffect(threadKey) {
+                    @OptIn(kotlinx.coroutines.FlowPreview::class)
+                    snapshotFlow { deepestSeen }
+                        .filter { it >= 0 }
+                        .debounce(400)
+                        .collect { seen ->
+                            val rows = rowsNow
+                            val ids = ArrayList<String>()
+                            for (i in 0..minOf(seen, rows.lastIndex)) {
+                                when (val r = rows[i]) {
+                                    is ChatRow.Single -> if (!r.m.fromMe) ids.add(r.m.id)
+                                    is ChatRow.Album -> r.items.filter { !it.fromMe }.forEach { ids.add(it.id) }
+                                    else -> {}
+                                }
+                            }
+                            if (ids.isNotEmpty()) session.sendReadReceipts(peer, ids)
+                        }
+                }
+            }
             val belowCount by remember(rows) {
                 derivedStateOf {
                     if (deepestSeen < 0) return@derivedStateOf 0
@@ -1383,7 +1435,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // while the reader had not seen a line of the text (#676). So the
             // count now keeps the arrow up on its own; with everything read
             // `belowCount` is 0 and #19's rule is untouched.
-            if (showJumpDown || belowCount > 0) {
+            if ((showJumpDown || belowCount > 0) && !autoFollowing) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 10.dp),
                     contentAlignment = Alignment.TopEnd,
