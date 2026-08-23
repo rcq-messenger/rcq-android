@@ -270,6 +270,10 @@ class IncomingCallActivity : ComponentActivity() {
         super.onStart()
         pendingRepost?.let { repostHandler.removeCallbacks(it) }
         pendingRepost = null
+        // A recreation: this instance is taking the ring over, so the stop the
+        // destroyed one parked must not fire.
+        pendingRingStop?.let { repostHandler.removeCallbacks(it) }
+        pendingRingStop = null
         val p = IncomingCallStore.pending ?: return
         if (p.callId != callId || isFinishing) return
         Push.cancelCallNotification(this)
@@ -281,10 +285,12 @@ class IncomingCallActivity : ComponentActivity() {
         IncomingCallStore.fsiSurfaceActive = false
         // ⚠ A destroy is NOT a departure. Unlocking the phone recreates this
         // activity on MIUI, and stopping the ring here started the melody over
-        // in the new instance (#710, #711). Only a finishing destroy silences
-        // it, and even then only if the ring still belongs to this call; a
-        // non-finishing one leaves the ring to the next instance or to the
-        // re-posted notification that onStop parked.
+        // in the new instance (#710, #711). But it is not always a recreation
+        // either, and a destroy that silenced nothing left a phone ringing
+        // with no screen, no notification and nothing left in the process to
+        // stop it. So the stop is DEFERRED and any next instance cancels it in
+        // onStart, the same shape onStop already uses for the notification:
+        // a recreation keeps the melody unbroken, an orphan goes quiet.
         if (isFinishing) {
             // Answered, declined, or dismissed — a parked re-post would revive a
             // notification for a call that is already over. A non-finishing
@@ -294,7 +300,21 @@ class IncomingCallActivity : ComponentActivity() {
         }
         window.decorView.removeCallbacks(watchdog)
         if (receiverRegistered) runCatching { unregisterReceiver(cancelReceiver) }
-        if (isFinishing) ringer?.stopFor(callId)
+        val leaving = ringer
+        val leavingCall = callId
+        if (isFinishing) {
+            pendingRingStop?.let { repostHandler.removeCallbacks(it) }
+            pendingRingStop = null
+            leaving?.stopFor(leavingCall)
+        } else {
+            pendingRingStop?.let { repostHandler.removeCallbacks(it) }
+            val stop = Runnable {
+                pendingRingStop = null
+                leaving?.stopFor(leavingCall)
+            }
+            pendingRingStop = stop
+            repostHandler.postDelayed(stop, RING_ORPHAN_GRACE_MS)
+        }
         super.onDestroy()
     }
 
@@ -303,6 +323,11 @@ class IncomingCallActivity : ComponentActivity() {
          *  activity between the two: any instance's onStart cancels it. */
         private val repostHandler = android.os.Handler(android.os.Looper.getMainLooper())
         private var pendingRepost: Runnable? = null
+        /** The deferred silence of a destroyed surface, cancelled by the next
+         *  instance's onStart. Long enough for a recreation to land, short
+         *  enough that a phone left ringing with no UI is a blip. */
+        private var pendingRingStop: Runnable? = null
+        private const val RING_ORPHAN_GRACE_MS = 1500L
         private const val REPOST_DELAY_MS = 800L
 
         const val ACTION_CANCEL = "app.rcq.android.CALL_CANCELLED"

@@ -46,7 +46,7 @@ class Ringer private constructor(private val context: Context) {
      *  start from the controller) leaves the melody exactly where it is. */
     fun startIncoming(callId: String?) {
         if (incomingActive && (callId == null || incomingCallId == callId)) return
-        if (incomingActive) stopInternal()
+        if (incomingActive) stopIncomingOnly()
         incomingCallId = callId
         startIncoming()
     }
@@ -59,7 +59,7 @@ class Ringer private constructor(private val context: Context) {
 
     fun startIncoming() {
         if (incomingActive) return
-        stopInternal()
+        stopIncomingOnly()
         incomingActive = true
         runCatching {
             val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -75,8 +75,13 @@ class Ringer private constructor(private val context: Context) {
         }
     }
 
+    /** ⚠ Stops the RINGBACK only, never the incoming ring. The two used to
+     *  live in two objects and could not reach each other; in one object a
+     *  shared stop meant an incoming call silenced the ringback of the call
+     *  the user was placing, and declining the incoming one left that call
+     *  ringing back at nobody for the rest of its life. */
     fun startRingback() {
-        stop()
+        stopRingbackOnly()
         runCatching {
             ringback = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70).apply {
                 startTone(ToneGenerator.TONE_SUP_RINGTONE)
@@ -84,18 +89,23 @@ class Ringer private constructor(private val context: Context) {
         }
     }
 
+    /** Everything quiet: the end of a call, whichever direction it went. */
     fun stop() {
         incomingCallId = null
-        stopInternal()
+        stopIncomingOnly()
+        stopRingbackOnly()
     }
 
-    private fun stopInternal() {
+    private fun stopIncomingOnly() {
         incomingActive = false
         runCatching { ringtone?.stop() }
         ringtone = null
+        runCatching { vibrator?.cancel() }
+    }
+
+    private fun stopRingbackOnly() {
         runCatching { ringback?.stopTone(); ringback?.release() }
         ringback = null
-        runCatching { vibrator?.cancel() }
     }
 
     companion object {
