@@ -754,6 +754,71 @@ class RcqApi(
         sendNoResult("POST", "/messages/queue/ack?dev=$deviceId", gson.toJson(QueueAckIn(directIds, groupIds)), authed = true)
     }
 
+    // ── room log drain (Stage 5 of the core-metadata plan) ───────────
+
+    /** One row of a room's log: the same envelope types and payloads the
+     *  legacy group rows of /messages/queue carry (`gmsg` broadcasts plus the
+     *  rows sealed to this member: `skdm`, `sknack`, `reaction`, `message`,
+     *  `system`, `delete`, `read` ...), so it goes through the same ingest.
+     *  `seq` is the room's durable sequence, the thing the cursor moves over. */
+    data class GroupLogRow(
+        val gid: Int,
+        val seq: Long,
+        val envelope_type: String?,
+        val cls: Int? = null,
+        val payload: String?,
+        val received_at: String? = null,
+    )
+
+    /** A room to read and, optionally, from where. `after` is recovery only
+     *  (re-read without moving the stored cursor); the normal drain omits it
+     *  and lets the island serve from this device's cursor. */
+    data class GroupLogRoomIn(val gid: Int, val after: Long? = null)
+
+    /** `rooms` omitted = every room the account is a member of, in one call. */
+    data class GroupLogFetchIn(val rooms: List<GroupLogRoomIn>? = null, val limit: Int = 500)
+
+    /** `heads` and `cursors` are keyed by room id; Gson keeps the JSON object
+     *  keys as strings, so they are read back through [GroupLogFetchOut.seqOf].
+     *  `more` means `limit` cut the answer short: fetch again. */
+    data class GroupLogFetchOut(
+        val rows: List<GroupLogRow> = emptyList(),
+        val heads: Map<String, Long> = emptyMap(),
+        val cursors: Map<String, Long> = emptyMap(),
+        val more: Boolean = false,
+    ) {
+        companion object {
+            fun seqOf(map: Map<String, Long>, gid: Int): Long? = map[gid.toString()]
+        }
+    }
+
+    data class GroupLogAckRoomIn(val gid: Int, val upto: Long)
+    data class GroupLogAckIn(val rooms: List<GroupLogAckRoomIn>)
+
+    /** Fetch the rows this device is behind on in every room the account is
+     *  in, above the island's stored cursor for this device. The cursor is
+     *  created AT THE HEAD on a device's first read (a fresh install gets no
+     *  backlog, same as the 1:1 watermark) and moves only on [ackGroupLog]:
+     *  a crash between fetch and persist re-serves the rows, and the UUID
+     *  dedupe collapses a repeat.
+     *
+     *  ⚠ The first call flips the ACCOUNT to a log reader on that island:
+     *  from then on new room posts for it exist only in the log. Only ever
+     *  called on an island that advertises `group_log`, and always next to
+     *  the legacy drain, which keeps serving whatever was written before. */
+    suspend fun fetchGroupLog(limit: Int = 500): GroupLogFetchOut = withContext(Dispatchers.IO) {
+        request("POST", "/messages/group-log/fetch", gson.toJson(GroupLogFetchIn(limit = limit)), authed = true, GroupLogFetchOut::class.java)
+    }
+
+    /** Move this device's cursor in each room forward to the max seq it has
+     *  PERSISTED (or held). Forward only on the island, so a stale or
+     *  out-of-order ack is harmless; one call for all rooms. */
+    suspend fun ackGroupLog(upto: Map<Int, Long>) = withContext(Dispatchers.IO) {
+        if (upto.isEmpty()) return@withContext
+        val rooms = upto.map { (gid, seq) -> GroupLogAckRoomIn(gid, seq) }
+        sendNoResult("POST", "/messages/group-log/ack", gson.toJson(GroupLogAckIn(rooms)), authed = true)
+    }
+
     // ── contacts (rcq-spec 4) ────────────────────────────────────────
 
     data class ContactRow(
@@ -1241,6 +1306,15 @@ class RcqApi(
         // one. Both default false: an older island omits them.
         val anon_keys: Boolean = false,
         val deposit_auth: Boolean = false,
+        // Stage 5 of the plan (server 2026.08.23.6): a post into a room is
+        // ONE row in the room's log, read through a per-device cursor at
+        // POST /messages/group-log/fetch, instead of one per-member queue row
+        // for every member. An island that advertises this is drained from
+        // the log next to the legacy queue (see Session.drainGroupLog); one
+        // that does not is drained exactly as before. Default false: an older
+        // island omits it, and asking it for a log it does not keep would
+        // only earn a 404.
+        val group_log: Boolean = false,
     )
     data class ServerInfoResponse(
         val name: String = "",
