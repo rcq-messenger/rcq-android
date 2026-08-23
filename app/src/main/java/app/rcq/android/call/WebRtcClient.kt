@@ -504,8 +504,28 @@ class WebRtcClient(private val appContext: Context) {
             ?: error("could not create peer connection")
     }
 
+    /** What the microphone track asks the audio processor for.
+     *
+     *  ⚠ Spelled out rather than left to the defaults. The software APM is
+     *  the only echo canceller in this build (the hardware one is off since
+     *  #532, where it was the thing letting a caller hear themselves), and an
+     *  empty constraints object leaves each of its stages to whatever the
+     *  bundled libwebrtc happens to default to on that device. Naming them is
+     *  how the far side stops sending our own voice back.
+     *
+     *  ⚠ Not verified on a real pair of phones from here: echo is a property
+     *  of a room and a speaker, not of a build (#681 is still open on that
+     *  ground). This makes the processor's settings explicit; it does not
+     *  prove the echo is gone. */
+    private fun audioConstraints() = MediaConstraints().apply {
+        mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+        mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+        mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+        mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+    }
+
     private fun addLocalTracks(media: Media, pc: PeerConnection) {
-        val audioSource = factory().createAudioSource(MediaConstraints())
+        val audioSource = factory().createAudioSource(audioConstraints())
         val audio = factory().createAudioTrack("rcq_audio0", audioSource)
         localAudio = audio
         pc.addTrack(audio, listOf(STREAM_ID))
