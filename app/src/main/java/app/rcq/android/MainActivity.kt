@@ -1142,8 +1142,24 @@ private fun RcqApp(session: Session) {
 @Composable
 private fun InAppBanner(b: Session.InAppBanner, onTap: () -> Unit) {
     val c = RcqTheme.colors
-    val preview = b.body.ifBlank {
-        stringResource(
+    // ⚠ TWO KINDS CARRY A SERIALIZED OBJECT IN `body`, NOT A LINE OF TEXT.
+    // A poll holds the ballot JSON (PollContent.toJson) and a relay share holds
+    // the descriptor with its "uuid" / "pw" credentials, and `body.ifBlank { }`
+    // printed both of those straight into the banner: unreadable, and in the
+    // relay case a credential on screen for anyone looking over the shoulder.
+    // Neither can be CREATED by this build any more, but old peers keep sending
+    // both, so they are resolved first and the blank fallback below only ever
+    // sees the kinds whose body really is text. The background path already
+    // reads correctly (Session.notificationPreview); this is the same message
+    // in the foreground and it has to say the same thing.
+    val preview = when {
+        b.kind == "poll" -> "📊 " + (
+            app.rcq.android.model.PollContent.fromJson(b.body)?.question?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.kind_message)
+            )
+        b.kind == "relay" -> "🛡️ " + stringResource(R.string.push_kind_relay_share)
+        b.body.isNotBlank() -> b.body
+        else -> stringResource(
             when (b.kind) {
                 "photo" -> R.string.kind_photo
                 "video" -> R.string.kind_video

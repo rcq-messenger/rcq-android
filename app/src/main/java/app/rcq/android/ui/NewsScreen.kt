@@ -101,23 +101,26 @@ private fun NewsCard(post: RcqApi.NewsPost) {
     androidx.compose.runtime.LaunchedEffect(copied) {
         if (copied) { kotlinx.coroutines.delay(1600); copied = false }
     }
+    val body = post.body
+    // Remembered, not rebuilt per recomposition: it is also the key of the
+    // pointer-input handler below, and a fresh lambda every frame would restart
+    // the gesture detector under the finger.
+    val copyPost: () -> Unit = remember(body, context) {
+        {
+            if (!body.isNullOrBlank()) {
+                (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("RCQ news", body))
+                copied = true
+            }
+        }
+    }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
             // A post is often a list of changes somebody wants to quote back at
             // us, or paste to a friend, and there was no way to get the text
             // out of it at all ("желательно сделать возможность копировать в
             // буфер текст выбранной новости. Долгим зажатием наверно").
-            .combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    val body = post.body
-                    if (!body.isNullOrBlank()) {
-                        (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                            .setPrimaryClip(android.content.ClipData.newPlainText("RCQ news", body))
-                        copied = true
-                    }
-                },
-            )
+            .combinedClickable(onClick = {}, onLongClick = copyPost)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -125,8 +128,24 @@ private fun NewsCard(post: RcqApi.NewsPost) {
             Text(post.author_label ?: "RCQ", color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             formatNewsDate(post.published_at)?.let { Text(it, color = c.textSecondary, fontSize = 12.sp) }
         }
-        if (!post.body.isNullOrBlank()) {
-            Text(post.body, color = c.textPrimary, fontSize = 15.sp)
+        if (!body.isNullOrBlank()) {
+            // A post announcing a release or a page is mostly there to hand
+            // over an address, and until now that address was dead grey text
+            // the reader had to retype. [linkedText] does the finding (and the
+            // trimming of the full stop the sentence ends on); the tap resolves
+            // through the app-wide uri handler, which is InAppBrowser, so a
+            // link opens in a Custom Tab over the app exactly like one tapped
+            // in a chat, and an rcq.app invite still routes back into the app.
+            val linked = remember(body, c.accent) { linkedText(body, c.accent) }
+            Text(
+                linked,
+                color = c.textPrimary,
+                fontSize = 15.sp,
+                // Compose gives the whole gesture inside a link to the link, so
+                // without this the copy above would stop working on precisely
+                // the posts worth copying.
+                modifier = Modifier.longPressOverLinks(copyPost),
+            )
         }
         if (post.attachments.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

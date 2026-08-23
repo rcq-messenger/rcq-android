@@ -494,11 +494,18 @@
     <string name="my_uins_footer">Поки ти відповідаєш під одним номером, решта просто зарезервовані за тобою. Ніхто інший їх не візьме.</string>
     <string name="settings_foot_appearance">Обери світлу, темну або системну тему.</string>
     <string name="settings_text_size">Розмір тексту</string>
+    <string name="settings_row_theme">Тема</string>
+    <string name="settings_search_hint">Пошук у налаштуваннях</string>
     <string name="settings_row_app_icon">Значок застосунку</string>
     <string name="settings_row_chat_bg">Фон чату</string>
     <string name="settings_row_home_bg">Фон головного екрана</string>
     <string name="chat_bg_none">Немає</string>
     <string name="chat_bg_custom">Галерея</string>
+    <!-- Under the wallpaper grid: the built-in gradients are filtered
+         to the ones drawn for the theme in use (the selected one is always
+         kept). Without this line a shorter grid reads as wallpapers having
+         gone missing. -->
+    <string name="chat_bg_theme_set_note">Шпалери, дібрані під поточну тему. Власне зображення доступне завжди.</string>
     <string name="app_icon_default">Типовий</string>
     <string name="app_icon_footer">Обери інший значок для лаунчера. Домашній екран може на мить блимнути, поки він оновиться.</string>
     <string name="settings_foot_privacy">Керуй тим, хто тебе бачить і хто може до тебе достукатися. Сервер, проксі і релеї RCQ є в розділі «Мережа».</string>
@@ -524,6 +531,9 @@
     <string name="common_copy_uin">Копіювати UIN</string>
     <string name="common_uin_copied">UIN скопійовано</string>
     <plurals name="members"><item quantity="one">%1$d учасник</item><item quantity="few">%1$d учасники</item><item quantity="many">%1$d учасників</item><item quantity="other">%1$d учасника</item></plurals>
+    <!-- Same row once the count reaches 1000 and compactCount() takes
+         over (999, then 1K, 2.1K); the argument is already formatted. -->
+    <string name="members_compact">%1$s учасників</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">був у мережі %1$s</string>
     <string name="last_seen_just_now">щойно</string>
@@ -566,14 +576,8 @@
     <!-- Settings: privacy -->
     <string name="pv_last_seen">Час у мережі</string>
     <string name="pv_last_seen_desc">Хто бачить, коли ти був у мережі востаннє.</string>
-    <string name="pv_stay_visible">Лишатися видимим після виходу</string>
-    <string name="pv_stay_visible_desc">Ще якийсь час показувати тебе як нещодавно в мережі після закриття застосунку.</string>
-    <string name="presence_countdown_hm">%1$d год %2$d хв</string>
-    <string name="presence_countdown_h">%1$d год</string>
-    <string name="presence_countdown_m">%1$d хв</string>
-    <string name="presence_countdown_lt1m">&lt;1 хв</string>
-    <string name="presence_info_title">Лишатися видимим після виходу</string>
-    <string name="presence_info_body">Ти й далі показуєшся в мережі стільки часу після закриття застосунку. Змінити це можна в налаштуваннях, у розділі приватності і мережі.</string>
+    <string name="pv_card_side_lists">Не відкривати мою картку з побічних списків</string>
+    <string name="pv_card_side_lists_desc">Будь-хто, хто побачив тебе в списку реакцій, у перегляді медіа або в списку учасників, може натиснути й відкрити твою картку. Перемикач записує, що ти цього не хочеш. Він зберігається на пристрої: острів його поки не перевіряє, тож застосунок, який його ігнорує, картку все одно відкриє. Насправді закриває її «Картка профілю» вище.</string>
     <string name="stealth_info_title">Через релеї</string>
     <string name="stealth_info_body_manual">Ти сам увімкнув релеї RCQ з меню. Трафік іде не прямо до острова, а через наші релеї: острів не бачить твоєї адреси, а мережа між тобою і островом не бачить, що ти користуєшся RCQ. Поки це ввімкнено, застосунок не пробує з\'єднатися напряму. Вимкнути можна в тому самому меню.</string>
     <string name="stealth_shield_green">Зелений щит: підтверджено, що через релеї дані доходять до острова.</string>
@@ -636,6 +640,21 @@
     <string name="poll_who_voted">Хто голосував</string>
     <string name="poll_voters_title">Голоси</string>
     <string name="poll_no_voters">Голосів немає</string>
+    <!-- Polls were removed (item 14a): the ballots were never E2EE.
+         Kept so an old peer's poll still renders instead of vanishing. -->
+    <string name="poll_removed_title">Опитування</string>
+    <string name="poll_removed_body">Опитування прибрано: голоси не шифрувалися. Відповісти на це вже не можна.</string>
+    <!-- Disappearing messages (item 20), option set mirrored from iOS. -->
+    <string name="chat_ttl_menu">Зникомі повідомлення</string>
+    <string name="chat_ttl_menu_on">Зникають: %1$s</string>
+    <string name="chat_ttl_body">Нові повідомлення в цьому чаті зникнуть в обох, коли вийде час. Відлік починається з моменту надсилання, тому час без мережі його не подовжує.</string>
+    <string name="chat_ttl_off">Вимкнено</string>
+    <string name="chat_ttl_quoted">Зникоме повідомлення</string>
+    <string name="chat_ttl_1m">1 хвилина</string>
+    <string name="chat_ttl_5m">5 хвилин</string>
+    <string name="chat_ttl_1h">1 година</string>
+    <string name="chat_ttl_24h">24 години</string>
+    <string name="chat_ttl_7d">7 днів</string>
     <!-- Connection diagnostics -->
     <string name="diag_title">Діагностика з\'єднання</string>
     <string name="diag_transport">Маршрут</string>
@@ -720,6 +739,25 @@
     <string name="gi_perm_delete">Видаляти</string>
     <string name="gi_perm_members">Учасники</string>
     <string name="gi_perm_info">Інфо</string>
+
+    <!-- Handing the group over (founder item 23). Owner only, own-island
+         only, and one way: the caller keeps membership and loses both the
+         owner seat and every moderator capability. -->
+    <string name="gi_transfer">Передати володіння</string>
+    <string name="gi_transfer_q">Передати володіння?</string>
+    <string name="gi_transfer_body">Зробити власником групи %1$s? Ти лишишся в групі звичайним учасником, але втратиш права власника та всі права модератора. Повернути володіння зможе лише новий власник.</string>
+    <string name="gi_transfer_cta">Передати</string>
+    <string name="gi_transfer_done_title">Володіння передано</string>
+    <string name="gi_transfer_done">Тепер групою володіє %1$s. Ти лишаєшся звичайним учасником: можна вийти, а можна лишитися.</string>
+    <string name="gi_transfer_stay">Лишитися</string>
+    <string name="gi_transfer_err_owner_only">Передати групу може лише власник.</string>
+    <string name="gi_transfer_err_already_owner">Він уже власник цієї групи.</string>
+    <string name="gi_transfer_err_not_a_member">Його більше немає в цій групі.</string>
+    <string name="gi_transfer_err_no_such_user">Цей острів його не знає.</string>
+    <string name="gi_transfer_err_target_suspended">Цей обліковий запис заблоковано.</string>
+    <string name="gi_transfer_err_rate_limited_in">Забагато спроб. Повтори через %1$d с.</string>
+    <string name="gi_transfer_err_rate_limited">Забагато спроб. Спробуй пізніше.</string>
+    <string name="gi_transfer_err_failed">Не вдалося передати групу.</string>
     <string name="gi_you"> (ти)</string>
     <string name="gi_delete">Видалити групу</string>
     <string name="gi_leave">Вийти з групи</string>
@@ -814,6 +852,9 @@
     <string name="media_save_failed">Не вдалося зберегти</string>
     <string name="media_fetching">Завантажуємо файл…</string>
     <string name="media_fetch_failed">Не вдалося завантажити файл. Перевірте зв’язок і спробуйте ще раз.</string>
+    <string name="media_video_too_old">Це відео надіслано в старому форматі й завелике, щоб відкрити тут (%1$d МБ). Попросіть надіслати ще раз із новішої версії.</string>
+    <string name="media_video_damaged">Це відео надійшло пошкодженим і обірвалося на середині. Попросіть надіслати його ще раз.</string>
+    <string name="media_too_large_for_island">Це відео важить %1$d МБ, а сервер приймає щонайбільше %2$d МБ.</string>
     <string name="chat_pin">Закріпити</string>
     <string name="chat_pinned_media">📎 Вкладення</string>
     <string name="chat_pin_failed">Не вдалося закріпити повідомлення.</string>
@@ -1031,7 +1072,7 @@
     <string name="emoji_tab_panel">Панель</string>
     <string name="emoji_tab_reactions">Реакції</string>
     <string name="emoji_pick_panel_hint">Натискай, щоб додати смайли на панель поля вводу (до 40).</string>
-    <string name="emoji_pick_reactions_hint">Натискай, щоб обрати швидкі реакції (до 6).</string>
+    <string name="emoji_pick_reactions_hint">Натискай, щоб обрати швидкі реакції (до 40).</string>
     <string name="myreports_title">Мої звернення</string>
     <string name="myreports_empty">Ти ще не надсилав звернень. Якщо надішлеш, відповідь з\'явиться тут.</string>
     <string name="myreports_answer">Відповідь</string>
@@ -1041,8 +1082,16 @@
     <string name="myreports_status_resolved">Вирішено</string>
     <string name="myreports_status_dismissed">Відхилено</string>
     <string name="myreports_status_duplicate">Дублікат</string>
-    <string name="myreports_delete">Видалити</string>
-    <string name="myreports_delete_refused">Це звернення ще розглядають, тому видалити його поки не можна.</string>
+    <string name="myreports_delete">Прибрати зі списку</string>
+    <string name="myreports_delete_refused">Це звернення ще розглядають, тому прибрати його зі списку поки не можна.</string>
+    <string name="myreports_remove_title">Прибрати зі списку?</string>
+    <string name="myreports_remove_body">Звернення зникне з твого списку. Саме воно лишається у нас і далі рахується в залі слави.</string>
+    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_edit">Змінити</string>
+    <string name="myreports_edited">змінено</string>
+    <string name="myreports_edit_locked">На це звернення вже відповіли, тому текст більше не змінюється.</string>
+    <string name="myreports_edit_not_editable">Це звернення змінити не можна.</string>
+    <string name="myreports_edit_error">Не вдалося зберегти. Спробуйте ще раз.</string>
     <string name="myreports_you">Ви</string>
     <string name="myreports_reply">Дописати</string>
     <string name="myreports_reply_placeholder">Додати до цього звернення</string>
@@ -1140,4 +1189,44 @@
     <string name="how_q5">Чи може хтось дізнатися, кому я пишу?</string>
     <string name="how_a5">Ваш острів знає, що конверт комусь адресовано, і не знає, що він від вас: вашого імені зовні немає.\n\nКоли релеї RCQ увімкнено, шлях назовні поділено між двома релеями. Перший бачить вас і не знає, до якого острова ви йдете; другий доходить до острова і не знає, хто ви. Щоб скласти половинки, потрібні обидва, а вони належать різним людям у різних країнах.\n\nЧого приховати не можна: сам факт, що ви користуєтеся RCQ, видно тому, хто тримає вашу мережу, доки релеї RCQ не ввімкнено.</string>
     <string name="how_more">Більше питань на rcq.app/faq →</string>
+
+    <!-- Chat-list sections (founder item 1 of 23.08, RCQ/docs/sections-design-2026-08-23.md).
+         The list of sections and which chat sits in which lives in the account's
+         "sections" vault slot, so the same sections are on every device.
+         The PIN copy says one thing and must go on saying it: the FLAG syncs, the
+         PROTECTION is local. Never "protects", never "encrypts": anyone holding the
+         account reads every section name and every member uin out of the slot. -->
+    <string name="sections_add">Додати чати</string>
+    <string name="sections_empty">Порожньо. Кнопка + переносить сюди чат.</string>
+    <string name="sections_reorder_hint">Перетягніть секцію або рухайте стрілками.</string>
+    <string name="sections_reorder_done">Готово</string>
+    <string name="sections_move_up">Вище</string>
+    <string name="sections_move_down">Нижче</string>
+    <string name="sections_menu_reorder">Переставити секції</string>
+    <string name="sections_menu_new">Нова секція</string>
+    <string name="sections_menu_rename">Перейменувати</string>
+    <string name="sections_menu_delete">Видалити секцію</string>
+    <string name="sections_delete_confirm">Видалити секцію? Чати залишаться на місці й повернуться туди, де були раніше.</string>
+    <string name="sections_menu_pin">Питати PIN</string>
+    <string name="sections_menu_pin_off">Не питати PIN</string>
+    <string name="sections_pin_note">Ховає секцію, доки ви не введете PIN на цьому пристрої. Самі чати цим не шифруються.</string>
+    <string name="sections_new_title">Нова секція</string>
+    <string name="sections_new_placeholder">Назва секції</string>
+    <string name="sections_new_save">Створити</string>
+    <string name="sections_rename_title">Перейменувати секцію</string>
+    <string name="sections_rename_save">Зберегти</string>
+    <string name="sections_locked_title">Питає PIN</string>
+    <string name="sections_locked_enter">Ваш PIN</string>
+    <string name="sections_locked_open">Відкрити</string>
+    <string name="sections_locked_wrong">Невірний PIN.</string>
+    <string name="sections_locked_nopin">Прихована на іншому пристрої. Тут PIN не задано.</string>
+    <string name="sections_locked_open_anyway">Усе одно відкрити</string>
+    <string name="sections_picker_title">Додати до «%1$s»</string>
+    <string name="sections_picker_save">Зберегти</string>
+    <string name="sections_picker_nobody">Поки нікого додати.</string>
+    <string name="sections_err_too_many_sections">Більше секцій в одному акаунті не буває.</string>
+    <string name="sections_err_section_full">Секція заповнена.</string>
+    <string name="sections_err_too_many_members">Забагато чатів в усіх секціях.</string>
+    <string name="sections_err_too_large">Список секцій завеликий, він не збережеться.</string>
+    <string name="sections_err_unreadable">Секції записані новішою версією RCQ.</string>
 </resources>

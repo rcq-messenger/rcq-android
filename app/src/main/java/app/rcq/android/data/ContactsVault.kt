@@ -48,6 +48,10 @@ object ContactsVault {
         object Written : Outcome()
         object Unchanged : Outcome()
         object Skipped : Outcome()
+        /** The island served a version BELOW the floor this install has seen.
+         *  The caller stops mirroring for the rest of the session; see the
+         *  note in [mirror]. */
+        object RolledBack : Outcome()
         data class Failed(val why: String) : Outcome()
     }
 
@@ -65,11 +69,19 @@ object ContactsVault {
                 val cur = api.vaultGet(slot)
                 if (!stillOurs()) return Outcome.Skipped
                 if (cur.version < floor) {
-                    // The island served an older version than this install has
-                    // seen. In the mirror phase the server list is the truth
-                    // anyway; stop trusting the floor and rewrite from the list.
-                    LocalStores.setVaultContactsVersion(0)
-                    return Outcome.Failed("rolled back: ${cur.version} < $floor")
+                    // ⚠⚠ The island served an older version than this install
+                    // has seen, and the FLOOR IS NOT CLEARED. This line used to
+                    // clear it and rewrite the whole list, on the reasoning
+                    // that in the mirror phase the server list is the truth
+                    // anyway. It is not safe: the island cannot tell "restored
+                    // from a backup" apart from "your derivation was retired by
+                    // POST /auth/reissue", and in the second case rewriting
+                    // republishes the entire contact list, sealed with the key
+                    // the user has just declared compromised, under a slot name
+                    // that will never be read again. Stop the mirror for this
+                    // session, keep what is on screen, say so. Same rule as the
+                    // sections slot (design 23.08 §2.2).
+                    return Outcome.RolledBack
                 }
                 val remote = cur.blob?.let { decode(Vault.open(identityPriv, slot, cur.version, Base64.decode(it, Base64.NO_WRAP))) } ?: Blob()
                 val next = fold(remote, list, now)

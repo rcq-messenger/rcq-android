@@ -4,7 +4,9 @@ import android.graphics.BitmapFactory
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Female
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Male
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -104,22 +107,45 @@ internal fun CollapseChevron(collapsed: Boolean) {
     )
 }
 
-/** ICQ-style collapsible section header: chevron · TITLE · (count) · trailing. */
+/** ICQ-style collapsible section header: chevron · TITLE · (count) · trailing.
+ *
+ *  @param onLongPress opens the section menu (founder item 1 of 23.08). Null on
+ *  a header that has no menu: the request rows, and any section whose PIN has
+ *  not been answered. See the note on [SectionMenuSheet].
+ *  @param locked draws the key glyph and, with [count] hidden by the caller,
+ *  is the whole of what a gated section shows. A member count or an unread
+ *  badge here is a leak of exactly what the user asked to hide.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SectionHeader(
     title: String,
     count: Int,
     collapsed: Boolean,
     onToggle: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
+    showCount: Boolean = true,
+    locked: Boolean = false,
     trailing: @Composable (RowScope.() -> Unit)? = null,
 ) {
     val c = RcqTheme.colors
+    // 0.7 is this header's own look against the theme background and stays that
+    // on a screen with no wallpaper ([LocalHomeVeil] is 1f there).
+    //
+    // ⚠ Over a home wallpaper it takes the LIST's veil when the list is more
+    // opaque than that. The rows around it went translucent by a number chosen
+    // for contrast (0.9 when the wallpaper fights the theme), and a header left
+    // at a flat 0.7 would be the one strip on the screen where the picture
+    // shows through harder than anywhere else, with the section title, the
+    // dimmest text on the row, sitting on it.
+    val listVeil = LocalHomeVeil.current
+    val veil = if (listVeil < 1f) maxOf(0.7f, listVeil) else 0.7f
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(0.dp))
-            .background(c.bgSecondary.copy(alpha = 0.7f))
-            .clickable(onClick = onToggle)
+            .background(c.bgSecondary.copy(alpha = veil))
+            .combinedClickable(onClick = onToggle, onLongClick = onLongPress)
             .padding(horizontal = 10.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -143,8 +169,19 @@ internal fun SectionHeader(
                 // instead of parking it at the far end of the row.
                 modifier = Modifier.weight(1f, fill = false),
             )
-            Spacer(Modifier.size(4.dp))
-            Text("($count)", color = c.textSecondary, fontSize = 11.sp, maxLines = 1)
+            if (locked) {
+                Spacer(Modifier.size(4.dp))
+                Icon(
+                    Icons.Filled.Key,
+                    contentDescription = null,
+                    tint = c.textSecondary,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+            if (showCount) {
+                Spacer(Modifier.size(4.dp))
+                Text("($count)", color = c.textSecondary, fontSize = 11.sp, maxLines = 1)
+            }
         }
         trailing?.invoke(this)
     }

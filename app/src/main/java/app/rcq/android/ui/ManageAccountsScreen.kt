@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.data.Account
+import app.rcq.android.data.AccountCards
 import app.rcq.android.data.AccountManager
 import app.rcq.android.data.SecureStore
 import app.rcq.android.net.RcqApi
@@ -73,6 +74,12 @@ internal fun ManageAccountsScreen(
     val accounts by AccountManager.visibleAccounts.collectAsState(initial = AccountManager.visibleNow())
     val activeId by AccountManager.activeId.collectAsState()
     var pendingDelete by remember { mutableStateOf<Account?>(null) }
+    // Each account's cached face + name (founder item 7), the same cache the
+    // home switcher reads. Warmed once, then a map lookup per row: no island is
+    // asked anything to draw this screen, and it is complete on the first frame
+    // after a cold start.
+    remember { AccountCards.warm(context) }
+    val cards by AccountCards.cards.collectAsState()
 
     // Roster order, not creation order: the list is now reorderable (the
     // switcher renders the same order), and sorting by createdAt here would
@@ -116,14 +123,33 @@ internal fun ManageAccountsScreen(
             }
             items(sorted, key = { it.id }) { account ->
                 val isActive = account.id == activeId
-                val nick = SecureStore.peekNickname(context, account.id) ?: "—"
-                val uin = SecureStore.peekUin(context, account.id)
-                val host = account.serverHost ?: RcqApi.DEFAULT_HOST
+                val card = cards[account.id]
+                // remember, not a bare call: these are two SharedPreferences
+                // reads and they sat in the body of a list row, so they ran
+                // again on every recomposition of the screen for every account
+                // on it. Keyed on the account and on the cache, which is what
+                // changes when a name does.
+                val nick = remember(account.id, card) {
+                    SecureStore.peekNickname(context, account.id) ?: card?.nickname ?: "—"
+                }
+                val uin = remember(account.id, card) {
+                    SecureStore.peekUin(context, account.id) ?: card?.uin
+                }
+                val host = account.serverHost ?: card?.host ?: RcqApi.DEFAULT_HOST
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 5.dp)
                         .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // The account's own picture, cached (founder item 7). The
+                    // rows carried a name, a host and a number and no face at
+                    // all, which is the one thing that tells two of your own
+                    // identities apart at a glance.
+                    AccountAvatar(
+                        card?.avatarMediaId, card?.avatarMediaKey, host,
+                        active = isActive, session = session, size = 36.dp,
+                    )
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(nick, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -191,7 +217,9 @@ internal fun ManageAccountsScreen(
     }
 
     pendingDelete?.let { account ->
-        val nick = SecureStore.peekNickname(context, account.id) ?: (account.serverHost ?: RcqApi.DEFAULT_HOST)
+        val nick = SecureStore.peekNickname(context, account.id)
+            ?: cards[account.id]?.nickname
+            ?: (account.serverHost ?: RcqApi.DEFAULT_HOST)
         RcqAskSheet(
             onDismiss = { pendingDelete = null },
             title = stringResource(R.string.manage_accounts_delete_title, nick),
@@ -200,7 +228,14 @@ internal fun ManageAccountsScreen(
                 SheetAction(
                     label = stringResource(R.string.manage_accounts_delete),
                     destructive = true,
-                    onClick = { session.deleteAccountLocal(account.id); pendingDelete = null },
+                    onClick = {
+                        session.deleteAccountLocal(account.id)
+                        // The face goes with the account. A cached picture and
+                        // nickname left behind after a LOCAL delete is exactly
+                        // the leftover the delete was asked to remove.
+                        AccountCards.forget(context, account.id)
+                        pendingDelete = null
+                    },
                 ),
             ),
         )

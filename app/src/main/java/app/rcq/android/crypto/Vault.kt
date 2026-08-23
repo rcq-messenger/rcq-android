@@ -34,6 +34,12 @@ import java.security.SecureRandom
 object Vault {
     const val CONTACTS = "contacts"
 
+    /** The chat-list sections (founder item 1 of 23.08). A second slot rather
+     *  than a field in [CONTACTS]: the two are written by different code paths
+     *  at different moments, and one 409 loop must not stall the other. Derived
+     *  the same way, so the island still sees only 32 hex characters. */
+    const val SECTIONS = "sections"
+
     private const val FORMAT_V1: Byte = 0x01
     private const val NONCE_LEN = 12
     private const val BLOCK = 512

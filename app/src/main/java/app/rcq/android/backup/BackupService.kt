@@ -109,6 +109,11 @@ object BackupService {
         val reply_to_snippet: String? = null,
         val reactions: Map<String, String>? = null,
         val expires_at: Long? = null,
+        /** kind == "call": which call this row records, so a restored history
+         *  can still tell an already-known call from a new one (#678/#686).
+         *  Additive and optional; an archive written by an older build or by
+         *  another client simply has no such field and reads as null. */
+        val call_id: String? = null,
     )
 
     private fun ChatMessage.toRecord() = Record(
@@ -137,6 +142,7 @@ object BackupService {
         reply_to_snippet = replyToSnippet,
         reactions = reactions.mapKeys { it.key.toString() },
         expires_at = expiresAt,
+        call_id = callId,
     )
 
     /** Back into this client's shape, or null when the line cannot be a message
@@ -176,6 +182,7 @@ object BackupService {
             spoiler = spoiler,
             albumId = album_id,
             expiresAt = expires_at,
+            callId = call_id,
         )
     }
 

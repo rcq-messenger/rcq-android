@@ -88,12 +88,14 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
               spoiler    INTEGER NOT NULL DEFAULT 0,
               album_id   TEXT,
               reply_to_id TEXT,
-              expires_at INTEGER
+              expires_at INTEGER,
+              call_id    TEXT
             )
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_messages_peer ON messages(peer_uin, sent_at)")
         db.execSQL("CREATE INDEX idx_messages_group ON messages(group_id, sent_at)")
+        db.execSQL(CALL_ID_INDEX_DDL)
         db.execSQL(DELETED_IDS_DDL)
         db.execSQL(DECOY_CONTACTS_DDL)
     }
@@ -140,6 +142,17 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // otherwise the first open of a long chat would re-ack its entire
         // history in one envelope.
         if (oldVersion < 18) db.execSQL("UPDATE messages SET state = 'READ' WHERE from_me = 0")
+        // 19: the call id on the history row (#678/#686). Existing call rows
+        // stay NULL and can never be filled in, because the id lived only in
+        // the CallController's per-call state and was gone the moment the call
+        // ended. An old row therefore never matches a dedupe probe, which is
+        // the safe direction: at worst one already-known call from before the
+        // upgrade is filed a second time, where guessing would have hidden a
+        // real one.
+        if (oldVersion < 19) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN call_id TEXT")
+            db.execSQL(CALL_ID_INDEX_DDL)
+        }
     }
 
     // ── decoy roster (only ever populated in the DECOY store) ────────────
@@ -217,6 +230,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
             put("file_size", msg.fileSize)
             put("duration_sec", msg.durationSec)
             put("thumb_b64", msg.thumbB64)
+            put("call_id", msg.callId)
             put("lat", msg.lat)
             put("lng", msg.lng)
             put("spoiler", if (msg.spoiler) 1 else 0)
@@ -301,6 +315,23 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.execSQL("INSERT OR IGNORE INTO deleted_ids (id, at) VALUES (?, ?)", arrayOf<Any>(id, at))
     }
 
+    /** True when a call-summary row for [callId] is already on this device.
+     *
+     *  The dedupe the caller-written missed-call marker needs (#678/#686). The
+     *  envelope uuid cannot do this job: the marker is a fresh envelope with a
+     *  fresh id, and the row the callee may already hold was written locally by
+     *  its own [CallController] and never had an envelope at all. The call id
+     *  is the only thing the two share.
+     *
+     *  ⚠ Not scoped to a peer. A call id is a uuid minted by the caller, so it
+     *  is unique across the whole store, and scoping it would only invite the
+     *  marker's own sender-uin to disagree with the row's peer_uin. */
+    fun hasCallId(callId: String): Boolean {
+        if (callId.isEmpty()) return false
+        return db.rawQuery("SELECT 1 FROM messages WHERE call_id = ? LIMIT 1", arrayOf(callId))
+            .use { it.moveToFirst() }
+    }
+
     /** True if this envelope was deleted here before. */
     fun isDeleted(id: String): Boolean =
         db.rawQuery("SELECT 1 FROM deleted_ids WHERE id = ? LIMIT 1", arrayOf(id)).use { it.moveToFirst() }
@@ -320,7 +351,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
     fun all(): List<ChatMessage> {
         val out = ArrayList<ChatMessage>()
         db.rawQuery(
-            "SELECT id, peer_uin, from_me, body, sent_at, state, kind, media_id, media_key, reply_snippet, reply_author, group_id, sender_uin, reactions, edited, file_name, file_mime, file_size, duration_sec, thumb_b64, lat, lng, spoiler, album_id, reply_to_id, expires_at FROM messages ORDER BY sent_at ASC", null,
+            "SELECT id, peer_uin, from_me, body, sent_at, state, kind, media_id, media_key, reply_snippet, reply_author, group_id, sender_uin, reactions, edited, file_name, file_mime, file_size, duration_sec, thumb_b64, lat, lng, spoiler, album_id, reply_to_id, expires_at, call_id FROM messages ORDER BY sent_at ASC", null,
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(
@@ -351,6 +382,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
                         albumId = c.getString(23),
                         replyToId = c.getString(24),
                         expiresAt = if (c.isNull(25)) null else c.getLong(25),
+                        callId = c.getString(26),
                     )
                 )
             }
@@ -363,7 +395,14 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 18
+        const val VERSION = 19
+
+        /** Partial on purpose: `call_id` is NULL on everything that is not a
+         *  call summary, which is all but a handful of rows, and SQLite would
+         *  otherwise index every one of them. A `call_id = ?` probe implies
+         *  `call_id IS NOT NULL`, so the planner still uses it. */
+        private const val CALL_ID_INDEX_DDL =
+            "CREATE INDEX IF NOT EXISTS idx_messages_call ON messages(call_id) WHERE call_id IS NOT NULL"
 
         /** The decoy store's own contact list (synthetic uins). Created on
          *  every db so the schema is uniform; empty everywhere but the decoy. */

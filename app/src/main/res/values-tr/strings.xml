@@ -494,11 +494,18 @@
     <string name="my_uins_footer">Sen bir numarayla cevap verirken diğerleri senin için ayrılmış durur. Kimse alamaz.</string>
     <string name="settings_foot_appearance">Açık, koyu ya da sistem temasını izle.</string>
     <string name="settings_text_size">Yazı boyutu</string>
+    <string name="settings_row_theme">Tema</string>
+    <string name="settings_search_hint">Ayarlarda ara</string>
     <string name="settings_row_app_icon">Uygulama simgesi</string>
     <string name="settings_row_chat_bg">Sohbet arka planı</string>
     <string name="settings_row_home_bg">Ana ekran arka planı</string>
     <string name="chat_bg_none">Yok</string>
     <string name="chat_bg_custom">Galeri</string>
+    <!-- Under the wallpaper grid: the built-in gradients are filtered
+         to the ones drawn for the theme in use (the selected one is always
+         kept). Without this line a shorter grid reads as wallpapers having
+         gone missing. -->
+    <string name="chat_bg_theme_set_note">Geçerli temaya göre seçilmiş duvar kağıtları. Kendi görseliniz her zaman kullanılabilir.</string>
     <string name="app_icon_default">Varsayılan</string>
     <string name="app_icon_footer">Başka bir başlatıcı simgesi seç. Güncellenirken ana ekran bir an titreyebilir.</string>
     <string name="settings_foot_privacy">Seni kimin görebileceğini ve sana kimin ulaşabileceğini belirle. Sunucu, vekil sunucu ve RCQ röleleri Ağ altında.</string>
@@ -524,6 +531,9 @@
     <string name="common_copy_uin">UIN kopyala</string>
     <string name="common_uin_copied">UIN kopyalandı</string>
     <plurals name="members"><item quantity="one">%1$d üye</item><item quantity="other">%1$d üye</item></plurals>
+    <!-- Same row once the count reaches 1000 and compactCount() takes
+         over (999, then 1K, 2.1K); the argument is already formatted. -->
+    <string name="members_compact">%1$s üye</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">son görülme %1$s</string>
     <string name="last_seen_just_now">az önce</string>
@@ -566,14 +576,8 @@
     <!-- Settings: privacy -->
     <string name="pv_last_seen">Son görülme</string>
     <string name="pv_last_seen_desc">En son ne zaman çevrimiçi olduğunu kimler görebilir.</string>
-    <string name="pv_stay_visible">Çıktıktan sonra görünür kal</string>
-    <string name="pv_stay_visible_desc">Uygulama kapandıktan sonra bir süre daha yakın zamanda çevrimiçi olarak görün.</string>
-    <string name="presence_countdown_hm">%1$d sa %2$d dk</string>
-    <string name="presence_countdown_h">%1$d sa</string>
-    <string name="presence_countdown_m">%1$d dk</string>
-    <string name="presence_countdown_lt1m">&lt;1 dk</string>
-    <string name="presence_info_title">Çıktıktan sonra görünür kal</string>
-    <string name="presence_info_body">Uygulamayı kapattıktan sonra bu süre boyunca çevrimiçi görünmeyi sürdürürsün. Ayarlar, Gizlilik &amp; Ağ altından değiştir.</string>
+    <string name="pv_card_side_lists">Kartımı yan listelerden uzak tut</string>
+    <string name="pv_card_side_lists_desc">Seni bir tepki listesinde, medya görüntüleyicide veya üye listesinde gören herkes dokunup profil kartını açabilir. Bu ayar, bunu istemediğini kaydeder. Bu cihazda tutulur: adanız bunu henüz denetlemiyor, yani onu yok sayan bir uygulama kartı yine de açar. Adanın gerçekten uyguladığı ayar yukarıdaki «Profil kartı».</string>
     <string name="stealth_info_title">Rölelerden</string>
     <string name="stealth_info_body_manual">RCQ rölelerini menüden kendin açtın. Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Bu açıkken uygulama doğrudan bağlantı denemez. Aynı menüden kapatabilirsin.</string>
     <string name="stealth_shield_green">Yeşil kalkan: rölelerden geçen trafiğin adaya ulaştığı doğrulandı.</string>
@@ -636,6 +640,21 @@
     <string name="poll_who_voted">Kimler oy verdi</string>
     <string name="poll_voters_title">Oylar</string>
     <string name="poll_no_voters">Oy yok</string>
+    <!-- Polls were removed (item 14a): the ballots were never E2EE.
+         Kept so an old peer's poll still renders instead of vanishing. -->
+    <string name="poll_removed_title">Anket</string>
+    <string name="poll_removed_body">Anketler kaldırıldı: oylar şifreli değildi. Buna artık yanıt verilemez.</string>
+    <!-- Disappearing messages (item 20), option set mirrored from iOS. -->
+    <string name="chat_ttl_menu">Kaybolan mesajlar</string>
+    <string name="chat_ttl_menu_on">Kaybolan: %1$s</string>
+    <string name="chat_ttl_body">Burada gönderdiğin yeni mesajlar süre dolunca iki tarafta da kaybolur. Süre, mesaj gönderildiği anda başlar; çevrimdışı geçen zaman onu uzatmaz.</string>
+    <string name="chat_ttl_off">Kapalı</string>
+    <string name="chat_ttl_quoted">Kaybolan mesaj</string>
+    <string name="chat_ttl_1m">1 dakika</string>
+    <string name="chat_ttl_5m">5 dakika</string>
+    <string name="chat_ttl_1h">1 saat</string>
+    <string name="chat_ttl_24h">24 saat</string>
+    <string name="chat_ttl_7d">7 gün</string>
     <!-- Connection diagnostics -->
     <string name="diag_title">Bağlantı tanılaması</string>
     <string name="diag_transport">Rota</string>
@@ -720,6 +739,25 @@
     <string name="gi_perm_delete">Sil</string>
     <string name="gi_perm_members">Üyeler</string>
     <string name="gi_perm_info">Bilgi</string>
+
+    <!-- Handing the group over (founder item 23). Owner only, own-island
+         only, and one way: the caller keeps membership and loses both the
+         owner seat and every moderator capability. -->
+    <string name="gi_transfer">Sahipliği devret</string>
+    <string name="gi_transfer_q">Sahiplik devredilsin mi?</string>
+    <string name="gi_transfer_body">Bu grubu %1$s kişisine devretmek istiyor musun? Grupta sıradan bir üye olarak kalırsın ama grup sahibi haklarını ve tüm moderatör yetkilerini kaybedersin. Geri vermek yalnızca yeni sahibin elinde.</string>
+    <string name="gi_transfer_cta">Devret</string>
+    <string name="gi_transfer_done_title">Sahiplik devredildi</string>
+    <string name="gi_transfer_done">Grubun sahibi artık %1$s. Hâlâ üyesin: çıkabilir ya da kalabilirsin.</string>
+    <string name="gi_transfer_stay">Kal</string>
+    <string name="gi_transfer_err_owner_only">Grubu yalnızca sahibi devredebilir.</string>
+    <string name="gi_transfer_err_already_owner">Bu grubun sahibi zaten o.</string>
+    <string name="gi_transfer_err_not_a_member">Artık bu grupta değil.</string>
+    <string name="gi_transfer_err_no_such_user">Bu ada onu tanımıyor.</string>
+    <string name="gi_transfer_err_target_suspended">O hesap askıya alınmış.</string>
+    <string name="gi_transfer_err_rate_limited_in">Çok fazla deneme. %1$d sn sonra tekrar dene.</string>
+    <string name="gi_transfer_err_rate_limited">Çok fazla deneme. Sonra tekrar dene.</string>
+    <string name="gi_transfer_err_failed">Grup devredilemedi.</string>
     <string name="gi_you"> (sen)</string>
     <string name="gi_delete">Grubu sil</string>
     <string name="gi_leave">Gruptan ayrıl</string>
@@ -814,6 +852,9 @@
     <string name="media_save_failed">Kaydedilemedi</string>
     <string name="media_fetching">Dosya indiriliyor…</string>
     <string name="media_fetch_failed">Dosya indirilemedi. Bağlantıyı kontrol edip tekrar deneyin.</string>
+    <string name="media_video_too_old">Bu video eski biçimde gönderilmiş ve burada açılamayacak kadar büyük (%1$d MB). Gönderenden yeni sürümden tekrar yollamasını isteyin.</string>
+    <string name="media_video_damaged">Bu video bozuk geldi ve ortasında kesildi. Gönderenden tekrar yollamasını isteyin.</string>
+    <string name="media_too_large_for_island">Bu video %1$d MB, sunucu en fazla %2$d MB kabul ediyor.</string>
     <string name="chat_pin">Sabitle</string>
     <string name="chat_pinned_media">📎 Ek</string>
     <string name="chat_pin_failed">Mesaj sabitlenemedi.</string>
@@ -1031,7 +1072,7 @@
     <string name="emoji_tab_panel">Panel</string>
     <string name="emoji_tab_reactions">Tepkiler</string>
     <string name="emoji_pick_panel_hint">Yazma paneline ifade eklemek için dokun (en fazla 40).</string>
-    <string name="emoji_pick_reactions_hint">Hızlı tepkilerini seçmek için dokun (en fazla 6).</string>
+    <string name="emoji_pick_reactions_hint">Hızlı tepkilerini seçmek için dokun (en fazla 40).</string>
     <string name="myreports_title">Bildirimlerim</string>
     <string name="myreports_empty">Hiç bildirim göndermedin. Gönderirsen cevabı burada görünür.</string>
     <string name="myreports_answer">Cevap</string>
@@ -1041,8 +1082,16 @@
     <string name="myreports_status_resolved">Çözüldü</string>
     <string name="myreports_status_dismissed">Reddedildi</string>
     <string name="myreports_status_duplicate">Tekrar</string>
-    <string name="myreports_delete">Sil</string>
-    <string name="myreports_delete_refused">Bu hâlâ inceleniyor, o yüzden şimdilik silinemez.</string>
+    <string name="myreports_delete">Listeden kaldır</string>
+    <string name="myreports_delete_refused">Bu hâlâ inceleniyor, o yüzden şimdilik listeden kaldırılamaz.</string>
+    <string name="myreports_remove_title">Listeden kaldırılsın mı?</string>
+    <string name="myreports_remove_body">Listenden kaybolur. Bildirimin kendisi bizde kalır ve Şöhret Salonu için saymaya devam eder.</string>
+    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_edit">Düzenle</string>
+    <string name="myreports_edited">düzenlendi</string>
+    <string name="myreports_edit_locked">Bu bildirime zaten cevap verilmiş, artık metni değişmiyor.</string>
+    <string name="myreports_edit_not_editable">Bu düzenlenemez.</string>
+    <string name="myreports_edit_error">Değişiklik kaydedilemedi. Tekrar deneyin.</string>
     <string name="myreports_you">Siz</string>
     <string name="myreports_reply">Ekle</string>
     <string name="myreports_reply_placeholder">Bu bildirime bir şey ekleyin</string>
@@ -1136,4 +1185,44 @@
     <string name="how_q5">Kime yazdığımı biri öğrenebilir mi?</string>
     <string name="how_a5">Adanız bir zarfın birine gittiğini bilir, sizden çıktığını bilmez: adınız dışarıda yazmaz.\n\nRCQ röleleri açıkken dışarı çıkan yol iki röle arasında bölünür. Birincisi sizi görür ama hangi adaya gittiğinizi bilmez; ikincisi adaya ulaşır ama kim olduğunuzu bilmez. İki yarıyı birleştirmek ikisini birden gerektirir, ve onlar farklı ülkelerde farklı kişilere aittir.\n\nGizlenemeyen şey: RCQ kullandığınız, ağınızı elinde tutan tarafa görünür, RCQ röleleri kapalı olduğu sürece.</string>
     <string name="how_more">Daha fazla soru: rcq.app/faq →</string>
+
+    <!-- Chat-list sections (founder item 1 of 23.08, RCQ/docs/sections-design-2026-08-23.md).
+         The list of sections and which chat sits in which lives in the account's
+         "sections" vault slot, so the same sections are on every device.
+         The PIN copy says one thing and must go on saying it: the FLAG syncs, the
+         PROTECTION is local. Never "protects", never "encrypts": anyone holding the
+         account reads every section name and every member uin out of the slot. -->
+    <string name="sections_add">Sohbet ekle</string>
+    <string name="sections_empty">Boş. Buraya sohbet taşımak için + kullanın.</string>
+    <string name="sections_reorder_hint">Bir bölümü sürükleyin ya da okları kullanın.</string>
+    <string name="sections_reorder_done">Tamam</string>
+    <string name="sections_move_up">Yukarı</string>
+    <string name="sections_move_down">Aşağı</string>
+    <string name="sections_menu_reorder">Bölümleri sırala</string>
+    <string name="sections_menu_new">Yeni bölüm</string>
+    <string name="sections_menu_rename">Yeniden adlandır</string>
+    <string name="sections_menu_delete">Bölümü sil</string>
+    <string name="sections_delete_confirm">Bu bölüm silinsin mi? Sohbetler yerinde kalır ve her zamanki yerlerine döner.</string>
+    <string name="sections_menu_pin">PIN sor</string>
+    <string name="sections_menu_pin_off">PIN sorma</string>
+    <string name="sections_pin_note">Bu cihazda PIN girene kadar bu bölümü gizler. Sohbetlerin kendisi bununla şifrelenmez.</string>
+    <string name="sections_new_title">Yeni bölüm</string>
+    <string name="sections_new_placeholder">Bölüm adı</string>
+    <string name="sections_new_save">Oluştur</string>
+    <string name="sections_rename_title">Bölümü yeniden adlandır</string>
+    <string name="sections_rename_save">Kaydet</string>
+    <string name="sections_locked_title">PIN soruyor</string>
+    <string name="sections_locked_enter">PIN kodunuz</string>
+    <string name="sections_locked_open">Aç</string>
+    <string name="sections_locked_wrong">PIN yanlış.</string>
+    <string name="sections_locked_nopin">Başka bir cihazda gizlendi. Burada PIN tanımlı değil.</string>
+    <string name="sections_locked_open_anyway">Yine de aç</string>
+    <string name="sections_picker_title">%1$s bölümüne ekle</string>
+    <string name="sections_picker_save">Kaydet</string>
+    <string name="sections_picker_nobody">Henüz eklenecek kimse yok.</string>
+    <string name="sections_err_too_many_sections">Bir hesabın taşıyabileceği bölüm sayısı bu kadar.</string>
+    <string name="sections_err_section_full">Bu bölüm dolu.</string>
+    <string name="sections_err_too_many_members">Bölümlerinizdeki sohbet sayısı çok fazla.</string>
+    <string name="sections_err_too_large">Bölüm listesi kaydedilemeyecek kadar büyük.</string>
+    <string name="sections_err_unreadable">Bölümleriniz RCQ\u0027nun daha yeni bir sürümüyle yazılmış.</string>
 </resources>

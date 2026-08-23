@@ -35,14 +35,19 @@ import androidx.compose.ui.window.DialogProperties
 import app.rcq.android.R
 import app.rcq.android.data.LocalStores
 
-private const val PANEL_CAP = 40
-private const val REACTION_CAP = 6
+// ⚠ Both ceilings come from LocalStores, which is where the list is actually
+// truncated on the way to disk. They were separate numbers once, the picker
+// let 40 reactions through and the store kept 6, and the user watched most of
+// their choice disappear on the next open. The reaction ROW that renders these
+// has to cope with a set this long: see the chat long-press row, which scrolls.
+private const val PANEL_CAP = LocalStores.PANEL_EMOJI_CAP
+private const val REACTION_CAP = LocalStores.REACTION_EMOJI_CAP
 
 /**
  * One window where the user curates BOTH sets in a single place (founder spec:
  * "so they don't have to bounce around"):
- *  - **Панель** — the emoticons shown in the composer smiley panel (≤40).
- *  - **Реакции** — the quick reactions on the long-press reaction row (≤6).
+ *  - **Панель**: the emoticons shown in the composer smiley panel (≤40).
+ *  - **Реакции**: the quick reactions on the long-press reaction row (≤40).
  *
  * A segmented tab switches which set the taps edit; the grid offers the WHOLE
  * bundled set ([Emoticons.fullSet] = original 40 + the 20 extra koloboks) with

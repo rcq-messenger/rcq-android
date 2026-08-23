@@ -54,6 +54,25 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Apps
+// Settings search (#28) index icons.
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Mood
+import androidx.compose.material.icons.filled.NoPhotography
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwipeLeft
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VpnLock
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Autorenew
@@ -95,7 +114,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -107,8 +128,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -140,6 +164,169 @@ import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
 private enum class SettingsRoute { ROOT, HOW_IT_WORKS, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
+
+// ── Settings search (#28) ────────────────────────────────────────────
+//
+// The settings rows are hand-written composables spread over two dozen screens,
+// so there is no tree to walk at runtime and no way to read a label back out of
+// one. Search therefore runs off a STATIC INDEX declared right here, next to the
+// screens it describes, and the index is built from an enum through an
+// exhaustive `when`: adding a constant without describing it does not compile.
+// That is the whole point of the shape. A new setting can be forgotten in the
+// index only by also not adding its constant, which is a visible omission rather
+// than a silent one.
+
+/** One constant per row search can find. ⚠ Adding a value here forces a branch
+ *  in [SettingsFind.row]; that is deliberate, do not give the `when` an `else`. */
+private enum class SettingsFind {
+    PROFILE,
+    THEME, TEXT_SIZE, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, ANIM_AVATARS, SWIPE_REPLY,
+    HOW_IT_WORKS, PRIVACY, NETWORK, NOTIFICATIONS, SOUNDS, BLOCKED, PIN_CODES,
+    RECOVERY, BACKUP, LINKED_DEVICES, BACKUP_ISLAND,
+    LAST_SEEN, PROFILE_CARD, CARD_SIDE_LISTS, GENDER_VISIBILITY, INVITE_POLICY,
+    READ_RECEIPTS, CALL_POLICY, SCREEN_SECURITY, STRANGERS, HALL_OF_FAME,
+    CUSTOM_SERVER, DIAGNOSTICS, RELAY_CALLS, RELAYS, ONION, LOCAL_PROXY, PUSH,
+    ISLAND,
+    CLEAR_HISTORY,
+    UIN_SHOP, MY_UINS, MOVE_UIN, BURN,
+    ABOUT, INVITE, SHARE_APK, REPORT_BUG, MY_REPORTS,
+}
+
+private class SettingsFindRow(
+    val id: SettingsFind,
+    val icon: ImageVector,
+    /** The label the row really shows. Matched first, and it is already
+     *  translated, so every locale searches in its own words for free. */
+    val titleRes: Int,
+    /** Section heading, shown under the title so a hit says where it lives. */
+    val sectionRes: Int,
+    /** Sub-screen a hit opens, or null when the row lives on the root list
+     *  (a hit then scrolls the root list to it and flashes it). */
+    val route: SettingsRoute?,
+    /** Extra words that must also find this row.
+     *
+     *  ⚠ NOT a string resource, on purpose. These are search keys, never drawn,
+     *  and they have to work ACROSS languages at once: a Russian speaker running
+     *  the English UI types "пин" and must still land on PIN codes, which a
+     *  per-locale resource could not do because it would only ever hold the one
+     *  locale's words. The visible label above carries the native-language
+     *  match; this carries everything else. */
+    val aliases: String,
+)
+
+/** ⚠ Exhaustive by design (see [SettingsFind]). */
+private fun SettingsFind.row(): SettingsFindRow = when (this) {
+    SettingsFind.PROFILE -> SettingsFindRow(this, Icons.Filled.Person, R.string.pe_title, R.string.settings_title, SettingsRoute.PROFILE,
+        "profile nickname avatar name about age city профиль ник никнейм аватар имя о себе возраст город")
+    SettingsFind.THEME -> SettingsFindRow(this, Icons.Filled.DarkMode, R.string.settings_row_theme, R.string.settings_sec_appearance, null,
+        "theme dark light night colour color тема тёмная темная светлая ночная цвет оформление")
+    SettingsFind.TEXT_SIZE -> SettingsFindRow(this, Icons.Filled.FormatSize, R.string.settings_text_size, R.string.settings_sec_appearance, null,
+        "font size text bigger smaller шрифт размер текст крупнее мельче")
+    SettingsFind.LANGUAGE -> SettingsFindRow(this, Icons.Filled.Language, R.string.onboard_language, R.string.settings_sec_appearance, SettingsRoute.LANGUAGE,
+        "language locale russian english язык локаль русский английский")
+    SettingsFind.APP_ICON -> SettingsFindRow(this, Icons.Filled.Apps, R.string.settings_row_app_icon, R.string.settings_sec_appearance, SettingsRoute.APP_ICON,
+        "icon launcher home screen иконка значок ярлык рабочий стол")
+    SettingsFind.CHAT_BG -> SettingsFindRow(this, Icons.Filled.Wallpaper, R.string.settings_row_chat_bg, R.string.settings_sec_appearance, SettingsRoute.CHAT_BG,
+        "wallpaper background chat picture обои фон подложка чат картинка")
+    SettingsFind.HOME_BG -> SettingsFindRow(this, Icons.Filled.Wallpaper, R.string.settings_row_home_bg, R.string.settings_sec_appearance, SettingsRoute.HOME_BG,
+        "wallpaper background home list picture обои фон главный экран список картинка")
+    SettingsFind.ANIM_AVATARS -> SettingsFindRow(this, Icons.Filled.Mood, R.string.settings_anim_avatars_title, R.string.settings_sec_appearance, null,
+        "avatar animation gif battery аватар анимация гиф батарея")
+    SettingsFind.SWIPE_REPLY -> SettingsFindRow(this, Icons.Filled.SwipeLeft, R.string.settings_swipe_reply, R.string.settings_sec_appearance, null,
+        "swipe reply quote gesture свайп ответ цитата жест")
+    SettingsFind.HOW_IT_WORKS -> SettingsFindRow(this, Icons.Filled.Info, R.string.how_title, R.string.settings_sec_privacy, SettingsRoute.HOW_IT_WORKS,
+        "help faq how encryption как это работает справка вопросы шифрование")
+    SettingsFind.PRIVACY -> SettingsFindRow(this, Icons.Filled.Lock, R.string.settings_row_privacy, R.string.settings_sec_privacy, SettingsRoute.PRIVACY,
+        "privacy visibility who can see приватность приваси видимость кто видит")
+    SettingsFind.NETWORK -> SettingsFindRow(this, Icons.Filled.NetworkCheck, R.string.settings_row_network, R.string.settings_sec_privacy, SettingsRoute.NETWORK,
+        "network server relay proxy сеть сервер релей прокси обход")
+    SettingsFind.NOTIFICATIONS -> SettingsFindRow(this, Icons.Filled.Notifications, R.string.settings_row_notifications, R.string.settings_sec_privacy, SettingsRoute.NOTIFICATIONS,
+        "notifications push alerts уведомления пуш пуши оповещения")
+    SettingsFind.SOUNDS -> SettingsFindRow(this, Icons.AutoMirrored.Filled.VolumeUp, R.string.settings_row_sounds, R.string.settings_sec_privacy, SettingsRoute.SOUNDS,
+        "sound volume ringtone mute звук звуки громкость сигнал беззвучно")
+    SettingsFind.BLOCKED -> SettingsFindRow(this, Icons.Outlined.Block, R.string.settings_row_blocked, R.string.settings_sec_privacy, SettingsRoute.BLOCKED,
+        "blocked block ban spam блок блокировка чёрный черный список бан спам")
+    SettingsFind.PIN_CODES -> SettingsFindRow(this, Icons.Filled.Password, R.string.settings_row_pin_codes, R.string.settings_sec_privacy, SettingsRoute.PIN_CODES,
+        "pin password passcode lock biometrics duress wipe decoy пин пароль код блокировка отпечаток паника")
+    SettingsFind.RECOVERY -> SettingsFindRow(this, Icons.Filled.Key, R.string.settings_row_recovery, R.string.settings_sec_privacy, SettingsRoute.RECOVERY_PHRASE,
+        "recovery phrase seed words restore key фраза сид восстановление слова ключ")
+    SettingsFind.BACKUP -> SettingsFindRow(this, Icons.Filled.Inventory2, R.string.settings_row_backup, R.string.settings_sec_privacy, SettingsRoute.BACKUP,
+        "backup export import history file бэкап бекап резервная копия история экспорт импорт файл")
+    SettingsFind.LINKED_DEVICES -> SettingsFindRow(this, Icons.Filled.Devices, R.string.settings_row_linked_devices, R.string.settings_sec_privacy, SettingsRoute.LINKED_DEVICES,
+        "devices sessions desktop linked устройства сессии сеансы десктоп компьютер привязанные")
+    SettingsFind.BACKUP_ISLAND -> SettingsFindRow(this, Icons.Filled.Dns, R.string.settings_row_backup_island, R.string.settings_sec_privacy, SettingsRoute.BACKUP_ISLAND,
+        "standby backup island mirror запасной резервный остров зеркало")
+    SettingsFind.LAST_SEEN -> SettingsFindRow(this, Icons.Filled.Visibility, R.string.pv_last_seen, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "last seen online presence был в сети последний раз онлайн присутствие")
+    SettingsFind.PROFILE_CARD -> SettingsFindRow(this, Icons.Outlined.AccountCircle, R.string.pv_profile_card, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "profile card who can open карточка профиля кто может открыть анкета")
+    SettingsFind.CARD_SIDE_LISTS -> SettingsFindRow(this, Icons.Filled.VisibilityOff, R.string.pv_card_side_lists, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "reactions media viewer members list card карточка реакции просмотр медиа список участников побочные")
+    SettingsFind.GENDER_VISIBILITY -> SettingsFindRow(this, Icons.Filled.Person, R.string.common_gender, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "gender sex пол гендер")
+    SettingsFind.INVITE_POLICY -> SettingsFindRow(this, Icons.Filled.Groups, R.string.pv_invite, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "groups invite add me группы приглашение добавить в группу")
+    SettingsFind.READ_RECEIPTS -> SettingsFindRow(this, Icons.Filled.DoneAll, R.string.pv_receipts, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "read receipts ticks blue seen прочитано галочки отчёт отчет о прочтении")
+    SettingsFind.CALL_POLICY -> SettingsFindRow(this, Icons.Filled.Call, R.string.pv_calls, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "calls who can call ring звонки кто может звонить вызов")
+    SettingsFind.SCREEN_SECURITY -> SettingsFindRow(this, Icons.Filled.NoPhotography, R.string.pv_screen_security, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "screenshot screen recording скриншот снимок экрана запись экрана")
+    SettingsFind.STRANGERS -> SettingsFindRow(this, Icons.Filled.Inbox, R.string.pv_strangers, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "strangers requests quarantine незнакомцы заявки запросы карантин")
+    SettingsFind.HALL_OF_FAME -> SettingsFindRow(this, Icons.Filled.EmojiEvents, R.string.pv_hall_of_fame, R.string.settings_row_privacy, SettingsRoute.PRIVACY,
+        "hall of fame hof зал славы")
+    SettingsFind.CUSTOM_SERVER -> SettingsFindRow(this, Icons.Filled.Dns, R.string.pv_custom_server, R.string.settings_row_network, SettingsRoute.NETWORK,
+        "server island host custom self hosted сервер остров хост свой самохостинг")
+    SettingsFind.DIAGNOSTICS -> SettingsFindRow(this, Icons.Filled.NetworkCheck, R.string.diag_title, R.string.settings_row_network, SettingsRoute.DIAGNOSTICS,
+        "diagnostics connection ping check диагностика соединение связь проверка")
+    SettingsFind.RELAY_CALLS -> SettingsFindRow(this, Icons.Filled.VpnLock, R.string.pv_relay_calls, R.string.settings_row_network, SettingsRoute.NETWORK,
+        "calls relay ip address звонки релей адрес айпи")
+    SettingsFind.RELAYS -> SettingsFindRow(this, Icons.Filled.Shield, R.string.pv_obfuscated, R.string.settings_row_network, SettingsRoute.NETWORK,
+        "relay relays blocked censorship tunnel vpn релей релеи обход блокировка туннель")
+    SettingsFind.ONION -> SettingsFindRow(this, Icons.Filled.Public, R.string.pv_onion, R.string.settings_row_network, SettingsRoute.NETWORK,
+        "onion tor routing луковая маршрутизация тор")
+    SettingsFind.LOCAL_PROXY -> SettingsFindRow(this, Icons.Filled.VpnKey, R.string.pv_localproxy, R.string.settings_row_network, SettingsRoute.NETWORK,
+        "proxy socks tor i2p прокси прокся сокс тор")
+    SettingsFind.PUSH -> SettingsFindRow(this, Icons.Filled.Notifications, R.string.notif_push, R.string.settings_row_notifications, SettingsRoute.NOTIFICATIONS,
+        "push delivery ntfy background пуш доставка фон уведомления")
+    SettingsFind.ISLAND -> SettingsFindRow(this, Icons.Filled.Dns, R.string.settings_sec_island, R.string.settings_sec_island, null,
+        "island server rules welcome остров сервер правила приветствие")
+    SettingsFind.CLEAR_HISTORY -> SettingsFindRow(this, Icons.Filled.DeleteSweep, R.string.settings_row_clear_history, R.string.settings_sec_history, null,
+        "clear history delete messages очистить историю удалить сообщения переписку")
+    SettingsFind.UIN_SHOP -> SettingsFindRow(this, Icons.Filled.Sell, R.string.settings_row_uin_shop, R.string.settings_sec_account, SettingsRoute.UIN_SHOP,
+        "uin shop number buy short магазин номер купить короткий")
+    SettingsFind.MY_UINS -> SettingsFindRow(this, Icons.Filled.Inventory2, R.string.settings_row_my_uins, R.string.settings_sec_account, SettingsRoute.MY_UINS,
+        "my uins numbers owned мои номера уин")
+    SettingsFind.MOVE_UIN -> SettingsFindRow(this, Icons.Filled.Autorenew, R.string.settings_row_move_uin, R.string.settings_sec_account, null,
+        "move new uin change number сменить номер переехать новый уин")
+    SettingsFind.BURN -> SettingsFindRow(this, Icons.Filled.LocalFireDepartment, R.string.settings_row_burn, R.string.settings_sec_account, null,
+        "burn delete account wipe удалить аккаунт сжечь стереть")
+    SettingsFind.ABOUT -> SettingsFindRow(this, Icons.Filled.Info, R.string.settings_row_about, R.string.settings_sec_about, null,
+        "about version update source о программе версия обновление обновить исходники")
+    SettingsFind.INVITE -> SettingsFindRow(this, Icons.Filled.PersonAdd, R.string.settings_row_invite, R.string.settings_sec_about, null,
+        "invite friend link пригласить друга ссылка")
+    SettingsFind.SHARE_APK -> SettingsFindRow(this, Icons.Filled.Share, R.string.settings_row_share_app, R.string.settings_sec_about, null,
+        "share apk send app поделиться апк передать приложение")
+    SettingsFind.REPORT_BUG -> SettingsFindRow(this, Icons.Filled.BugReport, R.string.settings_row_report_bug, R.string.settings_sec_about, null,
+        "bug report problem feedback баг ошибка репорт сообщить проблема отзыв")
+    SettingsFind.MY_REPORTS -> SettingsFindRow(this, Icons.Outlined.Flag, R.string.myreports_title, R.string.settings_sec_about, SettingsRoute.MY_REPORTS,
+        "my reports answers мои репорты обращения ответы")
+}
+
+/** The whole index, in screen order. */
+private val settingsFindIndex: List<SettingsFindRow> = SettingsFind.entries.map { it.row() }
+
+/** Fold a query or a haystack down to what matching should ignore: case, and
+ *  the ё/е split that makes "тёмная" and "темная" two different words. */
+private fun settingsSearchFold(s: String): String =
+    s.lowercase().replace('ё', 'е').replace('ў', 'у')
+
+/** Every whitespace-separated word of [query] has to appear somewhere in the
+ *  row's title, section or aliases. AND, not OR: "фон чат" should narrow, not
+ *  return every row that mentions a chat. */
+private fun settingsFindMatches(haystack: String, queryWords: List<String>): Boolean =
+    queryWords.all { haystack.contains(it) }
 
 @Composable
 internal fun SettingsScreen(
@@ -285,12 +472,39 @@ private fun SettingsRoot(
     val themeMode by LocalStores.themeMode.collectAsState()
     val contacts by session.contacts.collectAsState()
     val uinShopEnabled by session.uinShopEnabled.collectAsState()
+    // An island that runs no report desk gets neither the bug form nor the
+    // answers screen; hoisted because search has to hide those rows too.
+    val reportsOn by session.reportsEnabled.collectAsState()
+    // Flagship-only surface, gated like the UIN shop. Its row lives on the
+    // Privacy screen, and search must not point at it where it is hidden.
+    val hofOffered by session.hallOfFameEnabled.collectAsState()
     // How many numbers this account holds besides the one it uses. Decides
     // whether "My numbers" is worth a row on an island with no shop; a server
     // that predates /uin/mine answers 404 and it stays at zero.
     var heldCount by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         heldCount = runCatching { session.myUins().owned.size }.getOrDefault(0)
+        // "Stay visible after you leave" is gone (see PrivacyScreen). Its local
+        // anchor is what the home countdown chip ticks off, and a phone that had
+        // the switch on keeps a live anchor for up to 24h after the update, so
+        // the chip would outlive the feature. Dropping it here retires it on the
+        // first visit to Settings; the chip itself is HomeScreen's to delete.
+        app.rcq.android.data.LocalStores.clearPresenceWindow()
+        // ⚠⚠ A REMOVED FEATURE HAS TO ANSWER false, NOT VANISH. Dropping the
+        // switch from Privacy also dropped the only way to turn the island's
+        // copy of the flag off, and an island that has not taken the 23.08
+        // update still honours a `presence_persistent = true` a previous build
+        // set. Said once per account, remembered only when the island took it,
+        // so an offline visit tries again next time. See
+        // [LocalStores.presenceRetired].
+        if (!app.rcq.android.data.LocalStores.presenceRetired()) {
+            val retired = runCatching {
+                session.updateProfile(
+                    RcqApi.UpdateMeBody(presence_persistent = false, presence_ttl_minutes = 0),
+                )
+            }.getOrNull() != null
+            if (retired) app.rcq.android.data.LocalStores.markPresenceRetired()
+        }
     }
     var confirmBurn by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -330,10 +544,120 @@ private fun SettingsRoot(
         Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
     }
 
-    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
-        SettingsTopBar(stringResource(R.string.settings_title), onBack)
+    // ── search (#28) ─────────────────────────────────────────────────
+    // The magnifier lives in the top bar, where Android puts it, and takes the
+    // bar over while it is open (the platform SearchView pattern). iOS puts it
+    // where its Share button was; the behaviour either side is the same: type,
+    // tap a hit, land on the row.
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    // A hit on a row that lives on THIS list scrolls to it and flashes it.
+    // ⚠ The jump carries a nonce, so asking for the same row twice still fires,
+    // and so the effect below never has to clear its own key (an effect keyed on
+    // state it resets kills itself before it has done anything).
+    var jump by remember { mutableStateOf<Pair<Int, SettingsFind>?>(null) }
+    var flash by remember { mutableStateOf<SettingsFind?>(null) }
+    val rootScroll = rememberScrollState()
+    // Where every anchored row sits, filled in on layout. The root list is a
+    // plain scrolling Column, so every row composes and measures whether or not
+    // it is on screen and the map is complete after the first frame.
+    //
+    // ⚠ Each callback records ONLY what it can see by itself, and the two are
+    // subtracted later, in the effect. Recording "row minus container" at layout
+    // time would depend on the container's callback having already run this
+    // frame, and the first jump after opening Settings would scroll to the wrong
+    // place whenever it had not.
+    val rowInRoot = remember { mutableStateMapOf<SettingsFind, Int>() }
+    var listTopInRoot by remember { mutableFloatStateOf(0f) }
 
-        Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+    LaunchedEffect(jump) {
+        val target = jump?.second ?: return@LaunchedEffect
+        // The results list was covering the settings list a frame ago. Let it
+        // lay out before measuring anything: the offsets left over from before
+        // the search opened are usually right, but the SCROLL RANGE is not
+        // published until the list has been through a layout, and animating to
+        // an offset while the range still reads zero clamps the jump to the top.
+        kotlinx.coroutines.delay(48)
+        var y = rowInRoot[target]
+        var tries = 0
+        while (y == null && tries < 8) {
+            kotlinx.coroutines.delay(24)
+            y = rowInRoot[target]
+            tries++
+        }
+        y?.let { rootScroll.animateScrollTo((it - listTopInRoot.toInt() - 120).coerceAtLeast(0)) }
+        flash = target
+        kotlinx.coroutines.delay(1600)
+        if (flash == target) flash = null
+    }
+
+    fun openHit(hit: SettingsFindRow) {
+        searching = false
+        query = ""
+        val r = hit.route
+        // A row that leads somewhere opens it. A row that lives on this list is
+        // shown, never fired: search must not be a second way to press "Burn
+        // account".
+        if (r != null) onOpen(r) else jump = ((jump?.first ?: 0) + 1) to hit.id
+    }
+
+    /** Marks a root-list row as [id]'s: records where it sits so a hit can
+     *  scroll to it, and tints it while it is the flashed one. Reading `flash`
+     *  here is what subscribes this list to the flash, so no row needs to know
+     *  about search at all. */
+    fun anchor(id: SettingsFind): Modifier = Modifier
+        .onGloballyPositioned {
+            // Un-scrolled position in the window; the list's own top is taken
+            // off later (see the effect above).
+            rowInRoot[id] = (it.positionInRoot().y + rootScroll.value).toInt()
+        }
+        .clip(RoundedCornerShape(14.dp))
+        .background(if (flash == id) c.accent.copy(alpha = 0.20f) else Color.Transparent)
+
+    Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+        if (searching) {
+            SettingsSearchBar(
+                query = query,
+                onQuery = { query = it },
+                onClose = { searching = false; query = "" },
+            )
+        } else {
+            SettingsTopBar(stringResource(R.string.settings_title), onBack, trailing = {
+                Icon(
+                    Icons.Filled.Search,
+                    stringResource(R.string.settings_search_hint),
+                    tint = c.accent,
+                    modifier = Modifier.size(24.dp).clickable { searching = true },
+                )
+            })
+        }
+
+        if (searching) {
+            // Rows an island does not offer must not be findable either: a hit
+            // that opens a screen this build hides is a dead end (a removed
+            // feature answers, it does not vanish, and here the answer is "no
+            // such row on this island").
+            val hidden = remember(uinShopEnabled, heldCount, reportsOn, hofOffered) {
+                buildSet {
+                    if (!uinShopEnabled) add(SettingsFind.UIN_SHOP)
+                    if (!uinShopEnabled && heldCount == 0) add(SettingsFind.MY_UINS)
+                    if (!reportsOn) { add(SettingsFind.REPORT_BUG); add(SettingsFind.MY_REPORTS) }
+                    if (!hofOffered) add(SettingsFind.HALL_OF_FAME)
+                }
+            }
+            SettingsSearchResults(
+                query = query,
+                hidden = hidden,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                onPick = ::openHit,
+            )
+        } else {
+
+        Column(
+            Modifier.fillMaxWidth().weight(1f)
+                .onGloballyPositioned { listTopInRoot = it.positionInRoot().y }
+                .verticalScroll(rootScroll).padding(horizontal = 16.dp),
+        ) {
             // Profile header card — opens the editor.
             Row(
                 modifier = Modifier
@@ -362,11 +686,15 @@ private fun SettingsRoot(
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_appearance))
-            SegmentedTheme(themeMode) { LocalStores.setThemeMode(it) }
+            Column(anchor(SettingsFind.THEME).fillMaxWidth()) {
+                SegmentedTheme(themeMode) { LocalStores.setThemeMode(it) }
+            }
             Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.settings_text_size), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-            val fontScale by LocalStores.fontScale.collectAsState()
-            SegmentedFontScale(fontScale) { LocalStores.setFontScale(it) }
+            Column(anchor(SettingsFind.TEXT_SIZE).fillMaxWidth()) {
+                Text(stringResource(R.string.settings_text_size), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                val fontScale by LocalStores.fontScale.collectAsState()
+                SegmentedFontScale(fontScale) { LocalStores.setFontScale(it) }
+            }
             SectionFooter(stringResource(R.string.settings_foot_appearance))
             Spacer(Modifier.height(12.dp))
             val lang by LanguageManager.current.collectAsState()
@@ -379,17 +707,21 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_home_bg)) { onOpen(SettingsRoute.HOME_BG) }
             }
             val animAvatars by LocalStores.animateAvatars.collectAsState()
-            SettingsGroup {
-                SettingToggleRow(
-                    stringResource(R.string.settings_anim_avatars_title),
-                    stringResource(R.string.settings_anim_avatars_desc),
-                    animAvatars,
-                ) { LocalStores.setAnimateAvatars(it) }
+            Column(anchor(SettingsFind.ANIM_AVATARS).fillMaxWidth()) {
+                SettingsGroup {
+                    SettingToggleRow(
+                        stringResource(R.string.settings_anim_avatars_title),
+                        stringResource(R.string.settings_anim_avatars_desc),
+                        animAvatars,
+                    ) { LocalStores.setAnimateAvatars(it) }
+                }
             }
             Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.settings_swipe_reply), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-            val swipeSide by LocalStores.swipeReplySide.collectAsState()
-            SegmentedSwipeSide(swipeSide) { LocalStores.setSwipeReplySide(it) }
+            Column(anchor(SettingsFind.SWIPE_REPLY).fillMaxWidth()) {
+                Text(stringResource(R.string.settings_swipe_reply), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                val swipeSide by LocalStores.swipeReplySide.collectAsState()
+                SegmentedSwipeSide(swipeSide) { LocalStores.setSwipeReplySide(it) }
+            }
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_privacy))
@@ -424,14 +756,14 @@ private fun SettingsRoot(
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_history))
             SettingsGroup {
-                SettingsRow(Icons.Filled.DeleteSweep, stringResource(R.string.settings_row_clear_history), destructive = true) { confirmClear = true }
+                SettingsRow(Icons.Filled.DeleteSweep, stringResource(R.string.settings_row_clear_history), destructive = true, modifier = anchor(SettingsFind.CLEAR_HISTORY)) { confirmClear = true }
             }
             SectionFooter(stringResource(R.string.settings_foot_history))
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_about))
             SettingsGroup {
-                SettingsRow(Icons.Filled.Info, stringResource(R.string.settings_row_about), value = appVersion(context)) { showAbout = true }
+                SettingsRow(Icons.Filled.Info, stringResource(R.string.settings_row_about), value = appVersion(context), modifier = anchor(SettingsFind.ABOUT)) { showAbout = true }
                 Divider()
                 // Hand the APK to a friend offline — the only way to install RCQ
                 // first-time when rcq.app is blocked (the relays live inside the
@@ -440,18 +772,18 @@ private fun SettingsRoot(
                 // row below, which solves a different problem (installing when
                 // rcq.app is blocked) and hands over a 100MB file — not what
                 // anyone sends to say "join me".
-                SettingsRow(Icons.Filled.PersonAdd, stringResource(R.string.settings_row_invite)) {
+                SettingsRow(Icons.Filled.PersonAdd, stringResource(R.string.settings_row_invite), modifier = anchor(SettingsFind.INVITE)) {
                     app.rcq.android.net.UpdateChecker.shareInvite(context, uin)
                 }
                 Divider()
-                SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app)) {
+                SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app), modifier = anchor(SettingsFind.SHARE_APK)) {
                     app.rcq.android.net.UpdateChecker.shareApk(context)
                 }
                 // An island that runs no report desk gets neither entry: a
                 // form that answers 403 and a screen that will always be empty
                 // are worse than an absent menu item. Flag comes from
-                // /server/info; the default is permissive.
-                val reportsOn by session.reportsEnabled.collectAsState()
+                // /server/info; the default is permissive. (Collected at the top
+                // of this composable, because search needs it too.)
                 if (reportsOn) {
                 Divider()
                 // Open on an EMPTY form, every field of it. The reset used to
@@ -469,7 +801,7 @@ private fun SettingsRoot(
                 // transient state of the LAST send; the text and the pictures
                 // are cleared when a report actually goes out, and by Cancel,
                 // which is the button that means it.
-                SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug)) {
+                SettingsRow(Icons.Filled.BugReport, stringResource(R.string.settings_row_report_bug), modifier = anchor(SettingsFind.REPORT_BUG)) {
                     bugSent = false
                     // ⚠ `bugSending` is NOT reset here. It is the accurate
                     // in-flight flag, set by the coroutine that is still
@@ -495,6 +827,7 @@ private fun SettingsRoot(
             // is for moving somewhere else.
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_island))
+            Column(anchor(SettingsFind.ISLAND).fillMaxWidth()) {
             SettingsGroup {
                 val islandHost = session.currentServer
                 val islandInfo by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
@@ -539,6 +872,7 @@ private fun SettingsRoot(
                     }
                 }
             }
+            }
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_account))
@@ -569,7 +903,7 @@ private fun SettingsRoot(
                 )
             }
             SettingsGroup {
-                SettingsRow(Icons.Filled.Autorenew, stringResource(R.string.settings_row_move_uin)) { if (!migrating) confirmMigrate = true }
+                SettingsRow(Icons.Filled.Autorenew, stringResource(R.string.settings_row_move_uin), modifier = anchor(SettingsFind.MOVE_UIN)) { if (!migrating) confirmMigrate = true }
             }
             Text(
                 stringResource(R.string.cs_move_footer),
@@ -579,7 +913,7 @@ private fun SettingsRoot(
             )
 
             SettingsGroup {
-                SettingsRow(Icons.Filled.LocalFireDepartment, stringResource(R.string.settings_row_burn), destructive = true) { confirmBurn = true }
+                SettingsRow(Icons.Filled.LocalFireDepartment, stringResource(R.string.settings_row_burn), destructive = true, modifier = anchor(SettingsFind.BURN)) { confirmBurn = true }
             }
             Text(
                 stringResource(R.string.cs_burn_footer),
@@ -588,6 +922,7 @@ private fun SettingsRoot(
                 textAlign = TextAlign.Center,
             )
         }
+        } // end of the "not searching" branch
     }
 
     if (confirmClear) {
@@ -1078,6 +1413,56 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
 
 // ── Privacy & Network ────────────────────────────────────────────────
 
+/**
+ * Privacy choices this device keeps for itself, because the island has no
+ * field for them yet.
+ *
+ * Its own preferences file, keyed by UIN, so two accounts on one phone answer
+ * separately and nothing here can collide with [app.rcq.android.data.LocalStores].
+ *
+ * ⚠⚠ A flag stored here is a STATED PREFERENCE, never a rule. Whatever it says,
+ * the surface that would honour it runs on another person's phone against data
+ * their app already has. Anything written here needs an island-side field and a
+ * server that refuses the fetch before it becomes enforcement, and the string
+ * shown next to the switch has to say so.
+ */
+private object SettingsLocalPrivacy {
+    private const val FILE = "rcq_settings_privacy"
+    private fun prefs(context: Context) =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+    /** "Do not open my profile card from reaction lists, media viewers and
+     *  member lists" (#22). Off by default, which is how it has always behaved. */
+    private fun cardSideListsKey(uin: Int) = "card_side_lists:$uin"
+
+    fun cardSideListsClosed(context: Context, uin: Int): Boolean =
+        prefs(context).getBoolean(cardSideListsKey(uin), false)
+
+    fun setCardSideListsClosed(context: Context, uin: Int, closed: Boolean) {
+        prefs(context).edit().putBoolean(cardSideListsKey(uin), closed).apply()
+    }
+}
+
+/**
+ * May we offer a tap through to [subjectUin]'s card from an incidental surface
+ * (a media viewer's sender name, a reaction list, a member row)?
+ *
+ * The one place that question is answered, so a new side list cannot quietly
+ * grow a different rule. Item 9(b) added the viewer's sender name to the list
+ * of surfaces that ask.
+ *
+ * ⚠⚠ Read the [SettingsLocalPrivacy] header before trusting this. The switch
+ * behind it is a STATED PREFERENCE stored on the device the person set it on,
+ * keyed by their UIN, and the island carries no field for it yet. So this
+ * answers honestly for an account that lives on THIS phone and answers the
+ * default (allowed) for everybody else, exactly as pv_card_side_lists_desc
+ * tells the user. When the island grows the field, this function consults the
+ * cached profile too and every surface starts honouring it at once, which is
+ * the entire reason the check is not inlined at the call sites.
+ */
+internal fun cardOpenableFromSideList(context: Context, subjectUin: Int): Boolean =
+    !SettingsLocalPrivacy.cardSideListsClosed(context, subjectUin)
+
 @Composable
 private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
@@ -1092,14 +1477,20 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
     var invitePolicy by remember { mutableStateOf(cached?.group_invite_policy ?: "everyone") }
     var receipts by remember { mutableStateOf(cached?.read_receipts_visibility ?: "everyone") }
     var callPolicy by remember { mutableStateOf(cached?.call_policy ?: "everyone") }
-    var presencePersistent by remember { mutableStateOf(cached?.presence_persistent ?: false) }
-    var presenceTtl by remember { mutableStateOf(cached?.presence_ttl_minutes ?: 1440) }
     var hofOptIn by remember { mutableStateOf(cached?.hof_opt_in ?: false) }
     var hofAvatar by remember { mutableStateOf(cached?.hof_avatar) }   // data-URI or null
     var hofBusy by remember { mutableStateOf(false) }
     var hofError by remember { mutableStateOf<String?>(null) }
     val screenSec by app.rcq.android.data.LocalStores.screenSecurity.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    // "Keep my card out of side lists" (#22). Device-local, per account: the
+    // island has no field for it yet, so there is nothing to load from the
+    // profile and nothing to send. See [SettingsLocalPrivacy] for why this is
+    // a stated preference and not an enforced rule.
+    val ownUin = session.uin ?: 0
+    var cardSideLists by remember(ownUin) {
+        mutableStateOf(SettingsLocalPrivacy.cardSideListsClosed(context, ownUin))
+    }
     val hofPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -1122,17 +1513,9 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
             profileVis = p.profile_visibility ?: "everyone"
             invitePolicy = p.group_invite_policy ?: "everyone"
             receipts = p.read_receipts_visibility ?: "everyone"
-            presencePersistent = p.presence_persistent ?: false
-            presenceTtl = p.presence_ttl_minutes ?: 1440
+            callPolicy = p.call_policy ?: "everyone"
             hofOptIn = p.hof_opt_in ?: false
             hofAvatar = p.hof_avatar
-            // Seed the local countdown anchor if the feature is on but we have
-            // no window yet (enabled on another device, or before this feature
-            // existed). Active changes below re-anchor it; passive load never
-            // overrides an existing anchor.
-            if (presencePersistent && app.rcq.android.data.LocalStores.presenceWindow.value == null) {
-                app.rcq.android.data.LocalStores.setPresenceWindow(presenceTtl)
-            }
         }
     }
 
@@ -1143,40 +1526,46 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             VisibilityPicker(stringResource(R.string.pv_last_seen), lastSeen, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_last_seen_desc)) { lastSeen = it; save(RcqApi.UpdateMeBody(last_seen_visibility = it)) }
 
-            // Persistent presence + how long it lingers (iOS parity).
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.pv_stay_visible), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        Text(stringResource(R.string.pv_stay_visible_desc), color = c.textSecondary, fontSize = 11.sp)
-                    }
-                    Switch(
-                        checked = presencePersistent,
-                        onCheckedChange = {
-                            presencePersistent = it
-                            save(RcqApi.UpdateMeBody(presence_persistent = it))
-                            if (it) app.rcq.android.data.LocalStores.setPresenceWindow(presenceTtl)
-                            else app.rcq.android.data.LocalStores.clearPresenceWindow()
-                        },
-                        colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
-                    )
-                }
-                if (presencePersistent) {
-                    val ttls = listOf(30 to "30m", 60 to "1h", 180 to "3h", 480 to "8h", 1440 to "24h")
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgSecondary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        ttls.forEach { (mins, label) ->
-                            val sel = presenceTtl == mins
-                            Box(
-                                Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
-                                    .clickable { presenceTtl = mins; save(RcqApi.UpdateMeBody(presence_ttl_minutes = mins)); app.rcq.android.data.LocalStores.setPresenceWindow(mins) }.padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center,
-                            ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 12.sp) }
-                        }
-                    }
-                }
-            }
+            // ⚠ "Stay visible after you leave" USED TO SIT HERE and is gone on
+            // purpose (founder, 23.08). It never worked: this client only ever
+            // sent presence_persistent and never presence_ttl_minutes, so the
+            // island read a NULL ttl as "forever", and the window the island did
+            // keep was anchored on last_seen, which the 25s heartbeat rewrites.
+            // The duration chips picked a number nobody ever read, and the home
+            // countdown chip was a purely local clock with no relation to the
+            // server's. The backend has dropped the feature and now pins both
+            // fields to false, so nothing here sends them any more.
 
             VisibilityPicker(stringResource(R.string.pv_profile_card), profileVis, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_profile_card_desc)) { profileVis = it; save(RcqApi.UpdateMeBody(profile_visibility = it)) }
+
+            // "Keep my card out of side lists" (#22): the narrow sibling of the
+            // picker above. It sits here because that is where a person looks
+            // for it, and its copy says outright what it does and does not do.
+            //
+            // ⚠⚠ THIS SWITCH CANNOT ENFORCE ANYTHING BY ITSELF, and the string
+            // under it must never pretend otherwise. The reaction list, the
+            // media viewer and the member list that open my card are drawn on
+            // SOMEONE ELSE'S phone, out of data their app already holds; no flag
+            // on my device is in that code path. Enforcement needs the island to
+            // refuse the profile fetch when the opener came from one of those
+            // surfaces, which needs a field on the profile and a reason on the
+            // request. Until then this records the choice so it is ready to be
+            // published the day the island grows the field.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pv_card_side_lists), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.pv_card_side_lists_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Switch(
+                    checked = cardSideLists,
+                    onCheckedChange = {
+                        cardSideLists = it
+                        SettingsLocalPrivacy.setCardSideListsClosed(context, ownUin, it)
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                )
+            }
+
             VisibilityPicker(stringResource(R.string.common_gender), genderVis, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_gender_desc)) { genderVis = it; save(RcqApi.UpdateMeBody(gender_visibility = it)) }
             VisibilityPicker(stringResource(R.string.pv_invite), invitePolicy, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_invite_desc)) { invitePolicy = it; save(RcqApi.UpdateMeBody(group_invite_policy = it)) }
             VisibilityPicker(stringResource(R.string.pv_receipts), receipts, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_receipts_desc)) { receipts = it; save(RcqApi.UpdateMeBody(read_receipts_visibility = it)) }
@@ -3289,6 +3678,115 @@ internal fun SettingsTopBar(title: String, onBack: () -> Unit, trailing: @Compos
     }
 }
 
+/** The top bar while search is open: back closes it, the field takes the rest.
+ *  This is the platform's SearchView shape, so nobody has to learn it. */
+@Composable
+private fun SettingsSearchBar(query: String, onQuery: (String) -> Unit, onClose: () -> Unit) {
+    val c = RcqTheme.colors
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // A frame late on purpose: requesting focus on a node that has not been
+    // attached yet throws, and the keyboard is what makes an opened search bar
+    // feel opened.
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(80)
+        runCatching { focus.requestFocus() }
+    }
+    // Back closes search rather than leaving Settings. The screen's own
+    // BackHandler is disabled at the root, so this one is free to take it.
+    BackHandler(onBack = onClose)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+    ) {
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent,
+            modifier = Modifier.size(26.dp).clickable(onClick = onClose),
+        )
+        RcqField(
+            value = query,
+            onValueChange = onQuery,
+            placeholder = stringResource(R.string.settings_search_hint),
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.textSecondary, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    Icon(
+                        Icons.Filled.Close, stringResource(R.string.common_clear), tint = c.textSecondary,
+                        modifier = Modifier.size(18.dp).clickable { onQuery("") },
+                    )
+                }
+            },
+            modifier = Modifier.weight(1f).focusRequester(focus),
+        )
+    }
+}
+
+/** Hits for [query] over [settingsFindIndex]. An empty query lists everything,
+ *  which doubles as a flat map of Settings and costs nothing to offer. */
+@Composable
+private fun SettingsSearchResults(
+    query: String,
+    hidden: Set<SettingsFind>,
+    modifier: Modifier = Modifier,
+    onPick: (SettingsFindRow) -> Unit,
+) {
+    val c = RcqTheme.colors
+    val context = LocalContext.current
+    // Built through the Context rather than stringResource() so the whole
+    // haystack is one plain memoized value instead of a composable call per row
+    // per keystroke. The Compose context carries the app's locale, so the titles
+    // come out in the language on screen and a person can search in their own
+    // words without any of it being listed in the aliases.
+    val index = remember(hidden, context) {
+        settingsFindIndex.filter { it.id !in hidden }.map { row ->
+            row to settingsSearchFold(
+                context.getString(row.titleRes) + " " +
+                    context.getString(row.sectionRes) + " " + row.aliases,
+            )
+        }
+    }
+    val words = remember(query) {
+        settingsSearchFold(query).split(' ', '\n', '\t').filter { it.isNotBlank() }
+    }
+    val hits = remember(index, words) {
+        if (words.isEmpty()) index.map { it.first }
+        else index.filter { settingsFindMatches(it.second, words) }.map { it.first }
+    }
+    if (hits.isEmpty()) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.search_no_match), color = c.textSecondary, fontSize = 14.sp)
+        }
+        return
+    }
+    LazyColumn(
+        modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        items(hits, key = { it.id.name }) { row ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onPick(row) }
+                    .padding(horizontal = 10.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(row.icon, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        stringResource(row.titleRes), color = c.textPrimary, fontSize = 15.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        stringResource(row.sectionRes), color = c.textSecondary, fontSize = 11.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
 // ── PIN codes (panic-PIN, Phase 1: real PIN) ─────────────────────────
 
 @Composable
@@ -3635,11 +4133,22 @@ private fun Divider() {
 private val serverInfoCache = mutableMapOf<String, app.rcq.android.net.RcqApi.ServerInfoResponse>()
 
 @Composable
-private fun SettingsRow(icon: ImageVector, label: String, value: String? = null, destructive: Boolean = false, chevron: Boolean = true, onClick: () -> Unit) {
+private fun SettingsRow(
+    icon: ImageVector,
+    label: String,
+    value: String? = null,
+    destructive: Boolean = false,
+    chevron: Boolean = true,
+    /// Slot for the search anchor (#28). Applied AFTER fillMaxWidth and BEFORE
+    /// clickable, so an anchor's flash tint covers the whole row and the ripple
+    /// still sits on top of it.
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     val c = RcqTheme.colors
     val tint = if (destructive) Color(0xFFE5484D) else c.accent
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 13.dp),
+        Modifier.fillMaxWidth().then(modifier).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

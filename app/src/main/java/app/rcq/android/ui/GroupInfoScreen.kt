@@ -58,7 +58,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -131,6 +130,13 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     var showPin by remember { mutableStateOf(false) }
     // Member the owner/moderator is about to remove (drives the confirm dialog).
     var memberToRemove by remember { mutableStateOf<GroupMember?>(null) }
+    // Member the owner is about to hand the whole group to (founder item 23),
+    // and, once the island has confirmed it, the member it went to. The second
+    // one drives the follow-up offer, so it is kept apart from [group.ownerUin]
+    // on purpose: "you can leave now" only makes sense to the person who just
+    // handed the room over, not to everyone who opens this screen afterwards.
+    var transferTarget by remember { mutableStateOf<GroupMember?>(null) }
+    var handedTo by remember { mutableStateOf<GroupMember?>(null) }
     // Roster fold + search (parity with iOS): big groups show a preview, expand
     // to all, and can be searched + collapsed without scrolling to the bottom.
     var showAllMembers by remember { mutableStateOf(false) }
@@ -164,13 +170,23 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // rows behind it were inserted from an unordered set, so the tail of a big
     // group looked shuffled and moved between openings (#688). A name is what
     // people scan for, and who is here now is what they scan for first.
-    val sortedMembers = remember(group.members) {
+    //
+    // ⚠ The crown is read off `group.ownerUin`, not off the row's `role`. The
+    // two agree in any snapshot the island sends, but the COMPACT
+    // `group_membership_changed` a big room gets carries the owner alone, so a
+    // handover reaches this screen as a changed number over a roster that has
+    // not moved. Keyed on it as well for the same reason.
+    val sortedMembers = remember(group.members, group.ownerUin) {
         // Decorated once, not per comparison: this screen is built for rosters
         // of two thousand, and `thenBy { it.nickname.lowercase() }` allocates
         // two strings on every one of the ~n log n comparisons.
         group.members
             .map { m ->
-                val rank = when (m.role) { "owner" -> 0; "admin" -> 1; else -> 2 }
+                val rank = when {
+                    m.uin == group.ownerUin -> 0
+                    m.role == "admin" -> 1
+                    else -> 2
+                }
                 // Away and do-not-disturb count as present; invisible and
                 // offline do not, and neither does a member the server
                 // declines to report a presence for.
@@ -234,7 +250,12 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     }
                 }
                 Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text(pluralStringResource(R.plurals.members, group.memberCount, group.memberCount), color = c.textSecondary, fontSize = 13.sp)
+                // Founder item 27: the group's own screen was the last place
+                // still printing the raw count, so a 12480-member room read
+                // "12.5K members" in the chat list and "12480 members" here two
+                // taps later. [memberCountLabel] (CountFormat.kt) is the one
+                // formatter every surface shares.
+                Text(memberCountLabel(group.memberCount), color = c.textSecondary, fontSize = 13.sp)
                 // #581: whether the group is closed was legible only to the owner,
                 // as the toggle further down, and to whoever happened to look at an
                 // invite card. Same padlock and the same "Closed group" the invite
@@ -441,7 +462,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)
                             Text("#${m.uin}", color = c.textMono, fontSize = 12.sp)
                         }
-                        if (m.role == "owner") {
+                        if (m.uin == group.ownerUin) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Icon(Icons.Filled.Star, null, tint = c.accent, modifier = Modifier.size(12.dp))
                                 Text(stringResource(R.string.gi_owner), color = c.textSecondary, fontSize = 11.sp)
@@ -451,7 +472,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         }
                         // Owner/«members»-moderator can remove anyone but the
                         // owner and themselves (long-tap-free explicit control).
-                        if (canManageMembers && m.uin != ownUin && m.role != "owner") {
+                        if (canManageMembers && m.uin != ownUin && m.uin != group.ownerUin) {
                             Icon(
                                 Icons.Filled.PersonRemove,
                                 stringResource(R.string.gi_remove_member),
@@ -463,7 +484,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     // Owner picks which rights this member gets. Tapping a chip
                     // grants/revokes that cap (POST /permissions). Owner has all
                     // implicitly, so no chips on the owner row or for yourself.
-                    if (isOwner && m.uin != ownUin && m.role != "owner") {
+                    if (isOwner && m.uin != ownUin && m.uin != group.ownerUin) {
                         val toggle: (String) -> Unit = { perm ->
                             val next = if (perm in m.permissions) m.permissions - perm else m.permissions + perm
                             scope.launch { runCatching { session.setMemberPermissions(group.id, m.uin, next) } }
@@ -472,6 +493,29 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             PermChip(stringResource(R.string.gi_perm_delete), "delete" in m.permissions) { toggle("delete") }
                             PermChip(stringResource(R.string.gi_perm_members), "members" in m.permissions) { toggle("members") }
                             PermChip(stringResource(R.string.gi_perm_info), "info" in m.permissions) { toggle("info") }
+                        }
+                        // Handing the room over sits under the three chips
+                        // rather than among them, and is red: those are rights
+                        // the owner lends out and can take back, this is the
+                        // owner seat itself and it does not come back.
+                        //
+                        // Own-island only (group.host == null). A member is a
+                        // bare number that means something only against this
+                        // island's users, so there is no wire form for "the new
+                        // owner lives on island B" and the island refuses one
+                        // it cannot resolve.
+                        if (group.host == null) {
+                            Text(
+                                stringResource(R.string.gi_transfer),
+                                color = Color(0xFFE5484D),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .padding(start = 32.dp, top = 6.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { transferTarget = m }
+                                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                            )
                         }
                     }
                 }
@@ -544,6 +588,68 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     }
                 },
             ),
+        )
+    }
+
+    // Irreversible from this side, so it is named and spelled out before it is
+    // sent: who gets the room, and what we are left holding.
+    transferTarget?.let { target ->
+        RcqAskSheet(
+            onDismiss = { transferTarget = null },
+            title = stringResource(R.string.gi_transfer_q),
+            body = stringResource(R.string.gi_transfer_body, target.nickname),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.gi_transfer_cta),
+                    destructive = true,
+                ) {
+                    transferTarget = null
+                    scope.launch {
+                        // The island answers with the whole group and Session
+                        // upserts it, so `isOwner` and everything gated on it
+                        // flip on the next frame: the edit pencil, the owner
+                        // settings block, the kick buttons, the capability
+                        // chips, and "delete group" turning back into "leave".
+                        val err = session.transferGroupOwner(groupId, target.uin)
+                        if (err != null) {
+                            android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+                        } else {
+                            handedTo = target
+                        }
+                    }
+                },
+            ),
+        )
+    }
+
+    // The second half of a handover, offered where it leads: handing the room
+    // over and then walking out is the migration the founder described, and by
+    // now the button at the bottom of the screen says "leave group" instead of
+    // "delete group" because the island has already answered.
+    handedTo?.let { newOwner ->
+        RcqAskSheet(
+            onDismiss = { handedTo = null },
+            title = stringResource(R.string.gi_transfer_done_title),
+            body = stringResource(R.string.gi_transfer_done, newOwner.nickname),
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.gi_leave_cta),
+                    destructive = true,
+                ) {
+                    handedTo = null
+                    scope.launch {
+                        // ALWAYS the self-removal, never the owner's delete.
+                        // This button sits where the same person's "delete the
+                        // group for everyone" sat seconds earlier, and routing
+                        // it through the shared confirm would put the room one
+                        // stale `isOwner` read away from being destroyed
+                        // instead of left.
+                        runCatching { session.leaveGroup(groupId) }
+                        onLeft()
+                    }
+                },
+            ),
+            cancelLabel = stringResource(R.string.gi_transfer_stay),
         )
     }
 

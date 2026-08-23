@@ -675,6 +675,25 @@ object Push {
         }
     }
 
+    /**
+     * Take one thread's message notification out of the shade.
+     *
+     * The shade holds a thread's last line with its full body, so a message
+     * deleted from the chat because its disappearing-message TTL ran out but
+     * left in the shade has not disappeared at all. The caller knows WHICH
+     * thread lost a row; the ids are minted by [post], which is why the mapping
+     * lives here rather than at the call site. Exactly one of [groupId] /
+     * [peerUin] is expected; a wake we could never open has no thread to cancel.
+     */
+    fun cancelMessageThread(ctx: Context, groupId: Int?, peerUin: Int?) {
+        val id = when {
+            groupId != null -> groupId.toString().hashCode()
+            peerUin != null -> "peer:$peerUin".hashCode()
+            else -> return
+        }
+        runCatching { NotificationManagerCompat.from(ctx).cancel(id) }
+    }
+
     /** Build + post a wake notification for a {type:"msg"} push payload. */
     fun showMessage(ctx: Context, json: JsonObject) {
         ensureChannels(ctx)

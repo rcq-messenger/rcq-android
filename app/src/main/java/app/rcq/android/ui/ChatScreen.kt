@@ -85,7 +85,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
@@ -228,6 +227,81 @@ private object ChatDrafts {
      *  simply does not come back. */
     val replyByThread = mutableMapOf<String, String>()
 }
+
+/** Disappearing messages (founder item 20): the per-thread timer the user
+ *  picks, and the option set, mirrored one-for-one from iOS
+ *  (`ChatSettingsStore.ttlOptions`) so the two clients offer the same choices
+ *  and the same words for them.
+ *
+ *  The engine is elsewhere and this is only the control on top of it:
+ *  `LocalStores.threadTtl` holds the selection, `Session.peerTtl`/`groupTtl`
+ *  read it on every send, `Envelope`'s factories put `ttl` + `ts` on the wire,
+ *  and `Session.expiryFor` turns them into a deadline on BOTH copies.
+ *
+ *  ⚠ The selection is deliberately NOT held in this file. It was, in a
+ *  process-global map, and that map could not see which account was bound:
+ *  "p:5" IS NOT A PERSON, two local identities each have a #5, and on two
+ *  islands those are two different people. Unscoped, one identity's timer
+ *  showed up preselected in another identity's chat with the same number, and
+ *  with the send path wired that is a ttl on messages that identity never asked
+ *  to disappear. `LocalStores` owns account binding and the burn wipe, so it
+ *  owns this too, under the same `peer:<uin>` / `group:<id>` key iOS and the
+ *  web use.
+ *
+ *  ⚠ Picking a timer only affects what is sent from here on. An already-sent
+ *  message keeps the deadline it was sent with, on both devices; re-dating
+ *  history would be a lie about what the other side was promised. */
+private object DisappearingMessages {
+    /** The menu entry is drawn only where the send path can honour it. Kept as
+     *  a named flag rather than deleted: it is what the picker was hidden
+     *  behind while the wire half was missing, and it is the switch to reach
+     *  for if that half ever has to come out again. */
+    val WIRED = true
+
+    /** A timer the user can pick. `seconds == null` is "off". */
+    data class Option(val seconds: Int?, val labelRes: Int)
+
+    /** iOS parity, in iOS's order: off, two testing scales, two normal ones,
+     *  and a week. Do not add an option here alone; the other clients show
+     *  the same list. */
+    val options = listOf(
+        Option(null, R.string.chat_ttl_off),
+        Option(60, R.string.chat_ttl_1m),
+        Option(300, R.string.chat_ttl_5m),
+        Option(3_600, R.string.chat_ttl_1h),
+        Option(86_400, R.string.chat_ttl_24h),
+        Option(604_800, R.string.chat_ttl_7d),
+    )
+
+    /** The live timer for a thread, or null when off. [thread] is the
+     *  `LocalStores` thread key (`peer:<uin>` / `group:<id>`) — the SAME one
+     *  `Session` looks the timer up under when it sends, and not this screen's
+     *  own shorter draft key. */
+    fun get(thread: String): Int? = app.rcq.android.data.LocalStores.threadTtl(thread)
+
+    fun set(thread: String, seconds: Int?) =
+        app.rcq.android.data.LocalStores.setThreadTtl(thread, seconds)
+
+    /** The human label for a timer; falls back to "off" for anything we do not
+     *  have a word for (a value set by another client, say). */
+    fun labelRes(seconds: Int?): Int =
+        options.firstOrNull { it.seconds == seconds }?.labelRes ?: R.string.chat_ttl_off
+}
+
+// Ordering of the long-press reaction bar (founder item 21) lives in
+// LocalStores: `byMostUsed` reorders the user's own quick set most-used first,
+// `bumpReactionUse` records a tap. Both are used further down this file.
+//
+// It belongs there and not here because LocalStores is the only place that
+// knows which ACCOUNT is bound and wipes itself when an account is burned. A
+// tally kept in this file would live in one prefs blob shared by every identity
+// on the device, so a decoy account would show a bar sorted by the real
+// account's habits, which is a behavioural fingerprint handed over for free.
+// The store's sort is stable, so a fresh account sees exactly the set the user
+// configured, in the order they configured it.
+//
+// ⚠ Both calls are no-ops before an account is bound; nothing here has to
+// check for that.
 
 /** Put shared text into a thread's composer without sending it — the landing
  *  spot for the text half of a system share (a link, a quote). Appends rather
@@ -388,7 +462,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
     }
     var attachMenu by remember { mutableStateOf(false) }
-    var showPollComposer by remember { mutableStateOf(false) }
+    /** This conversation's key in the per-account stores (`peer:<uin>` /
+     *  `group:<id>`) — unread counts, the reading position, the secure-screen
+     *  flag and the disappearing-message timer all hang off it. NOT
+     *  [threadKey], which is this screen's own in-memory draft key. */
+    val thisThread = if (isGroup) app.rcq.android.data.LocalStores.groupThread(groupId!!) else app.rcq.android.data.LocalStores.peerThread(peer!!)
+    // Disappearing messages: the picker, and this thread's live timer. Read
+    // once per thread and kept here so the menu row and the picker agree
+    // without either of them reaching into the store on every recomposition.
+    var showTtlPicker by remember { mutableStateOf(false) }
+    var threadTtl by remember(thisThread) { mutableStateOf(DisappearingMessages.get(thisThread)) }
     var showSearch by remember { mutableStateOf(false) }
     var showAllMedia by remember { mutableStateOf(false) }
     var chatMenu by remember { mutableStateOf(false) }
@@ -399,9 +482,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val mediaProgress by session.mediaProgress.collectAsState()
     val mediaFailed by session.mediaSendFailed.collectAsState()
     var showGroupPicker by remember { mutableStateOf(false) }
-    var showRelayPicker by remember { mutableStateOf(false) }
-    // Decrypted bytes of a photo opened for fullscreen viewing (tester #10).
-    var fullscreenImage by remember { mutableStateOf<ByteArray?>(null) }
+    // Decrypted bytes of a photo opened for fullscreen viewing (tester #10),
+    // plus who sent it: item 9(b) puts the sender's name at the top of the
+    // viewer and one tap on it opens their card, and the bytes alone cannot
+    // say whose they are.
+    var fullscreenImage by remember { mutableStateOf<ViewerMedia?>(null) }
     /** An album opened full screen: every picture of the batch and where to
      *  start. The grid only ever draws four, and before this the other six of a
      *  batch of ten could not be looked at from anywhere (#691/#675/#689). */
@@ -410,7 +495,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // BYTES and never a URL, so a received clip is watched here rather than
     // being written out as plaintext for whatever player happens to be
     // installed to open (see VideoViewer.kt).
-    var fullscreenVideo by remember { mutableStateOf<ByteArray?>(null) }
+    var fullscreenVideo by remember { mutableStateOf<ViewerVideo?>(null) }
 
     // ---- Rows + unread anchor, computed BEFORE the list state exists. ----
     // The list used to be created blank (index 0), compose a frame or two at
@@ -419,7 +504,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // history sliding away (smoothness audit item 2). None of this depends on
     // the list state, so it moved above it: the state is born already pointing
     // at the right row and there is nothing to jump over.
-    val thisThread = if (isGroup) app.rcq.android.data.LocalStores.groupThread(groupId!!) else app.rcq.android.data.LocalStores.peerThread(peer!!)
     // Snapshot the unread count at open (before openThread clears it) so we can
     // mark where reading left off — an "Unread messages" divider, Telegram-style.
     val initialUnread = remember(target) { app.rcq.android.data.LocalStores.unread.value[thisThread] ?: 0 }
@@ -520,25 +604,60 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             then(bytes)
         }
     }
+    /** [mediaBytes] for a clip: the same "say that it started, say if it did
+     *  not finish" contract, over the streamed path that a long one survives. */
+    fun openVideo(m: ChatMessage, then: (VideoSource) -> Unit) {
+        if (m.mediaId == null || m.mediaKey == null) return
+        android.widget.Toast.makeText(context, fetchingToast, android.widget.Toast.LENGTH_SHORT).show()
+        scope.launch {
+            when (val r = playableVideo(session, m)) {
+                is PlayableVideo.Ready -> then(r.source)
+                else -> sayVideoFailure(context, r)
+            }
+        }
+    }
+
     fun mediaNameMime(m: ChatMessage, bytes: ByteArray): Pair<String, String> = when (m.kind) {
         "photo" -> if (bytes.isGif()) "RCQ_${m.id}.gif" to "image/gif" else "RCQ_${m.id}.jpg" to "image/jpeg"
         "video" -> "RCQ_${m.id}.mp4" to "video/mp4"
         "voice" -> "RCQ_voice_${m.id}.m4a" to "audio/mp4"
         else -> (m.fileName ?: "RCQ_${m.id}") to (m.fileMime ?: "application/octet-stream")
     }
-    fun shareMessageMedia(m: ChatMessage) = mediaBytes(m) { bytes ->
-        val (name, mime) = mediaNameMime(m, bytes)
-        MediaSaver.share(context, bytes, name, mime)
+    /** ⚠ A clip goes the streamed way here too. Save and Share on a long-press
+     *  used to run through [mediaBytes], so the two menu entries died on
+     *  exactly the videos the player now handles, and died the same silent
+     *  way. */
+    fun shareMessageMedia(m: ChatMessage) {
+        if (m.kind == "video") {
+            openVideo(m) { src -> MediaSaver.share(context, src::writeTo, "RCQ_${m.id}.mp4", "video/mp4") }
+            return
+        }
+        mediaBytes(m) { bytes ->
+            val (name, mime) = mediaNameMime(m, bytes)
+            MediaSaver.share(context, bytes, name, mime)
+        }
     }
-    fun saveMessageMedia(m: ChatMessage) = mediaBytes(m) { bytes ->
-        val (name, mime) = mediaNameMime(m, bytes)
-        runSave {
-            val isGallery = m.kind == "photo" || m.kind == "video"
-            val ok = if (isGallery) MediaSaver.saveToGallery(context, bytes, name, mime)
-                     else MediaSaver.saveToDownloads(context, bytes, name, mime)
-            val where = if (m.kind == "video") "Movies/RCQ" else if (isGallery) "Pictures/RCQ" else "Downloads/RCQ"
-            val msg = if (ok) context.getString(R.string.media_saved_to, where) else saveFailToast
-            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+    fun saveMessageMedia(m: ChatMessage) {
+        if (m.kind == "video") {
+            openVideo(m) { src ->
+                runSave {
+                    val ok = MediaSaver.saveToGallery(context, src::writeTo, "RCQ_${m.id}.mp4", "video/mp4")
+                    val msg = if (ok) context.getString(R.string.media_saved_to, "Movies/RCQ") else saveFailToast
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            return
+        }
+        mediaBytes(m) { bytes ->
+            val (name, mime) = mediaNameMime(m, bytes)
+            runSave {
+                val isGallery = m.kind == "photo"
+                val ok = if (isGallery) MediaSaver.saveToGallery(context, bytes, name, mime)
+                         else MediaSaver.saveToDownloads(context, bytes, name, mime)
+                val where = if (isGallery) "Pictures/RCQ" else "Downloads/RCQ"
+                val msg = if (ok) context.getString(R.string.media_saved_to, where) else saveFailToast
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -551,8 +670,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val secureThreads by app.rcq.android.data.LocalStores.secureThreads.collectAsState()
     val chatSecure = !isGroup && !isSelf && peer != null &&
         app.rcq.android.data.LocalStores.peerThread(peer) in secureThreads
-    // The user's chosen quick reactions (≤6); defaults to the historical six
-    // until customised in the emoji picker. Drives the long-press reaction row.
+    // The user's chosen quick reactions (up to REACTION_CAP, EmojiPicker.kt);
+    // defaults to the standard six until customised in the emoji picker.
+    // Drives the long-press reaction row, which scrolls horizontally because
+    // the cap is far wider than a phone.
     val reactionSet by LocalStores.reactionEmojis.collectAsState()
     // Which way a row is dragged to quote it (#526).
     val swipeSide by LocalStores.swipeReplySide.collectAsState()
@@ -568,6 +689,51 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // a member without a picture simply keeps the plain nick.
     fun authorMember(m: ChatMessage): app.rcq.android.model.GroupMember? =
         if (isGroup && !m.fromMe) group?.members?.firstOrNull { it.uin == m.senderUin } else null
+
+    // Item 9(b/c): who a full-screen viewer names at the top, and whose card
+    // that name opens.
+    //
+    // ⚠ Decided HERE and nowhere else. `authorName` reads the group roster and
+    // the 1:1 peer, which exist only in this frame; the viewers are dialogs
+    // hung off the bottom of this composable and would otherwise have to be
+    // handed the whole roster to name one person. Every door into a viewer (a
+    // bubble, an album tile, the album pager, the media gallery) comes through
+    // these, so the name and the tap behave the same whichever was used.
+    //
+    // Null is not a failure, it is "there is nobody to show": my own picture,
+    // and Saved, where the only person involved is me.
+    fun viewerSenderUin(m: ChatMessage): Int? =
+        if (m.fromMe || isSelf) null
+        else (if (isGroup) m.senderUin else peer)?.takeIf { it != ownUin }
+
+    fun viewerSenderName(m: ChatMessage): String? =
+        if (m.fromMe || isSelf) null else authorName(m)
+
+    fun viewerMediaOf(m: ChatMessage, bytes: ByteArray): ViewerMedia =
+        ViewerMedia(bytes, viewerSenderUin(m), viewerSenderName(m))
+
+    fun viewerVideoOf(m: ChatMessage, source: VideoSource): ViewerVideo =
+        ViewerVideo(source, viewerSenderUin(m), viewerSenderName(m))
+
+    // Item 9(c): the name at the top of a viewer opens that person's card.
+    //
+    // Null (a name that is plain text rather than a button) when there is
+    // nobody to open, or when that person asked to be kept out of incidental
+    // surfaces. The second check is the shared gate in SettingsScreen.kt: a
+    // media viewer is named in that setting's own description, next to
+    // reaction lists and member lists, so it asks the question they ask
+    // instead of growing a private rule.
+    //
+    // ⚠ The viewer is put away BEFORE the card is pushed. Today the navigation
+    // is a `when` chain that swaps this whole screen out, so its dialogs go
+    // with it and this is belt and braces. It stops being belt and braces the
+    // day a card is pushed OVER a live chat, and a full-screen dialog left
+    // sitting on top of the profile it just opened is not a failure anyone
+    // would think to look for from here.
+    fun viewerSenderClick(uin: Int?, close: () -> Unit): (() -> Unit)? {
+        if (uin == null || !cardOpenableFromSideList(context, uin)) return null
+        return { close(); onOpenPeerInfo(uin) }
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
@@ -596,7 +762,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
             val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
-            if (v != null) pendingSend = PendingSend.Video(v)
+            // Refused here, before the preview opens, rather than after the
+            // upload: the island's cap is known from /server/info.
+            if (v != null && videoFitsIsland(context, session, v)) pendingSend = PendingSend.Video(v)
         }
     }
 
@@ -620,8 +788,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (mime.startsWith("video/")) {
                         val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                         if (v == null) { failed += 1; continue }
-                        if (isGroup) session.sendGroupVideo(groupId!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
-                        else session.sendVideo(peer!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
+                        sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId)
                     } else {
                         val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
                         if (data == null) { failed += 1; continue }
@@ -675,7 +842,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     withContext(Dispatchers.IO) {
                         runCatching { readPickedVideo(context, uri) }
                             .onFailure { android.util.Log.w("RCQshare", "video read threw", it) }.getOrNull()
-                    }?.let { PendingSend.Video(it) }
+                    }?.takeIf { videoFitsIsland(context, session, it) }?.let { PendingSend.Video(it) }
                 } else {
                     withContext(Dispatchers.IO) {
                         runCatching { readImageForSend(context, uri) }
@@ -702,8 +869,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             mime.startsWith("video/") -> {
                                 val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                                 if (v == null) { failed += 1; continue }
-                                if (isGroup) session.sendGroupVideo(groupId!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
-                                else session.sendVideo(peer!!, v.bytes, v.thumbB64, v.durationSec, null, albumId = albumId)
+                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId)
                             }
                             mime.startsWith("image/") -> {
                                 val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
@@ -802,7 +968,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 
     // Mark this thread active+read while open; clear again on a new
     // message arriving here is handled in Session.bumpUnreadIfInbound.
-    // (`thisThread` itself is declared up with the rows block.)
+    // (`thisThread` itself is declared up with the composer/menu state.)
     // Latest snapshot for the mention-seen mark on exit (onDispose otherwise
     // captures the messages value from when the effect was first set up).
     val msgsForMentionSeen by androidx.compose.runtime.rememberUpdatedState(messages)
@@ -1112,7 +1278,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         // The count, not the roster's size: the roster arrives a
                         // moment later than the header does.
                         val n = group?.memberCount ?: 0
-                        pluralStringResource(R.plurals.members, n, n)
+                        // 999 stays 999; from 1000 up the header reads 1K / 2.1K
+                        // so a big group cannot push the subtitle out of shape.
+                        // [memberCountLabel] is the shared label (CountFormat.kt),
+                        // the same one the chat list uses, so one room cannot read
+                        // "12.5K" in the list and "12480" here.
+                        memberCountLabel(n)
                     }
                     isSelf -> stringResource(R.string.chat_saved_subtitle)
                     isTyping -> stringResource(R.string.chat_typing)
@@ -1167,6 +1338,36 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         leadingIcon = { Icon(Icons.Filled.Image, null, tint = c.accent) },
                         onClick = { chatMenu = false; showAllMedia = true },
                     )
+                    // Disappearing messages. Hidden where the user cannot post
+                    // (an owner-only group, from anyone who is not the owner):
+                    // a timer on messages you are not allowed to send is a
+                    // setting with nothing to act on. iOS hides it on the same
+                    // rule.
+                    //
+                    // ⚠ One name, always, and the state lives in the tick and
+                    // the tint (#713). The row is what the tap DOES; the
+                    // trailing label is where the timer currently stands, and
+                    // the icon's description says it out loud for a reader that
+                    // cannot see the tint.
+                    if (DisappearingMessages.WIRED && canPost) {
+                        val ttlLabel = stringResource(DisappearingMessages.labelRes(threadTtl))
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_ttl_menu), color = c.textPrimary) },
+                            trailingIcon = {
+                                if (threadTtl != null) {
+                                    Text(ttlLabel, color = c.accent, fontSize = 12.sp)
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Schedule,
+                                    if (threadTtl != null) stringResource(R.string.chat_ttl_menu_on, ttlLabel) else null,
+                                    tint = if (threadTtl != null) c.accent else c.textSecondary,
+                                )
+                            },
+                            onClick = { chatMenu = false; showTtlPicker = true },
+                        )
+                    }
                     if (!isGroup && !isSelf && peer != null) {
                         DropdownMenuItem(
                             // ⚠ One name, always. It used to read "Уведомлять"
@@ -1259,15 +1460,30 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
         ChatBackground()  // global chat wallpaper (behind the messages); no-op when default
-        // A brand-new thread had nothing in it at all here — just wallpaper —
+        // A brand-new thread had nothing in it at all here, just wallpaper,
         // while iOS has always said what the screen is and what to do with it.
         // A first-time reader could not tell an empty conversation from one
         // that failed to load.
-        if (rows.isEmpty()) {
+        //
+        // ...but only where the reader can actually answer it. In a closed
+        // (owner-only) group with nothing in it yet, "say hi, your first
+        // message starts the conversation" is an invitation to do something
+        // the group will not let them do, under a composer that is not there
+        // (founder item 24). Empty AND read-only shows nothing at all.
+        if (rows.isEmpty() && canPost) {
             // Nothing but wallpaper under this, so it reads off the wallpaper
-            // rather than off the theme — a light theme with the "Midnight"
-            // wallpaper printed it black on near-black (#554, same defect as
+            // rather than off the theme (a light theme with the "Midnight"
+            // wallpaper printed it black on near-black, #554, same defect as
             // the home header).
+            //
+            // ⚠⚠ A HAIRLINE TOKEN IS NOT A GLYPH COLOUR. This icon used to be
+            // tinted `ec.divider`, which is the 1px rule colour (#303030 in
+            // dark): about 1.18:1 against the graphite wallpaper, i.e. an
+            // invisible icon above a visible heading. `divider` is chosen to
+            // disappear into a flat surface, and nothing that has to be SEEN
+            // may take its colour from it. The body copy right below already
+            // uses `textSecondary` and is legible, so the glyph uses the same
+            // token and is legible for the same reason.
             val ec = chatChrome()
             Column(
                 Modifier.fillMaxSize().padding(top = 96.dp, start = 32.dp, end = 32.dp),
@@ -1277,7 +1493,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 Icon(
                     Icons.AutoMirrored.Filled.Message,
                     contentDescription = null,
-                    tint = ec.divider,
+                    tint = ec.textSecondary,
                     modifier = Modifier.size(38.dp),
                 )
                 Text(
@@ -1313,7 +1529,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             SystemNoticeRow(m)
                         } else {
                             val senderPic = if (row.showSender) authorMember(m) else null
-                            SwipeToReply(side = swipeSide, onReply = { startReply(m) }) {
+                            // ⚠ No swipe-to-quote where there is no composer to
+                            // quote INTO. With the read-only strip gone (item 24)
+                            // a swipe would raise a reply chip above nothing, and
+                            // the chip's only way out is the little cross on it.
+                            SwipeToReply(side = swipeSide, onReply = { if (canPost) startReply(m) }) {
                             MessageBubble(
                                 session, m,
                                 senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
@@ -1323,8 +1543,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 onRetry = { scope.launch { runCatching { session.resend(m) } } },
                                 onLongPress = { actionMsg = m },
                                 onOpenGroup = onOpenGroup,
-                                onViewImage = { fullscreenImage = it },
-                                onViewVideo = { fullscreenVideo = it },
+                                onViewImage = { fullscreenImage = viewerMediaOf(m, it) },
+                                onViewVideo = { fullscreenVideo = viewerVideoOf(m, it) },
                                 mentionNick = mentionNick,
                                 onMentionClick = onMentionClick,
                                 mentionMatch = mentionMatch,
@@ -1343,8 +1563,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         senderAvatarKey = if (row.showSender) authorMember(row.items.first())?.avatarMediaKey else null,
                         onLongPress = { actionMsg = row.items.first() },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
-                        onViewImage = { fullscreenImage = it },
-                        onViewVideo = { fullscreenVideo = it },
+                        // An album is one sender's batch, so the first item
+                        // names the whole row.
+                        onViewImage = { fullscreenImage = viewerMediaOf(row.items.first(), it) },
+                        onViewVideo = { fullscreenVideo = viewerVideoOf(row.items.first(), it) },
                         onOpenAlbum = { idx -> albumViewer = row.items to idx },
                     )
                 }
@@ -1579,16 +1801,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
         }
 
-        if (!canPost) {
-            // Read-only notice on a subtle plate (parity with the iOS material
-            // backdrop) so it reads as a deliberate bar, not stray text.
-            Box(Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.Center) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Filled.Campaign, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
-                    Text(stringResource(R.string.chat_owner_only), color = c.textSecondary, fontSize = 13.sp)
-                }
-            }
-        } else {
+        // Read-only group: NOTHING here (founder item 24). There used to be a
+        // full-width "only the owner can post in this group" strip on a plate,
+        // permanently, under every message. It is a label that repeats a fact
+        // the absence of a composer already states, it never stops being true,
+        // and it eats a row of the chat for ever. The missing composer is the
+        // message.
+        if (canPost) {
             // A photo produces no row until its upload finishes, so without this
             // the screen is blank for the whole upload and the user cannot tell
             // a slow send from one that never started (#473). Sits directly above
@@ -1669,36 +1888,38 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     albumViewer?.let { (items, idx) ->
-        // Name and type follow the page: a clip is an .mp4 in Movies/RCQ, a
-        // picture a .jpg (or .gif) in Pictures/RCQ, like the single viewers.
-        fun nameAndMime(m: ChatMessage, b: ByteArray): Pair<String, String> = when {
-            m.kind == "video" -> "RCQ_${System.currentTimeMillis()}.mp4" to "video/mp4"
-            b.isGif() -> "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
-            else -> "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
-        }
+        // Item 9(b/c): the pager names the sender of the page you are on, so
+        // the name follows the swipe rather than being frozen at the item the
+        // grid was tapped on.
+        //
+        // ⚠ The pager hands back a WRITER, not bytes. Name and type still
+        // follow the page (a clip is an .mp4 in Movies/RCQ, a picture a .jpg or
+        // .gif in Pictures/RCQ) but the payload of a clip is a stream, because
+        // a page of an album can be a film and a film does not fit in an array.
         AlbumPagerViewer(
             session, items, idx,
-            onShare = { m, b ->
-                val (name, mime) = nameAndMime(m, b)
-                MediaSaver.share(context, b, name, mime)
-            },
-            onSave = { m, b ->
-                val (name, mime) = nameAndMime(m, b)
+            senderNameOf = { m -> viewerSenderName(m) },
+            onSenderClick = { m -> viewerSenderClick(viewerSenderUin(m)) { albumViewer = null } },
+            onShare = { _, payload -> MediaSaver.share(context, payload.write, payload.name, payload.mime) },
+            onSave = { m, payload ->
                 runSave {
-                    val ok = MediaSaver.saveToGallery(context, b, name, mime)
+                    val ok = MediaSaver.saveToGallery(context, payload.write, payload.name, payload.mime)
                     val dir = if (m.kind == "video") "Movies/RCQ" else "Pictures/RCQ"
                     val msg = if (ok) context.getString(R.string.media_saved_to, dir) else saveFailToast
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
-            onPlayVideo = { fullscreenVideo = it },
+            onPlayVideo = { m, src -> fullscreenVideo = viewerVideoOf(m, src) },
             onDismiss = { albumViewer = null },
         )
     }
 
-    fullscreenImage?.let { bytes ->
+    fullscreenImage?.let { media ->
+        val bytes = media.bytes
         FullscreenImageViewer(
             bytes,
+            senderName = media.senderName,
+            onSenderClick = viewerSenderClick(media.senderUin) { fullscreenImage = null },
             onShare = {
                 val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
                                    else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
@@ -1717,13 +1938,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         )
     }
 
-    fullscreenVideo?.let { bytes ->
+    fullscreenVideo?.let { media ->
         FullscreenVideoViewer(
-            bytes,
-            onShare = { MediaSaver.share(context, it, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4") },
-            onSave = {
+            media.source,
+            senderName = media.senderName,
+            // The album goes too: a clip played FROM the album has the pager
+            // still standing behind it, and leaving that up would put the
+            // album back over the card.
+            onSenderClick = viewerSenderClick(media.senderUin) { fullscreenVideo = null; albumViewer = null },
+            // ⚠ `src::writeTo`, not the bytes. Save and share stream the
+            // plaintext into their destination and verify every chunk of it on
+            // the way; a container that fails takes the half-written file with
+            // it instead of landing a truncated clip in the gallery.
+            onShare = { src -> MediaSaver.share(context, src::writeTo, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4") },
+            onSave = { src ->
                 runSave {
-                    val ok = MediaSaver.saveToGallery(context, it, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4")
+                    val ok = MediaSaver.saveToGallery(context, src::writeTo, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4")
                     val msg = if (ok) context.getString(R.string.media_saved_to, "Movies/RCQ") else saveFailToast
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
@@ -1731,7 +1961,18 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // A codec this device cannot decode is still worth watching
             // somewhere: fall back to the old behaviour rather than to a black
             // rectangle. This is the ONLY path that writes a decrypted clip out.
-            onUnsupported = { openFile(context, it, "video-${System.currentTimeMillis()}.mp4", "video/mp4") },
+            onUnsupported = { src -> openFile(context, src::writeTo, "video-${System.currentTimeMillis()}.mp4", "video/mp4") },
+            // Bytes that did not check out. Say so, and do NOT offer it to
+            // another player: the clip stopping early is what an edited chunk
+            // looks like, and letting that pass as a short video is the whole
+            // failure.
+            onDamaged = {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.media_video_damaged),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            },
             onDismiss = { fullscreenVideo = null },
         )
     }
@@ -1767,9 +2008,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         // member row is gated by membership, exactly like the
                         // nickname beside it, so no new exposure.
                         val member = group?.members?.firstOrNull { it.uin == uin }
+                        // ...and the row OPENS them (founder item 22). A list of
+                        // faces and names whose entire purpose is "who was that"
+                        // was inert: tapping one did nothing, so the only way on
+                        // to the profile was to close the sheet, find a message
+                        // of theirs and tap the nick above it. Every other list
+                        // of people in the app is tappable; this one now is too.
+                        // Own row excluded, same rule the sender nick uses: the
+                        // app has no self-profile card to push.
+                        val openProfile = if (uin != ownUin) ({
+                            whoReactedMsg = null
+                            onOpenPeerInfo(uin)
+                        }) else null
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(start = 28.dp, top = 3.dp, bottom = 3.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .then(if (openProfile != null) Modifier.clickable(onClick = openProfile) else Modifier)
+                                .padding(start = 28.dp, top = 3.dp, bottom = 3.dp),
                         ) {
                             PersonAvatar(
                                 member?.avatarMediaId ?: peerContact?.avatarMediaId?.takeIf { uin == peer },
@@ -1814,20 +2071,36 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 Column {
+                    // Founder item 21: the reactions this user actually uses
+                    // come FIRST, so the two or three they reach for every day
+                    // never need a horizontal scroll to reach. Ties keep the
+                    // order they were configured in.
+                    //
+                    // ★ Settled once, at OPEN, and never again while the bar is
+                    // up: `remember` is keyed on the message id and this whole
+                    // block leaves composition when the sheet closes, so the
+                    // order is computed on the way in and is then frozen. Recom-
+                    // puting live would re-sort the row under a finger that is
+                    // already moving towards a smiley, which is how you send the
+                    // wrong reaction. The counter is bumped BELOW, on the tap,
+                    // by which point this list is already fixed for this open.
+                    val quickReactions = remember(m.id) { LocalStores.byMostUsed(reactionSet) }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
                     ) {
-                        reactionSet.forEach { asset ->
+                        quickReactions.forEach { asset ->
                             Box(
                                 modifier = Modifier.clip(CircleShape).clickable {
+                                    LocalStores.bumpReactionUse(asset)
                                     scope.launch { runCatching { session.sendReaction(m, asset) } }
                                     actionMsg = null
                                 }.padding(4.dp),
                             ) { AnimatedEmoticon(asset, Modifier.size(32.dp)) }
                         }
                     }
-                    MessageAction(stringResource(R.string.chat_reply)) { startReply(m); actionMsg = null }
+                    // Same rule as the swipe above: no composer, no reply row.
+                    if (canPost) MessageAction(stringResource(R.string.chat_reply)) { startReply(m); actionMsg = null }
                     if (m.kind == "photo" || m.kind == "video" || m.kind == "file" || m.kind == "voice") {
                         MessageAction(stringResource(R.string.media_share)) { shareMessageMedia(m); actionMsg = null }
                         MessageAction(stringResource(R.string.media_save)) { saveMessageMedia(m); actionMsg = null }
@@ -1991,8 +2264,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     MessageAction(stringResource(R.string.chat_attach_file)) { attachMenu = false; filePicker.launch(arrayOf("*/*")) }
                     MessageAction(stringResource(R.string.chat_attach_location)) { attachMenu = false; shareLocation() }
                     MessageAction(stringResource(R.string.chat_attach_group)) { attachMenu = false; showGroupPicker = true }
-                    if (isGroup) MessageAction(stringResource(R.string.poll_create)) { attachMenu = false; showPollComposer = true }
-                    MessageAction(stringResource(R.string.relay_share_attach)) { attachMenu = false; showRelayPicker = true }
+                    // No "create poll" row and no "share a connection" row any
+                    // more (founder, items 14a + 14b). Polls were never E2EE:
+                    // the island held voter_uin + option_index in the clear
+                    // even for an "anonymous" ballot, and polls.creator_uin sat
+                    // next to the envelope UUID, which de-anonymized the author
+                    // of that one message. The backend answers 410
+                    // feature_removed and reports polls:false in /server/info,
+                    // so there is nothing left here to call. Relay sharing cost
+                    // no metadata at all (an inner envelope kind inside an
+                    // ordinary sealed message, the island never saw it) and
+                    // went purely as a product cut.
+                    //
+                    // ⚠ Both are OUTGOING cuts only. A poll from an old peer
+                    // still renders (as a "no longer supported" card), and an
+                    // incoming relay share is still ACCEPTED with its Add
+                    // button intact - see RelayBubble below.
                 }
             }
         }
@@ -2022,12 +2309,51 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler)
                             else session.sendPhoto(peer!!, ps.bytes, caption, spoiler)
                         is PendingSend.Video ->
-                            if (isGroup) session.sendGroupVideo(groupId!!, ps.v.bytes, ps.v.thumbB64, ps.v.durationSec, caption, spoiler)
-                            else session.sendVideo(peer!!, ps.v.bytes, ps.v.thumbB64, ps.v.durationSec, caption, spoiler)
+                            sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler)
                     }
                 }
             },
         )
+    }
+
+    // Disappearing-message timer for THIS thread. Picking one only affects
+    // messages sent from here on: an already-sent message carries the timer it
+    // was sent with, and re-dating history would be a lie about what the other
+    // side was promised.
+    if (showTtlPicker) {
+        RcqSheet(
+            onDismiss = { showTtlPicker = false },
+            title = stringResource(R.string.chat_ttl_menu),
+        ) {
+            Text(
+                stringResource(R.string.chat_ttl_body),
+                color = c.textSecondary, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            DisappearingMessages.options.forEach { opt ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            DisappearingMessages.set(thisThread, opt.seconds)
+                            // Read BACK rather than trusting the pick: the
+                            // store refuses to write anything before an account
+                            // is bound, and a menu row claiming "1 hour" over a
+                            // setting that was never saved is the lying control
+                            // this whole feature waited to avoid.
+                            threadTtl = DisappearingMessages.get(thisThread)
+                            showTtlPicker = false
+                        }
+                        .padding(vertical = 12.dp),
+                ) {
+                    Text(stringResource(opt.labelRes), color = c.textPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    if (opt.seconds == threadTtl) {
+                        Icon(Icons.Filled.Check, stringResource(R.string.common_on), tint = c.accent, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+            SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { showTtlPicker = false }
+        }
     }
 
     // Share a group invite into this chat: pick one of your groups, send its
@@ -2066,41 +2392,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
     }
 
-    // In-chat bridge sharing: pick a relay from your pool to hand the peer so
-    // they can route through it when their own relays are blocked.
-    if (showRelayPicker) {
-        val pool = remember { session.shareableRelays() }
-        RcqSheet(
-            onDismiss = { showRelayPicker = false },
-            title = stringResource(R.string.relay_share_pick_title),
-        ) {
-            Text(stringResource(R.string.relay_share_pick_body), color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-            if (groupId != null) Text(stringResource(R.string.relay_share_group_warn), color = c.statusBusy, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
-            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                pool.forEach { r ->
-                    MessageAction("${r.proto.uppercase()} · ${r.server}:${r.port}") {
-                        showRelayPicker = false
-                        val gid = groupId
-                        val p = peer
-                        scope.launch { runCatching {
-                            if (gid != null) session.shareRelayToGroup(gid, r) else p?.let { session.shareRelay(it, r) }
-                        } }
-                    }
-                }
-            }
-            SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { showRelayPicker = false }
-        }
-    }
-
-    if (showPollComposer && groupId != null) {
-        PollComposerDialog(
-            onDismiss = { showPollComposer = false },
-            onCreate = { q, opts, single, anon ->
-                showPollComposer = false
-                scope.launch { runCatching { session.sendPoll(groupId, q, opts, single, anon) } }
-            },
-        )
-    }
+    // (The relay-share picker and the poll composer used to sit here. Both
+    // entry points are gone; the sheets they opened went with them.)
 
     // In-chat message search — stacks over the thread (it's a later child of
     // the host Box). Tapping a hit scrolls the list to that message.
@@ -2124,8 +2417,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             session = session,
             messages = messages,
             onClose = { showAllMedia = false },
-            onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = it } },
-            onOpenVideo = { m -> mediaBytes(m) { fullscreenVideo = it } },
+            onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = viewerMediaOf(m, it) } },
+            onOpenVideo = { m -> openVideo(m) { fullscreenVideo = viewerVideoOf(m, it) } },
         )
     }
     if (confirmClearThread) {
@@ -2423,14 +2716,37 @@ private fun MessageAction(label: String, danger: Boolean = false, onClick: () ->
     )
 }
 
-private fun previewOf(m: ChatMessage, context: android.content.Context): String = when (m.kind) {
+/** The one line a reply carries as its quote of the message it answers.
+ *
+ *  ⚠⚠ A REPLY IS PERMANENT AND THE QUOTE IS A COPY OF SOMEBODY ELSE'S TEXT.
+ *  Disappearing timers are per side (see [Session.peerTtl]), so my answer to a
+ *  message with five minutes on it carries no `ttl` of its own whenever MY
+ *  thread timer is off. Copying the body in would ship those words back to
+ *  their author inside a message that never expires, persist them in
+ *  `replyToSnippet` on both devices, and write them into every `.rcqbak`
+ *  export, which keeps the reply precisely because the reply has no
+ *  `expiresAt` of its own. The one line the sender was promised would go would
+ *  stay, word for word, inside the answer to it.
+ *
+ *  So a dying message is quoted by LABEL. The reply still carries the target's
+ *  id, so both sides keep the thread and the tap that jumps to it; there is
+ *  simply nothing to read in the strip once the original is gone. web-chat
+ *  guards the same thing in `Chat.tsx` (`replyQuote` and `startReply`). */
+private fun previewOf(m: ChatMessage, context: android.content.Context): String = when {
+    m.expiresAt != null -> context.getString(R.string.chat_ttl_quoted)
+    else -> previewOfKind(m, context)
+}
+
+private fun previewOfKind(m: ChatMessage, context: android.content.Context): String = when (m.kind) {
     "photo" -> context.getString(R.string.chat_prev_photo)
     "file" -> m.fileName ?: context.getString(R.string.chat_prev_file)
     "voice" -> context.getString(R.string.chat_prev_voice)
     "video" -> context.getString(R.string.chat_prev_video)
     "location" -> context.getString(R.string.chat_prev_location)
+    // Polls are gone, but an old peer's ballot is still a message with a
+    // question in it, and quoting it must say what it was rather than a blank.
     "poll" -> app.rcq.android.model.PollContent.fromJson(m.body)?.question?.take(100)
-        ?: context.getString(R.string.poll_create)
+        ?: context.getString(R.string.poll_removed_title)
     "relay" -> context.getString(R.string.relay_share_title)
     else -> m.body.take(100)
 }
@@ -2650,7 +2966,7 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
                 Text(foreignHost, color = c.textMono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (p != null) {
-                Text(pluralStringResource(R.plurals.members, p.member_count, p.member_count), color = c.textSecondary, fontSize = 12.sp)
+                Text(memberCountLabel(p.member_count), color = c.textSecondary, fontSize = 12.sp)
                 Text(
                     stringResource(
                         if (joinedLocalId != null) R.string.group_invite_tap_open
@@ -2670,7 +2986,7 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
         RcqAskSheet(
             onDismiss = { if (!joining) showJoin = false },
             title = p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title),
-            body = if (p != null) pluralStringResource(R.plurals.members, p.member_count, p.member_count)
+            body = if (p != null) memberCountLabel(p.member_count)
             else stringResource(R.string.group_invite_island_hint, foreignHost ?: ""),
             actions = listOf(
                 // Greyed and inert while a join is in flight — the row stands in for
@@ -2860,7 +3176,7 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
             )
             if (foreignHost != null) Text(foreignHost, color = c.textMono, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (p != null) Text(
-                pluralStringResource(R.plurals.members, p.member_count, p.member_count),
+                memberCountLabel(p.member_count),
                 color = c.textSecondary, fontSize = 11.sp,
             )
         }
@@ -2869,7 +3185,7 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
         RcqAskSheet(
             onDismiss = { if (!joining) showJoin = false },
             title = p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_title),
-            body = if (p != null) pluralStringResource(R.plurals.members, p.member_count, p.member_count)
+            body = if (p != null) memberCountLabel(p.member_count)
             else stringResource(R.string.group_invite_island_hint, foreignHost ?: ""),
             actions = listOf(
                 // Same as GroupLinkBubble: dimmed and inert while the join runs.
@@ -3142,7 +3458,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (ByteArray) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -3187,7 +3503,7 @@ private fun AlbumGrid(
     items: List<ChatMessage>,
     onLongPress: () -> Unit,
     onViewImage: (ByteArray) -> Unit = {},
-    onViewVideo: (ByteArray) -> Unit = {},
+    onViewVideo: (VideoSource) -> Unit = {},
     onOpenAlbum: (Int) -> Unit = {},
 ) {
     val maxW = 240.dp
@@ -3242,12 +3558,13 @@ private fun AlbumTile(
     h: Dp,
     onLongPress: () -> Unit,
     onViewImage: (ByteArray) -> Unit = {},
-    onViewVideo: (ByteArray) -> Unit = {},
+    onViewVideo: (VideoSource) -> Unit = {},
     /** Open the whole album at this tile, so everything in it can be reached
      *  by swiping. Null for the callers that have no album around them. */
     onOpenAlbum: (() -> Unit)? = null,
 ) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isVideo = m.kind == "video"
     val photo by produceState<ByteArray?>(initialValue = null, m.id) {
@@ -3277,9 +3594,14 @@ private fun AlbumTile(
                     // An album tile used to hand BOTH kinds to an external app,
                     // so the same photo opened in-app from a single bubble and
                     // in the gallery app from an album. Both stay in-app now.
-                    val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
-                    if (bytes != null) {
-                        if (isVideo) onViewVideo(bytes) else onViewImage(bytes)
+                    if (isVideo) {
+                        when (val r = playableVideo(session, m)) {
+                            is PlayableVideo.Ready -> onViewVideo(r.source)
+                            else -> sayVideoFailure(context, r)
+                        }
+                    } else {
+                        val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
+                        if (bytes != null) onViewImage(bytes)
                     }
                 }
             },
@@ -3391,7 +3713,7 @@ private fun SwipeToReply(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (ByteArray) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -3453,7 +3775,9 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 )
             }
         } else if (m.kind == "poll") {
-            PollBubble(session, m, onLongPress)
+            // Retired ballot from an old peer. Takes no `session`: it makes no
+            // API call at all now (see PollBubble).
+            PollBubble(m, onLongPress)
         } else if (m.kind == "file") {
             FileBubble(session, m, onLongPress)
         } else if (m.kind == "video") {
@@ -3671,16 +3995,22 @@ private fun blurForSpoiler(src: Bitmap): Bitmap {
  *  photos only, and a batch of five clips, or four clips ahead of two photos,
  *  had the same unreachable tail as before (found in review). Tapping the disc
  *  hands the clip to the video player above this dialog; closing the player
- *  lands back on the same page. Nothing of a clip is fetched until asked. */
+ *  lands back on the same page. Nothing of a clip is fetched until asked.
+ *
+ *  [senderNameOf] / [onSenderClick] are asked per PAGE, not once for the album:
+ *  the name at the top has to follow the swipe. A null click means the name is
+ *  shown but not tappable (see viewerSenderClick in ChatScreen). */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumPagerViewer(
     session: Session,
     items: List<ChatMessage>,
     startIndex: Int,
-    onShare: (ChatMessage, ByteArray) -> Unit = { _, _ -> },
-    onSave: (ChatMessage, ByteArray) -> Unit = { _, _ -> },
-    onPlayVideo: (ByteArray) -> Unit = {},
+    senderNameOf: (ChatMessage) -> String? = { null },
+    onSenderClick: (ChatMessage) -> (() -> Unit)? = { null },
+    onShare: (ChatMessage, MediaPayload) -> Unit = { _, _ -> },
+    onSave: (ChatMessage, MediaPayload) -> Unit = { _, _ -> },
+    onPlayVideo: (ChatMessage, VideoSource) -> Unit = { _, _ -> },
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) { onDismiss(); return }
@@ -3702,6 +4032,19 @@ private fun AlbumPagerViewer(
         return session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
             ?.also { if (m.kind != "video") loaded[m.id] = it }
     }
+    // What Save and Share act on: a name, a type, and a way to write the
+    // plaintext out. A picture already has its bytes; a clip is streamed
+    // straight into the destination and verified chunk by chunk on the way.
+    suspend fun payloadOf(m: ChatMessage): MediaPayload? {
+        if (m.kind == "video") {
+            val ready = playableVideo(session, m) as? PlayableVideo.Ready ?: return null
+            return MediaPayload("RCQ_${m.id}.mp4", "video/mp4", ready.source::writeTo)
+        }
+        val b = bytesOf(m) ?: return null
+        val (name, mime) =
+            if (b.isGif()) "RCQ_${m.id}.gif" to "image/gif" else "RCQ_${m.id}.jpg" to "image/jpeg"
+        return MediaPayload(name, mime) { out -> out.write(b); true }
+    }
     // Save/share fetch on the tap (a clip is not pulled down for the buttons);
     // while that runs the buttons are a spinner, not two more downloads.
     var actionBusy by remember { mutableStateOf(false) }
@@ -3709,10 +4052,28 @@ private fun AlbumPagerViewer(
     // (15+): the counter below is placed by the bar's real height, and that
     // is only right when the content is under the bar everywhere.
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // Item 9(b): one auto-hide timer and one fade for the whole album, the
+        // same shared pair the video player uses (MediaViewerChrome.kt). Pinned
+        // while a save or share is fetching, so the spinner that replaces the
+        // two discs cannot fade out from under the wait it exists to explain.
+        val chrome = rememberViewerChrome(pinned = actionBusy)
+        val dismissDrag = rememberViewerDismiss()
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                // ⚠ Not on the pages. The pager's own horizontal drag gets
+                // first refusal on every pointer, so the vertical detector has
+                // to sit ABOVE it: a page-level one fights the pager for the
+                // same events and the album stops turning.
+                .viewerSwipeToDismiss(dismissDrag, onDismiss = onDismiss),
+        ) {
             androidx.compose.foundation.pager.HorizontalPager(
                 state = pager,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    translationY = dismissDrag.dragPx
+                    alpha = dismissDrag.contentAlpha
+                },
             ) { page ->
                 val m = items[page]
                 val isVideo = m.kind == "video"
@@ -3730,10 +4091,16 @@ private fun AlbumPagerViewer(
                     var fetching by remember(m.id) { mutableStateOf(false) }
                     var playFailed by remember(m.id) { mutableStateOf(false) }
                     Box(
+                        // Item 9(b): a tap TOGGLES the controls, it does not
+                        // close the album. Closing is the X and the swipe down.
+                        // A tap that threw the picture away was the reason Save
+                        // and Share could not be reached once they had faded:
+                        // the only gesture that could bring them back was also
+                        // the one that ended the viewer.
                         Modifier.fillMaxSize().clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = onDismiss,
+                            onClick = { chrome.toggle() },
                         ),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -3748,9 +4115,15 @@ private fun AlbumPagerViewer(
                                     if (fetching) return@ViewerAction
                                     fetching = true; playFailed = false
                                     scope.launch {
-                                        val b = bytesOf(m)
+                                        // ⚠ Not bytesOf(). A page of an album is
+                                        // the same clip a bubble opens, and it
+                                        // has to survive the same length.
+                                        val r = playableVideo(session, m)
                                         fetching = false
-                                        if (b != null) onPlayVideo(b) else playFailed = true
+                                        when (r) {
+                                            is PlayableVideo.Ready -> onPlayVideo(m, r.source)
+                                            else -> playFailed = true
+                                        }
                                     }
                                 }
                                 // A fetch that came back empty used to leave a
@@ -3775,10 +4148,11 @@ private fun AlbumPagerViewer(
                         offset = if (scale > 1f) offset + panChange else Offset.Zero
                     }
                     Box(
+                        // Toggles the controls; see the video page above.
                         Modifier.fillMaxSize().clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = onDismiss,
+                            onClick = { chrome.toggle() },
                         ),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -3820,51 +4194,83 @@ private fun AlbumPagerViewer(
             // in the top-left corner of every screen in the system, closing a
             // picture is the same gesture, and it is the one people reach for
             // most often here.
-            ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp), onDismiss)
+            ViewerChrome(chrome, Modifier.align(Alignment.TopStart)) {
+                ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
+                    Modifier.statusBarsPadding().padding(16.dp), onDismiss)
+            }
+            // Item 9(b/c): whose picture this is, re-read on every page.
+            val senderName = current?.let(senderNameOf)
+            if (!senderName.isNullOrBlank()) {
+                ViewerChrome(chrome, Modifier.align(Alignment.TopCenter)) {
+                    ViewerSenderLabel(senderName, onClick = current?.let(onSenderClick))
+                }
+            }
             if (current != null) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
-                ) {
-                    // Save and share act on the page you are looking at. A photo
-                    // page has its bytes already; a clip is fetched on the tap.
-                    if (actionBusy) {
-                        CircularProgressIndicator(color = RcqTheme.colors.accent, modifier = Modifier.size(36.dp).padding(6.dp), strokeWidth = 2.dp)
-                    } else {
-                        ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) {
-                            actionBusy = true
-                            scope.launch { try { bytesOf(current)?.let { onSave(current, it) } } finally { actionBusy = false } }
-                        }
-                        ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
-                            actionBusy = true
-                            scope.launch { try { bytesOf(current)?.let { onShare(current, it) } } finally { actionBusy = false } }
+                ViewerChrome(chrome, Modifier.align(Alignment.TopEnd)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.statusBarsPadding().padding(16.dp),
+                    ) {
+                        // Save and share act on the page you are looking at. A photo
+                        // page has its bytes already; a clip is fetched on the tap.
+                        if (actionBusy) {
+                            CircularProgressIndicator(color = RcqTheme.colors.accent, modifier = Modifier.size(36.dp).padding(6.dp), strokeWidth = 2.dp)
+                        } else {
+                            ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) {
+                                actionBusy = true
+                                scope.launch { try { payloadOf(current)?.let { onSave(current, it) } } finally { actionBusy = false } }
+                            }
+                            ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
+                                actionBusy = true
+                                scope.launch { try { payloadOf(current)?.let { onShare(current, it) } } finally { actionBusy = false } }
+                            }
                         }
                     }
                 }
             }
             if (items.size > 1) {
-                Text(
-                    "${pager.currentPage + 1} / ${items.size}",
-                    color = Color.White, fontSize = 13.sp,
-                    // The dialog is laid out under the system bar and its own
-                    // insets read zero (see activityNavigationBarBottom): the
-                    // bar's real height plus a margin, whatever kind of bar.
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = activityNavigationBarBottom() + 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                )
+                // The counter fades with the buttons rather than on its own
+                // clock: "3 / 10" burning on an otherwise bare picture is the
+                // drift the shared chrome exists to prevent.
+                ViewerChrome(chrome, Modifier.align(Alignment.BottomCenter)) {
+                    Text(
+                        "${pager.currentPage + 1} / ${items.size}",
+                        color = Color.White, fontSize = 13.sp,
+                        // The dialog is laid out under the system bar and its own
+                        // insets read zero (see activityNavigationBarBottom): the
+                        // bar's real height plus a margin, whatever kind of bar.
+                        modifier = Modifier.padding(bottom = activityNavigationBarBottom() + 16.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }
 }
 
-/** Fullscreen photo viewer (tester #10): tap anywhere or the X to close, pinch
- *  to zoom, drag while zoomed to pan. */
+/** Fullscreen photo viewer (tester #10): pinch to zoom, drag while zoomed to
+ *  pan, tap to show or hide the controls, swipe down or press the X to close.
+ *
+ *  ⚠ The tap used to CLOSE this viewer, and item 9(b) is why it no longer does.
+ *  Once the controls auto-hide, a tap that closes leaves no gesture that brings
+ *  Save and Share back: the one thing your finger could do to the picture was
+ *  also the thing that ended it. So a tap toggles the chrome, exactly as every
+ *  other messenger on this phone behaves, and closing moved onto the swipe down
+ *  and the close disc.
+ *
+ *  [senderName] / [onSenderClick] are item 9(c). A null click leaves the name
+ *  as plain text: either there is nobody to open (my own picture, Saved), or
+ *  that person asked to be kept out of incidental surfaces. */
+// `canPan` on transformable is still experimental; same opt-in the album pager
+// above carries, for the same modifier.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FullscreenImageViewer(
     bytes: ByteArray,
+    senderName: String? = null,
+    onSenderClick: (() -> Unit)? = null,
     onShare: (ByteArray) -> Unit = {},
     onSave: (ByteArray) -> Unit = {},
     onDismiss: () -> Unit,
@@ -3876,29 +4282,55 @@ private fun FullscreenImageViewer(
             scale = (scale * zoomChange).coerceIn(1f, 5f)
             offset = if (scale > 1f) offset + panChange else Offset.Zero
         }
+        // The shared timer and fade (MediaViewerChrome.kt), the same pair the
+        // album pager and the video player use. Pinned while the photo is
+        // zoomed in: someone working at 4x is reading the picture, not watching
+        // it, and losing the close button mid-inspection is exactly the moment
+        // they want it.
+        val chrome = rememberViewerChrome(pinned = scale > 1f)
+        val dismissDrag = rememberViewerDismiss()
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { chrome.toggle() },
+                )
+                // Off while zoomed: that drag is a pan across the picture, and
+                // reaching its bottom edge must not throw the viewer away.
+                .viewerSwipeToDismiss(dismissDrag, enabled = scale <= 1f, onDismiss = onDismiss),
             contentAlignment = Alignment.Center,
         ) {
-            if (bytes.isGif()) {
-                SafeAnimatedGif(bytes, Modifier.fillMaxWidth())
-            } else {
-                // Decode off the main thread, bounded to 2560px (ample for the
-                // 5x pinch-zoom) so opening a big photo never stalls the UI.
-                val image = rememberSampledBitmap(bytes, maxPx = 2560)
-                if (image != null) {
-                    Image(
-                        bitmap = image,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .transformable(transform)
-                            .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                    )
+            Box(
+                Modifier.fillMaxSize().graphicsLayer {
+                    translationY = dismissDrag.dragPx
+                    alpha = dismissDrag.contentAlpha
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (bytes.isGif()) {
+                    SafeAnimatedGif(bytes, Modifier.fillMaxWidth())
+                } else {
+                    // Decode off the main thread, bounded to 2560px (ample for the
+                    // 5x pinch-zoom) so opening a big photo never stalls the UI.
+                    val image = rememberSampledBitmap(bytes, maxPx = 2560)
+                    if (image != null) {
+                        Image(
+                            bitmap = image,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                // ⚠ `canPan` matches the album pager, and here it
+                                // is what lets the swipe-down through: without it
+                                // transformable eats every drag at any zoom, and
+                                // the close gesture never reaches the box above.
+                                .transformable(transform, canPan = { scale > 1f })
+                                .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                        )
+                    }
                 }
             }
             // White glyphs laid straight on the photo disappear over a light
@@ -3907,17 +4339,105 @@ private fun FullscreenImageViewer(
             // makes the tap target the whole disc rather than the strokes.
             // Close on the left, the two actions on the right: see the album
             // viewer above (#703).
-            ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
-                Modifier.align(Alignment.TopStart).statusBarsPadding().padding(16.dp), onDismiss)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp),
-            ) {
-                ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(bytes) }
-                ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(bytes) }
+            ViewerChrome(chrome, Modifier.align(Alignment.TopStart)) {
+                ViewerAction(Icons.Filled.Close, stringResource(R.string.common_close),
+                    Modifier.statusBarsPadding().padding(16.dp), onDismiss)
+            }
+            if (!senderName.isNullOrBlank()) {
+                ViewerChrome(chrome, Modifier.align(Alignment.TopCenter)) {
+                    ViewerSenderLabel(senderName, onClick = onSenderClick)
+                }
+            }
+            ViewerChrome(chrome, Modifier.align(Alignment.TopEnd)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.statusBarsPadding().padding(16.dp),
+                ) {
+                    ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(bytes) }
+                    ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(bytes) }
+                }
             }
         }
     }
+}
+
+/** A picture or a clip on its way to a full-screen viewer, plus who sent it.
+ *
+ *  The viewers used to be handed a bare [ByteArray], which is why the sender's
+ *  name could not be shown above them: decrypted bytes do not know whose they
+ *  are, and the roster that could answer lives up in ChatScreen. This is the
+ *  three fields the viewers need, built once at the point where the roster is
+ *  still in scope (viewerMediaOf). */
+private class ViewerMedia(
+    val bytes: ByteArray,
+    /** Whose card the name opens; null when there is nobody to open. */
+    val senderUin: Int?,
+    /** What to print; null means print nothing rather than print "unknown". */
+    val senderName: String?,
+)
+
+/** [ViewerMedia] for a clip.
+ *
+ *  ⚠ A separate type, and the difference is the whole of #691 item 3: a photo
+ *  is bytes, a film is a thing you read a piece at a time. Holding a video the
+ *  way [ViewerMedia] holds a picture is what made a long one fail to open with
+ *  no message of any kind, so the video viewer is handed a [VideoSource] and
+ *  never a ByteArray. */
+private class ViewerVideo(
+    val source: VideoSource,
+    val senderUin: Int?,
+    val senderName: String?,
+)
+
+/** Something to save or share: what to call it, what it is, and how to write
+ *  it out. A writer rather than a ByteArray so the same two buttons work on a
+ *  picture and on a film. */
+private class MediaPayload(
+    val name: String,
+    val mime: String,
+    val write: (java.io.OutputStream) -> Boolean,
+)
+
+/** What came back when a clip was asked for. */
+private sealed class PlayableVideo {
+    class Ready(val source: VideoSource) : PlayableVideo()
+
+    /** A single-seal blob from before the chunked container existed, too heavy
+     *  to open on this device. Nothing can be done for it here: AES-GCM keeps
+     *  its tag at the end, so a provider will not hand out any plaintext before
+     *  it has read all of the ciphertext. The sender has to send it again. */
+    class TooOld(val bytes: Long) : PlayableVideo()
+
+    object Failed : PlayableVideo()
+}
+
+/** Fetch a clip in whatever shape it can actually be PLAYED in.
+ *
+ *  ⚠ Not `fetchImage`. That one downloads into one array and decrypts into
+ *  another, which for a film is an OutOfMemoryError swallowed by `runCatching`
+ *  into a silent null: "long videos do not download", with nothing on screen
+ *  to say so. This streams the container to disk and opens it a chunk at a
+ *  time. */
+private suspend fun playableVideo(session: Session, m: ChatMessage): PlayableVideo {
+    val mid = m.mediaId ?: return PlayableVideo.Failed
+    val key = m.mediaKey ?: return PlayableVideo.Failed
+    val host = m.groupId?.let { session.groupHost(it) }
+    return when (val src = session.fetchMediaSource(mid, key, host)) {
+        is Session.MediaSource.InMemory -> PlayableVideo.Ready(VideoSource.of(src.bytes))
+        is Session.MediaSource.Streamed -> PlayableVideo.Ready(VideoSource.of(src.file, src.key, src.plainLen))
+        is Session.MediaSource.TooLargeLegacy -> PlayableVideo.TooOld(src.bytes)
+        null -> PlayableVideo.Failed
+    }
+}
+
+/** Say what went wrong, in the person's own terms. Both cases used to be
+ *  silence. */
+private fun sayVideoFailure(context: Context, r: PlayableVideo) {
+    val text = when (r) {
+        is PlayableVideo.TooOld -> context.getString(R.string.media_video_too_old, (r.bytes / (1024 * 1024)).toInt())
+        else -> context.getString(R.string.media_fetch_failed)
+    }
+    android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
 }
 
 /// One control of the full-screen media viewer: a white glyph on a dark disc,
@@ -4152,9 +4672,19 @@ private fun VoiceBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit, onView: (ByteArray) -> Unit = {}) {
+private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit, onView: (VideoSource) -> Unit = {}) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // ⚠ The disc used to be a play glyph and nothing else, whatever was
+    // happening behind it. A 300 MB clip takes minutes to come down, and a
+    // poster with a play button on it for three minutes is indistinguishable
+    // from a poster with a play button that does not work, which is a fair
+    // part of what "long videos do not download" described. The disc now says
+    // that it started, and how far it has got.
+    var fetching by remember(m.id) { mutableStateOf(false) }
+    val download by session.mediaDownload.collectAsState()
+    val progress = download?.takeIf { it.first == m.mediaId }?.second
     var revealed by remember(m.id) { mutableStateOf(false) }
     val hidden = m.spoiler && !revealed
     val thumbBmp = remember(m.id) {
@@ -4176,15 +4706,23 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
             .combinedClickable(
                 onClick = {
                     if (hidden) { revealed = true; return@combinedClickable }
-                    val mid = m.mediaId; val key = m.mediaKey
-                    if (mid != null && key != null) scope.launch {
-                        // Decrypt, then hand the BYTES to the in-app player.
-                        // This used to write the plaintext clip into the shared
-                        // FileProvider cache and fire an ACTION_VIEW chooser,
-                        // which meant a private video left the app the moment
-                        // you watched it.
-                        val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
-                        if (bytes != null) onView(bytes)
+                    if (m.mediaId != null && m.mediaKey != null && !fetching) scope.launch {
+                        // Fetch, then hand the in-app player something it can
+                        // READ FROM. It used to write the plaintext clip into
+                        // the shared FileProvider cache and fire an ACTION_VIEW
+                        // chooser, which meant a private video left the app the
+                        // moment you watched it; then it decrypted into a
+                        // ByteArray, which meant a long one never opened at all
+                        // and said nothing about it (#691). Now: a container
+                        // streamed to disk, decrypted a megabyte at a time, and
+                        // a message on either kind of failure.
+                        fetching = true
+                        val r = playableVideo(session, m)
+                        fetching = false
+                        when (r) {
+                            is PlayableVideo.Ready -> onView(r.source)
+                            else -> sayVideoFailure(context, r)
+                        }
                     }
                 },
                 onLongClick = onLongPress,
@@ -4201,7 +4739,14 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
                 Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, stringResource(R.string.chat_play_video), tint = Color.White, modifier = Modifier.size(30.dp))
+                when {
+                    fetching && progress != null ->
+                        CircularProgressIndicator(progress = { progress }, color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
+                    fetching ->
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(26.dp))
+                    else ->
+                        Icon(Icons.Filled.PlayArrow, stringResource(R.string.chat_play_video), tint = Color.White, modifier = Modifier.size(30.dp))
+                }
             }
             (m.durationSec ?: 0).takeIf { it > 0 }?.let {
                 Text(
@@ -4250,8 +4795,27 @@ private fun LocationBubble(m: ChatMessage, onLongPress: () -> Unit) {
 }
 
 /** In-chat bridge sharing: a relay a contact handed you (or you sent). Incoming
- *  shows an Add button → [ContactRelayStore.add] (augments the transport pool);
- *  outgoing/added/invalid show a status line. See RCQ/docs/bridge-sharing-design.md. */
+ *  shows an Add button, [ContactRelayStore.add] (augments the transport pool);
+ *  outgoing/added/invalid show a status line. See RCQ/docs/bridge-sharing-design.md.
+ *
+ *  ★★ THIS SIDE STAYS. Sharing a relay FROM the chat was cut (founder item 14b,
+ *  he does not see the point and finds it unusable), but the two directions are
+ *  not the same decision.
+ *
+ *  Rendering an incoming share as "unsupported" would be the one outcome we
+ *  cannot afford: this card is how somebody behind a block gets a working way
+ *  out, handed to them by a person they already trust, over an ordinary sealed
+ *  message the island never sees. A build that refused to show the Add button
+ *  would take a working relay away from a user who had already been given one,
+ *  and they would have no other way to enter it (the pasted-link path in
+ *  Settings needs a link, and what arrives here is a card). "Still accept it"
+ *  costs nothing at all: kind="relay" is an inner envelope type, the backend
+ *  has never heard of it, so there is no server surface to keep alive and no
+ *  metadata to pay for.
+ *
+ *  So: no new shares leave this client, every share that arrives is honoured,
+ *  and an old outgoing share of ours still renders its "you shared a way to
+ *  connect" line instead of turning into a blank. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RelayBubble(m: ChatMessage, onLongPress: () -> Unit) {
@@ -4351,13 +4915,38 @@ private fun readPickedFile(context: Context, uri: Uri): PickedFile? = runCatchin
 
 private data class PickedFile(val bytes: ByteArray, val name: String, val mime: String)
 
-private data class PickedVideo(val bytes: ByteArray, val thumbB64: String, val durationSec: Int)
+/** A picked clip, as a HANDLE rather than a copy.
+ *
+ *  ⚠⚠ `bytes: ByteArray` is what used to be here, and reading it was where a
+ *  long send died: `openInputStream(uri).readBytes()` on a 300 MB clip is an
+ *  OutOfMemoryError, the whole reader sat inside `runCatching{}.getOrNull()`,
+ *  and Kotlin's runCatching catches Errors — so picking a long video did
+ *  literally nothing, with no toast and no log. The clip already exists on
+ *  this device; what the sender needs from it is where it is and how big it
+ *  is, and only then, if it is small, its bytes. */
+private data class PickedVideo(
+    val uri: Uri,
+    /** Plaintext length, from the file descriptor rather than a guess: it is
+     *  declared to the island as Content-Length before a byte moves. */
+    val sizeBytes: Long,
+    val thumbB64: String,
+    val durationSec: Int,
+)
 
-/** Read a picked video: raw bytes + a base64 JPEG poster frame (so the
- *  bubble renders before the blob downloads) + duration in seconds. */
+/** Read what a picked video IS: a poster frame (so the bubble renders before
+ *  the blob downloads), a duration, and a length. Never the clip itself. */
 private fun readPickedVideo(context: Context, uri: Uri): PickedVideo? = runCatching {
     val cr = context.contentResolver
-    val bytes = cr.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching null
+    // statSize is the file's own answer; OpenableColumns.SIZE is the provider's
+    // and can be absent. A length we cannot establish is a length we will not
+    // guess: the streamed upload declares it up front, and a wrong one would
+    // truncate the person's video.
+    val size = cr.openFileDescriptor(uri, "r")?.use { it.statSize }?.takeIf { it > 0 }
+        ?: cr.query(uri, null, null, null, null)?.use { cur ->
+            val idx = cur.getColumnIndex(OpenableColumns.SIZE)
+            if (idx >= 0 && cur.moveToFirst() && !cur.isNull(idx)) cur.getLong(idx) else null
+        }
+        ?: return@runCatching null
     val mmr = android.media.MediaMetadataRetriever()
     val (thumbB64, durSec) = try {
         mmr.setDataSource(context, uri)
@@ -4377,8 +4966,59 @@ private fun readPickedVideo(context: Context, uri: Uri): PickedVideo? = runCatch
     } finally {
         runCatching { mmr.release() }
     }
-    PickedVideo(bytes, thumbB64, durSec)
+    PickedVideo(uri, size, thumbB64, durSec)
 }.getOrNull()
+
+/** Send a picked clip the way its weight demands: the ordinary in-memory path
+ *  for an everyday one, the streamed chunk-sealed path for a long one. The
+ *  threshold lives in [Session.needsStreamedSend] because it is a fact about
+ *  the container, not about this screen. */
+private suspend fun sendPickedVideo(
+    context: Context,
+    session: Session,
+    isGroup: Boolean,
+    groupId: Int?,
+    peer: Int?,
+    v: PickedVideo,
+    caption: String?,
+    spoiler: Boolean = false,
+    albumId: String? = null,
+) {
+    if (session.needsStreamedSend(v.sizeBytes)) {
+        // A fresh stream per attempt: the route ladder can run the upload again
+        // through the tunnel, and a cross-island send deposits twice.
+        val open = {
+            context.contentResolver.openInputStream(v.uri)
+                ?: throw java.io.IOException("cannot read ${v.uri}")
+        }
+        if (isGroup) session.sendGroupVideoStreamed(groupId!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+        else session.sendVideoStreamed(peer!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+        return
+    }
+    val bytes = withContext(Dispatchers.IO) {
+        context.contentResolver.openInputStream(v.uri)?.use { it.readBytes() }
+    } ?: throw java.io.IOException("cannot read ${v.uri}")
+    if (isGroup) session.sendGroupVideo(groupId!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+    else session.sendVideo(peer!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+}
+
+/** Will the island take it? Say so in the composer, in MB, when it will not.
+ *  The island has always enforced its cap while reading the body, so without
+ *  this the answer arrives after the upload rather than before it. */
+private fun videoFitsIsland(context: Context, session: Session, v: PickedVideo): Boolean {
+    val max = session.mediaMaxBlobBytes
+    if (app.rcq.android.crypto.MediaStream.blobLength(v.sizeBytes) <= max) return true
+    android.widget.Toast.makeText(
+        context,
+        context.getString(
+            R.string.media_too_large_for_island,
+            (v.sizeBytes / (1024 * 1024)).toInt(),
+            (max / (1024 * 1024)).toInt(),
+        ),
+        android.widget.Toast.LENGTH_LONG,
+    ).show()
+    return false
+}
 
 /** Write decrypted bytes to the cache and hand them to a viewer via a
  *  FileProvider URI (chooser fallback so the user can always save it). */
@@ -4473,11 +5113,19 @@ private fun MediaTile(session: Session, m: ChatMessage, onClick: () -> Unit) {
     }
 }
 
-private fun openFile(context: Context, bytes: ByteArray, fileName: String, mime: String) {
+private fun openFile(context: Context, bytes: ByteArray, fileName: String, mime: String) =
+    openFile(context, { out -> out.write(bytes); true }, fileName, mime)
+
+/** [openFile] for media too big to hold. [write] streams the plaintext into
+ *  the file we are about to hand another app and answers false if it could not
+ *  produce all of it; a false takes the half-written file away rather than
+ *  offering a truncated clip to a player. */
+private fun openFile(context: Context, write: (java.io.OutputStream) -> Boolean, fileName: String, mime: String) {
     runCatching {
         val dir = java.io.File(context.cacheDir, "files").apply { mkdirs() }
         val f = java.io.File(dir, fileName.replace('/', '_'))
-        f.writeBytes(bytes)
+        val ok = java.io.FileOutputStream(f).use { out -> write(out) }
+        if (!ok) { f.delete(); return }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
         val view = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mime)

@@ -14,6 +14,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+/** A body that went past what the caller said it could hold. Carries the
+ *  numbers so a log line can name them; nothing shows it to the person, because
+ *  from their side it is a download that did not come back. */
+class BlobTooLargeException(val bytes: Long, val maxBytes: Long) :
+    IOException("blob is $bytes bytes, this client takes at most $maxBytes")
+
 /**
  * Minimal REST client for the RCQ backend, talking the same wire protocol
  * as the iOS client (rcq-spec) against prod by default. Registration,
@@ -104,6 +110,24 @@ class RcqApi(
             .callTimeout(10, TimeUnit.MINUTES)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+    /** The same twin again for a STREAMED transfer, with the whole-call ceiling
+     *  taken off entirely.
+     *
+     *  ⚠ The 10-minute `callTimeout` above is a size limit wearing a clock's
+     *  clothes: at the island's 512 MB blob cap it means "finish at 6.8 Mbps
+     *  sustained or fail", which no ordinary mobile uplink does. A half-hour
+     *  film would be killed at minute ten with the upload perfectly healthy.
+     *  Nothing is loosened about detecting a DEAD transfer: the read/write
+     *  timeouts still fail a socket that stops moving for a minute, which is
+     *  the thing a ceiling is actually for; what goes away is the punishment
+     *  for being slow but alive. */
+    private fun largeMediaClient(base: OkHttpClient): OkHttpClient =
+        base.newBuilder()
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build()
 
     /**
@@ -514,9 +538,22 @@ class RcqApi(
 
     data class MyReport(
         val id: Int,
+        /** The number the operator answers by. Server-side it IS `id`, sent as
+         *  its own field so a client shows it instead of guessing whether `id`
+         *  is an internal key to keep out of the UI.
+         *
+         *  ⚠ NULL on an island that predates 2026-08-23, and the screen uses
+         *  exactly that as its capability probe: the same server release added
+         *  the number and PATCH /reports/mine/{id}, so no number means no edit
+         *  endpoint either, and the pencil stays hidden rather than offering an
+         *  action that can only 404. */
+        val number: Int? = null,
         val reason: String?,
         val status: String?,
         val created_at: String?,
+        /** Set once the reporter has rewritten their own text. Null on every
+         *  report nobody edited, which is all of them before 2026-08-23. */
+        val edited_at: String? = null,
         /** The LAST operator answer. An island older than the thread sends only
          *  this, which is why the screen still falls back to it. */
         val reply: String?,
@@ -538,8 +575,33 @@ class RcqApi(
         post("/reports/mine/$id/messages", gson.toJson(ReportTurnBody(body)), authed = true, ReportTurn::class.java)
     }
 
-    /** Drop one of my own reports. 409 = still open against another user, so
-     *  moderation keeps it until there is a verdict. */
+    data class ReportEditBody(val reason: String)
+
+    /** Rewrite my own report while nobody has answered it yet.
+     *
+     *  Refused, and each of these reaches the user as its own sentence:
+     *   * "HTTP 409" `closed` / `already_answered` -> the text an operator has
+     *     already replied to cannot change under him;
+     *   * "HTTP 400" `not_editable` -> a crash dump, or new text carrying the
+     *     `[CRASH]` marker by hand (that marker keeps auto-submitted crashes
+     *     out of the Hall of Fame tally, so it is not something a person may
+     *     type into their own report);
+     *   * "HTTP 404" -> not mine, or already dropped from my list.
+     *
+     *  Returns the report as the server now holds it, so the caller replaces
+     *  the row rather than guessing what the edit did to it. */
+    suspend fun editMyReport(id: Int, reason: String): MyReport = withContext(Dispatchers.IO) {
+        request("PATCH", "/reports/mine/$id", gson.toJson(ReportEditBody(reason)), authed = true, MyReport::class.java)
+    }
+
+    /** Drop one of my own reports from my own list.
+     *
+     *  ⚠ It is a HIDE, not a delete, and the UI must not say otherwise. The row
+     *  survives: `hof_stats` counts bug reports live over that table, so a real
+     *  delete was a scoreboard exploit (file thirty, erase the dismissed ones,
+     *  look like a contributor who is never wrong). 409 = still open against
+     *  another user, so moderation keeps it on the list until there is a
+     *  verdict and the reporter can still be asked things in the thread. */
     suspend fun deleteMyReport(id: Int) = withContext(Dispatchers.IO) {
         deleteNoContent("/reports/mine/$id", authed = true)
     }
@@ -1108,6 +1170,24 @@ class RcqApi(
             post("/groups/$id/members/$memberUin/permissions", gson.toJson(SetPermissionsBody(permissions)), authed = true, GroupOut::class.java)
         }
 
+    data class TransferOwnerBody(val to_uin: Int)
+
+    /** Owner-only: hand the whole group to another member (founder item 23,
+     *  the half that needed a server). Returns the group as it now stands:
+     *  the new `owner_uin`, and BOTH member rows re-roled with their
+     *  `permissions` cleared, because a capability is a grant from the owner
+     *  and the owner is somebody else now.
+     *
+     *  ⚠ OWN-ISLAND ONLY. A group member is a bare number that means something
+     *  only against this island's users, so the island refuses a target it
+     *  cannot resolve (`no_such_user`); there is no wire form for "the new
+     *  owner lives on island B". Callers gate on `group.host == null`.
+     *
+     *  Refusals arrive as `{"detail": {"code": ...}}` — see [refusalOf]. */
+    suspend fun transferGroupOwner(id: Int, toUin: Int): GroupOut = withContext(Dispatchers.IO) {
+        post("/groups/$id/transfer-owner", gson.toJson(TransferOwnerBody(toUin)), authed = true, GroupOut::class.java)
+    }
+
     /** Partial group update (owner/admin). Only non-null fields are sent
      *  (Gson omits nulls by default), so a PATCH that only swaps the
      *  avatar leaves name/policy/pin untouched. */
@@ -1406,6 +1486,13 @@ class RcqApi(
         val vault: Boolean = false,
         val vault_max_blob_bytes: Int = 0,
         val vault_max_slots: Int = 0,
+        // The island's `/media` blob ceiling. Purely informational — the island
+        // has always enforced it while reading the body — but a client that
+        // knows it can refuse an oversize video in the composer instead of
+        // after uploading half a gigabyte to be told 413. Zero means "this
+        // island does not say", and the client keeps its own default of what
+        // every RCQ island has shipped with.
+        val media_max_blob_bytes: Long = 0,
     )
     data class ServerInfoResponse(
         val name: String = "",
@@ -1648,6 +1735,34 @@ private class ProgressBody(
     }
 }
 
+/** The blob part of a STREAMED upload: reads the source a chunk at a time,
+ *  seals each chunk, and writes the ciphertext to the socket.
+ *
+ *  The exact encoded length is arithmetic on the plaintext length
+ *  ([MediaStream.blobLength]), so this still declares a real `Content-Length`
+ *  and the request never falls back to chunked transfer-encoding, which
+ *  matters because the island enforces its size cap while reading and we would
+ *  rather be refused before the film than after it.
+ */
+private class SealingBody(
+    private val openSource: () -> java.io.InputStream,
+    private val plainLen: Long,
+    private val key: ByteArray,
+    private val type: okhttp3.MediaType?,
+    private val onProgress: ((sent: Long, total: Long) -> Unit)?,
+) : RequestBody() {
+    override fun contentType() = type
+    override fun contentLength() = app.rcq.android.crypto.MediaStream.blobLength(plainLen)
+
+    override fun writeTo(sink: okio.BufferedSink) {
+        openSource().use { input ->
+            app.rcq.android.crypto.MediaStream.seal(
+                input, sink.outputStream(), key, plainLen, onProgress = onProgress,
+            )
+        }
+    }
+}
+
     suspend fun uploadBlob(
         bytes: ByteArray,
         onProgress: ((sent: Long, total: Long) -> Unit)? = null,
@@ -1687,6 +1802,120 @@ private class ProgressBody(
         viaBestRoute { mediaClient(it).newCall(req).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("download HTTP ${resp.code}")
             resp.body?.bytes() ?: throw IOException("empty blob")
+        }
+    }
+
+    // ── streamed media (RCQM1, see crypto/MediaStream.kt) ────────────────
+
+    /** Upload a blob that is SEALED AS IT GOES: [openSource] is read a chunk at
+     *  a time, each chunk is AES-256-GCM sealed, and the ciphertext goes
+     *  straight onto the socket. Nothing bigger than one chunk is ever in
+     *  memory, so the ceiling on a send stops being the heap.
+     *
+     *  [openSource] must be re-openable: the route ladder in [viaBestRoute] can
+     *  run the call a second time through the tunnel, and OkHttp can replay a
+     *  body on a stale pooled connection. Each attempt writes a fresh,
+     *  self-consistent container (a new nonce prefix under the SAME key), which
+     *  is why re-sending is safe and why two islands handed the same media id
+     *  may hold two different encodings of it, both valid and both openable
+     *  with the one key. */
+    suspend fun uploadBlobStreaming(
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        key: ByteArray,
+        onProgress: ((sent: Long, total: Long) -> Unit)? = null,
+    ): UploadResponse = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("blob", "media.bin", SealingBody(openSource, plainLen, key, OCTET, onProgress))
+            .build()
+        val b = Request.Builder().url("$baseUrl/media/upload").post(body)
+        token?.let { b.header("Authorization", "Bearer $it") }
+        viaBestRoute { largeMediaClient(it).newCall(b.build()).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IOException("upload HTTP ${resp.code}: ${text.take(200)}")
+            gson.fromJson(text, UploadResponse::class.java)
+        }
+    }
+
+    /** [uploadBlobStreaming] under a client-chosen id (cross-island deposit,
+     *  idempotent server-side). */
+    suspend fun putBlobStreaming(
+        mediaId: String,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        key: ByteArray,
+        onProgress: ((sent: Long, total: Long) -> Unit)? = null,
+    ): UploadResponse = withContext(Dispatchers.IO) {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("blob", "media.bin", SealingBody(openSource, plainLen, key, OCTET, onProgress))
+            .build()
+        val b = Request.Builder().url("$baseUrl/media/$mediaId").put(body)
+        token?.let { b.header("Authorization", "Bearer $it") }
+        viaBestRoute { largeMediaClient(it).newCall(b.build()).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IOException("deposit HTTP ${resp.code}: ${text.take(200)}")
+            gson.fromJson(text, UploadResponse::class.java)
+        }
+    }
+
+    /** Download an encrypted blob straight to [dest] without ever holding it in
+     *  memory. Writes to a `.part` beside it and renames, so a transfer that
+     *  dies halfway never leaves a truncated file under the real name for the
+     *  next open to trip over. Returns the byte count. */
+    /**
+     * Stream `GET /media/{id}` into [dest], bounded by [maxBytes].
+     *
+     * ⚠⚠ [maxBytes] is not a formality and it is not the sender's problem. This
+     * endpoint is unauthenticated and the body is whatever the island chooses
+     * to send, so without a ceiling the only limit on what lands in this cache
+     * is the size of the phone: a hostile or misconfigured island answers a tap
+     * on a video bubble with gigabytes, the media cache is wiped to make room
+     * for it, and on a full device the write fails part way. The declared
+     * length is checked first, so the usual case costs nothing, and the read
+     * loop is checked too, because a Content-Length is a claim.
+     */
+    suspend fun getBlobToFile(
+        mediaId: String,
+        dest: java.io.File,
+        maxBytes: Long,
+        onProgress: ((got: Long, total: Long) -> Unit)? = null,
+    ): Long = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("$baseUrl/media/$mediaId").get().build()
+        viaBestRoute { largeMediaClient(it).newCall(req).execute() }.use { resp ->
+            if (!resp.isSuccessful) throw IOException("download HTTP ${resp.code}")
+            val body = resp.body ?: throw IOException("empty blob")
+            val total = body.contentLength()
+            if (total > maxBytes) throw BlobTooLargeException(total, maxBytes)
+            dest.parentFile?.mkdirs()
+            // Room for it, plus a margin so this is not the write that fills
+            // the device. `usableSpace` is 0 on a path we cannot stat, which is
+            // not a reason to refuse.
+            val free = dest.parentFile?.usableSpace ?: 0L
+            if (total > 0 && free > 0 && total + FREE_SPACE_MARGIN > free) {
+                throw IOException("not enough free space for blob $mediaId ($total bytes, $free free)")
+            }
+            val tmp = java.io.File(dest.parentFile, dest.name + ".part")
+            try {
+                body.byteStream().use { input ->
+                    java.io.FileOutputStream(tmp).use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var got = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            got += n
+                            if (got > maxBytes) throw BlobTooLargeException(got, maxBytes)
+                            out.write(buf, 0, n)
+                            onProgress?.invoke(got, total)
+                        }
+                        out.flush()
+                    }
+                }
+                if (!tmp.renameTo(dest)) throw IOException("could not place blob $mediaId")
+                dest.length()
+            } finally {
+                tmp.delete()
+            }
         }
     }
 
@@ -1755,6 +1984,39 @@ private class ProgressBody(
 
         const val DEFAULT_HOST = "api.rcq.app"
         const val DEFAULT_BASE_URL = "https://$DEFAULT_HOST"
+
+        /** Free space a streamed download leaves behind. A cache write must
+         *  not be the thing that fills the phone. */
+        const val FREE_SPACE_MARGIN = 256L * 1024 * 1024
+
+        /** A refusal the island spelled out for us to branch on, pulled back
+         *  out of the `HTTP <status>: <body>` message [execute] throws.
+         *  [code] is null when the endpoint answered with the plain-string
+         *  `detail` most of them use ("owner only"), which is prose, not a
+         *  branch. */
+        data class Refusal(val status: Int?, val code: String?, val retryAfter: Int?)
+
+        /** Read one. Never throws: an unparseable or truncated body simply has
+         *  no code, and the caller falls back to its generic sentence. */
+        fun refusalOf(message: String?): Refusal {
+            val m = message ?: return Refusal(null, null, null)
+            val status = m.removePrefix("HTTP ").takeWhile { it.isDigit() }.toIntOrNull()
+            val detail = runCatching {
+                com.google.gson.JsonParser.parseString(m.substringAfter(": ", ""))
+                    .asJsonObject.get("detail")?.takeIf { it.isJsonObject }?.asJsonObject
+            }.getOrNull() ?: return Refusal(status, null, null)
+            val code = runCatching { detail.get("code")?.asString }.getOrNull()
+            val retry = runCatching { detail.get("retry_after")?.asInt }.getOrNull()
+            return Refusal(status, code, retry)
+        }
+
+        /** The longest report `reason` the island stores, in CODE POINTS.
+         *  ⚠ Pydantic's max_length counts Python characters, so an emoji is ONE
+         *  there and TWO in a Kotlin String: clamp an edited report by code
+         *  points, or a 999-character draft with two emoji in it comes back
+         *  422 with nothing on screen explaining why (the same trap the pinned
+         *  message fell into on all three clients). */
+        const val REPORT_REASON_MAX = 1000
 
         /** Foreign hosts whose DIRECT route was already found to be blocked.
          *  Process-wide on purpose: the instances that talk to those hosts are
