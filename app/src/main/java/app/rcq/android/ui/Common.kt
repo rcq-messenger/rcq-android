@@ -517,7 +517,17 @@ internal fun IslandAvatar(
     val image = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 256)
         ?: rememberGifFirstFrame(bytes)
     val shape = RoundedCornerShape(size * 0.28f)
-    Box(Modifier.size(size).clip(shape).background(islandTint(host)).then(modifier), contentAlignment = Alignment.Center) {
+    // ⚠ The tint is the TILE, not a mat under the picture. A logo is a PNG with
+    // an alpha channel (that is the whole point of refusing to flatten one, see
+    // the admin console), so painting the tile behind it showed the island's
+    // hash colour THROUGH the mark: the founder's flower came out on a green
+    // square (24.08). With a picture there is nothing to tint.
+    Box(
+        Modifier.size(size).clip(shape)
+            .then(if (image == null) Modifier.background(islandTint(host)) else Modifier)
+            .then(modifier),
+        contentAlignment = Alignment.Center,
+    ) {
         if (image != null) {
             Image(
                 bitmap = image,
