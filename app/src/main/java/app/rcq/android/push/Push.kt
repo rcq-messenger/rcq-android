@@ -1111,13 +1111,54 @@ object Push {
         val sdp = str("sdp") ?: return
         val fromUin = json.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
         // ⚠ A REAL PERSON'S NAME, FULL SCREEN, WITHOUT ANYONE TOUCHING THE
-        // PHONE. The payload carries the caller's nickname and this raises a
-        // full-screen intent with it, so a call landing during a duress session
-        // announced a real contact over the decoy view — and answering would
-        // have opened the real account's media path. Dropped entirely: a call
-        // that never rings reads as one the caller cancelled.
+        // PHONE. The ring below is a full-screen intent with the caller's name
+        // on it, so a call landing during a duress session announced a real
+        // contact over the decoy view, and answering would have opened the real
+        // account's media path. Dropped entirely: a call that never rings reads
+        // as one the caller cancelled.
         if (app.rcq.android.security.DuressGate.isActive) return
-        ring(ctx, callId, fromUin, str("nickname") ?: "#$fromUin", str("media") ?: "video", sdp)
+        // ⚠ THE ISLAND NO LONGER SENDS THE NAME, SO THIS LOOKS IT UP. Its wake
+        // used to carry `nickname`, which meant the distributor that woke this
+        // phone (for our own push.rcq.app, a Cloudflare edge that terminates
+        // TLS) learned WHO was calling WHOM and WHEN, by name. Since
+        // 2026-08-24 the wake carries only `from_uin`, and the name comes out
+        // of this account's own roster cache: the same cache, and the same
+        // move, as the group name that left the message push on 2026-08-22.
+        //
+        // ⚠⚠ ORDER MATTERS, AND IT IS NOT "LOCAL FIRST". This function is not
+        // only the push entry point: [CallController] and
+        // [IncomingCallActivity] build the same flat object IN-PROCESS to
+        // raise (and re-raise) a full-screen ring for a call that arrived over
+        // the live socket, and they pass a name they have already resolved
+        // knowing which ISLAND the peer is on. The roster read below does not
+        // know that: it matches on the number alone, and a cross-island uin
+        // renders exactly like a local number belonging to somebody else
+        // entirely. Preferring the local read would therefore put the wrong
+        // person's name on a cross-island ring, which is the family of bug the
+        // sealed path below exists to close. So a supplied name wins, and the
+        // lookup fills the gap the island left. A push from an up-to-date
+        // island carries no name to prefer, which is the whole point; one from
+        // a self-hosted island still on an older build carries the old field,
+        // and honouring it is the graceful half of that transition.
+        //
+        // `to_uin` picks the account, exactly as the sealed wake below does: a
+        // multi-account phone shares ONE endpoint, so resolving against the
+        // active account could hand the wrong roster to the wrong call.
+        //
+        // ⚠ Not gated on [PanicPinService.isLocked], and that is unchanged
+        // rather than decided here: the flat ring has always named the caller
+        // on a locked screen while the sealed one below stays neutral. Worth
+        // reconciling, deliberately not in a change about what leaves the box.
+        val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
+        val acctId = toUin?.let { u ->
+            AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
+        } ?: AccountManager.activeId.value
+        val name = str("nickname")
+            ?: acctId
+                ?.let { PushEnvelope.nameFor(ctx, it, fromUin, host = null) }
+                ?.takeIf { it.isNotBlank() }
+            ?: "#$fromUin"
+        ring(ctx, callId, fromUin, name, str("media") ?: "video", sdp)
     }
 
     /**

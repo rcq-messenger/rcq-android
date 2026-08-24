@@ -278,6 +278,20 @@ object LocalStores {
     private val _secureThreads = MutableStateFlow<Set<String>>(emptySet())
     val secureThreads: StateFlow<Set<String>> = _secureThreads.asStateFlow()
 
+    /** The threads the PEER asked to keep screen-secure, in the same
+     *  `peer:<uin>` keys and kept in a slot of their OWN.
+     *
+     *  ★★★ #722. The flag is mutual, and an inbound SecureScreen used to be
+     *  written straight into [_secureThreads] above: the other side could
+     *  therefore switch MY alerts off without a word, take a screenshot with
+     *  the notice disarmed, and switch them back on. Their wish is recorded
+     *  here instead, mine stays mine, and [isThreadSecure] arms the alerts
+     *  while EITHER set holds the thread. So the peer can raise this
+     *  protection and can never lower it, and the two bits stay tellable
+     *  apart, which is what lets the chat say who turned what on. */
+    private val _peerSecureThreads = MutableStateFlow<Set<String>>(emptySet())
+    val peerSecureThreads: StateFlow<Set<String>> = _peerSecureThreads.asStateFlow()
+
     /** Historical fixed reaction set — the default until the user customises
      *  their own. Asset names match iOS exactly so a reaction renders the same
      *  GIF on both clients.
@@ -427,6 +441,7 @@ object LocalStores {
             _mentionSeenAt.value = emptyMap()
             _chatPos = emptyMap()
             _secureThreads.value = emptySet()
+            _peerSecureThreads.value = emptySet()
             _threadTtls = emptyMap()
             _aliases.value = emptyMap()
             _reactionUses = emptyMap()
@@ -458,6 +473,7 @@ object LocalStores {
         _mentionSeenAt.value = loadMentionSeen(pk(K_MENTION_SEEN))
         _chatPos = loadChatPos(pk(K_CHAT_POS))
         _secureThreads.value = prefs.getStringSet(pk(K_SECURE), emptySet())!!.toSet()
+        _peerSecureThreads.value = prefs.getStringSet(pk(K_SECURE_PEER), emptySet())!!.toSet()
         _reactionUses = loadCounts(pk(K_REACTION_USES))
         _threadTtls = loadCounts(pk(K_THREAD_TTL))
         _sectionFlags.value = loadSectionFlags()
@@ -492,14 +508,32 @@ object LocalStores {
         return legacy
     }
 
-    fun isThreadSecure(thread: String) = thread in _secureThreads.value
+    /** Did I ask for screenshot alerts here myself? */
+    fun isThreadSecureByMe(thread: String) = thread in _secureThreads.value
 
-    /** Set/clear screen-secure mode for a thread (local store only — the caller
-     *  propagates to the peer via a SecureScreen envelope). */
+    /** Did the peer ask for them? Their wish alone keeps the alerts armed. */
+    fun isThreadSecureByPeer(thread: String) = thread in _peerSecureThreads.value
+
+    /** Are the alerts armed for this thread at all: mine OR theirs. Deliberately
+     *  the OR and not the peer's last word (#722): whoever wants the notice gets
+     *  it, and nobody can take it away from the other side. */
+    fun isThreadSecure(thread: String) = isThreadSecureByMe(thread) || isThreadSecureByPeer(thread)
+
+    /** Set/clear MY screen-secure wish for a thread (local store only: the
+     *  caller propagates it to the peer via a SecureScreen envelope). */
     fun setThreadSecure(thread: String, on: Boolean) {
         if (acct == null) return
         _secureThreads.value = if (on) _secureThreads.value + thread else _secureThreads.value - thread
         prefs.edit().putStringSet(pk(K_SECURE), _secureThreads.value).apply()
+    }
+
+    /** Record the PEER's wish for a thread. Never touches my own set, so a
+     *  remote "off" cannot disarm what I turned on. */
+    fun setThreadSecureByPeer(thread: String, on: Boolean) {
+        if (acct == null) return
+        _peerSecureThreads.value =
+            if (on) _peerSecureThreads.value + thread else _peerSecureThreads.value - thread
+        prefs.edit().putStringSet(pk(K_SECURE_PEER), _peerSecureThreads.value).apply()
     }
 
     // ── disappearing messages: the per-thread timer (founder item 20) ──
@@ -1348,6 +1382,7 @@ object LocalStores {
     private const val K_PRES_WIN = "presence_window"
     private const val K_PRES_RETIRED = "presence_retired"
     private const val K_SECURE = "secure_threads"
+    private const val K_SECURE_PEER = "secure_threads_peer"
     private const val K_SECTION_FLAGS = "section_flags"
     private const val K_PRIVACY_CACHE = "privacy_cache"
     private const val K_CONTACTS_CACHE = "contacts_cache"

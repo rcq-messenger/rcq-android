@@ -634,7 +634,7 @@
     <string name="pv_relays_section">Релеи RCQ</string>
     <string name="relay_what_is">Что такое релей?</string>
     <string name="pv_obfuscated">Пускать приложение через релеи RCQ</string>
-    <string name="pv_obfuscated_desc">Трафик идёт не прямо к острову, а через наши релеи: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Применяется при следующем запуске. Там, где RCQ заблокирован, это к тому же единственный путь.</string>
+    <string name="pv_obfuscated_desc">Трафик идёт не прямо к острову, а через наши релеи: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Применяется сразу: приложение переподключается. Там, где RCQ заблокирован, это к тому же единственный путь.</string>
     <string name="pv_obf_auto_disable">Не включать релеи автоматически</string>
     <string name="pv_obf_auto_disable_desc">По умолчанию приложение само включает релеи, если не может подключиться напрямую. Если вы пускаете трафик через свой VPN/прокси, включите этот переключатель, чтобы наш транспорт не накладывался поверх вашего.</string>
     <string name="pv_onion">Луковая маршрутизация (эксперимент)</string>
@@ -867,6 +867,9 @@
     <string name="chat_secure_on">Уведомлять о скриншотах</string>
     <string name="chat_secure_off">Не уведомлять о скриншотах</string>
     <string name="secscreen_peer_screenshot">%1$s сделал(а) скриншот</string>
+    <string name="secscreen_peer_on">%1$s включил(а) уведомления о скриншотах</string>
+    <string name="secscreen_peer_off">%1$s выключил(а) уведомления о скриншотах у себя</string>
+    <string name="secscreen_kept_by_peer">Всё равно включено: %1$s попросил(а) уведомления, и ваши скриншоты здесь объявляются.</string>
     <string name="chat_menu_cd">Действия чата</string>
     <string name="chat_search_idle">Поиск по сообщениям в этом чате.</string>
     <string name="search_no_match">Ничего не найдено</string>

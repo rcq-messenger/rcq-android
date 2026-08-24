@@ -609,7 +609,7 @@
     <string name="pv_relays_section">Relays do RCQ</string>
     <string name="relay_what_is">O que é um relay?</string>
     <string name="pv_obfuscated">Levar o app pelos relays do RCQ</string>
-    <string name="pv_obfuscated_desc">O tráfego não vai direto para a ilha, vai pelos nossos relays: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. Vale a partir da próxima abertura do app. Onde o RCQ está bloqueado, esse ainda é o único caminho.</string>
+    <string name="pv_obfuscated_desc">O tráfego não vai direto para a ilha, vai pelos nossos relays: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. Vale na hora: o app se reconecta. Onde o RCQ está bloqueado, esse ainda é o único caminho.</string>
     <string name="pv_obf_auto_disable">Não ligar os relays automaticamente</string>
     <string name="pv_obf_auto_disable_desc">Por padrão o app liga os relays sozinho se não conseguir alcançar a ilha direto. Se você já leva seu tráfego pelo seu próprio VPN ou proxy, ligue isto para o nosso transporte não empilhar em cima do seu.</string>
     <string name="pv_onion">Roteamento onion (experimental)</string>
@@ -835,6 +835,9 @@
     <string name="chat_secure_on">Avisos de captura de ecrã</string>
     <string name="chat_secure_off">Desligar a conversa protegida</string>
     <string name="secscreen_peer_screenshot">%1$s fez uma captura de tela</string>
+    <string name="secscreen_peer_on">%1$s ativou os avisos de captura de tela</string>
+    <string name="secscreen_peer_off">%1$s desativou os avisos de captura de tela do lado dele</string>
+    <string name="secscreen_kept_by_peer">Continua ligado: %1$s pediu alertas, então as suas capturas aqui são anunciadas.</string>
     <string name="chat_menu_cd">Ações da conversa</string>
     <string name="chat_search_idle">Buscar mensagens nesta conversa.</string>
     <string name="search_no_match">Nada encontrado</string>

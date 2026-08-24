@@ -638,7 +638,7 @@
     <string name="pv_relays_section">RCQ relays</string>
     <string name="relay_what_is">What is a relay?</string>
     <string name="pv_obfuscated">Route the app through RCQ relays</string>
-    <string name="pv_obfuscated_desc">Traffic goes through our relays instead of straight to the island: the island does not see your address, and the network between you and the island does not see that you are using RCQ. Takes effect on next launch. Where RCQ is blocked, this is also the only way through.</string>
+    <string name="pv_obfuscated_desc">Traffic goes through our relays instead of straight to the island: the island does not see your address, and the network between you and the island does not see that you are using RCQ. Takes effect at once: the app reconnects. Where RCQ is blocked, this is also the only way through.</string>
     <string name="pv_obf_auto_disable">Don\'t turn relays on automatically</string>
     <string name="pv_obf_auto_disable_desc">By default the app turns the relays on by itself if it can\'t reach the island directly. If you route your traffic through your own VPN/proxy, enable this so our transport doesn\'t stack on top of yours.</string>
     <string name="pv_onion">Onion routing (experimental)</string>
@@ -871,6 +871,9 @@
     <string name="chat_secure_on">Screenshot alerts</string>
     <string name="chat_secure_off">Turn off screenshot alerts</string>
     <string name="secscreen_peer_screenshot">%1$s took a screenshot</string>
+    <string name="secscreen_peer_on">%1$s turned on screenshot alerts</string>
+    <string name="secscreen_peer_off">%1$s turned off screenshot alerts on their side</string>
+    <string name="secscreen_kept_by_peer">Still on: %1$s asked for alerts, so screenshots you take here are announced.</string>
     <string name="chat_menu_cd">Chat actions</string>
     <string name="chat_search_idle">Search messages in this chat.</string>
     <string name="search_no_match">No matches</string>
