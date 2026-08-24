@@ -609,7 +609,7 @@
     <string name="pv_relays_section">RCQ 中继</string>
     <string name="relay_what_is">什么是中继？</string>
     <string name="pv_obfuscated">让应用走 RCQ 中继</string>
-    <string name="pv_obfuscated_desc">流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。下次启动时生效。在 RCQ 被封锁的地方，这也是唯一的通路。</string>
+    <string name="pv_obfuscated_desc">流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。立即生效：应用会重新连接。在 RCQ 被封锁的地方，这也是唯一的通路。</string>
     <string name="pv_obf_auto_disable">不自动启用中继</string>
     <string name="pv_obf_auto_disable_desc">默认情况下，如果无法直接连到岛，应用会自动打开中继。如果你已经把流量走自己的 VPN/代理，请打开这个开关，避免我们的传输叠加在你的之上。</string>
     <string name="pv_onion">洋葱路由（实验性）</string>
@@ -835,6 +835,9 @@
     <string name="chat_secure_on">截屏提醒</string>
     <string name="chat_secure_off">关闭聊天保护</string>
     <string name="secscreen_peer_screenshot">%1$s 截了屏</string>
+    <string name="secscreen_peer_on">%1$s 打开了截屏提醒</string>
+    <string name="secscreen_peer_off">%1$s 在自己那边关闭了截屏提醒</string>
+    <string name="secscreen_kept_by_peer">仍然开启：%1$s 要求了提醒，因此你在这里的截图会被告知。</string>
     <string name="chat_menu_cd">聊天操作</string>
     <string name="chat_search_idle">在这个聊天里搜索消息。</string>
     <string name="search_no_match">没有匹配项</string>

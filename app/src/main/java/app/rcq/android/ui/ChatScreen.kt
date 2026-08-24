@@ -668,8 +668,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // via Session.onLocalScreenshot(). The global screen-security toggle still
     // hard-blocks all screenshots via FLAG_SECURE (applied in MainActivity).
     val secureThreads by app.rcq.android.data.LocalStores.secureThreads.collectAsState()
-    val chatSecure = !isGroup && !isSelf && peer != null &&
-        app.rcq.android.data.LocalStores.peerThread(peer) in secureThreads
+    // #722: the peer's wish is a set of its own, so a remote "off" cannot put
+    // out what this side turned on. The alerts are live while EITHER side asked
+    // for them, and that is what the row has to show: whether a screenshot
+    // taken here is going to be announced, not merely which way I flipped it.
+    val peerSecureThreads by app.rcq.android.data.LocalStores.peerSecureThreads.collectAsState()
+    val oneToOne = !isGroup && !isSelf && peer != null
+    val secureByPeer = oneToOne &&
+        app.rcq.android.data.LocalStores.peerThread(peer!!) in peerSecureThreads
+    val chatSecure = secureByPeer || (oneToOne &&
+        app.rcq.android.data.LocalStores.peerThread(peer!!) in secureThreads)
     // The user's chosen quick reactions (up to REACTION_CAP, EmojiPicker.kt);
     // defaults to the standard six until customised in the emoji picker.
     // Drives the long-press reaction row, which scrolls horizontally because
@@ -1396,7 +1404,33 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             // -> "Запрет скриншотов"). The shield promised
                             // protection the feature does not give (#700).
                             leadingIcon = { Icon(Icons.Filled.NoPhotography, null, tint = if (chatSecure) c.accent else c.textSecondary) },
-                            onClick = { chatMenu = false; session.setChatSecure(peer, !chatSecure) },
+                            onClick = {
+                                chatMenu = false
+                                session.setChatSecure(peer, !chatSecure)
+                                // Turning them off only drops MY half, and when
+                                // my half was never up it drops nothing and
+                                // sends nothing (see [Session.setChatSecure]:
+                                // an "off" on the wire still disarms every
+                                // client that has not split the two slots). A
+                                // tick that refuses to go out needs to say why
+                                // rather than look broken (#722).
+                                //
+                                // ⚠ The copy promises only what this device can
+                                // keep: the alerts stay armed HERE, so what I
+                                // shoot is still announced. It deliberately does
+                                // not promise their side keeps announcing to me:
+                                // when my own bit really did come down, an iOS
+                                // or pre-split Android peer takes that "off" as
+                                // mutual and disarms, and there is no version
+                                // signal on the wire to tell the two apart.
+                                if (chatSecure && secureByPeer) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        context.getString(R.string.secscreen_kept_by_peer, session.contactName(peer)),
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            },
                         )
                     }
                     // Erase this conversation without hunting for the contact on

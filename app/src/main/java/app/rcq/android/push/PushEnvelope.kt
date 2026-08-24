@@ -225,8 +225,15 @@ internal object PushEnvelope {
     /** The sender's display name from whatever this account has on disk: the
      *  cached roster first, then the cross-island store (a peer on another
      *  island is never in the roster cache). Null → the caller falls back to
-     *  "#<uin>", which is what the app shows for an unknown handle too. */
-    private fun nameFor(ctx: Context, accountId: String, uin: Int, host: String?): String? {
+     *  "#<uin>", which is what the app shows for an unknown handle too.
+     *
+     *  Internal rather than private since 2026-08-24: the CALL wake needs it
+     *  too. The island used to put the caller's `nickname` in the call push,
+     *  which handed the distributor (a Cloudflare edge, for push.rcq.app) the
+     *  caller's name beside the callee's number; it sends only `from_uin` now
+     *  and the name is looked up here, exactly as the message wake already
+     *  did. Headless-safe by construction, like everything else in here. */
+    internal fun nameFor(ctx: Context, accountId: String, uin: Int, host: String?): String? {
         LocalStores.cachedContactsJsonFor(accountId)?.let { json ->
             runCatching { Gson().fromJson(json, Array<Contact>::class.java) }
                 .getOrNull()

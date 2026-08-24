@@ -609,7 +609,7 @@
     <string name="pv_relays_section">RCQ röleleri</string>
     <string name="relay_what_is">Röle nedir?</string>
     <string name="pv_obfuscated">Uygulamayı RCQ röleleri üzerinden geçir</string>
-    <string name="pv_obfuscated_desc">Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Bir sonraki açılışta geçerli olur. RCQ\'nun engellendiği yerlerde ayrıca tek yol budur.</string>
+    <string name="pv_obfuscated_desc">Trafik adaya doğrudan gitmez, bizim rölelerimizden geçer: ada adresini görmez, seninle ada arasındaki ağ da RCQ kullandığını görmez. Hemen geçerli olur: uygulama yeniden bağlanır. RCQ\'nun engellendiği yerlerde ayrıca tek yol budur.</string>
     <string name="pv_obf_auto_disable">Röleleri kendiliğinden açma</string>
     <string name="pv_obf_auto_disable_desc">Uygulama varsayılan olarak adaya doğrudan ulaşamazsa röleleri kendiliğinden açar. Trafiğini kendi VPN\'inden ya da vekil sunucundan geçiriyorsan bunu aç, böylece bizim taşıyıcımız seninkinin üstüne binmez.</string>
     <string name="pv_onion">Soğan yönlendirme (deneysel)</string>
@@ -835,6 +835,9 @@
     <string name="chat_secure_on">Ekran görüntüsü uyarıları</string>
     <string name="chat_secure_off">Güvenli sohbeti kapat</string>
     <string name="secscreen_peer_screenshot">%1$s ekran görüntüsü aldı</string>
+    <string name="secscreen_peer_on">%1$s ekran görüntüsü uyarılarını açtı</string>
+    <string name="secscreen_peer_off">%1$s kendi tarafında ekran görüntüsü uyarılarını kapattı</string>
+    <string name="secscreen_kept_by_peer">Yine de açık: %1$s uyarı istedi, bu yüzden burada aldığınız ekran görüntüleri bildirilir.</string>
     <string name="chat_menu_cd">Sohbet işlemleri</string>
     <string name="chat_search_idle">Bu sohbetteki mesajlarda ara.</string>
     <string name="search_no_match">Sonuç yok</string>

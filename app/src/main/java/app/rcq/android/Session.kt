@@ -1516,12 +1516,17 @@ class Session(context: Context) {
         }
     }
 
-    /** Quick toggle for the RCQ relays (the home "Route the app through RCQ relays"
-     *  control). Unlike the Settings switch — which only persists the pref and
-     *  applies on next launch — this engages/drops sing-box LIVE: rebuild the
-     *  API + socket so they capture (or release) the SOCKS proxy, then
+    /** Toggle for the RCQ relays: both the home "Route the app through RCQ
+     *  relays" control and the Settings switch land here. Engages/drops
+     *  sing-box LIVE (the pref alone left a running tunnel running): rebuild
+     *  the API + socket so they capture (or release) the SOCKS proxy, then
      *  reconnect. Lets a user who's being blocked turn the tunnel on and have
-     *  messages start flowing without restarting the app. */
+     *  messages start flowing without restarting the app.
+     *
+     *  ⚠ Nothing here waits for a restart, so no copy may say it does. The
+     *  Settings description used to promise "takes effect on next launch" long
+     *  after the switch had been rewired to this (#722); that sentence is still
+     *  true of the onion row below it, which only writes a mode. */
     fun setObfuscation(on: Boolean) {
         val transport = app.rcq.android.net.SingBoxTransport
         transport.setEnabled(appCtx, on)
@@ -2900,19 +2905,41 @@ class Session(context: Context) {
         }
     }
 
-    /** Toggle per-conversation screen-secure mode for a 1:1 chat: set it
-     *  locally and propagate to the peer so BOTH sides enforce it (iOS parity).
-     *  While such a chat is open, ChatScreen adds FLAG_SECURE (Android blanks
-     *  the screenshot); a screenshot by the peer arrives as a system notice. */
+    /** Toggle per-conversation screen-secure mode for a 1:1 chat: set MY wish
+     *  locally and propagate it to the peer so BOTH sides enforce it (iOS
+     *  parity). A screenshot by the peer arrives as a system notice.
+     *
+     *  Only my own bit moves here. The peer's wish lives in its own slot
+     *  ([LocalStores.setThreadSecureByPeer]) and the alerts are armed while
+     *  either bit is set, so switching this off does NOT put out an alert the
+     *  peer turned on: the chat keeps notifying, and the menu keeps its tick,
+     *  until they drop it too.
+     *
+     *  ⚠⚠ NOTHING GOES OUT UNLESS MY OWN BIT ACTUALLY MOVES, and that guard is
+     *  load-bearing rather than tidy. The menu row toggles the OR, so a tap in
+     *  a chat the PEER armed and I never did arrives here as `on = false` over
+     *  a bit that is already false. Sending that "off" would be retracting a
+     *  request I never made, and every client that has not yet split the two
+     *  slots (all of iOS, Android before this build) still reads an inbound
+     *  `secureScreen(false)` as "clear my flag", so the tap would silently
+     *  DISARM them while this side kept the tick and told the user the alerts
+     *  had survived. No bit of mine moved, so there is nothing to say. */
     fun setChatSecure(peerUin: Int, on: Boolean) {
-        LocalStores.setThreadSecure(LocalStores.peerThread(peerUin), on)
+        val thread = LocalStores.peerThread(peerUin)
+        if (LocalStores.isThreadSecureByMe(thread) == on) return
+        LocalStores.setThreadSecure(thread, on)
         scope.launch { sendControl(peerUin, Envelope.secureScreen(on)) }
     }
 
     /** A screenshot was just taken on THIS device (detected by MainActivity on
      *  Android 14+). If a per-conversation secure 1:1 chat is open (notify-only
      *  mode, iOS parity), tell the peer so a "took a screenshot" notice appears
-     *  on their side. No-op otherwise. */
+     *  on their side. No-op otherwise.
+     *
+     *  ★★★ #722. [LocalStores.isThreadSecure] is the OR of my wish and the
+     *  peer's, so this stays armed for a thread the PEER asked to protect even
+     *  after I switch my own copy off. Turning the alerts off on my phone
+     *  cannot silence the notice I owe them; only they can drop it. */
     fun onLocalScreenshot() {
         val thread = activeThread ?: return
         if (!thread.startsWith("peer:")) return
@@ -6877,10 +6904,60 @@ class Session(context: Context) {
                 is Envelope.ReadReceipt -> applyReadReceipt(dec.senderUin, env.targetIds)
         is Envelope.DeliveredReceipt -> applyDeliveredReceipt(dec.senderUin, env.targetIds)
                 is Envelope.Visit -> app.rcq.android.data.VisitStore.record(dec.senderUin, env.atEpochMillis())
-                is Envelope.SecureScreen ->
-                    // Peer toggled per-conversation secure mode — mirror it so
-                    // OUR side also enforces FLAG_SECURE for this chat.
-                    LocalStores.setThreadSecure(LocalStores.peerThread(dec.senderUin), env.on)
+                is Envelope.SecureScreen -> {
+                    // ★★★ #722. The peer toggled per-conversation screenshot
+                    // alerts. This used to write STRAIGHT INTO MY OWN flag and
+                    // say nothing, which handed the other side a way to disarm
+                    // me: turn the alerts off from their phone, screenshot with
+                    // the notice dead on both ends, turn them back on. Nothing
+                    // was ever shown, so there was nothing to notice.
+                    //
+                    // Now their wish lands in a slot of its own. Mine is
+                    // untouched, so a remote "off" can no longer lower what I
+                    // raised (the alerts are armed while EITHER side wants
+                    // them), and every change they make is written into the
+                    // thread like any other state change, so the off/shot/on
+                    // dance is visible even when it costs them nothing.
+                    val thread = LocalStores.peerThread(dec.senderUin)
+                    val was = LocalStores.isThreadSecureByPeer(thread)
+                    LocalStores.setThreadSecureByPeer(thread, env.on)
+                    // ⚠⚠ THE FLAG ALWAYS MOVES; THE ROW DOES NOT. SecureScreen
+                    // is control traffic, so it falls straight through the
+                    // stranger quarantine by design (there is no message of
+                    // ours for it to belong to). The visible row it writes is
+                    // NOT control traffic: without this gate anyone who knows
+                    // the number could put "#12345 turned on screenshot
+                    // alerts" into the chat list of a user who asked for
+                    // strangers to wait in the requests list, one row per
+                    // flip, having walked round the very list that exists to
+                    // hold them. Their bit is still recorded, so the alerts
+                    // still arm if we ever do talk to them.
+                    if (was != env.on && !isQuarantinedStranger(dec.senderUin)) {
+                        val who = _contacts.value.firstOrNull { it.uin == dec.senderUin }?.nickname
+                            ?: "#${dec.senderUin}"
+                        val text = appCtx.getString(
+                            if (env.on) app.rcq.android.R.string.secscreen_peer_on
+                            else app.rcq.android.R.string.secscreen_peer_off,
+                            who,
+                        )
+                        // A fresh id: the control envelope carries none, and the
+                        // was/is guard already swallows a repeated delivery of
+                        // the same state.
+                        //
+                        // ⚠ `countsUnread = false`: a state change is worth
+                        // recording, not worth ringing. It costs the peer one
+                        // menu tap, and routed through the badge it would be a
+                        // chime, an in-app banner and a full shade notification
+                        // PER FLIP, with nothing but their patience limiting
+                        // how many they send. The row is there when the chat is
+                        // opened, which is what "visible even when it costs
+                        // them nothing" needed to mean.
+                        store(ChatMessage(
+                            java.util.UUID.randomUUID().toString().uppercase(),
+                            dec.senderUin, fromMe = false, body = text, sentAt = now, kind = "system",
+                        ), countsUnread = false)
+                    }
+                }
                 is Envelope.ScreenshotTaken -> {
                     // Peer took a screenshot in a secure chat — post a notice
                     // with their name (resolved + localized on our side).
@@ -7636,6 +7713,18 @@ class Session(context: Context) {
         val content = env is Envelope.Text || env is Envelope.Photo || env is Envelope.Video ||
             env is Envelope.File || env is Envelope.Voice || env is Envelope.Location
         if (!content) return false
+        return isQuarantinedStranger(senderUin)
+    }
+
+    /** Is this sender someone the quarantine would hold, sender aside from what
+     *  they sent? Split out of [shouldQuarantineStranger] so a branch that is
+     *  NOT content can ask the same question. Control traffic falls through the
+     *  quarantine on purpose, but a control envelope that now writes a visible
+     *  row into the chat has stopped being purely control: the row belongs
+     *  behind the same gate, or the requests list is a door with a window next
+     *  to it. */
+    private fun isQuarantinedStranger(senderUin: Int): Boolean {
+        if (!LocalStores.strangerQuarantineEnabled()) return false
         if (LocalStores.isAllowedStranger(senderUin)) return false
         if (isSameIslandContact(senderUin)) return false
         // I wrote to them first, so their reply is invited, whatever the list says.
@@ -8706,7 +8795,20 @@ class Session(context: Context) {
         // few hundred lines up refuses to give and for exactly the same
         // reason. A missed-call marker (#678/#686) turned that into a liveness
         // oracle anyone could poll: deposit a marker, watch for the receipt.
-        if (!row.fromMe && row.groupId == null && row.peerUin != store.uin && row.kind != "call") {
+        //
+        // ⚠⚠ AND NEVER FOR A NOTICE, for exactly the same reason. `kind =
+        // "system"` rows are minted here out of a CONTROL envelope (the peer
+        // toggling screenshot alerts, the peer taking a screenshot) and the
+        // sender holds no message row with that id either way: the screenshot
+        // envelope's id is theirs but was never filed as a message, and the
+        // alerts one carries no id at all, so this device makes one up. Either
+        // way the receipt moves no tick and says only "somebody's phone is
+        // awake over here". The alerts toggle is worse than the call marker
+        // was: it costs the sender one menu tap, it is not held by the
+        // stranger quarantine, and flipping it back and forth is a liveness
+        // oracle anyone with the number can poll for free.
+        if (!row.fromMe && row.groupId == null && row.peerUin != store.uin &&
+            row.kind != "call" && row.kind != "system") {
             scope.launch {
                 runCatching { sendControl(row.peerUin, Envelope.deliveredReceipt(listOf(row.id))) }
             }
