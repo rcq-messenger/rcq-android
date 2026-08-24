@@ -1273,4 +1273,11 @@
     <string name="sections_err_too_many_members">Too many chats across your sections.</string>
     <string name="sections_err_too_large">The section list is too large to save.</string>
     <string name="sections_err_unreadable">Your sections were written by a newer version of RCQ.</string>
+    <string name="island_pick_title">Choose an island</string>
+    <string name="island_use">Use this island</string>
+    <string name="island_manual_entry">Enter an address instead</string>
+    <string name="island_back_to_list">Back to the list</string>
+    <string name="island_host_hint">server host</string>
+    <string name="island_manual_help">The default is the public RCQ island. Point at an organisation\'s island or your own self-host.</string>
+    <string name="island_reset_default">Reset to default</string>
 </resources>

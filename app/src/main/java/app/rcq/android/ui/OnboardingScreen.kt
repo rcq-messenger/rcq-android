@@ -266,8 +266,18 @@ private fun PageContent(p: OnbPage) {
 private fun serverHostLabel(server: String): String =
     server.ifBlank { RcqApi.DEFAULT_HOST }
 
+/// The island picker, now one shared view (see [IslandPickerSheet]): the
+/// catalogue as cards you swipe through, with typing an address kept one tap
+/// away for self-hosters. Onboarding and the in-app "add a server" flow show
+/// the same thing.
 @Composable
 private fun ServerPickerDialog(server: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    IslandPickerSheet(current = server, onPick = onPick, onDismiss = onDismiss)
+}
+
+@Suppress("unused")
+@Composable
+private fun LegacyServerPickerDialog(server: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     var draft by remember { mutableStateOf(server) }
     RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.onboard_server_label)) {
