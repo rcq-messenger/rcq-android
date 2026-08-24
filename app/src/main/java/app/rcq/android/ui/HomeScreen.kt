@@ -3127,6 +3127,28 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
                 color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(stringResource(R.string.add_account_body), color = c.textSecondary, fontSize = 13.sp)
+            // The same deck of islands onboarding draws. Adding an account is
+            // the same question -- which island -- and this sheet was asking it
+            // with a bare host field, so the catalogue existed in one place and
+            // not the other (founder, 24.08).
+            val ctxLocal = androidx.compose.ui.platform.LocalContext.current
+            val islands by produceState(initialValue = app.rcq.android.data.IslandCatalog.cached().orEmpty()) {
+                value = app.rcq.android.data.IslandCatalog.load(ctxLocal)
+            }
+            var manual by remember { mutableStateOf(false) }
+            if (!manual && islands.isNotEmpty()) {
+                IslandCarousel(current = "", islands = islands, onPick = { onAdd(it) })
+                Text(
+                    stringResource(R.string.island_manual_entry), color = c.accent, fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                        .clip(RoundedCornerShape(12.dp)).clickable { manual = true }.padding(vertical = 8.dp),
+                )
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+                return@Column
+            }
             // Two hints, one slot: the field says what it is, and the default
             // host moves under it so leaving it blank still tells you where the
             // new account lands.

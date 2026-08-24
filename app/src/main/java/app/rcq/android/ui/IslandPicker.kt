@@ -114,6 +114,37 @@ internal fun IslandPickerSheet(
                 onPick(draft.trim())
             }
         } else {
+            IslandCarousel(current = current, islands = islands, onPick = onPick)
+            Text(
+                stringResource(R.string.island_manual_entry), color = c.accent, fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                    .clip(RoundedCornerShape(12.dp)).clickable { manual = true }.padding(vertical = 6.dp),
+            )
+        }
+        Text(
+            stringResource(R.string.common_cancel), color = c.textSecondary, fontSize = 15.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onDismiss).padding(vertical = 14.dp),
+        )
+    }
+}
+
+/// The deck itself, without a sheet around it: cards, dots and the Use button.
+///
+/// Split out because the add-account flow shows the same deck INSIDE its own
+/// sheet, and a sheet within a sheet is not a thing. Both callers therefore
+/// draw one list of islands rather than two that drift apart.
+@Composable
+internal fun IslandCarousel(
+    current: String,
+    islands: List<IslandCatalog.Entry>,
+    onPick: (String) -> Unit,
+) {
+    val c = RcqTheme.colors
+    if (islands.isEmpty()) return
+    run {
             val startAt = islands.indexOfFirst { it.host.equals(current.trim(), ignoreCase = true) }.coerceAtLeast(0)
             val pager = rememberPagerState(initialPage = startAt) { islands.size }
             HorizontalPager(
@@ -141,20 +172,7 @@ internal fun IslandPickerSheet(
             CapsuleButton(stringResource(R.string.island_use), modifier = Modifier.fillMaxWidth()) {
                 onPick(islands[pager.currentPage].host)
             }
-            Text(
-                stringResource(R.string.island_manual_entry), color = c.accent, fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-                    .clip(RoundedCornerShape(12.dp)).clickable { manual = true }.padding(vertical = 6.dp),
-            )
         }
-        Text(
-            stringResource(R.string.common_cancel), color = c.textSecondary, fontSize = 15.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                .clickable(onClick = onDismiss).padding(vertical = 14.dp),
-        )
-    }
 }
 
 /** One island: its painting, its logo, and what it says about itself. */
