@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
@@ -296,6 +298,11 @@ internal fun HomeScreen(
     onOpenRadio: () -> Unit = {},
     onSwitchAccount: (String) -> Unit = {},
     onAddAccount: (String?) -> Unit = {},
+    /** Add an account from its recovery phrase. Same destination the onboarding
+     *  screen and the account-management screen already reach; the add-account
+     *  sheet offers it too, because "I already have an account" is the other
+     *  half of the question that sheet asks (founder, 24.08, iOS parity). */
+    onRestoreBySeed: () -> Unit = {},
     onManageAccounts: () -> Unit = {},
 ) {
     val c = RcqTheme.colors
@@ -1257,6 +1264,7 @@ internal fun HomeScreen(
     if (showAddAccount) {
         AddAccountDialog(
             onAdd = { host -> showAddAccount = false; onAddAccount(host) },
+            onRestore = { showAddAccount = false; onRestoreBySeed() },
             onDismiss = { showAddAccount = false },
         )
     }
@@ -3098,7 +3106,7 @@ private fun AddResultRow(
  *  self-host. The new account is added alongside the current one. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
+private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -3138,12 +3146,28 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
             var manual by remember { mutableStateOf(false) }
             if (!manual && islands.isNotEmpty()) {
                 IslandCarousel(current = "", islands = islands, onPick = { onAdd(it) })
-                Text(
-                    stringResource(R.string.island_manual_entry), color = c.accent, fontSize = 13.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-                        .clip(RoundedCornerShape(12.dp)).clickable { manual = true }.padding(vertical = 8.dp),
-                )
+                // Two doors under the deck, the same pair iOS offers: type an
+                // address, or bring an account that already exists. Restoring
+                // by phrase lived only in onboarding and in account management,
+                // so somebody adding an account from here had no way to say "I
+                // already have one" (founder, 24.08).
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    AddAccountDoor(
+                        icon = Icons.Filled.VpnKey,
+                        title = stringResource(R.string.restore_title),
+                        modifier = Modifier.weight(1f),
+                        onClick = onRestore,
+                    )
+                    AddAccountDoor(
+                        icon = Icons.Filled.Keyboard,
+                        title = stringResource(R.string.island_manual_entry),
+                        modifier = Modifier.weight(1f),
+                        onClick = { manual = true },
+                    )
+                }
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                     Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
@@ -3200,6 +3224,27 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onDismiss: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** One of the two doors under the island deck: a glyph over a word, both halves
+ *  the same width so neither reads as the main action. */
+@Composable
+private fun AddAccountDoor(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(c.bgPrimary).clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(icon, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+        Text(title, color = c.textSecondary, fontSize = 13.sp, maxLines = 1)
     }
 }
 
