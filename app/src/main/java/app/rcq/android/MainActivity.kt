@@ -858,6 +858,7 @@ private fun RcqApp(session: Session) {
                     onOpenRandom = { showRandom = true },
                     onSwitchAccount = ::switchAccount,
                     onAddAccount = ::addAccount,
+                    onRestoreBySeed = { showRestore = true },
                     onManageAccounts = { showManageAccounts = true },
                 )
             }
