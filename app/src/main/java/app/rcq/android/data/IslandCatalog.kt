@@ -47,6 +47,14 @@ object IslandCatalog {
         val name: String,
         val description: String? = null,
         val region: String? = null,
+        /// The island's logo, MIRRORED ON THE SITE rather than fetched from the
+        /// island itself. An operator's logo lives at `<island>/server/logo`,
+        /// and reading it from here would hand this device's address to every
+        /// island in the catalogue the moment somebody opened the picker,
+        /// including the ones they scroll past and never join. The catalogue and
+        /// the paintings already come from rcq.app; one more file from the same
+        /// host tells nobody anything new.
+        val logoUrl: String? = null,
     )
 
     private var memory: List<Entry>? = null
@@ -124,6 +132,8 @@ object IslandCatalog {
                     name = o.get("name")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty().ifEmpty { host },
                     description = o.get("description")?.takeIf { !it.isJsonNull }?.asString?.trim(),
                     region = o.get("region")?.takeIf { !it.isJsonNull }?.asString?.trim(),
+                    logoUrl = o.get("logo")?.takeIf { !it.isJsonNull }?.asString?.trim()
+                        ?.takeIf { it.startsWith("https://") },
                 ),
             )
         }
@@ -164,6 +174,24 @@ object IslandCatalog {
                 if (bytes.size > ART_CAP_BYTES) return@runCatching null
                 f.writeBytes(bytes)
                 trimArt(context)
+                bytes
+            }
+        }.getOrNull()
+    }
+
+    /** An island's mirrored logo, cached beside the paintings. Null draws the
+     *  lettered tile, which is also what an island with no logo at all gets. */
+    suspend fun logo(context: Context, entry: Entry): ByteArray? = withContext(Dispatchers.IO) {
+        val url = entry.logoUrl ?: return@withContext null
+        val f = File(artDir(context), "logo-" + entry.host.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".png")
+        runCatching {
+            if (f.exists()) return@runCatching f.readBytes().takeIf { it.isNotEmpty() }
+            val req = Request.Builder().url(url).get().build()
+            http().newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@runCatching null
+                val bytes = r.body?.bytes() ?: return@runCatching null
+                if (bytes.size > 256 * 1024) return@runCatching null
+                f.writeBytes(bytes)
                 bytes
             }
         }.getOrNull()
