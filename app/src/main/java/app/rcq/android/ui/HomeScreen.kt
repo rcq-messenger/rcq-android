@@ -1926,14 +1926,14 @@ private fun HomeHeader(
             // Without it the only way to learn a post exists was to open the
             // menu and then the screen, on the off chance.
             if (newsUnread > 0) {
+                // Bare red, no ring. The ring was `bgPrimary`, so over a home
+                // wallpaper it drew a white (or near-black) halo around a 6dp
+                // dot and the halo was bigger than the dot (founder, 24.08).
                 Box(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 2.dp, y = (-2).dp)
-                        .size(9.dp)
-                        .clip(CircleShape)
-                        .background(chrome.bgPrimary)
-                        .padding(1.5.dp)
+                        .offset(x = 3.dp, y = (-3).dp)
+                        .size(8.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFE5484D)),
                 )
