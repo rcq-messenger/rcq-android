@@ -1,5 +1,11 @@
 package app.rcq.android.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
@@ -160,11 +167,25 @@ private fun IslandCard(island: IslandCatalog.Entry) {
         value = IslandCatalog.art(ctx, island.host)
     }
     val image = rememberSampledBitmap(art, maxPx = 512)
+    // No card under it. The island is a cut-out and the sheet already has a
+    // ground of its own; a second panel behind the painting turned a floating
+    // island into a sticker on a tile (founder, 24.08). Everything here stands
+    // on the sheet, and the island drifts.
+    val float = rememberInfiniteTransition(label = "island-float")
+    val dy by float.animateFloat(
+        initialValue = -4f,
+        targetValue = 4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2600, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "island-dy",
+    )
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.bgPrimary).padding(bottom = 14.dp),
+        Modifier.fillMaxWidth().padding(bottom = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().height(140.dp).offset(y = dy.dp), contentAlignment = Alignment.Center) {
             if (image != null) {
                 Image(
                     bitmap = image, contentDescription = null, contentScale = ContentScale.Fit,
