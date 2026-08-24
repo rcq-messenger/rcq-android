@@ -194,16 +194,43 @@ private fun IslandCard(island: IslandCatalog.Entry) {
             }
             // The island's own logo sits ON the painting, the way a flag sits on
             // a hill: the painting says "an island", the logo says WHICH.
-            IslandAvatar(
-                island.host,
-                cards[island.host]?.logoVersion,
-                island.name,
-                size = 34.dp,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
+            // The mirrored logo when the catalogue carries one, the island's own
+            // when this device has spoken to it, and the lettered tile when
+            // neither: an island whose operator never set a logo is a normal
+            // state, not a gap.
+            val mirrored by produceState<ByteArray?>(initialValue = null, island.host) {
+                value = IslandCatalog.logo(ctx, island)
+            }
+            val mirroredImage = rememberSampledBitmap(mirrored, maxPx = 128)
+            if (mirroredImage != null) {
+                Image(
+                    bitmap = mirroredImage, contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.align(Alignment.BottomCenter).size(34.dp)
+                        .clip(RoundedCornerShape(34.dp * 0.28f)),
+                )
+            } else {
+                IslandAvatar(
+                    island.host,
+                    cards[island.host]?.logoVersion,
+                    cards[island.host]?.name?.takeIf { it.isNotBlank() } ?: island.name,
+                    size = 34.dp,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
-        Text(island.name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center)
+        // What the island CALLS ITSELF wins over what the catalogue says about
+        // it. The catalogue is a file edited by hand in a repository; the card
+        // is the answer this device got from /server/info, which is the name
+        // the operator typed into their own admin console. They drift, and when
+        // they do the operator's is the true one (founder, 24.08: "why does it
+        // say RCQ (default) when we have a server name").
+        //
+        // Only for islands this device has spoken to. Asking every island in
+        // the catalogue for its name the moment this sheet opens would hand our
+        // address to five hosts the person has not chosen yet.
+        val name = cards[island.host]?.name?.takeIf { it.isNotBlank() } ?: island.name
+        Text(name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center)
         Text(
             island.region?.let { "${island.host} · $it" } ?: island.host,
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
