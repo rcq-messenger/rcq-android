@@ -1335,8 +1335,14 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
+                    // ⚠ NOT clipped to a circle. PersonAvatar rounds the picture
+                    // itself, and its status badge deliberately sticks out past
+                    // the lower-left edge; a circular clip on the wrapper cut
+                    // that badge in half, which is what the founder saw here and
+                    // nowhere else (24.08). The tap target stays the whole
+                    // square, which is what it always was.
                     Box(
-                        Modifier.clip(CircleShape).clickable(enabled = !avatarBusy) { avatarPicker.launch("image/*") },
+                        Modifier.clickable(enabled = !avatarBusy) { avatarPicker.launch("image/*") },
                         contentAlignment = Alignment.Center,
                     ) {
                         PersonAvatar(ownAvatar?.first, ownAvatar?.second, ownStatus, session, 56.dp, animated = true)
