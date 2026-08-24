@@ -3631,6 +3631,21 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                 }
 
                 Field(stringResource(R.string.backup_island_host_hint), host) { host = it }
+                // The same picker onboarding uses, so "which islands are there"
+                // is answered in one place and looks the same in both. Typing a
+                // host stays exactly where it was: a self-hoster's island is
+                // never in a catalogue.
+                var pickIsland by remember { mutableStateOf(false) }
+                Text(
+                    stringResource(R.string.island_pick_title),
+                    color = c.accent, fontSize = 13.sp,
+                    modifier = Modifier.clickable { pickIsland = true }.padding(vertical = 4.dp),
+                )
+                if (pickIsland) IslandPickerSheet(
+                    current = host,
+                    onPick = { host = it; pickIsland = false },
+                    onDismiss = { pickIsland = false },
+                )
                 Button(
                     onClick = {
                         busy = true; error = null
