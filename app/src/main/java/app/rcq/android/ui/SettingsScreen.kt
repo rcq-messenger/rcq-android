@@ -698,6 +698,7 @@ private fun SettingsRoot(
             SectionFooter(stringResource(R.string.settings_foot_appearance))
             Spacer(Modifier.height(12.dp))
             val lang by LanguageManager.current.collectAsState()
+            val animAvatars by LocalStores.animateAvatars.collectAsState()
             SettingsGroup {
                 SettingsRow(Icons.Filled.Language, stringResource(R.string.onboard_language), value = LanguageManager.displayName(lang)) { onOpen(SettingsRoute.LANGUAGE) }
                 Divider()
@@ -705,10 +706,12 @@ private fun SettingsRoot(
                 Divider()
                 SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_chat_bg)) { onOpen(SettingsRoute.CHAT_BG) }
                 SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_home_bg)) { onOpen(SettingsRoute.HOME_BG) }
-            }
-            val animAvatars by LocalStores.animateAvatars.collectAsState()
-            Column(anchor(SettingsFind.ANIM_AVATARS).fillMaxWidth()) {
-                SettingsGroup {
+                Divider()
+                // In the same container as the four rows above it (founder,
+                // 24.08). It had one of its own, touching that one, which read
+                // as a second group holding a single switch — and it is an
+                // appearance setting exactly like the wallpapers over it.
+                Column(anchor(SettingsFind.ANIM_AVATARS).fillMaxWidth()) {
                     SettingToggleRow(
                         stringResource(R.string.settings_anim_avatars_title),
                         stringResource(R.string.settings_anim_avatars_desc),

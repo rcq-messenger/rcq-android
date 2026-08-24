@@ -320,12 +320,17 @@ internal fun PersonAvatar(
         // it, the way the site draws it in the Hall of Fame. Keeping it fully
         // inside the square put it in the corner the round image never reaches,
         // so it read as clipped and half-swallowed by the avatar.
+        // ⚠ No disc under it. The badge used to sit on a `bgPrimary` circle,
+        // which is white in the light theme and near-black in the dark one, and
+        // over a wallpaper or a photograph that disc is the thing the eye
+        // catches rather than the status on it (founder, 24.08). The glyph is
+        // a solid coloured shape with its own outline: it reads on a picture
+        // without a plate under it, the same way it does on iOS.
         if (showStatus) Box(
             Modifier.align(Alignment.BottomStart)
                 .offset(x = -(badge / 4), y = badge / 4)
                 .size(badge)
                 .clip(CircleShape)
-                .background(c.bgPrimary)
                 .then(if (onStatusClick != null) Modifier.clickable(onClick = onStatusClick) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
