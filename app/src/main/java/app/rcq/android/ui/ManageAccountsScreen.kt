@@ -21,6 +21,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -187,16 +190,36 @@ internal fun ManageAccountsScreen(
                     // tapped, and duplicated the ACTIVE label two lines to the
                     // left. The other rows now get the action it looked like it
                     // was: switch to this account without leaving the screen.
+                    // ⚠ GLYPHS, not words, and #752 is why. Two text buttons
+                    // ("Перейти", "Удалить") plus the reorder arrows have a
+                    // minimum width between them that a narrow screen cannot
+                    // pay: `weight(1f)` then hands the name column whatever is
+                    // left, which was one character wide, so the nickname and
+                    // the island name came out as a vertical stack of single
+                    // letters. A glyph is the same size in every language,
+                    // which is the property the row needs.
                     if (isActive) {
-                        TextButton(onClick = { pendingDelete = account }) {
-                            Text(stringResource(R.string.manage_accounts_delete), color = Color(0xFFE5484D))
+                        IconButton(onClick = { pendingDelete = account }) {
+                            Icon(
+                                Icons.Filled.DeleteOutline,
+                                stringResource(R.string.manage_accounts_delete),
+                                tint = Color(0xFFE5484D),
+                            )
                         }
                     } else {
-                        TextButton(onClick = { onSwitchAccount(account.id) }) {
-                            Text(stringResource(R.string.manage_accounts_switch), color = c.accent)
+                        IconButton(onClick = { onSwitchAccount(account.id) }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Login,
+                                stringResource(R.string.manage_accounts_switch),
+                                tint = c.accent,
+                            )
                         }
-                        TextButton(onClick = { pendingDelete = account }) {
-                            Text(stringResource(R.string.manage_accounts_delete), color = Color(0xFFE5484D))
+                        IconButton(onClick = { pendingDelete = account }) {
+                            Icon(
+                                Icons.Filled.DeleteOutline,
+                                stringResource(R.string.manage_accounts_delete),
+                                tint = Color(0xFFE5484D),
+                            )
                         }
                     }
                     // Reorder: with several identities, creation order is rarely

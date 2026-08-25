@@ -2650,8 +2650,17 @@ private fun Composer(
                         if (showEmoji) keyboard?.hide()
                     }.padding(8.dp),
                 )
+                // Over a chat wallpaper the composer stops being a solid slab
+                // and lets the picture through, the way iOS does since 24.08:
+                // a filled pill across the bottom of a wallpapered chat is the
+                // one element that reads as pasted on. Still a fill, not
+                // nothing — the text has to stand on something — just a
+                // translucent one. Without a wallpaper nothing changes.
+                val composerFill =
+                    if (LocalStores.chatBackground.collectAsState().value.isBlank()) c.bgSecondary
+                    else c.bgSecondary.copy(alpha = 0.55f)
                 Box(
-                    Modifier.weight(1f).heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 10.dp),
+                    Modifier.weight(1f).heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(composerFill).padding(horizontal = 14.dp, vertical = 10.dp),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     if (draft.isEmpty()) Text(stringResource(R.string.chat_input_hint), color = c.textSecondary, fontSize = 15.sp)
