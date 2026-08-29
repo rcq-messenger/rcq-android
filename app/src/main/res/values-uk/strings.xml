@@ -1242,4 +1242,6 @@
     <string name="gi_slow_off">Вимк</string>
     <string name="chat_files_off">Власник групи вимкнув надсилання файлів</string>
     <string name="chat_links_off">Власник групи вимкнув посилання</string>
+    <string name="chat_slowmode_wait">Увімкнено повільний режим: повторіть трохи згодом</string>
+    <string name="chat_slowmode_wait_in">Увімкнено повільний режим: повторіть через %1$d с</string>
 </resources>

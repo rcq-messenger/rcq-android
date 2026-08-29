@@ -1236,4 +1236,6 @@
     <string name="gi_slow_off">关闭</string>
     <string name="chat_files_off">群主已禁用文件</string>
     <string name="chat_links_off">群主已禁用链接</string>
+    <string name="chat_slowmode_wait">已开启慢速模式:请稍后再试</string>
+    <string name="chat_slowmode_wait_in">已开启慢速模式:请在 %1$d 秒后再试</string>
 </resources>

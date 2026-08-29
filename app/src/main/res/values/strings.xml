@@ -1289,4 +1289,6 @@
     <string name="gi_slow_off">Off</string>
     <string name="chat_files_off">The owner turned off files in this group</string>
     <string name="chat_links_off">The owner turned off links in this group</string>
+    <string name="chat_slowmode_wait">Slow mode is on: try again in a moment</string>
+    <string name="chat_slowmode_wait_in">Slow mode is on: try again in %1$d s</string>
 </resources>
