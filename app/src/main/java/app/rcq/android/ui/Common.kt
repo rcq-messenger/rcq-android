@@ -140,11 +140,26 @@ internal fun SectionHeader(
     // dimmest text on the row, sitting on it.
     val listVeil = LocalHomeVeil.current
     val veil = if (listVeil < 1f) maxOf(0.7f, listVeil) else 0.7f
+    // Л2.12: with a home wallpaper the header stands on a frosted slice of it
+    // rather than on the plain veil. The wash on top then drops to the iOS
+    // translucent-surface tint (0.58): the frost underneath restores the
+    // ground the heavier veil alone used to provide. A wallpaper that FIGHTS
+    // the theme keeps the 0.9 wash - frost softens the picture but does not
+    // buy back text contrast, so the AA arithmetic on the veil constant still
+    // rules. Null / inactive slices (no wallpaper, or a screen that never
+    // provides them) keep the exact fill this header has always had.
+    val slices = LocalWallpaperSlices.current
+    val fill = if (slices?.active == true) {
+        val wash = if (listVeil >= 0.9f) 0.9f else 0.58f
+        Modifier.wallpaperSlice(slices, veil = c.bgSecondary.copy(alpha = wash))
+    } else {
+        Modifier.background(c.bgSecondary.copy(alpha = veil))
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(0.dp))
-            .background(c.bgSecondary.copy(alpha = veil))
+            .then(fill)
             .combinedClickable(onClick = onToggle, onLongClick = onLongPress)
             .padding(horizontal = 10.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,

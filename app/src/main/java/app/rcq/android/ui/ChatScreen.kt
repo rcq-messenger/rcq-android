@@ -1240,15 +1240,43 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         if (peerGone && messages.lastOrNull()?.fromMe == false) LocalStores.setGone(peer!!, false)
     }
 
-    Column(Modifier.fillMaxSize().background(c.bgPrimary).imePadding()) {
-        // Header. Deliberately NOT wallpaper-aware: the wallpaper Box starts
-        // BELOW this row (see ChatBackground further down), so the header
-        // always stands on the theme background and the theme's colours are
-        // simply right. A blend-with-the-wallpaper variant was tried for #648
-        // and reverted — on the luminance threshold (Cream) it flipped the
-        // title dark on a dark bar, the exact defect it meant to fix.
+    // Frosted chrome over the wallpaper (founder item L2.9). One slice state
+    // for the whole screen, built from the same selection ChatBackground()
+    // itself reads; inert with no wallpaper set. The veil washes follow the
+    // tone rule the home list uses: 0.9 only when chatVeil() says the
+    // wallpaper FIGHTS the theme, else the header keeps its usual 0.6 and the
+    // composer area takes the pill's 0.55.
+    val chatBg by LocalStores.chatBackground.collectAsState()
+    val slices = rememberWallpaperSlices(chatBg, remember { LocalStores.chatBgFile(context) })
+    val fightingTone = chatVeil() == 0.9f
+    val headerVeil = if (fightingTone) 0.9f else 0.6f
+    val bottomVeil = if (fightingTone) 0.9f else 0.55f
+
+    Box(Modifier.fillMaxSize().background(c.bgPrimary)) {
+    // The wallpaper is one full-screen layer behind EVERYTHING (header, list,
+    // composer) and OUTSIDE imePadding on purpose: a custom photo's Crop
+    // mapping is a function of this Box's size, so keeping it out of the
+    // ime-padded node means the picture never re-crops when the keyboard
+    // opens and the frosted chrome slices always line up with it. With no
+    // wallpaper it draws nothing and the root's bgPrimary is exactly the
+    // ground every element has always stood on.
+    Box(Modifier.fillMaxSize().wallpaperSliceLayer(slices)) { ChatBackground() }
+    Column(Modifier.fillMaxSize().imePadding()) {
+        // Header. With no wallpaper: byte-identical to what it has always
+        // been, a 0.6 wash of bgSecondary on the theme ground. With one, the
+        // wash sits on a frosted slice of the wallpaper (L2.9). The #648
+        // lesson still holds: recolouring the header FROM the wallpaper
+        // flipped the title dark-on-dark on the luminance threshold (Cream),
+        // so the text keeps its theme colours and the veil is the THEME's own
+        // bgSecondary, thickened to 0.9 when the wallpaper's tone fights the
+        // theme. The wash restores the ground the title was designed against,
+        // the same trick the home list veil uses.
         Row(
-            Modifier.fillMaxWidth().background(c.bgSecondary.copy(alpha = 0.6f))
+            Modifier.fillMaxWidth()
+                .then(
+                    if (slices.active) Modifier.wallpaperSlice(slices, veil = c.bgSecondary.copy(alpha = headerVeil))
+                    else Modifier.background(c.bgSecondary.copy(alpha = 0.6f)),
+                )
                 .clickable(enabled = !isSelf) { if (isGroup) groupId?.let(onOpenGroupInfo) else peer?.let(onOpenPeerInfo) }
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1493,7 +1521,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
-        ChatBackground()  // global chat wallpaper (behind the messages); no-op when default
+        // (The wallpaper used to be drawn HERE, clipped to this Box; L2.9
+        // moved it to the full-screen layer behind the whole Column, so the
+        // list simply stays transparent over it.)
         // A brand-new thread had nothing in it at all here, just wallpaper,
         // while iOS has always said what the screen is and what to do with it.
         // A first-time reader could not tell an empty conversation from one
@@ -1844,6 +1874,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
         }
 
+        // Bottom chrome (reply chip, upload strip, composer) on ONE frosted
+        // slice: the bar area shows blurred wallpaper under a wash of the
+        // theme ground and the input pill floats on it, iOS parity for L2.9.
+        // With no wallpaper the Column is a bare pass-through and every child
+        // paints exactly as before.
+        Column(
+            if (slices.active) Modifier.wallpaperSlice(slices, veil = c.bgPrimary.copy(alpha = bottomVeil))
+            else Modifier,
+        ) {
         replyTarget?.let { rt ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
                 Box(Modifier.width(3.dp).height(34.dp).clip(RoundedCornerShape(2.dp)).background(c.accent))
@@ -1951,6 +1990,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 onCancelVoice = { cancelRecording() },
             )
         }
+        }
+    }
     }
 
     albumViewer?.let { (items, idx) ->
@@ -2695,12 +2736,15 @@ private fun Composer(
                         if (showEmoji) keyboard?.hide() else keyboard?.show()
                     }.padding(8.dp),
                 )
-                // Over a chat wallpaper the composer stops being a solid slab
-                // and lets the picture through, the way iOS does since 24.08:
-                // a filled pill across the bottom of a wallpapered chat is the
-                // one element that reads as pasted on. Still a fill, not
-                // nothing — the text has to stand on something — just a
-                // translucent one. Without a wallpaper nothing changes.
+                // Over a chat wallpaper the pill is translucent so the bar
+                // shows through it. Since L2.9 the bar really is the
+                // wallpaper: the chrome Column in ChatScreen draws a frosted
+                // slice under this whole row, so the 0.55 finally blends with
+                // the picture. Before that it blended with plain bgPrimary
+                // and the "lets the picture through" this comment used to
+                // promise never actually happened. Still a fill, not nothing
+                // (the text has to stand on something). Without a wallpaper
+                // nothing changes: the opaque slab it has always been.
                 val composerFill =
                     if (LocalStores.chatBackground.collectAsState().value.isBlank()) c.bgSecondary
                     else c.bgSecondary.copy(alpha = 0.55f)

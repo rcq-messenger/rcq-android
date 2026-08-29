@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Palette
 // Settings search (#28) index icons.
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DarkMode
@@ -163,7 +164,7 @@ import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
-private enum class SettingsRoute { ROOT, HOW_IT_WORKS, PROFILE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
+private enum class SettingsRoute { ROOT, HOW_IT_WORKS, PROFILE, APPEARANCE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
 
 // ── Settings search (#28) ────────────────────────────────────────────
 //
@@ -218,9 +219,9 @@ private class SettingsFindRow(
 private fun SettingsFind.row(): SettingsFindRow = when (this) {
     SettingsFind.PROFILE -> SettingsFindRow(this, Icons.Filled.Person, R.string.pe_title, R.string.settings_title, SettingsRoute.PROFILE,
         "profile nickname avatar name about age city профиль ник никнейм аватар имя о себе возраст город")
-    SettingsFind.THEME -> SettingsFindRow(this, Icons.Filled.DarkMode, R.string.settings_row_theme, R.string.settings_sec_appearance, null,
+    SettingsFind.THEME -> SettingsFindRow(this, Icons.Filled.DarkMode, R.string.settings_row_theme, R.string.settings_sec_appearance, SettingsRoute.APPEARANCE,
         "theme dark light night colour color тема тёмная темная светлая ночная цвет оформление")
-    SettingsFind.TEXT_SIZE -> SettingsFindRow(this, Icons.Filled.FormatSize, R.string.settings_text_size, R.string.settings_sec_appearance, null,
+    SettingsFind.TEXT_SIZE -> SettingsFindRow(this, Icons.Filled.FormatSize, R.string.settings_text_size, R.string.settings_sec_appearance, SettingsRoute.APPEARANCE,
         "font size text bigger smaller шрифт размер текст крупнее мельче")
     SettingsFind.LANGUAGE -> SettingsFindRow(this, Icons.Filled.Language, R.string.onboard_language, R.string.settings_sec_appearance, SettingsRoute.LANGUAGE,
         "language locale russian english язык локаль русский английский")
@@ -230,9 +231,9 @@ private fun SettingsFind.row(): SettingsFindRow = when (this) {
         "wallpaper background chat picture обои фон подложка чат картинка")
     SettingsFind.HOME_BG -> SettingsFindRow(this, Icons.Filled.Wallpaper, R.string.settings_row_home_bg, R.string.settings_sec_appearance, SettingsRoute.HOME_BG,
         "wallpaper background home list picture обои фон главный экран список картинка")
-    SettingsFind.ANIM_AVATARS -> SettingsFindRow(this, Icons.Filled.Mood, R.string.settings_anim_avatars_title, R.string.settings_sec_appearance, null,
+    SettingsFind.ANIM_AVATARS -> SettingsFindRow(this, Icons.Filled.Mood, R.string.settings_anim_avatars_title, R.string.settings_sec_appearance, SettingsRoute.APPEARANCE,
         "avatar animation gif battery аватар анимация гиф батарея")
-    SettingsFind.SWIPE_REPLY -> SettingsFindRow(this, Icons.Filled.SwipeLeft, R.string.settings_swipe_reply, R.string.settings_sec_appearance, null,
+    SettingsFind.SWIPE_REPLY -> SettingsFindRow(this, Icons.Filled.SwipeLeft, R.string.settings_swipe_reply, R.string.settings_sec_appearance, SettingsRoute.APPEARANCE,
         "swipe reply quote gesture свайп ответ цитата жест")
     SettingsFind.HOW_IT_WORKS -> SettingsFindRow(this, Icons.Filled.Info, R.string.how_title, R.string.settings_sec_privacy, SettingsRoute.HOW_IT_WORKS,
         "help faq how encryption как это работает справка вопросы шифрование")
@@ -246,7 +247,7 @@ private fun SettingsFind.row(): SettingsFindRow = when (this) {
         "sound volume ringtone mute звук звуки громкость сигнал беззвучно")
     SettingsFind.BLOCKED -> SettingsFindRow(this, Icons.Outlined.Block, R.string.settings_row_blocked, R.string.settings_sec_privacy, SettingsRoute.BLOCKED,
         "blocked block ban spam блок блокировка чёрный черный список бан спам")
-    SettingsFind.PIN_CODES -> SettingsFindRow(this, Icons.Filled.Password, R.string.settings_row_pin_codes, R.string.settings_sec_privacy, SettingsRoute.PIN_CODES,
+    SettingsFind.PIN_CODES -> SettingsFindRow(this, Icons.Filled.Password, R.string.settings_row_pin_codes, R.string.settings_row_privacy, SettingsRoute.PIN_CODES,
         "pin password passcode lock biometrics duress wipe decoy пин пароль код блокировка отпечаток паника")
     SettingsFind.RECOVERY -> SettingsFindRow(this, Icons.Filled.Key, R.string.settings_row_recovery, R.string.settings_sec_privacy, SettingsRoute.RECOVERY_PHRASE,
         "recovery phrase seed words restore key фраза сид восстановление слова ключ")
@@ -375,6 +376,11 @@ internal fun SettingsScreen(
         if (openBackupIsland && route == SettingsRoute.BACKUP_ISLAND) { onBack(); return@BackHandler }
         route = when (route) {
             SettingsRoute.DIAGNOSTICS, SettingsRoute.CUSTOM_SERVER -> SettingsRoute.NETWORK
+            // Their rows moved off the root (founder item L2.16): the pickers
+            // live on Appearance, the PIN screen on Privacy. Back follows the
+            // rows, same rule as Diagnostics above.
+            SettingsRoute.APP_ICON, SettingsRoute.CHAT_BG, SettingsRoute.HOME_BG -> SettingsRoute.APPEARANCE
+            SettingsRoute.PIN_CODES -> SettingsRoute.PRIVACY
             else -> SettingsRoute.ROOT
         }
     }
@@ -404,7 +410,13 @@ internal fun SettingsScreen(
         )
         SettingsRoute.PROFILE -> ProfileEditScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.HOW_IT_WORKS -> HowItWorksScreen { route = SettingsRoute.ROOT }
-        SettingsRoute.PRIVACY -> PrivacyScreen(session) { route = SettingsRoute.ROOT }
+        SettingsRoute.APPEARANCE -> AppearanceScreen(
+            onOpen = { route = it },
+        ) { route = SettingsRoute.ROOT }
+        SettingsRoute.PRIVACY -> PrivacyScreen(
+            session,
+            onOpenPinCodes = { route = SettingsRoute.PIN_CODES },
+        ) { route = SettingsRoute.ROOT }
         SettingsRoute.NETWORK -> NetworkScreen(
             session,
             onOpenCustomServer = { route = SettingsRoute.CUSTOM_SERVER },
@@ -420,11 +432,16 @@ internal fun SettingsScreen(
         SettingsRoute.MY_REPORTS -> MyReportsScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.SOUNDS -> SoundsScreen { route = SettingsRoute.ROOT }
         SettingsRoute.LANGUAGE -> LanguageScreen { route = SettingsRoute.ROOT }
-        SettingsRoute.APP_ICON -> AppIconScreen { route = SettingsRoute.ROOT }
-        SettingsRoute.CHAT_BG -> ChatBackgroundScreen { route = SettingsRoute.ROOT }
-        SettingsRoute.HOME_BG -> HomeBackgroundScreen { route = SettingsRoute.ROOT }
+        // Back from the icon/wallpaper pickers returns to Appearance, where
+        // their rows live now, mirroring the Diagnostics -> Network rule.
+        SettingsRoute.APP_ICON -> AppIconScreen { route = SettingsRoute.APPEARANCE }
+        SettingsRoute.CHAT_BG -> ChatBackgroundScreen { route = SettingsRoute.APPEARANCE }
+        SettingsRoute.HOME_BG -> HomeBackgroundScreen { route = SettingsRoute.APPEARANCE }
         SettingsRoute.BLOCKED -> BlockedUsersScreen(session) { route = SettingsRoute.ROOT }
-        SettingsRoute.PIN_CODES -> PinCodesScreen(session) { route = SettingsRoute.ROOT }
+        // The PIN row sits on the Privacy screen now; back follows it there.
+        // A search hit can still open PIN codes straight from the root, and
+        // back then lands on Privacy, exactly like Diagnostics -> Network.
+        SettingsRoute.PIN_CODES -> PinCodesScreen(session) { route = SettingsRoute.PRIVACY }
         SettingsRoute.RECOVERY_PHRASE -> RecoveryPhraseScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.BACKUP -> BackupScreen(session) { route = SettingsRoute.ROOT }
         SettingsRoute.LINKED_DEVICES -> LinkedDevicesScreen(session) { route = SettingsRoute.ROOT }
@@ -469,7 +486,6 @@ private fun SettingsRoot(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val ownStatus by session.status.collectAsState()
-    val themeMode by LocalStores.themeMode.collectAsState()
     val contacts by session.contacts.collectAsState()
     val uinShopEnabled by session.uinShopEnabled.collectAsState()
     // An island that runs no report desk gets neither the bug form nor the
@@ -686,44 +702,16 @@ private fun SettingsRoot(
 
             Spacer(Modifier.height(22.dp))
             SectionLabel(stringResource(R.string.settings_sec_appearance))
-            Column(anchor(SettingsFind.THEME).fillMaxWidth()) {
-                SegmentedTheme(themeMode) { LocalStores.setThemeMode(it) }
-            }
-            Spacer(Modifier.height(10.dp))
-            Column(anchor(SettingsFind.TEXT_SIZE).fillMaxWidth()) {
-                Text(stringResource(R.string.settings_text_size), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                val fontScale by LocalStores.fontScale.collectAsState()
-                SegmentedFontScale(fontScale) { LocalStores.setFontScale(it) }
-            }
-            SectionFooter(stringResource(R.string.settings_foot_appearance))
-            Spacer(Modifier.height(12.dp))
             val lang by LanguageManager.current.collectAsState()
-            val animAvatars by LocalStores.animateAvatars.collectAsState()
             SettingsGroup {
+                // One door for every visual knob (founder item L2.16): theme,
+                // text size, wallpapers, animated avatars and the swipe side
+                // moved to [AppearanceScreen]. Language stays out here: it is
+                // the row people hunt for first on a phone in the wrong
+                // language, and burying it one level down defeats it.
+                SettingsRow(Icons.Filled.Palette, stringResource(R.string.settings_sec_appearance)) { onOpen(SettingsRoute.APPEARANCE) }
+                Divider()
                 SettingsRow(Icons.Filled.Language, stringResource(R.string.onboard_language), value = LanguageManager.displayName(lang)) { onOpen(SettingsRoute.LANGUAGE) }
-                Divider()
-                SettingsRow(Icons.Filled.Apps, stringResource(R.string.settings_row_app_icon)) { onOpen(SettingsRoute.APP_ICON) }
-                Divider()
-                SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_chat_bg)) { onOpen(SettingsRoute.CHAT_BG) }
-                SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_home_bg)) { onOpen(SettingsRoute.HOME_BG) }
-                Divider()
-                // In the same container as the four rows above it (founder,
-                // 24.08). It had one of its own, touching that one, which read
-                // as a second group holding a single switch — and it is an
-                // appearance setting exactly like the wallpapers over it.
-                Column(anchor(SettingsFind.ANIM_AVATARS).fillMaxWidth()) {
-                    SettingToggleRow(
-                        stringResource(R.string.settings_anim_avatars_title),
-                        stringResource(R.string.settings_anim_avatars_desc),
-                        animAvatars,
-                    ) { LocalStores.setAnimateAvatars(it) }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            Column(anchor(SettingsFind.SWIPE_REPLY).fillMaxWidth()) {
-                Text(stringResource(R.string.settings_swipe_reply), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                val swipeSide by LocalStores.swipeReplySide.collectAsState()
-                SegmentedSwipeSide(swipeSide) { LocalStores.setSwipeReplySide(it) }
             }
 
             Spacer(Modifier.height(22.dp))
@@ -740,12 +728,8 @@ private fun SettingsRoot(
                 Divider()
                 SettingsRow(Icons.Outlined.Block, stringResource(R.string.settings_row_blocked), value = if (blockedCount > 0) "$blockedCount" else null) { onOpen(SettingsRoute.BLOCKED) }
                 Divider()
-                SettingsRow(
-                    Icons.Filled.Password,
-                    stringResource(R.string.settings_row_pin_codes),
-                    value = if (session.pinConfigured) stringResource(R.string.pin_on) else null,
-                ) { onOpen(SettingsRoute.PIN_CODES) }
-                Divider()
+                // PIN codes moved onto the Privacy screen (founder item L2.16,
+                // mirroring iOS): one lock door on the root instead of two.
                 SettingsRow(Icons.Filled.Key, stringResource(R.string.settings_row_recovery)) { onOpen(SettingsRoute.RECOVERY_PHRASE) }
                 Divider()
                 SettingsRow(Icons.Filled.Inventory2, stringResource(R.string.settings_row_backup)) { onOpen(SettingsRoute.BACKUP) }
@@ -1490,8 +1474,64 @@ private object SettingsLocalPrivacy {
 internal fun cardOpenableFromSideList(context: Context, subjectUin: Int): Boolean =
     !SettingsLocalPrivacy.cardSideListsClosed(context, subjectUin)
 
+// ── Appearance (founder item L2.16) ──────────────────────────────────
+
+/** Every visual knob in one place, off the root list: the root had grown to
+ *  where theme pills and wallpaper rows buried the doors people actually hunt
+ *  for. Same controls, same stores, new address; the root keeps one
+ *  "Appearance" row. [onOpen] serves the picker rows (app icon, wallpapers),
+ *  whose screens pop back here, not to the root. */
 @Composable
-private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
+private fun AppearanceScreen(onOpen: (SettingsRoute) -> Unit, onBack: () -> Unit) {
+    val c = RcqTheme.colors
+    val themeMode by LocalStores.themeMode.collectAsState()
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(c.bgPrimary)
+    ) {
+        SettingsTopBar(stringResource(R.string.settings_sec_appearance), onBack)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+        ) {
+            Spacer(Modifier.height(12.dp))
+            SegmentedTheme(themeMode) { LocalStores.setThemeMode(it) }
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.settings_text_size), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+            val fontScale by LocalStores.fontScale.collectAsState()
+            SegmentedFontScale(fontScale) { LocalStores.setFontScale(it) }
+            SectionFooter(stringResource(R.string.settings_foot_appearance))
+            Spacer(Modifier.height(12.dp))
+            val animAvatars by LocalStores.animateAvatars.collectAsState()
+            SettingsGroup {
+                SettingsRow(Icons.Filled.Apps, stringResource(R.string.settings_row_app_icon)) { onOpen(SettingsRoute.APP_ICON) }
+                Divider()
+                SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_chat_bg)) { onOpen(SettingsRoute.CHAT_BG) }
+                SettingsRow(Icons.Filled.Wallpaper, stringResource(R.string.settings_row_home_bg)) { onOpen(SettingsRoute.HOME_BG) }
+                Divider()
+                // In the same container as the rows above it (founder, 24.08):
+                // a lone toggle in a group of its own read as a second group
+                // holding a single switch.
+                SettingToggleRow(
+                    stringResource(R.string.settings_anim_avatars_title),
+                    stringResource(R.string.settings_anim_avatars_desc),
+                    animAvatars,
+                ) { LocalStores.setAnimateAvatars(it) }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.settings_swipe_reply), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+            val swipeSide by LocalStores.swipeReplySide.collectAsState()
+            SegmentedSwipeSide(swipeSide) { LocalStores.setSwipeReplySide(it) }
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: () -> Unit) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     // Seed pickers from the cached profile so they render instantly with the
@@ -1679,6 +1719,18 @@ private fun PrivacyScreen(session: Session, onBack: () -> Unit) {
                     }
                     hofError?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
                 }
+            }
+
+            // The PIN row lives here now (founder item L2.16, mirroring iOS,
+            // whose Privacy pane ends on Panic PIN): the root keeps a single
+            // Privacy door instead of two lock rows. Same gating as the root
+            // row had: the "On" value only when a PIN is configured.
+            SettingsGroup {
+                SettingsRow(
+                    Icons.Filled.Password,
+                    stringResource(R.string.settings_row_pin_codes),
+                    value = if (session.pinConfigured) stringResource(R.string.pin_on) else null,
+                ) { onOpenPinCodes() }
             }
 
         }

@@ -63,6 +63,10 @@ internal data class ChatBgPreset(
     val topColor: Color,
     /** Which theme this wallpaper was drawn for. See [ChatBackgrounds.offered]. */
     val forDark: Boolean,
+    /** The gradient's stops, kept because a Brush does not hand them back.
+     *  The frosted chrome slices ([wallpaperSlice]) rebuild the gradient with
+     *  offset start/end from these: a blur of a gradient is the gradient. */
+    val stops: List<Color>,
 )
 
 /** Built-in chat wallpapers. Global (one for the whole app), applied behind the
@@ -113,6 +117,7 @@ internal object ChatBackgrounds {
         brush = if (stops.size == 1) SolidColor(stops[0]) else Brush.verticalGradient(stops),
         topColor = stops[0],
         forDark = forDark,
+        stops = stops,
     )
 
     fun preset(id: String) = presets.firstOrNull { it.id == id }
@@ -220,6 +225,19 @@ internal fun homeVeil(): Float {
     // A custom image whose tone has not been measured yet reports null above and
     // therefore no veil for a frame or two, which is the honest answer: it also
     // has not drawn yet.
+    return if (top.needsLightChrome() == RcqTheme.colors.isDark) WALLPAPER_VEIL
+    else WALLPAPER_VEIL_CONTRARY
+}
+
+/** The same question for the CHAT wallpaper: 1f when there is none, else the
+ *  agree/contrary veil for chrome that now stands on it (Л2.9 moved the chat
+ *  header and input bar onto the wallpaper; their washes pick strength here
+ *  by the same tone test the home list uses). */
+@Composable
+internal fun chatVeil(): Float {
+    val bg by LocalStores.chatBackground.collectAsState()
+    val context = LocalContext.current
+    val top = wallpaperTopColor(bg, remember { LocalStores.chatBgFile(context) }) ?: return 1f
     return if (top.needsLightChrome() == RcqTheme.colors.isDark) WALLPAPER_VEIL
     else WALLPAPER_VEIL_CONTRARY
 }

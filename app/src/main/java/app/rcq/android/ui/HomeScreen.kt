@@ -777,12 +777,21 @@ internal fun HomeScreen(
     // instead of being covered edge to edge by opaque rows. 1f (and therefore
     // no change at all) when there is no wallpaper. See [LocalHomeVeil].
     val veil = homeVeil()
-    androidx.compose.runtime.CompositionLocalProvider(LocalHomeVeil provides veil) {
+    // Л2.12: frosted slices under the section headers. Built from the same
+    // inputs HomeBackground() reads, so the frost can never disagree with the
+    // sharp wallpaper it aligns itself to. Inactive with no wallpaper, and
+    // then everything below renders exactly as before.
+    val homeBgSel by LocalStores.homeBackground.collectAsState()
+    val slices = rememberWallpaperSlices(homeBgSel, remember { LocalStores.homeBgFile(context) })
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalHomeVeil provides veil,
+        LocalWallpaperSlices provides slices,
+    ) {
     Box(Modifier.fillMaxSize().background(c.bgPrimary)) {
         // Optional home/chat-list wallpaper (separate from the chat one).
         // Renders behind the list; every container above it is veiled rather
         // than opaque so it shows through. No-op on the default ("").
-        HomeBackground()
+        Box(Modifier.fillMaxSize().wallpaperSliceLayer(slices)) { HomeBackground() }
         Column(Modifier.fillMaxSize()) {
             HomeHeader(
                 // ⚠ The header has no fill of its own — it stands on the
