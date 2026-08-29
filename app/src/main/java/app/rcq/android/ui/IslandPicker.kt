@@ -248,17 +248,30 @@ private fun IslandCard(island: IslandCatalog.Entry) {
         // the catalogue for its name the moment this sheet opens would hand our
         // address to five hosts the person has not chosen yet.
         val name = cards[island.host]?.name?.takeIf { it.isNotBlank() } ?: island.name
-        Text(name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center)
+        Text(
+            name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
         Text(
             island.region?.let { "${island.host} · $it" } ?: island.host,
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
         )
-        island.description?.takeIf { it.isNotBlank() }?.let {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                it, color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
+        // ⚠ A RESERVED box, not an optional block. Each page used to measure
+        // its own height — two lines of description here, none there — so the
+        // pager, and the sheet around it, re-measured on every swipe and the
+        // whole sheet twitched up and down while browsing («шторка дёргается
+        // то вниз, то вверх», #736). Every card now claims the same three
+        // lines whether its island has anything to say or not.
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.TopCenter) {
+            island.description?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it, color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
         }
     }
 }
