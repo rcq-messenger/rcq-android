@@ -2278,8 +2278,18 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 if (newText.isNotEmpty() && newText != orig.body) {
                     scope.launch { runCatching { session.sendEdit(orig, newText) } }
                 }
+                // ⚠ Not six frames — the IME collapse animation runs longer
+                // than that, the early nudges land against a still-shrinking
+                // viewport, and the list settles just above the end with the
+                // chevron showing anyway («опять остался», #727 after #698).
+                // Chase the end for up to half a second, nudging only while
+                // there is somewhere to go; frames after the layout settles
+                // are free no-ops.
                 if (wasAtEnd) scope.launch {
-                    repeat(6) { withFrameNanos {} ; listState.scrollBy(1_000_000f) }
+                    repeat(30) {
+                        withFrameNanos {}
+                        if (listState.canScrollForward) listState.scrollBy(1_000_000f)
+                    }
                 }
             }
             SheetTextRow(stringResource(R.string.common_cancel), dimmed = true) { editMsg = null }
