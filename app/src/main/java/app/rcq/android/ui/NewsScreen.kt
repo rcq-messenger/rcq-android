@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,7 +50,12 @@ fun NewsScreen(session: Session, onBack: () -> Unit) {
     var feed by remember { mutableStateOf<RcqApi.NewsFeed?>(null) }
     var loading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
+    // Keyed on the news_posted tick (A4), not Unit: a post published while
+    // this screen is open re-fetches in place. Re-marking seen keeps the home
+    // dot dark for what the reader is literally looking at (markNewsSeen's
+    // monotonic guard makes the repeat harmless).
+    val newsTick by session.newsFeedChanged.collectAsState()
+    LaunchedEffect(newsTick) {
         feed = session.loadNews()
         // Seen the moment the screen shows them, which is what clears the red
         // dot on the home menu.

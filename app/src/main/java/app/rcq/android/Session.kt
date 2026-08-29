@@ -5490,6 +5490,12 @@ class Session(context: Context) {
     private val _keySlotsChanged = MutableStateFlow(0)
     val keySlotsChanged: StateFlow<Int> = _keySlotsChanged.asStateFlow()
 
+    /** Bumped when the island announces `news_posted` (A4): an open news
+     *  screen re-fetches on the tick, and the home dot goes live through
+     *  [refreshNewsBadge] instead of waiting for the next appear. */
+    private val _newsFeedChanged = MutableStateFlow(0)
+    val newsFeedChanged: StateFlow<Int> = _newsFeedChanged.asStateFlow()
+
     /** Retry a previously-failed outgoing message (same UUID, so no dup). */
     suspend fun resend(msg: ChatMessage) {
         if (!msg.fromMe || msg.state != DeliveryState.FAILED) return
@@ -8521,6 +8527,14 @@ class Session(context: Context) {
             // re-read next — "изменение произошло не сразу, в какой момент оно
             // должно актуализироваться?" had no answer.
             "contact_renamed" -> scope.launch { runCatching { refreshContacts() } }
+            // A fresh news post, announced live (A4). The frame is only a
+            // doorbell: refreshNewsBadge re-reads /news itself, which keeps
+            // the first-run seeding (a fresh install must not be told it
+            // missed the whole archive) in the one place that handles it.
+            "news_posted" -> scope.launch {
+                runCatching { refreshNewsBadge() }
+                _newsFeedChanged.value++
+            }
             "random_match" -> {
                 val pairId = obj.get("pair_id")?.takeIf { !it.isJsonNull }?.asString
                 obj.getAsJsonObject("peer")?.let { p ->
