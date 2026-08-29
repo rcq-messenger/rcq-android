@@ -1089,6 +1089,12 @@ class RcqApi(
         val is_closed: Boolean = false,
         val members_hidden: Boolean = false,
         val pinned_text: String? = null,
+        // Owner-set room policies (#755 parity with the desktop): whether
+        // members may post links / files, and the per-member slowmode step.
+        // Old islands omit them; the defaults are the permissive originals.
+        val links_allowed: Boolean = true,
+        val files_allowed: Boolean = true,
+        val slowmode_sec: Int = 0,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
         val created_at: String? = null,
@@ -1204,6 +1210,9 @@ class RcqApi(
         val pinned_text: String? = null,
         val is_closed: Boolean? = null,
         val members_hidden: Boolean? = null,
+        val links_allowed: Boolean? = null,
+        val files_allowed: Boolean? = null,
+        val slowmode_sec: Int? = null,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
     )

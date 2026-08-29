@@ -363,6 +363,27 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     }
                     GroupToggleRow(stringResource(R.string.gi_closed), stringResource(R.string.gi_closed_desc), group.isClosed) { v -> scope.launch { runCatching { session.patchGroup(groupId, isClosed = v) } } }
                     GroupToggleRow(stringResource(R.string.gi_hide), stringResource(R.string.gi_hide_desc), group.membersHidden) { v -> scope.launch { runCatching { session.patchGroup(groupId, membersHidden = v) } } }
+                    // Room policies (#755 — the desktop had these, this client
+                    // could neither see nor set them). The island enforces
+                    // slowmode server-side; links/files are honoured by
+                    // clients on render and compose.
+                    GroupToggleRow(stringResource(R.string.gi_links), stringResource(R.string.gi_links_desc), group.linksAllowed) { v -> scope.launch { runCatching { session.patchGroup(groupId, linksAllowed = v) } } }
+                    GroupToggleRow(stringResource(R.string.gi_files), stringResource(R.string.gi_files_desc), group.filesAllowed) { v -> scope.launch { runCatching { session.patchGroup(groupId, filesAllowed = v) } } }
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.gi_slowmode), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.gi_slowmode_desc), color = c.textSecondary, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgPrimary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            // The island's fixed steps (_SLOWMODE_STEPS): off, 10s, 30s, 1m, 5m, 1h.
+                            listOf(0 to stringResource(R.string.gi_slow_off), 10 to "10s", 30 to "30s", 60 to "1m", 300 to "5m", 3600 to "1h").forEach { (sec, label) ->
+                                val sel = group.slowmodeSec == sec
+                                Box(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
+                                        .clickable { if (!sel) scope.launch { runCatching { session.patchGroup(groupId, slowmodeSec = sec) } } }.padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 12.sp) }
+                            }
+                        }
+                    }
                 }
             }
         }

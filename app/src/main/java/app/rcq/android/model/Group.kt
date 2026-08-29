@@ -50,6 +50,11 @@ data class RcqGroup(
     val isClosed: Boolean = false,
     val membersHidden: Boolean = false,
     val pinnedText: String? = null,
+    // Owner-set room policies (#755, desktop parity). Permissive defaults are
+    // what every group had before the fields existed.
+    val linksAllowed: Boolean = true,
+    val filesAllowed: Boolean = true,
+    val slowmodeSec: Int = 0,
     val avatarMediaId: String? = null,
     val avatarMediaKey: String? = null,
     val members: List<GroupMember> = emptyList(),
