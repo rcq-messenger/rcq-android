@@ -444,6 +444,12 @@ internal fun EmoticonText(
     /// `combinedClickable` never sees a long click. In a group "@Anna" on its
     /// own is one of the commonest messages there is.
     onLongPress: (() -> Unit)? = null,
+    // False when the group's owner turned links off (#755) and neither the
+    // reader nor the sender is exempt: the URL then stays literal text, no
+    // annotation, exactly as if this renderer never learned about links (web
+    // parity, EmoticonText.tsx LinkContext). Defaults to true so every
+    // non-group call site keeps its behavior untouched.
+    linksEnabled: Boolean = true,
 ) {
     val tokens = remember(body) { Emoticons.tokenize(body) }
     val accent = RcqTheme.colors.accent
@@ -453,8 +459,10 @@ internal fun EmoticonText(
         (mentionNick != null && body.contains('#') && Emoticons.MENTION_RE.containsMatchIn(body)) ||
         (mentionMatch != null && body.contains('@'))
     // http(s) links are made tappable in the body too (report: links in chats
-    // weren't clickable). Cheap "://" gate before the regex.
-    val hasUrl = body.contains("://") && Emoticons.URL_RE.containsMatchIn(body)
+    // weren't clickable). Cheap "://" gate before the regex. A links-off room
+    // (linksEnabled=false) skips this whole branch: the body takes the same
+    // plain-text path a link-free message always took.
+    val hasUrl = linksEnabled && body.contains("://") && Emoticons.URL_RE.containsMatchIn(body)
     // Fast path: a pure-text body with no resolvable mentions and no links.
     if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention && !hasUrl) {
         Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
@@ -481,11 +489,11 @@ internal fun EmoticonText(
     // rebuilds when the body or a resolver actually changes. animate=false also
     // renders a static first frame (no AnimatedImageDrawable churn).
     val context = LocalContext.current
-    val (annotated, inline) = remember(body, mentionNick, mentionMatch, onMentionClick, accent) {
+    val (annotated, inline) = remember(body, mentionNick, mentionMatch, onMentionClick, accent, linksEnabled) {
         val inlineMap = HashMap<String, InlineTextContent>()
         val ann = buildAnnotatedString {
             for (t in tokens) when (t) {
-                is Emoticons.Token.Text -> appendWithMentions(t.text, mentionNick, mentionMatch, onMentionClick, accent)
+                is Emoticons.Token.Text -> appendWithMentions(t.text, mentionNick, mentionMatch, onMentionClick, accent, linksEnabled)
                 is Emoticons.Token.Emo -> {
                     appendInlineContent(t.asset, t.code)
                     if (t.asset !in inlineMap) {
@@ -583,6 +591,9 @@ private fun AnnotatedString.Builder.appendWithMentions(
     mentionMatch: ((String, Int) -> Pair<Int, Int>?)?,
     onMentionClick: ((Int) -> Unit)?,
     accent: Color,
+    // False = leave URLs as literal text (links-off room, #755); mentions
+    // stay clickable either way, they are not links out of the app.
+    linkify: Boolean = true,
 ) {
     // url=true -> a tappable http(s) link (display = the URL); otherwise a
     // mention (uin + display nick). Both kinds are merged in source order.
@@ -612,8 +623,10 @@ private fun AnnotatedString.Builder.appendWithMentions(
             }
         }
     }
-    for (m in Emoticons.URL_RE.findAll(text)) {
-        hits.add(Hit(m.range, true, 0, m.value))
+    if (linkify) {
+        for (m in Emoticons.URL_RE.findAll(text)) {
+            hits.add(Hit(m.range, true, 0, m.value))
+        }
     }
     if (hits.isEmpty()) { append(text); return }
     hits.sortBy { it.range.first }

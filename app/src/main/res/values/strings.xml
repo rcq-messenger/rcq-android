@@ -1288,4 +1288,5 @@
     <string name="gi_slowmode_desc">How often one member may post</string>
     <string name="gi_slow_off">Off</string>
     <string name="chat_files_off">The owner turned off files in this group</string>
+    <string name="chat_links_off">The owner turned off links in this group</string>
 </resources>
