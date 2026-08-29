@@ -1229,4 +1229,12 @@
     <string name="sections_err_too_many_members">Demasiados chats en tus secciones.</string>
     <string name="sections_err_too_large">La lista de secciones es demasiado grande para guardarla.</string>
     <string name="sections_err_unreadable">Tus secciones las escribió una versión más nueva de RCQ.</string>
+    <string name="gi_links">Enlaces permitidos</string>
+    <string name="gi_links_desc">Los miembros pueden enviar enlaces</string>
+    <string name="gi_files">Archivos permitidos</string>
+    <string name="gi_files_desc">Los miembros pueden adjuntar archivos</string>
+    <string name="gi_slowmode">Modo lento</string>
+    <string name="gi_slowmode_desc">Con qué frecuencia puede escribir un miembro</string>
+    <string name="gi_slow_off">No</string>
+    <string name="chat_files_off">El dueño del grupo desactivó los archivos</string>
 </resources>

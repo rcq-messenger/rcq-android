@@ -1280,4 +1280,12 @@
     <string name="island_host_hint">server host</string>
     <string name="island_manual_help">The default is the public RCQ island. Point at an organisation\'s island or your own self-host.</string>
     <string name="island_reset_default">Reset to default</string>
+    <string name="gi_links">Links allowed</string>
+    <string name="gi_links_desc">Members may post links</string>
+    <string name="gi_files">Files allowed</string>
+    <string name="gi_files_desc">Members may attach files and media</string>
+    <string name="gi_slowmode">Slow mode</string>
+    <string name="gi_slowmode_desc">How often one member may post</string>
+    <string name="gi_slow_off">Off</string>
+    <string name="chat_files_off">The owner turned off files in this group</string>
 </resources>

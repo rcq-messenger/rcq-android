@@ -1233,4 +1233,12 @@
     <string name="sections_err_too_many_members">Забагато чатів в усіх секціях.</string>
     <string name="sections_err_too_large">Список секцій завеликий, він не збережеться.</string>
     <string name="sections_err_unreadable">Секції записані новішою версією RCQ.</string>
+    <string name="gi_links">Посилання дозволені</string>
+    <string name="gi_links_desc">Учасники можуть надсилати посилання</string>
+    <string name="gi_files">Файли дозволені</string>
+    <string name="gi_files_desc">Учасники можуть прикріплювати файли та медіа</string>
+    <string name="gi_slowmode">Повільний режим</string>
+    <string name="gi_slowmode_desc">Як часто один учасник може писати</string>
+    <string name="gi_slow_off">Вимк</string>
+    <string name="chat_files_off">Власник групи вимкнув надсилання файлів</string>
 </resources>

@@ -1899,7 +1899,18 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 members = group?.members ?: emptyList(),
                 ownUin = ownUin,
                 accentColor = c.accent,
-                onAttach = { attachMenu = true },
+                onAttach = {
+                    // Files switched off by the room's owner (#755): the
+                    // island cannot see what a sealed envelope carries, so
+                    // honouring the policy is the sender's job, same as the
+                    // desktop. The owner keeps the button — it is their rule.
+                    val filesOff = group != null && !group.filesAllowed && ownUin != group.ownerUin
+                    if (filesOff) {
+                        android.widget.Toast.makeText(context, context.getString(R.string.chat_files_off), android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        attachMenu = true
+                    }
+                },
                 onTyping = { nonBlank ->
                     if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, nonBlank)
                 },
