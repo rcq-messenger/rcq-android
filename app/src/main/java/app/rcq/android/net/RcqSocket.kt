@@ -143,6 +143,21 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
                 }
             }
 
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                // ⚠ Without this override a SERVER-initiated close never became
+                // onClosed at all. OkHttp only fires onClosed once the client
+                // has enqueued its own close frame; we never did, so the
+                // server's close frame (4000 superseded, 4401 auth, 1012
+                // resync-bounce) sat unanswered while the server waited ~10s
+                // for the echo and cut TCP, and the client learned about any
+                // of it only when a protocol ping failed 10-40s later (worst
+                // case the 90s watchdog). During that zombie window send()
+                // kept returning true into a dead pipe. Answering the
+                // handshake makes onClosed fire immediately, so the 1s
+                // backoff + drain-on-open actually run when the server asks.
+                webSocket.close(1000, null)
+            }
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (gen != generation) return
                 believedConnected = false
