@@ -369,6 +369,9 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     // clients on render and compose.
                     GroupToggleRow(stringResource(R.string.gi_links), stringResource(R.string.gi_links_desc), group.linksAllowed) { v -> scope.launch { runCatching { session.patchGroup(groupId, linksAllowed = v) } } }
                     GroupToggleRow(stringResource(R.string.gi_files), stringResource(R.string.gi_files_desc), group.filesAllowed) { v -> scope.launch { runCatching { session.patchGroup(groupId, filesAllowed = v) } } }
+                    // Voluntary catalog (stage 6): listing publishes the name
+                    // and description so island search can match the room.
+                    GroupToggleRow(stringResource(R.string.gi_catalog), stringResource(R.string.gi_catalog_desc), group.inCatalog) { v -> scope.launch { runCatching { session.patchGroup(groupId, inCatalog = v) } } }
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.gi_slowmode), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Text(stringResource(R.string.gi_slowmode_desc), color = c.textSecondary, fontSize = 12.sp)

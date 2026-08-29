@@ -1233,6 +1233,8 @@
     <string name="sections_err_too_many_members">Забагато чатів в усіх секціях.</string>
     <string name="sections_err_too_large">Список секцій завеликий, він не збережеться.</string>
     <string name="sections_err_unreadable">Секції записані новішою версією RCQ.</string>
+    <string name="gi_catalog">Показувати в пошуку</string>
+    <string name="gi_catalog_desc">Назва та опис кімнати публікуються, щоб її можна було знайти. Вимк: лише за посиланням.</string>
     <string name="gi_links">Посилання дозволені</string>
     <string name="gi_links_desc">Учасники можуть надсилати посилання</string>
     <string name="gi_files">Файли дозволені</string>

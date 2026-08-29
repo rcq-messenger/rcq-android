@@ -1280,6 +1280,8 @@
     <string name="island_host_hint">server host</string>
     <string name="island_manual_help">The default is the public RCQ island. Point at an organisation\'s island or your own self-host.</string>
     <string name="island_reset_default">Reset to default</string>
+    <string name="gi_catalog">Show in search</string>
+    <string name="gi_catalog_desc">The room\'s name and description are published so people can find it. Off: link only.</string>
     <string name="gi_links">Links allowed</string>
     <string name="gi_links_desc">Members may post links</string>
     <string name="gi_files">Files allowed</string>

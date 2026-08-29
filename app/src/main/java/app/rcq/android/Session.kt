@@ -3523,6 +3523,7 @@ class Session(context: Context) {
         membersHidden = g.members_hidden,
         pinnedText = g.pinned_text,
         linksAllowed = g.links_allowed,
+        inCatalog = g.in_catalog,
         filesAllowed = g.files_allowed,
         slowmodeSec = g.slowmode_sec,
         avatarMediaId = g.avatar_media_id,
@@ -4042,12 +4043,14 @@ class Session(context: Context) {
         linksAllowed: Boolean? = null,
         filesAllowed: Boolean? = null,
         slowmodeSec: Int? = null,
+        inCatalog: Boolean? = null,
     ) {
         val ctx = groupCtx(id)
         upsertGroup(mapGroupCtx(ctx, ctx.api.patchGroup(ctx.gid, RcqApi.GroupPatchBody(
             name = name, description = description, pinned_text = pinnedText,
             post_policy = postPolicy, is_closed = isClosed, members_hidden = membersHidden,
             links_allowed = linksAllowed, files_allowed = filesAllowed, slowmode_sec = slowmodeSec,
+            in_catalog = inCatalog,
         ))))
     }
 

@@ -1275,6 +1275,8 @@
     <string name="island_host_hint">адрес сервера</string>
     <string name="island_manual_help">По умолчанию это общий остров RCQ. Укажите остров организации или свой собственный.</string>
     <string name="island_reset_default">Вернуть стандартный</string>
+    <string name="gi_catalog">Показывать в поиске</string>
+    <string name="gi_catalog_desc">Имя и описание комнаты публикуются, чтобы её можно было найти. Выкл: только по ссылке.</string>
     <string name="gi_links">Ссылки разрешены</string>
     <string name="gi_links_desc">Участники могут отправлять ссылки</string>
     <string name="gi_files">Файлы разрешены</string>

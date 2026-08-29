@@ -1227,6 +1227,8 @@
     <string name="sections_err_too_many_members">所有分组里的聊天太多了。</string>
     <string name="sections_err_too_large">分组列表太大，保存不了。</string>
     <string name="sections_err_unreadable">你的分组是更新版本的 RCQ 写的。</string>
+    <string name="gi_catalog">在搜索中显示</string>
+    <string name="gi_catalog_desc">房间名称和简介会被发布,以便他人找到。关闭:仅限链接进入。</string>
     <string name="gi_links">允许链接</string>
     <string name="gi_links_desc">成员可以发送链接</string>
     <string name="gi_files">允许文件</string>
