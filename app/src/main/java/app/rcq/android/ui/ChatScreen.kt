@@ -1722,7 +1722,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         senderName = if (isGroup && !row.items.first().fromMe && row.showSender) authorName(row.items.first()) else null,
                         senderAvatarId = if (row.showSender) authorMember(row.items.first())?.avatarMediaId else null,
                         senderAvatarKey = if (row.showSender) authorMember(row.items.first())?.avatarMediaKey else null,
-                        onLongPress = { actionMsg = row.items.first() },
+                        onLongPress = { held -> actionMsg = held },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                         // An album is one sender's batch, so the first item
                         // names the whole row.
@@ -3191,7 +3191,11 @@ private fun MessageLongPressOverlay(
                             },
                         )
                     }
-                    if (m.fromMe && m.kind == "text") {
+                    // #739: a photo/video/file caption is the row's body, and the
+                    // edit envelope replaces a body by id on every client - so
+                    // captions have always been editable in the protocol, only
+                    // this menu said no.
+                    if (m.fromMe && (m.kind == "text" || m.kind == "photo" || m.kind == "video" || m.kind == "file")) {
                         add(MsgOverlayItem(stringResource(R.string.chat_edit), Icons.Filled.Edit) { onEdit(m); onDismiss() })
                     }
                     if (m.fromMe && m.state == DeliveryState.FAILED) {
@@ -4023,7 +4027,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: (ChatMessage) -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -4067,7 +4071,10 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
 private fun AlbumGrid(
     session: Session,
     items: List<ChatMessage>,
-    onLongPress: () -> Unit,
+    // #749: which TILE was held. The old () -> Unit collapsed every tile to
+    // the album's first message, so "delete" from a held photo deleted the
+    // wrong one.
+    onLongPress: (ChatMessage) -> Unit,
     onViewImage: (ByteArray) -> Unit = {},
     onViewVideo: (VideoSource) -> Unit = {},
     onOpenAlbum: (Int) -> Unit = {},
@@ -4080,25 +4087,25 @@ private fun AlbumGrid(
         val gridMod = Modifier.clip(RoundedCornerShape(12.dp))
         when (count) {
             2 -> Row(gridMod, horizontalArrangement = Arrangement.spacedBy(sp)) {
-                AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
-                AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
+                AlbumTile(session, items[0], half, maxW * 0.5f, { onLongPress(items[0]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
+                AlbumTile(session, items[1], half, maxW * 0.5f, { onLongPress(items[1]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
             }
             3 -> Column(gridMod, verticalArrangement = Arrangement.spacedBy(sp)) {
-                AlbumTile(session, items[0], maxW, maxW * 0.55f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
+                AlbumTile(session, items[0], maxW, maxW * 0.55f, { onLongPress(items[0]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[1], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
-                    AlbumTile(session, items[2], half, maxW * 0.385f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(2) })
+                    AlbumTile(session, items[1], half, maxW * 0.385f, { onLongPress(items[1]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
+                    AlbumTile(session, items[2], half, maxW * 0.385f, { onLongPress(items[2]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(2) })
                 }
             }
             else -> Column(gridMod, verticalArrangement = Arrangement.spacedBy(sp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[0], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
-                    AlbumTile(session, items[1], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
+                    AlbumTile(session, items[0], half, maxW * 0.5f, { onLongPress(items[0]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(0) })
+                    AlbumTile(session, items[1], half, maxW * 0.5f, { onLongPress(items[1]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(1) })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(sp)) {
-                    AlbumTile(session, items[2], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(2) })
+                    AlbumTile(session, items[2], half, maxW * 0.5f, { onLongPress(items[2]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(2) })
                     Box(contentAlignment = Alignment.Center) {
-                        AlbumTile(session, items[3], half, maxW * 0.5f, onLongPress, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(3) })
+                        AlbumTile(session, items[3], half, maxW * 0.5f, { onLongPress(items[3]) }, onViewImage, onViewVideo, onOpenAlbum = { onOpenAlbum(3) })
                         if (items.size > 4) {
                             Box(
                                 Modifier.size(half, maxW * 0.5f).background(Color.Black.copy(alpha = 0.5f)),
