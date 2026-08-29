@@ -4524,6 +4524,7 @@ class Session(context: Context) {
                 is Envelope.ScreenshotTaken -> Unit
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
+                is Envelope.ReadMark -> Unit     // A2 marker rides INSIDE a carbon, never group-sealed
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
                 is Envelope.ContactRequest -> Unit // §5f is 1:1 consent, never group-sealed
                 is Envelope.ProfileUpdate -> Unit  // §5e is deposited per-contact, never group-sealed
@@ -6237,6 +6238,29 @@ class Session(context: Context) {
         }
     }
 
+    /** Tell my OTHER devices that I read a thread (megalist A2). The marker
+     *  rides inside the same self-carbon a sent message uses, so the island
+     *  sees the sealed self-addressed blob it has always seen. The outer type
+     *  is "read", which the island already files as EPHEMERAL: it reaches my
+     *  other devices live and through their queues, but never pushes a "new
+     *  message" banner to my own sleeping phone, and "read" is a token the
+     *  island reads on every peer receipt anyway. Nothing new is learned,
+     *  which was the condition this feature had to meet.
+     *
+     *  Never for Saved Messages (I am the peer there) and never for a foreign
+     *  group (its id is per-device, the §5c limit carbons already document).
+     *  Best effort: a lost marker only means the other device clears its badge
+     *  when it is next opened, exactly as it did before. */
+    private suspend fun sendReadMarker(toPeer: Int?, toGroup: Int?) {
+        val me = store.uin ?: return
+        if (toPeer != null && toPeer == me) return
+        if (toGroup != null && groups.value.firstOrNull { it.id == toGroup }?.host != null) return
+        runCatching {
+            val carbon = Envelope.Carbon(to = toPeer, gid = toGroup, env = Envelope.ReadMark(System.currentTimeMillis()))
+            sendSealedCopies(me, encryptFor(me, carbon), envelopeType = "read")
+        }
+    }
+
     /** Fan a control envelope (delete / edit / reaction) out to the group.
      *  Mirrors fanOutGroup's transport split: capable members get ONE
      *  sender-keys gmsg broadcast, legacy members a per-member sealed copy.
@@ -7013,6 +7037,7 @@ class Session(context: Context) {
                     // Only honour my own carbon; file the inner message as fromMe
                     // in its destination thread (dedup by id; no badge/sound).
                     if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
+                is Envelope.ReadMark -> Unit   // A2 marker only ever arrives WRAPPED in a carbon
                 is Envelope.Skdm -> Unit       // sender-keys distribution is group-only
                 is Envelope.Sknack -> Unit     // sender-keys recovery is group-only
                 is Envelope.RelayShare ->
@@ -7046,6 +7071,9 @@ class Session(context: Context) {
                 // as our own account at the call site, so no authority check.
                 is Envelope.Edit -> editInFlow(_groupMessages, gid, inner.targetId, inner.text)
                 is Envelope.Delete -> deleteInFlow(_groupMessages, gid, inner.targetId)
+                // I read this room on another device (A2): drop the badge
+                // here too, minus anything that landed after that moment.
+                is Envelope.ReadMark -> applyRemoteRead(LocalStores.groupThread(gid), inner.at, gid = gid)
                 else -> Unit
             }
         } else if (to != null) {
@@ -7058,6 +7086,8 @@ class Session(context: Context) {
                 is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", now, kind = "location", lat = inner.lat, lng = inner.lng, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
                 is Envelope.Edit -> editInFlow(_messages, to, inner.targetId, inner.text)
                 is Envelope.Delete -> deleteInFlow(_messages, to, inner.targetId)
+                // I read this thread on another device (A2).
+                is Envelope.ReadMark -> applyRemoteRead(LocalStores.peerThread(to), inner.at, peer = to)
                 else -> Unit
             }
         }
@@ -9044,9 +9074,37 @@ class Session(context: Context) {
 
     fun openThread(thread: String) {
         activeThread = thread
+        val had = LocalStores.unreadOf(thread)
         LocalStores.clearUnread(thread)
         LocalStores.clearReaction(thread)
         LocalStores.clearMention(thread)
+        // A2: my other devices drop this thread's badge too. Only worth a
+        // packet when there WAS something unread; opening an already-read
+        // chat says nothing, so it sends nothing.
+        if (had > 0) {
+            val peer = thread.removePrefix("peer:").toIntOrNull().takeIf { thread.startsWith("peer:") }
+            val gid = thread.removePrefix("group:").toIntOrNull().takeIf { thread.startsWith("group:") }
+            if (peer != null || gid != null) scope.launch { sendReadMarker(peer, gid) }
+        }
+    }
+
+    /** Another device of this account read a thread up to [at] (A2). Recount
+     *  rather than clear: a message that landed AFTER that moment is still
+     *  unread here, so a marker crossing paths with a fresh message cannot
+     *  swallow it. The badge only ever shrinks, so a stale or out-of-order
+     *  marker can never un-read a thread. */
+    private fun applyRemoteRead(thread: String, at: Long, peer: Int? = null, gid: Int? = null) {
+        val current = LocalStores.unreadOf(thread)
+        if (current <= 0) return
+        val rows = if (gid != null) _groupMessages.value[gid] ?: emptyList()
+        else if (peer != null) _messages.value[peer] ?: emptyList()
+        else return
+        // Only rows somebody else sent count towards a badge.
+        val after = rows.count { !it.fromMe && it.sentAt > at }
+        val next = minOf(current, after)
+        if (next == current) return
+        // decUnread drops the entry when it hits zero, exactly like clearUnread.
+        LocalStores.decUnread(thread, current - next)
     }
 
     fun closeThread() {
