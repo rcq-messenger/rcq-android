@@ -3497,11 +3497,18 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
     }
     // Minimal RcqGroup so the shared GroupAvatar can render the real avatar
     // (or fall back to the generic glyph for groups without one).
-    val avatarGroup = remember(p) {
+    val avatarGroup = remember(p, groups) {
         p?.let {
+            // Stage 6: the island serves the avatar pair to MEMBERS only, so
+            // the preview carries it only for rooms we are in - and for those
+            // the local roster has it anyway. A stranger's link renders the
+            // generic glyph, which is the point.
+            val local = groups.firstOrNull { g -> g.id == it.id }
             app.rcq.android.model.RcqGroup(
                 id = it.id, name = it.name ?: "", ownerUin = it.owner_uin,
-                isClosed = it.is_closed, avatarMediaId = it.avatar_media_id, avatarMediaKey = it.avatar_media_key,
+                isClosed = it.is_closed,
+                avatarMediaId = it.avatar_media_id ?: local?.avatarMediaId,
+                avatarMediaKey = it.avatar_media_key ?: local?.avatarMediaKey,
             )
         }
     }
@@ -3710,11 +3717,18 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
         }?.id
         else groups.firstOrNull { it.id == groupId }?.id
     }
-    val avatarGroup = remember(p) {
+    val avatarGroup = remember(p, groups) {
         p?.let {
+            // Stage 6: the island serves the avatar pair to MEMBERS only, so
+            // the preview carries it only for rooms we are in - and for those
+            // the local roster has it anyway. A stranger's link renders the
+            // generic glyph, which is the point.
+            val local = groups.firstOrNull { g -> g.id == it.id }
             app.rcq.android.model.RcqGroup(
                 id = it.id, name = it.name ?: "", ownerUin = it.owner_uin,
-                isClosed = it.is_closed, avatarMediaId = it.avatar_media_id, avatarMediaKey = it.avatar_media_key,
+                isClosed = it.is_closed,
+                avatarMediaId = it.avatar_media_id ?: local?.avatarMediaId,
+                avatarMediaKey = it.avatar_media_key ?: local?.avatarMediaKey,
             )
         }
     }
