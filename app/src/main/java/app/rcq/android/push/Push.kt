@@ -368,8 +368,36 @@ object Push {
         val row = health.devices.firstOrNull {
             it.platform == "android-up" && it.host.equals(host, ignoreCase = true)
         } ?: return false
-        return isUnreachableError(row.last_error)
+        // Transport failure: the island cannot reach the host at all. This was
+        // the whole test until the edge relay went up in front of ntfy.sh -
+        // after which every POST reaches ntfy and comes back as a STATUS
+        // ("507": no subscriber), so this branch went quiet and the hundreds
+        // of devices whose ntfy app had died stopped ever being healed. The
+        // relay fixed the server's half and silently disarmed the client's.
+        if (isUnreachableError(row.last_error)) return true
+        // Deaf subscription: this device is OPEN RIGHT NOW (heal only runs in
+        // the foreground), and yet not one wake has landed for a week. A
+        // healthy distributor on an in-use phone does not look like that,
+        // whatever status code the host answers with. A device that merely
+        // slept a week has last_ok catching up the moment its distributor
+        // reconnects; if it has not, moving to the embedded one - which needs
+        // no third-party app to be alive - is the favour, not the fight.
+        val weekMs = 7L * 24 * 3600 * 1000
+        val now = System.currentTimeMillis()
+        val lastOk = row.last_ok?.let { parseIsoMs(it) }
+        val registered = row.registered_at?.let { parseIsoMs(it) }
+        val deaf = if (lastOk != null) now - lastOk > weekMs
+        else registered != null && now - registered > weekMs
+        return deaf && row.last_error != null
     }
+
+    /** ISO-8601 from the island ("2026-08-30T12:00:00Z" or with offset) to
+     *  epoch ms, null when unparseable - a decision function must not throw. */
+    private fun parseIsoMs(iso: String): Long? = runCatching {
+        java.time.OffsetDateTime.parse(iso).toInstant().toEpochMilli()
+    }.getOrNull() ?: runCatching {
+        java.time.Instant.parse(iso).toEpochMilli()
+    }.getOrNull()
 
     /** Act on [shouldSwitchToEmbedded]: repoint this device at our own
      *  distributor (push.rcq.app) and re-register. Returns true when it moved.
