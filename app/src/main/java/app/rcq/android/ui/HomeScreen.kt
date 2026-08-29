@@ -545,7 +545,10 @@ internal fun HomeScreen(
             online = byRecency(looseContacts.filter { it.host == null && it.presence != UserStatus.OFFLINE }),
             offline = byRecency(looseContacts.filter { it.host == null && it.presence == UserStatus.OFFLINE }),
             archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived }),
-            visibleGroups = looseGroups,
+            // A favorited group lives in Favorites and ONLY there (#748) —
+            // the desktop has deduplicated this way from the start, and the
+            // double row was the reason people avoided favoriting groups.
+            visibleGroups = looseGroups.filter { LocalStores.groupThread(it.id) !in favorites },
             archivedGroups = groups.filter { LocalStores.groupThread(it.id) in archived },
             // Favorited groups are surfaced in the Favorites section (the toggle
             // already persisted, but the section only rendered contacts so a
