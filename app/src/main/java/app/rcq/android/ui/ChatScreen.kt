@@ -43,7 +43,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.window.Dialog
@@ -81,13 +86,21 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.Message
+// Aliased: `Reply` is already this file's crypto payload class (onSend).
+import androidx.compose.material.icons.automirrored.filled.Reply as ReplyIcon
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
@@ -398,6 +411,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // a character doesn't recompose the whole ChatScreen (header + message
     // LazyColumn). That recomposition-per-keystroke was the input-field lag.
     var actionMsg by remember { mutableStateOf<ChatMessage?>(null) }
+    // The composer emoticon panel. The state lives HERE rather than inside
+    // Composer (where the draft stays) because the message LIST closes it now:
+    // a tap on the list or the start of a scroll puts the panel away, iOS
+    // style, and the list is not the Composer's to touch. The #741 keyboard
+    // choreography stays in Composer, next to the field it orchestrates.
+    var showEmoji by remember { mutableStateOf(false) }
     // Long-pressing a reaction chip opens a "who reacted" sheet for that message.
     var whoReactedMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var editMsg by remember { mutableStateOf<ChatMessage?>(null) }
@@ -555,6 +574,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         initialFirstVisibleItemIndex = initialListPos.first,
         initialFirstVisibleItemScrollOffset = initialListPos.second,
     )
+    // Close the emoticon panel the moment the list starts moving (iOS closes
+    // it on any interaction with the chat content). Keyed on the panel so a
+    // closed panel costs nothing: no flow is collecting, and nothing here
+    // reads scroll state during composition (a raw isScrollInProgress read in
+    // the body would recompose the whole screen on every scroll start/stop).
+    LaunchedEffect(showEmoji) {
+        if (!showEmoji) return@LaunchedEffect
+        snapshotFlow { listState.isScrollInProgress }.filter { it }.collect { showEmoji = false }
+    }
 
     // Share / save media to device (report #6 — Android couldn't share/download
     // a photo/video; iOS already could). Save uses scoped MediaStore on API 29+
@@ -1260,8 +1288,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // opens and the frosted chrome slices always line up with it. With no
     // wallpaper it draws nothing and the root's bgPrimary is exactly the
     // ground every element has always stood on.
-    Box(Modifier.fillMaxSize().wallpaperSliceLayer(slices)) { ChatBackground() }
-    Column(Modifier.fillMaxSize().imePadding()) {
+    // L2.11: while the message overlay is up, everything behind it blurs, the
+    // wallpaper layer INCLUDED (HomeScreen does the same for its row preview;
+    // blurring only the content would leave sharp wallpaper grinning through
+    // the bubbles' gaps). API 31+ only; below that RenderEffect is a silent
+    // no-op and the overlay's heavier dim carries the scrim alone.
+    // Conditional so the everyday chain is exactly the plain one it always
+    // was, and STATIC while open: the layer blurs a stilled frame under a
+    // modal scrim, never per-frame over a scrolling list (the
+    // ChatBackground.kt policy).
+    val overlayBlur =
+        if (actionMsg != null && android.os.Build.VERSION.SDK_INT >= 31) {
+            Modifier.graphicsLayer { renderEffect = BlurEffect(24f, 24f) }
+        } else {
+            Modifier
+        }
+    Box(Modifier.fillMaxSize().then(overlayBlur).wallpaperSliceLayer(slices)) { ChatBackground() }
+    Column(
+        Modifier.fillMaxSize()
+            .then(overlayBlur)
+            .imePadding(),
+    ) {
         // Header. With no wallpaper: byte-identical to what it has always
         // been, a 0.6 wash of bgSecondary on the theme ground. With one, the
         // wash sits on a frosted slice of the wallpaper (L2.9). The #648
@@ -1520,7 +1567,29 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             )
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier.weight(1f).fillMaxWidth()
+                // Tap-outside close for the emoticon panel (iOS taps the chat
+                // content to put it away). A down in the Initial pass: it
+                // never consumes and never delays the bubbles' own click and
+                // long-press handlers, and it deliberately does NOT raise the
+                // keyboard, since the reader touched the LIST, not the field
+                // (#741's two exits stay two). Conditional on purpose: with
+                // the panel closed the modifier does not exist at all, so
+                // normal message taps pay nothing.
+                .then(
+                    if (showEmoji) {
+                        Modifier.pointerInput(showEmoji) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                showEmoji = false
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
         // (The wallpaper used to be drawn HERE, clipped to this Box; L2.9
         // moved it to the full-screen layer behind the whole Column, so the
         // list simply stays transparent over it.)
@@ -1946,6 +2015,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             Composer(
                 threadKey = threadKey,
                 focusRequester = composerFocus,
+                showEmoji = showEmoji,
+                onShowEmoji = { showEmoji = it },
                 isGroup = isGroup,
                 members = group?.members ?: emptyList(),
                 ownUin = ownUin,
@@ -1991,6 +2062,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             )
         }
         }
+    }
+
+    // L2.11: the message long-press menu, an iOS-style overlay rendered as
+    // the last child of the chat root Box so it paints over everything here
+    // (header, list, bottom chrome). The body lives in [MessageLongPressOverlay];
+    // see its kdoc for why it must NOT be inlined back into this function.
+    actionMsg?.let { m ->
+        MessageLongPressOverlay(
+            session = session,
+            m = m,
+            isSelf = isSelf,
+            group = group,
+            ownUin = ownUin,
+            canPost = canPost,
+            reactionSet = reactionSet,
+            onStartReply = startReply,
+            onShare = { shareMessageMedia(it) },
+            onSave = { saveMessageMedia(it) },
+            onEdit = { editMsg = it },
+            onDismiss = { actionMsg = null },
+        )
     }
     }
 
@@ -2150,129 +2242,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             }
             SheetTextRow(stringResource(R.string.common_done)) { whoReactedMsg = null }
-        }
-    }
-
-    actionMsg?.let { m ->
-        // "Delete for everyone" is offered for your own message, OR (in a group)
-        // when you're a moderator: the owner, an admin, or a member granted the
-        // `delete` cap (founder batch 21.08, item 3; web precedent: Chat.tsx
-        // canModerate). Recipients re-check the same rule on receipt.
-        // Saved (notes to self) has no "everyone" — you ARE everyone there, and
-        // offering both "delete for everyone" and "delete for me" on your own
-        // note only asks the user to decide something meaningless. Reported by
-        // vss: "У кого «всех»? Надо один пункт просто Удалить."
-        val canDeleteAll = !isSelf && (m.fromMe || (group != null && group.moderator(ownUin)))
-        // A sheet, not a centre dialog: this is the most-used menu in the app and
-        // it belongs under the thumb, next to the message it acts on (iOS has
-        // had it as a sheet from the start; on Android everything was a centred
-        // AlertDialog, which reads as a system warning rather than a menu).
-        ModalBottomSheet(
-            onDismissRequest = { actionMsg = null },
-            containerColor = c.bgSecondary,
-        ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-                Text(
-                    stringResource(if (m.kind == "photo") R.string.chat_a_photo else R.string.chat_a_message),
-                    color = c.textSecondary, fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                Column {
-                    // Founder item 21: the reactions this user actually uses
-                    // come FIRST, so the two or three they reach for every day
-                    // never need a horizontal scroll to reach. Ties keep the
-                    // order they were configured in.
-                    //
-                    // ★ Settled once, at OPEN, and never again while the bar is
-                    // up: `remember` is keyed on the message id and this whole
-                    // block leaves composition when the sheet closes, so the
-                    // order is computed on the way in and is then frozen. Recom-
-                    // puting live would re-sort the row under a finger that is
-                    // already moving towards a smiley, which is how you send the
-                    // wrong reaction. The counter is bumped BELOW, on the tap,
-                    // by which point this list is already fixed for this open.
-                    val quickReactions = remember(m.id) { LocalStores.byMostUsed(reactionSet) }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
-                    ) {
-                        quickReactions.forEach { asset ->
-                            Box(
-                                modifier = Modifier.clip(CircleShape).clickable {
-                                    LocalStores.bumpReactionUse(asset)
-                                    scope.launch { runCatching { session.sendReaction(m, asset) } }
-                                    actionMsg = null
-                                }.padding(4.dp),
-                            ) { AnimatedEmoticon(asset, Modifier.size(32.dp)) }
-                        }
-                    }
-                    // Same rule as the swipe above: no composer, no reply row.
-                    if (canPost) MessageAction(stringResource(R.string.chat_reply)) { startReply(m); actionMsg = null }
-                    if (m.kind == "photo" || m.kind == "video" || m.kind == "file" || m.kind == "voice") {
-                        MessageAction(stringResource(R.string.media_share)) { shareMessageMedia(m); actionMsg = null }
-                        MessageAction(stringResource(R.string.media_save)) { saveMessageMedia(m); actionMsg = null }
-                    }
-                    // Pin from chat (owner / info-moderator): copies this message's
-                    // text into the single group pin slot, replacing whatever was
-                    // there (a chat pin or the settings-entered text — one slot).
-                    if (group != null && group.members.firstOrNull { it.uin == ownUin }?.canManageInfo(group.ownerUin) == true) {
-                        val pinFallback = stringResource(R.string.chat_pinned_media)
-                        val pinFailToast = stringResource(R.string.chat_pin_failed)
-                        MessageAction(stringResource(R.string.chat_pin)) {
-                            // ⚠ The island's slot is 500 chars (GroupPatchIn.pinned_text) and a
-                            // longer body is refused BEFORE the row is written. Unclamped, the
-                            // optimistic swap below showed the new pin until the next refresh put
-                            // the old one back: a pin that looked like it worked and did nothing.
-                            val body = m.body.ifBlank { pinFallback }
-                            val text = if (body.length > 500) body.take(499) + "…" else body
-                            val previous = group.pinnedText
-                            // Optimistic + instant: replace the displayed pin now,
-                            // then PATCH (the response reconciles it).
-                            session.applyPinnedTextLocally(group.id, text)
-                            scope.launch {
-                                runCatching { session.patchGroup(group.id, pinnedText = text) }
-                                    .onFailure {
-                                        session.applyPinnedTextLocally(group.id, previous ?: "")
-                                        android.widget.Toast.makeText(context, pinFailToast, android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                            }
-                            actionMsg = null
-                        }
-                    }
-                    if (m.kind == "text") MessageAction(stringResource(R.string.chat_copy)) {
-                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("message", m.body))
-                        actionMsg = null
-                    }
-                    if (m.fromMe && m.kind == "text") MessageAction(stringResource(R.string.chat_edit)) { editMsg = m; actionMsg = null }
-                    if (m.fromMe && m.state == DeliveryState.FAILED) MessageAction(stringResource(R.string.chat_retry)) {
-                        scope.launch { runCatching { session.resend(m) } }; actionMsg = null
-                    }
-                    if (canDeleteAll) MessageAction(stringResource(R.string.chat_delete_all), danger = true) {
-                        scope.launch { runCatching { session.sendDeleteForEveryone(m) } }; actionMsg = null
-                    }
-                    MessageAction(
-                        stringResource(if (isSelf) R.string.chat_delete else R.string.chat_delete_me),
-                        danger = true,
-                    ) {
-                        // ⚠ In Saved Messages this is the ONLY delete on offer
-                        // (`canDeleteAll` is false above — you ARE everyone
-                        // there), and it used to be a purely local erase. But a
-                        // note has not been local since #469: it ships to your
-                        // own number so every device of the account gets it. So
-                        // "Удалить" removed the note here and left it standing
-                        // on the web and on the other phone, with no reload or
-                        // restart able to catch up — report #601. The single
-                        // menu item stays; what it means now matches what the
-                        // thread actually is, and the retraction rides the same
-                        // envelope every other delete does (to my own number,
-                        // where the other devices pick it up).
-                        if (isSelf) scope.launch { runCatching { session.sendDeleteForEveryone(m) } }
-                        else session.deleteLocal(m)
-                        actionMsg = null
-                    }
-                }
-            }
         }
     }
 
@@ -2585,6 +2554,12 @@ private fun Composer(
     // Owned by ChatScreen so choosing "reply" can put the caret in here and
     // raise the keyboard without the user tapping the field first.
     focusRequester: FocusRequester,
+    // Also owned by ChatScreen, because the message list closes the panel
+    // (tap or scroll on the chat content, iOS-style). Every open/close in
+    // here goes through the setter; the keyboard half of the choreography
+    // (#741) stays local to this composable.
+    showEmoji: Boolean,
+    onShowEmoji: (Boolean) -> Unit,
     isGroup: Boolean,
     members: List<app.rcq.android.model.GroupMember>,
     ownUin: Int,
@@ -2616,7 +2591,6 @@ private fun Composer(
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    var showEmoji by remember { mutableStateOf(false) }
     // The draft lives HERE (not in ChatScreen) so a keystroke recomposes only
     // the composer, not the header + message list. Seeded from / persisted to
     // the process-lifetime ChatDrafts map, keyed by thread.
@@ -2699,7 +2673,6 @@ private fun Composer(
                 }
             }
         }
-        if (showEmoji && !recording) EmoticonPanel(onPick = insertAtCaret)
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
@@ -2726,14 +2699,19 @@ private fun Composer(
                     modifier = Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onAttach).padding(8.dp),
                 )
                 Icon(
-                    Icons.Filled.Mood, stringResource(R.string.chat_emoticons), tint = if (showEmoji) c.accent else c.textSecondary,
+                    // The glyph names the thing the tap brings BACK (iOS
+                    // parity): a keyboard while the panel is up, the smiley
+                    // while the keyboard is.
+                    if (showEmoji) Icons.Filled.Keyboard else Icons.Filled.Mood,
+                    stringResource(R.string.chat_emoticons), tint = if (showEmoji) c.accent else c.textSecondary,
                     modifier = Modifier.size(40.dp).clip(CircleShape).clickable {
-                        showEmoji = !showEmoji
+                        val open = !showEmoji
+                        onShowEmoji(open)
                         // Both directions, not one (#741): opening the panel
                         // parked the keyboard and closing it left the user
                         // with neither — the field still had focus, so one
                         // show() is all the way back.
-                        if (showEmoji) keyboard?.hide() else keyboard?.show()
+                        if (open) keyboard?.hide() else keyboard?.show()
                     }.padding(8.dp),
                 )
                 // Over a chat wallpaper the pill is translucent so the bar
@@ -2771,7 +2749,7 @@ private fun Composer(
                         keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                         maxLines = 5,
                         modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
-                            .onFocusChanged { if (it.isFocused) showEmoji = false },
+                            .onFocusChanged { if (it.isFocused) onShowEmoji(false) },
                     )
                 }
             }
@@ -2791,8 +2769,10 @@ private fun Composer(
                                 ChatDrafts.byThread.remove(threadKey)
                                 // The emoticon panel stayed up after sending, so
                                 // the next message was composed against a keyboard
-                                // that wasn't there (reported on 0.100).
-                                showEmoji = false
+                                // that wasn't there (reported on 0.100). No
+                                // keyboard?.show() here on purpose: composing is
+                                // DONE, unlike the Mood toggle's exit.
+                                onShowEmoji(false)
                                 onSend(body)
                             }
                         } else {
@@ -2825,6 +2805,10 @@ private fun Composer(
                 )
             }
         }
+        // BELOW the input row, in the keyboard's place (iOS docks it under
+        // the bar): the panel swaps with the IME, so it stands where the IME
+        // stood, not between the bar and the list.
+        if (showEmoji && !recording) EmoticonPanel(onPick = insertAtCaret)
     }
 }
 
@@ -2847,6 +2831,8 @@ private fun SheetTextRow(label: String, dimmed: Boolean = false, onClick: () -> 
     )
 }
 
+/** A plain text action row. The message menu moved to the L2.11 overlay (see
+ *  [MsgOverlayActionRow]); the attach sheet still speaks in these. */
 @Composable
 private fun MessageAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
     Text(
@@ -2855,6 +2841,299 @@ private fun MessageAction(label: String, danger: Boolean = false, onClick: () ->
         fontSize = 16.sp,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
     )
+}
+
+/** The message long-press menu (L2.11): full-screen scrim over the blurred
+ *  chat, the quick-reaction pill on top, a compact stand-in for the pressed
+ *  message, and the action rows as the iOS 260dp panel.
+ *
+ *  ⚠⚠ EXTRACTED from ChatScreen and it must stay extracted. ChatScreen is
+ *  already at the edge of what ART's verifier accepts for one method (the
+ *  23.08 try/finally VerifyError incident is the same disease), and inlining
+ *  this block (buildList with nine conditional adds) into it made the release
+ *  dex fail verification: opening ANY chat crashed with "register v3 has type
+ *  Precise Reference: Session but expected Integer". The compiler and
+ *  assembleRelease stay green; only installing the APK and opening a chat
+ *  catches it. A separate method is its own verification unit. */
+@Composable
+private fun MessageLongPressOverlay(
+    session: Session,
+    m: ChatMessage,
+    isSelf: Boolean,
+    group: app.rcq.android.model.RcqGroup?,
+    ownUin: Int,
+    canPost: Boolean,
+    reactionSet: List<String>,
+    onStartReply: (ChatMessage) -> Unit,
+    onShare: (ChatMessage) -> Unit,
+    onSave: (ChatMessage) -> Unit,
+    onEdit: (ChatMessage) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+        // "Delete for everyone" is offered for your own message, OR (in a group)
+        // when you're a moderator: the owner, an admin, or a member granted the
+        // `delete` cap (founder batch 21.08, item 3; web precedent: Chat.tsx
+        // canModerate). Recipients re-check the same rule on receipt.
+        // Saved (notes to self) has no "everyone" — you ARE everyone there, and
+        // offering both "delete for everyone" and "delete for me" on your own
+        // note only asks the user to decide something meaningless. Reported by
+        // vss: "У кого «всех»? Надо один пункт просто Удалить."
+        val canDeleteAll = !isSelf && (m.fromMe || (group != null && group.moderator(ownUin)))
+        // The old sheet fired no haptic; the overlay reads as a lift, and a
+        // lift answers the finger (same LongPress tick SwipeToReply uses).
+        // The keyboard goes down too: the sheet was its own WINDOW and took
+        // the IME with it for free, an in-tree overlay has to ask (and iOS
+        // resigns the keyboard on this long-press as well). Focus stays on
+        // the field, exactly like the sheet left it.
+        val overlayHaptics = LocalHapticFeedback.current
+        val overlayKeyboard = LocalSoftwareKeyboardController.current
+        LaunchedEffect(m.id) {
+            overlayHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            overlayKeyboard?.hide()
+        }
+        // The sheet's own window used to swallow Back; an in-tree overlay has
+        // to answer it itself or Back would leave the whole chat.
+        BackHandler { onDismiss() }
+        // Entry: fade + settle from 0.94, the shape HomeScreen's
+        // PreviewOverlay uses (exit is immediate there too).
+        var shown by remember(m.id) { mutableStateOf(false) }
+        LaunchedEffect(m.id) { shown = true }
+        val reveal by animateFloatAsState(if (shown) 1f else 0f, label = "msgOverlay")
+        Box(
+            Modifier.fillMaxSize()
+                .graphicsLayer { alpha = reveal }
+                // Below API 31 there is no blur behind this, so the dim does
+                // the whole job and is thicker for it.
+                .background(Color.Black.copy(alpha = if (android.os.Build.VERSION.SDK_INT >= 31) 0.35f else 0.45f))
+                .clickable(remember { MutableInteractionSource() }, indication = null) { onDismiss() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .graphicsLayer {
+                        val s = 0.94f + 0.06f * reveal
+                        scaleX = s
+                        scaleY = s
+                    }
+                    // The stack can outgrow a small screen (pill + preview +
+                    // up to nine rows); scrolling beats clipping the delete
+                    // rows off the bottom. Taps on the gaps still fall
+                    // through to the scrim's dismiss.
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Founder item 21: the reactions this user actually uses
+                // come FIRST, so the two or three they reach for every day
+                // never need a horizontal scroll to reach. Ties keep the
+                // order they were configured in.
+                //
+                // ★ Settled once, at OPEN, and never again while the bar is
+                // up: `remember` is keyed on the message id and this whole
+                // block leaves composition when the overlay closes, so the
+                // order is computed on the way in and is then frozen. Recom-
+                // puting live would re-sort the row under a finger that is
+                // already moving towards a smiley, which is how you send the
+                // wrong reaction. The counter is bumped BELOW, on the tap,
+                // by which point this list is already fixed for this open.
+                val quickReactions = remember(m.id) { LocalStores.byMostUsed(reactionSet) }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .shadow(8.dp, RoundedCornerShape(26.dp))
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(c.bgSecondary)
+                        .widthIn(max = 320.dp)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    quickReactions.forEach { asset ->
+                        Box(
+                            modifier = Modifier.clip(CircleShape).clickable {
+                                LocalStores.bumpReactionUse(asset)
+                                scope.launch { runCatching { session.sendReaction(m, asset) } }
+                                onDismiss()
+                            }.padding(4.dp),
+                        ) { AnimatedEmoticon(asset, Modifier.size(32.dp)) }
+                    }
+                }
+                // A compact stand-in for the pressed message, so the reader
+                // sees WHAT the menu acts on with the chat blurred behind.
+                if (m.kind == "text") {
+                    Box(
+                        Modifier
+                            .widthIn(max = (LocalConfiguration.current.screenWidthDp * 0.8f).dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
+                            // Same trick as HomeScreen's card: a tap on the
+                            // preview is not a dismiss.
+                            .clickable(enabled = false) {}
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        EmoticonText(m.body, color = c.textPrimary, fontSize = 15.sp, lineHeight = 19.sp, maxLines = 6)
+                    }
+                } else {
+                    // Media and the rest keep a compact chip: the kind's icon
+                    // plus the caption the sheet header used. A real thumbnail
+                    // would mean hoisting the bubbles' async decode machinery
+                    // up here; the chip says which message is under the
+                    // finger, which is the job.
+                    val kindIcon = when (m.kind) {
+                        "photo" -> Icons.Filled.Image
+                        "video" -> Icons.Filled.Videocam
+                        "voice" -> Icons.Filled.Mic
+                        "file" -> Icons.Filled.Description
+                        "location" -> Icons.Filled.LocationOn
+                        else -> Icons.AutoMirrored.Filled.Message
+                    }
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
+                            .clickable(enabled = false) {}
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(kindIcon, null, tint = c.textSecondary, modifier = Modifier.size(20.dp))
+                        Text(
+                            stringResource(if (m.kind == "photo") R.string.chat_a_photo else R.string.chat_a_message),
+                            color = c.textPrimary, fontSize = 14.sp,
+                        )
+                    }
+                }
+                // The action rows: the exact Android set, order, conditions
+                // and callbacks the sheet had, just laid out as the iOS
+                // 260dp panel with an icon slot per row.
+                val pinFallback = stringResource(R.string.chat_pinned_media)
+                val pinFailToast = stringResource(R.string.chat_pin_failed)
+                val overlayItems = buildList {
+                    // Same rule as the swipe above: no composer, no reply row.
+                    if (canPost) {
+                        add(MsgOverlayItem(stringResource(R.string.chat_reply), Icons.AutoMirrored.Filled.ReplyIcon) { onStartReply(m); onDismiss() })
+                    }
+                    if (m.kind == "photo" || m.kind == "video" || m.kind == "file" || m.kind == "voice") {
+                        add(MsgOverlayItem(stringResource(R.string.media_share), Icons.Filled.Share) { onShare(m); onDismiss() })
+                        add(MsgOverlayItem(stringResource(R.string.media_save), Icons.Filled.Download) { onSave(m); onDismiss() })
+                    }
+                    // Pin from chat (owner / info-moderator): copies this message's
+                    // text into the single group pin slot, replacing whatever was
+                    // there (a chat pin or the settings-entered text — one slot).
+                    if (group != null && group.members.firstOrNull { it.uin == ownUin }?.canManageInfo(group.ownerUin) == true) {
+                        add(
+                            MsgOverlayItem(stringResource(R.string.chat_pin), Icons.Filled.PushPin) {
+                                // ⚠ The island's slot is 500 chars (GroupPatchIn.pinned_text) and a
+                                // longer body is refused BEFORE the row is written. Unclamped, the
+                                // optimistic swap below showed the new pin until the next refresh put
+                                // the old one back: a pin that looked like it worked and did nothing.
+                                val body = m.body.ifBlank { pinFallback }
+                                val text = if (body.length > 500) body.take(499) + "…" else body
+                                val previous = group.pinnedText
+                                // Optimistic + instant: replace the displayed pin now,
+                                // then PATCH (the response reconciles it).
+                                session.applyPinnedTextLocally(group.id, text)
+                                scope.launch {
+                                    runCatching { session.patchGroup(group.id, pinnedText = text) }
+                                        .onFailure {
+                                            session.applyPinnedTextLocally(group.id, previous ?: "")
+                                            android.widget.Toast.makeText(context, pinFailToast, android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                }
+                                onDismiss()
+                            },
+                        )
+                    }
+                    if (m.kind == "text") {
+                        add(
+                            MsgOverlayItem(stringResource(R.string.chat_copy), Icons.Filled.ContentCopy) {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("message", m.body))
+                                onDismiss()
+                            },
+                        )
+                    }
+                    if (m.fromMe && m.kind == "text") {
+                        add(MsgOverlayItem(stringResource(R.string.chat_edit), Icons.Filled.Edit) { onEdit(m); onDismiss() })
+                    }
+                    if (m.fromMe && m.state == DeliveryState.FAILED) {
+                        add(
+                            MsgOverlayItem(stringResource(R.string.chat_retry), Icons.Filled.Refresh) {
+                                scope.launch { runCatching { session.resend(m) } }; onDismiss()
+                            },
+                        )
+                    }
+                    if (canDeleteAll) {
+                        add(
+                            MsgOverlayItem(stringResource(R.string.chat_delete_all), Icons.Filled.DeleteForever, danger = true) {
+                                scope.launch { runCatching { session.sendDeleteForEveryone(m) } }; onDismiss()
+                            },
+                        )
+                    }
+                    add(
+                        MsgOverlayItem(
+                            stringResource(if (isSelf) R.string.chat_delete else R.string.chat_delete_me),
+                            Icons.Filled.Delete,
+                            danger = true,
+                        ) {
+                            // ⚠ In Saved Messages this is the ONLY delete on offer
+                            // (`canDeleteAll` is false above — you ARE everyone
+                            // there), and it used to be a purely local erase. But a
+                            // note has not been local since #469: it ships to your
+                            // own number so every device of the account gets it. So
+                            // "Удалить" removed the note here and left it standing
+                            // on the web and on the other phone, with no reload or
+                            // restart able to catch up — report #601. The single
+                            // menu item stays; what it means now matches what the
+                            // thread actually is, and the retraction rides the same
+                            // envelope every other delete does (to my own number,
+                            // where the other devices pick it up).
+                            if (isSelf) scope.launch { runCatching { session.sendDeleteForEveryone(m) } }
+                            else session.deleteLocal(m)
+                            onDismiss()
+                        },
+                    )
+                }
+                Column(
+                    Modifier
+                        .width(260.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(c.bgSecondary),
+                ) {
+                    overlayItems.forEachIndexed { i, item ->
+                        if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.textPrimary.copy(alpha = 0.08f)))
+                        MsgOverlayActionRow(item)
+                    }
+                }
+            }
+        }
+}
+
+/** One row of the message long-press overlay's actions panel (L2.11): fixed
+ *  44dp-min rows with a 22dp icon slot, the iOS panel's grammar (compare the
+ *  icon-less [MessageAction] rows the old bottom sheet used). */
+private class MsgOverlayItem(
+    val label: String,
+    val icon: ImageVector,
+    val danger: Boolean = false,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun MsgOverlayActionRow(item: MsgOverlayItem) {
+    val c = RcqTheme.colors
+    val tint = if (item.danger) Color(0xFFE5484D) else c.textPrimary
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(onClick = item.onClick).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(item.icon, null, tint = tint, modifier = Modifier.size(22.dp))
+        Text(item.label, color = tint, fontSize = 16.sp)
+    }
 }
 
 /** The one line a reply carries as its quote of the message it answers.

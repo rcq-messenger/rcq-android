@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -657,14 +658,32 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
     var showPicker by remember { mutableStateOf(false) }
     if (showPicker) EmojiPickerDialog(onDismiss = { showPicker = false })
 
+    // iOS parity: the panel is a floating card docked under the input bar, not
+    // a full-bleed slab. Rounded 18, hairline white border, and over a chat
+    // wallpaper a translucent fill so the frosted slice the bottom chrome
+    // draws (L2.9, wallpaperSlice in ChatScreen) reads through it, same as the
+    // composer pill's 0.55. Without a wallpaper the opaque bgSecondary it has
+    // always been. The 0.66 is a veil, not a blur: per-frame RenderEffect over
+    // the chrome is rejected for target phones (ChatBackground.kt), and the
+    // pre-blurred slice under the chrome already supplies the frosted part.
+    val cardShape = RoundedCornerShape(18.dp)
+    val fill =
+        if (LocalStores.chatBackground.collectAsState().value.isBlank()) c.bgSecondary
+        else c.bgSecondary.copy(alpha = 0.66f)
+    val card = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 8.dp)
+        .padding(bottom = 6.dp)
+        .clip(cardShape)
+        .background(fill)
+        .border(0.5.dp, Color.White.copy(alpha = 0.08f), cardShape)
+
     if (panel.isEmpty()) {
         // Empty by default: a centered CTA inviting the user to choose their own
         // panel set (and, in the same window, their quick reactions).
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
+            modifier = card
                 .height(200.dp)
-                .background(c.bgSecondary)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -683,7 +702,7 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
         return
     }
 
-    Column(Modifier.fillMaxWidth().background(c.bgSecondary)) {
+    Column(card) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.End,

@@ -98,12 +98,13 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -327,6 +328,10 @@ internal fun HomeScreen(
     val pending by session.pending.collectAsState()
     val ciReqs by session.ciRequests.collectAsState()
     val messages by session.messages.collectAsState()
+    // The group threads too (same flow ChatScreen reads as groupAll): the
+    // long-press preview shows a read-only window on the thread, and group
+    // rows need their messages for it (L2.11).
+    val groupMsgs by session.groupMessages.collectAsState()
     // Saved Messages is the thread with yourself. Counted from the map the
     // screen already has, so this costs nothing extra.
     val savedCount = messages[uin]?.size ?: 0
@@ -380,6 +385,19 @@ internal fun HomeScreen(
     var comingSoon by remember { mutableStateOf<String?>(null) }
     var previewContact by remember { mutableStateOf<Contact?>(null) }
     var previewGroup by remember { mutableStateOf<RcqGroup?>(null) }
+    // L2.11: one impact when the preview OPENS, iOS placement (ContactListView
+    // fires the generator in openPreview, deliberately not on press-down).
+    // Rows draw no ripple (indication = null), so this is the long-press's
+    // only physical acknowledgement.
+    val haptics = LocalHapticFeedback.current
+    val openContactPreview: (Contact) -> Unit = {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        previewContact = it
+    }
+    val openGroupPreview: (RcqGroup) -> Unit = {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        previewGroup = it
+    }
     var reportTarget by remember { mutableStateOf<Contact?>(null) }
     // Irreversible-on-this-device actions, each behind a confirmation.
     var clearPeerTarget by remember { mutableStateOf<Contact?>(null) }
@@ -783,6 +801,17 @@ internal fun HomeScreen(
     // then everything below renders exactly as before.
     val homeBgSel by LocalStores.homeBackground.collectAsState()
     val slices = rememberWallpaperSlices(homeBgSel, remember { LocalStores.homeBgFile(context) })
+    // L2.11: while a row preview is up, the content behind it blurs, the iOS
+    // material-scrim analog. RenderEffect exists only on API 31+; below that
+    // this stays a plain Modifier and the overlay's heavier dim separates on
+    // its own (Modifier.blur/RenderEffect are silent no-ops before 31). The
+    // effect only ever runs while the STATIC overlay is open; it is never a
+    // per-frame blur over scrolling content, which ChatBackground.kt rejects.
+    val previewOpen = previewContact != null || previewGroup != null
+    val previewBlur =
+        if (previewOpen && android.os.Build.VERSION.SDK_INT >= 31)
+            Modifier.graphicsLayer { renderEffect = androidx.compose.ui.graphics.BlurEffect(24f, 24f) }
+        else Modifier
     androidx.compose.runtime.CompositionLocalProvider(
         LocalHomeVeil provides veil,
         LocalWallpaperSlices provides slices,
@@ -791,8 +820,10 @@ internal fun HomeScreen(
         // Optional home/chat-list wallpaper (separate from the chat one).
         // Renders behind the list; every container above it is veiled rather
         // than opaque so it shows through. No-op on the default ("").
-        Box(Modifier.fillMaxSize().wallpaperSliceLayer(slices)) { HomeBackground() }
-        Column(Modifier.fillMaxSize()) {
+        // Both static layers get the preview blur; the overlay itself is a
+        // later sibling of this Box and stays sharp.
+        Box(Modifier.fillMaxSize().then(previewBlur).wallpaperSliceLayer(slices)) { HomeBackground() }
+        Column(Modifier.fillMaxSize().then(previewBlur)) {
             HomeHeader(
                 // ⚠ The header has no fill of its own — it stands on the
                 // wallpaper above, not on `c.bgPrimary` — so its foregrounds
@@ -1140,10 +1171,10 @@ internal fun HomeScreen(
                         // because this section rendered only contacts.
                         Sections.SYS_FAV -> {
                             items(favContacts, key = { contactKey("fav", it) }) { ct ->
-                                ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                                ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { openContactPreview(ct) })
                             }
                             items(favGroups, key = { "favg_${it.id}" }) { g ->
-                                GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                                GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { openGroupPreview(g) })
                             }
                         }
                         Sections.SYS_GROUPS -> {
@@ -1156,18 +1187,18 @@ internal fun HomeScreen(
                                 }
                             } else {
                                 items(items = visibleGroups, key = { it.id }) { g: RcqGroup ->
-                                    GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                                    GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { openGroupPreview(g) })
                                 }
                             }
                         }
                         Sections.SYS_ONLINE -> items(onlineContacts, key = { contactKey("on", it) }) { ct ->
-                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { openContactPreview(ct) })
                         }
                         Sections.SYS_OFFLINE -> items(offlineContacts, key = { contactKey("off", it) }) { ct ->
-                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { openContactPreview(ct) })
                         }
                         Sections.SYS_CI -> items(crossIslandContacts, key = { contactKey("cisl", it) }) { ct ->
-                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                            ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { openContactPreview(ct) })
                         }
                         // Archive holds BOTH archived contacts AND archived
                         // groups. (An archived group was filtered out of the
@@ -1175,10 +1206,10 @@ internal fun HomeScreen(
                         // entirely and could not be un-archived.)
                         Sections.SYS_ARCHIVE -> {
                             items(archivedContacts, key = { contactKey("arch", it) }) { ct ->
-                                ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                                ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { openContactPreview(ct) })
                             }
                             items(archivedGroups, key = { "archg_${it.id}" }) { g ->
-                                GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                                GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { openGroupPreview(g) })
                             }
                         }
                         else -> {
@@ -1190,10 +1221,10 @@ internal fun HomeScreen(
                                 item(key = "u-empty-$sid") { SectionEmptyHint() }
                             } else {
                                 items(gs, key = { "u${sid}g${it.id}" }) { g ->
-                                    GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { previewGroup = g })
+                                    GroupRow(group = g, ownUin = uin, session = session, unread = unread[LocalStores.groupThread(g.id)] ?: 0, onClick = { onOpenGroup(g.id) }, onLongPress = { openGroupPreview(g) })
                                 }
                                 items(cs, key = { contactKey("u$sid", it) }) { ct ->
-                                    ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { previewContact = ct })
+                                    ContactRowItem(ct, unread = unread[LocalStores.peerThread(ct.uin)] ?: 0, session = session, onClick = { onOpenChat(ct.uin) }, onLongPress = { openContactPreview(ct) })
                                 }
                             }
                         }
@@ -1229,7 +1260,10 @@ internal fun HomeScreen(
                 // No host: a PERSON's picture always lives on OUR island —
                 // ours natively, a cross-island contact's because §5e DEPOSITS
                 // the blob here rather than having us pull it from theirs.
-                avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 36.dp) },
+                avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 24.dp) },
+                messages = messages[ct.uin] ?: emptyList(),
+                isGroup = false,
+                senderName = { session.contactName(it) },
                 actions = contactActions(ct, session, scope, context, onOpenChat,
                     onReport = { reportTarget = it },
                     onClearThread = { clearPeerTarget = it },
@@ -1241,7 +1275,14 @@ internal fun HomeScreen(
             PreviewOverlay(
                 title = g.name,
                 subtitle = memberCountLabel(g.memberCount),
-                avatar = { GroupAvatar(g, session, 36.dp) },
+                avatar = { GroupAvatar(g, session, 24.dp) },
+                messages = groupMsgs[g.id] ?: emptyList(),
+                isGroup = true,
+                // Roster nick first (the name the room sees), contactName
+                // after: same order the chat's mention resolver uses. The
+                // roster may not be cached yet on the home screen; contactName
+                // still lands on a name or "#uin".
+                senderName = { u -> g.members.firstOrNull { it.uin == u }?.nickname ?: session.contactName(u) },
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
                     onClearThread = { clearGroupTarget = it }),
                 onDismiss = { previewGroup = null },
@@ -2481,61 +2522,8 @@ private fun cappedSp(base: Float, maxScale: Float): androidx.compose.ui.unit.Tex
     return (base * maxScale / scale).sp
 }
 
-@Composable
-private fun PreviewOverlay(
-    title: String,
-    subtitle: String,
-    avatar: @Composable () -> Unit,
-    actions: List<ContextAction>,
-    onDismiss: () -> Unit,
-) {
-    val c = RcqTheme.colors
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-    val scale by animateFloatAsState(if (shown) 1f else 0.9f, label = "preview")
-
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            Modifier
-                .scale(scale)
-                .padding(28.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(c.bgSecondary)
-                .clickable(enabled = false) {}
-                .fillMaxWidth(),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                avatar()
-                Column {
-                    Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text(subtitle, color = c.textMono, fontSize = 12.sp)
-                }
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(c.divider))
-            actions.forEach { a ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { a.onClick(); onDismiss() }
-                        .padding(horizontal = 16.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    val tint = if (a.destructive) Color(0xFFE5484D) else c.textPrimary
-                    Icon(a.icon, null, tint = tint, modifier = Modifier.size(20.dp))
-                    Text(a.title, color = tint, fontSize = 16.sp)
-                }
-            }
-        }
-    }
-}
+// The row long-press preview (PreviewOverlay) lives in HomePreview.kt: an
+// iOS-style read-only thread window + separate actions card (L2.11).
 
 @Composable
 private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect: (Contact) -> Unit) {
