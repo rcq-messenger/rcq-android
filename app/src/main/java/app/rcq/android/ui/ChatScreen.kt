@@ -3026,12 +3026,16 @@ private fun MessageLongPressOverlay(
                     if (group != null && group.members.firstOrNull { it.uin == ownUin }?.canManageInfo(group.ownerUin) == true) {
                         add(
                             MsgOverlayItem(stringResource(R.string.chat_pin), Icons.Filled.PushPin) {
-                                // ⚠ The island's slot is 500 chars (GroupPatchIn.pinned_text) and a
+                                // ⚠ The island's slot is 4096 chars since 29.08 (GroupPatchIn.pinned_text) and a
                                 // longer body is refused BEFORE the row is written. Unclamped, the
                                 // optimistic swap below showed the new pin until the next refresh put
                                 // the old one back: a pin that looked like it worked and did nothing.
                                 val body = m.body.ifBlank { pinFallback }
-                                val text = if (body.length > 500) body.take(499) + "…" else body
+                                // 4096 since 29.08 (megalist A6, the server
+                                // column was raised from 500 with the clamp
+                                // rule unchanged: cut client-side, mark the
+                                // cut, never let the 422 rollback surprise).
+                                val text = if (body.length > 4096) body.take(4095) + "…" else body
                                 val previous = group.pinnedText
                                 // Optimistic + instant: replace the displayed pin now,
                                 // then PATCH (the response reconciles it).
