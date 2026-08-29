@@ -1229,6 +1229,8 @@
     <string name="sections_err_too_many_members">Bölümlerinizdeki sohbet sayısı çok fazla.</string>
     <string name="sections_err_too_large">Bölüm listesi kaydedilemeyecek kadar büyük.</string>
     <string name="sections_err_unreadable">Bölümleriniz RCQ\u0027nun daha yeni bir sürümüyle yazılmış.</string>
+    <string name="gi_catalog">Aramada göster</string>
+    <string name="gi_catalog_desc">Odanın adı ve açıklaması bulunabilmesi için yayımlanır. Kapalı: yalnızca bağlantıyla.</string>
     <string name="gi_links">Bağlantılara izin ver</string>
     <string name="gi_links_desc">Üyeler bağlantı gönderebilir</string>
     <string name="gi_files">Dosyalara izin ver</string>

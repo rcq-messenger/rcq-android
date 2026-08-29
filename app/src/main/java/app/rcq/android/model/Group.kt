@@ -53,6 +53,7 @@ data class RcqGroup(
     // Owner-set room policies (#755, desktop parity). Permissive defaults are
     // what every group had before the fields existed.
     val linksAllowed: Boolean = true,
+    val inCatalog: Boolean = false,
     val filesAllowed: Boolean = true,
     val slowmodeSec: Int = 0,
     val avatarMediaId: String? = null,

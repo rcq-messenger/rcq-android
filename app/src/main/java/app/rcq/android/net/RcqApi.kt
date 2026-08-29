@@ -1095,6 +1095,9 @@ class RcqApi(
         val links_allowed: Boolean = true,
         val files_allowed: Boolean = true,
         val slowmode_sec: Int = 0,
+        // Voluntary catalog (stage 6): true only when the owner listed the
+        // room; search matches catalog rows only.
+        val in_catalog: Boolean = false,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
         val created_at: String? = null,
@@ -1213,6 +1216,7 @@ class RcqApi(
         val links_allowed: Boolean? = null,
         val files_allowed: Boolean? = null,
         val slowmode_sec: Int? = null,
+        val in_catalog: Boolean? = null,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
     )

@@ -1229,6 +1229,8 @@
     <string name="sections_err_too_many_members">Demasiados chats en tus secciones.</string>
     <string name="sections_err_too_large">La lista de secciones es demasiado grande para guardarla.</string>
     <string name="sections_err_unreadable">Tus secciones las escribió una versión más nueva de RCQ.</string>
+    <string name="gi_catalog">Mostrar en la búsqueda</string>
+    <string name="gi_catalog_desc">El nombre y la descripción se publican para que la sala se pueda encontrar. No: solo por enlace.</string>
     <string name="gi_links">Enlaces permitidos</string>
     <string name="gi_links_desc">Los miembros pueden enviar enlaces</string>
     <string name="gi_files">Archivos permitidos</string>
