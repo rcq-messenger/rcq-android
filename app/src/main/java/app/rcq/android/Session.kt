@@ -49,7 +49,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -5407,6 +5409,37 @@ class Session(context: Context) {
             val failed = _messages.value.values.flatten()
                 .filter { it.fromMe && it.state == DeliveryState.FAILED }
             for (m in failed) runCatching { resend(m) }
+            // Whatever is STILL failed after this pass (or failed while we
+            // were resending) keeps a timer on it - see armFailedRetryTimer.
+            armFailedRetryTimer()
+        }
+    }
+
+    /** Timer companion to [retryFailedSends] (#814). The reconnect hook above
+     *  only fires when the SOCKET died and came back - but on a flickering
+     *  link the socket often survives while an HTTP send dies, so the message
+     *  sat red until the user tapped it. While any FAILED row exists, retry
+     *  every 30s (only when the channel claims to be up; a retry into a dead
+     *  network would just re-fail and burn battery). The envelope UUID is
+     *  stable, so a retry that half-landed before is deduped by the receiver.
+     *  One job, self-terminating: when nothing is FAILED any more it ends,
+     *  and the next failure arms a fresh one. */
+    private var failedRetryJob: Job? = null
+
+    private fun armFailedRetryTimer() {
+        if (failedRetryJob?.isActive == true) return
+        val anyFailed = _messages.value.values.flatten().any { it.fromMe && it.state == DeliveryState.FAILED } ||
+            _groupMessages.value.values.flatten().any { it.fromMe && it.state == DeliveryState.FAILED }
+        if (!anyFailed) return
+        failedRetryJob = scope.launch {
+            while (isActive) {
+                delay(30_000)
+                val failed = (_messages.value.values.flatten() + _groupMessages.value.values.flatten())
+                    .filter { it.fromMe && it.state == DeliveryState.FAILED }
+                if (failed.isEmpty()) return@launch
+                if (!connected.value) continue
+                for (m in failed) runCatching { resend(m) }
+            }
         }
     }
 
@@ -6059,7 +6092,10 @@ class Session(context: Context) {
     /** Replace the body of [target] (text only, author only) and tell the
      *  other side(s) via an `edit` envelope. */
     suspend fun sendEdit(target: ChatMessage, newText: String) {
-        if (!target.fromMe || target.kind != "text" || newText.isBlank()) return
+        // text OR a captioned media row (#739): for photo/video/file the body
+        // IS the caption, and Envelope.edit replaces a body by id everywhere.
+        val editable = target.kind == "text" || target.kind == "photo" || target.kind == "video" || target.kind == "file"
+        if (!target.fromMe || !editable || newText.isBlank()) return
         val env = Envelope.edit(target.id, newText)
         val gid = target.groupId
         if (gid != null) editInFlow(_groupMessages, gid, target.id, newText)
@@ -9115,6 +9151,7 @@ class Session(context: Context) {
     }
 
     private fun updateMessageState(id: String, peer: Int, state: DeliveryState) {
+        if (state == DeliveryState.FAILED) armFailedRetryTimer()
         db.updateState(id, state)
         val cur = _messages.value.toMutableMap()
         cur[peer] = (cur[peer] ?: emptyList()).map { if (it.id == id) it.copy(state = state) else it }
@@ -9131,6 +9168,7 @@ class Session(context: Context) {
     }
 
     private fun updateGroupMsgState(groupId: Int, id: String, state: DeliveryState) {
+        if (state == DeliveryState.FAILED) armFailedRetryTimer()
         db.updateState(id, state)
         val cur = _groupMessages.value.toMutableMap()
         cur[groupId] = (cur[groupId] ?: emptyList()).map { if (it.id == id) it.copy(state = state) else it }
