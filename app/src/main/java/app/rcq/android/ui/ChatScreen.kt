@@ -2234,6 +2234,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         var editValue by remember(m.id) {
             mutableStateOf(TextFieldValue(m.body, selection = TextRange(m.body.length)))
         }
+        // #740: the sheet opened with the caret nowhere and no keyboard — the
+        // caret-at-end above only matters once the field actually has focus.
+        // Ask for it as soon as the sheet is up; the IME follows the focus.
+        val editFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        LaunchedEffect(m.id) {
+            withFrameNanos {}
+            runCatching { editFocus.requestFocus() }
+        }
         // A sheet, not a centre dialog: the old AlertDialog was its OWN sub-window
         // and did NOT inherit the activity's adjustResize, so for a long message the
         // keyboard covered the field and the user typed blind (it needed
@@ -2269,7 +2277,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
                     cursorBrush = SolidColor(c.accent),
                     maxLines = 8,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(editFocus),
                 )
             }
             SheetGap()
