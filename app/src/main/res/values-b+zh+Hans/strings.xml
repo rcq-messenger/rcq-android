@@ -335,6 +335,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">语音房间</string>
     <string name="home_menu_radio">电台</string>
+    <string name="stealth_shield_turn_off">关闭中继</string>
     <string name="home_menu_bypass_title">RCQ 中继</string>
     <string name="home_menu_bypass_enable">让应用走 RCQ 中继</string>
     <string name="home_menu_bypass_disable">不再走 RCQ 中继</string>
