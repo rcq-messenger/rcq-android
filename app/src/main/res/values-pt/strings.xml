@@ -335,6 +335,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Salas de áudio</string>
     <string name="home_menu_radio">Rádio</string>
+    <string name="stealth_shield_turn_off">Desligar os relés</string>
     <string name="home_menu_bypass_title">Relés RCQ</string>
     <string name="home_menu_bypass_enable">Levar o app pelos relays do RCQ</string>
     <string name="home_menu_bypass_disable">Parar de ir pelos relays do RCQ</string>

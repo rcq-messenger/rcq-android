@@ -1186,6 +1186,10 @@ private fun SettingsRoot(
                 }
             }
             SheetGap()
+            // #737: the one place about the app is also where to learn what a
+            // relay is when the shield is not on screen to ask.
+            RelayLearnMore()
+            SheetGap()
             TextButton(onClick = { showAbout = false }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.common_done), color = c.accent)
             }

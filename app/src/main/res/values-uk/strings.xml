@@ -335,6 +335,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Аудіокімнати</string>
     <string name="home_menu_radio">Рація</string>
+    <string name="stealth_shield_turn_off">Вимкнути релеї</string>
     <string name="home_menu_bypass_title">Релеї RCQ</string>
     <string name="home_menu_bypass_enable">Пускати застосунок через релеї RCQ</string>
     <string name="home_menu_bypass_disable">Не пускати через релеї RCQ</string>

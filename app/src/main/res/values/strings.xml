@@ -355,6 +355,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Audio rooms</string>
     <string name="home_menu_radio">Radio</string>
+    <string name="stealth_shield_turn_off">Turn relays off</string>
     <string name="home_menu_bypass_title">RCQ relays</string>
     <string name="home_menu_bypass_enable">Route the app through RCQ relays</string>
     <string name="home_menu_bypass_disable">Stop routing through RCQ relays</string>

@@ -1793,7 +1793,13 @@ private fun HomeHeader(
                 RelayLearnMore()
             }
             SheetGap()
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            // #737: the shield names the relays and explains them, so it is
+            // also the natural place to switch them off - without a trip back
+            // through the overflow menu.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { showStealthInfo = false; onToggleBypass(false) }) {
+                    Text(stringResource(R.string.stealth_shield_turn_off), color = c.textSecondary)
+                }
                 TextButton(onClick = { showStealthInfo = false }) {
                     Text(stringResource(R.string.common_ok), color = c.accent)
                 }
