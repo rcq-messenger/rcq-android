@@ -181,6 +181,20 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         })
     }
 
+    /** Foreground health probe. A socket that heard NOTHING for longer than
+     *  the app-ping cadence while we believe it connected is a zombie — the
+     *  watchdog normally catches that, but the watchdog lives inside the ping
+     *  Timer, and an OEM freezer (MIUI) stops that Timer with the process, so
+     *  after an unfreeze the pipe can sit dead until the Timer's next tick or
+     *  forever. Called on every return to the foreground (Session), where a
+     *  healthy socket makes this a no-op. */
+    fun ensureAlive(maxSilenceMs: Long = 30_000) {
+        if (!shouldStayConnected) return
+        if (believedConnected && System.currentTimeMillis() - lastInboundAt <= maxSilenceMs) return
+        android.util.Log.w("RCQsocket", "foreground probe: socket silent or down — redialing")
+        reconnectNow()
+    }
+
     /** Tear down the current socket and dial again right away. Used when the
      *  network path changed (VPN dropped/joined, Wi-Fi ↔ cellular): the old
      *  socket is bound to the vanished route and OkHttp's protocol ping takes

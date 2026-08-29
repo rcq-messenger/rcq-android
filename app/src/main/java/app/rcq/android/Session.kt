@@ -1362,6 +1362,32 @@ class Session(context: Context) {
             }
         refreshBackupHomes()
         refreshCiRequests()
+        // ⚠ Coming back to the foreground now CHECKS THE PIPE AND DRAINS. The
+        // hook existed in RcqApp since the PIN-grace work and had zero
+        // subscribers, so returning to the app verified nothing: a socket
+        // that died while an OEM freezer (MIUI above all) held the process —
+        // ping Timer frozen WITH the watchdog inside it — stayed believed-
+        // alive, the server pushed (sound!) and queued, and nothing on this
+        // side ever fetched until a full restart. Report #807, right after
+        // the server-side ghost heal shipped: the heal can only save clients
+        // that still send frames, and a frozen client sends none. iOS has
+        // always re-drained on foreground; this is that, ported. The drain is
+        // throttled so app-switch flurries cost one fetch, and the socket is
+        // only redialed when it has been silent past the app-ping cadence.
+        var lastForegroundDrain = 0L
+        RcqApp.onForegroundChange = { up ->
+            if (up && started && !duressViewUp) {
+                socket.ensureAlive()
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastForegroundDrain > 30_000) {
+                    lastForegroundDrain = now
+                    scope.launch {
+                        runCatching { drainQueue() }
+                        runCatching { drainGroupLog() }
+                    }
+                }
+            }
+        }
         // Keep the server's push-suppression list in lock-step with the local
         // mute set: the StateFlow replays its current value on subscribe (one
         // reconcile after login — fixes mutes the server never learned about)
