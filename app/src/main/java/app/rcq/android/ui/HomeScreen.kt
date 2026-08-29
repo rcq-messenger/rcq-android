@@ -2006,7 +2006,19 @@ private fun HomeHeader(
                 // traffic), so the manual on/off lives here too — it engages/drops
                 // sing-box LIVE (setObfuscation) without an app restart.
                 DropdownMenuItem(
-                    text = { Text(stringResource(if (stealthActive) R.string.home_menu_bypass_disable else R.string.home_menu_bypass_enable), color = c.textPrimary) },
+                    // #738: the row's NAME stays put and the action moves to the
+                    // subtitle - same rule the screenshot notice follows. A menu
+                    // item that renames itself reads as two different items to a
+                    // screen reader and to the person who memorised the menu.
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.home_menu_bypass_title), color = c.textPrimary)
+                            Text(
+                                stringResource(if (stealthActive) R.string.home_menu_bypass_disable else R.string.home_menu_bypass_enable),
+                                color = c.textSecondary, fontSize = 12.sp,
+                            )
+                        }
+                    },
                     leadingIcon = { Icon(Icons.Filled.Shield, null, tint = if (stealthActive) c.accent else c.textSecondary) },
                     onClick = { overflowMenu = false; onToggleBypass(!stealthActive) },
                 )

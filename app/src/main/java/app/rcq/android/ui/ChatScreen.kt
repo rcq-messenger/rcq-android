@@ -1803,6 +1803,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 val div = rows.indexOfFirst { it is ChatRow.Unread }
                 if (div >= 0) div - 1 else rows.lastIndex
             }
+            // #746 p.2: a reaction chip hangs UNDER the bubble but lives in the
+            // same list row, so "the whole row is on screen" waited for the chip
+            // too - the reader had read the message, the badge had not. The chip
+            // row is one fixed height; subtract it for rows that carry one. An
+            // approximation (a second chip line would still wait), but it moves
+            // the threshold to the message's own edge in the case people hit.
+            val reactionChipPx = with(LocalDensity.current) { 32.dp.toPx() }.toInt()
             LaunchedEffect(threadKey) {
                 snapshotFlow {
                     val info = listState.layoutInfo
@@ -1815,7 +1822,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (!listState.canScrollForward && info.totalItemsCount > 0) {
                         info.totalItemsCount - 1
                     } else {
-                        info.visibleItemsInfo.lastOrNull { it.offset + it.size <= floor }?.index ?: -1
+                        info.visibleItemsInfo.lastOrNull {
+                            val r = rows.getOrNull(it.index)
+                            val hasChip = (r is ChatRow.Single && r.m.reactions.isNotEmpty()) ||
+                                (r is ChatRow.Album && r.items.any { a -> a.reactions.isNotEmpty() })
+                            it.offset + it.size - (if (hasChip) reactionChipPx else 0) <= floor
+                        }?.index ?: -1
                     }
                 }
                     // A row taller than the screen is never fully visible, so this

@@ -335,6 +335,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Salas de audio</string>
     <string name="home_menu_radio">Radio</string>
+    <string name="home_menu_bypass_title">Relés RCQ</string>
     <string name="home_menu_bypass_enable">Llevar la app por los relays de RCQ</string>
     <string name="home_menu_bypass_disable">Dejar de ir por los relays de RCQ</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
