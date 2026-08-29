@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,12 +28,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import app.rcq.android.R
 import app.rcq.android.data.LocalStores
 
@@ -59,6 +60,7 @@ private const val REACTION_CAP = LocalStores.REACTION_EMOJI_CAP
  * [decodeGifFrames]): frames decode ONCE process-wide and cells just cycle
  * them — never the per-cell live decoders that OOM-crashed low-RAM devices.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun EmojiPickerDialog(onDismiss: () -> Unit) {
     val c = RcqTheme.colors
@@ -67,15 +69,46 @@ internal fun EmojiPickerDialog(onDismiss: () -> Unit) {
     var tab by remember { mutableStateOf(0) } // 0 = panel, 1 = reactions
     val activeSet = (if (tab == 0) panel else reactions).toSet()
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // ⚠ A grid inside a sheet fights the sheet for the drag: once the grid
+    // sits at its top, the leftover of a downward drag spills up into
+    // ModalBottomSheet, which reads it as swipe-to-dismiss, so scrolling back
+    // through the set would close the window mid-curation (the #696 lesson;
+    // this is the RcqField fence, applied to a grid). Eats DOWNWARD leftovers
+    // only: the sheet's own ways out (scrim tap, back, Done) still work, and
+    // an upward drag still reaches the sheet.
+    val fenceSheetSwipe = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ) = if (available.y > 0f) available.copy(x = 0f)
+                else androidx.compose.ui.geometry.Offset.Zero
+            override suspend fun onPostFling(
+                consumed: androidx.compose.ui.unit.Velocity,
+                available: androidx.compose.ui.unit.Velocity,
+            ) = if (available.y > 0f) available.copy(x = 0f)
+                else androidx.compose.ui.unit.Velocity.Zero
+        }
+    }
+
+    // A sheet, not a centred dialog (founder item L2.1, "центральные диалоги
+    // в шторки"). Raw ModalBottomSheet rather than RcqSheet: RcqSheet
+    // hardcodes bgSecondary and wraps its content in a scroller of its own,
+    // and this window needs bgPrimary plus a grid that scrolls itself. The
+    // state and the insets are the two mandatory house pieces (#542/#543/#546).
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberRcqSheetState(),
+        contentWindowInsets = rcqSheetInsets,
+        containerColor = c.bgPrimary,
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.86f)
-                .padding(16.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(c.bgPrimary)
-                .padding(16.dp),
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp),
         ) {
             Text(
                 stringResource(R.string.emoji_picker_title),
@@ -98,7 +131,12 @@ internal fun EmojiPickerDialog(onDismiss: () -> Unit) {
             }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 46.dp),
-                modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 10.dp),
+                // Bounded, because a sheet is as tall as its content: the grid
+                // scrolls inside this height instead of growing to the full
+                // set (the dialog's 0.86-of-screen, minus its chrome).
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.62f)
+                    .nestedScroll(fenceSheetSwipe)
+                    .padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
