@@ -152,6 +152,15 @@ sealed interface Envelope {
      *  dedups its own carbon by the inner message's id. */
     data class Carbon(val to: Int?, val gid: Int?, val env: Envelope) : Envelope
 
+    /** Cross-device read marker (megalist A2, wire kind "readmark"). Rides
+     *  INSIDE a [Carbon] to my own uin: the thread is the carbon's own
+     *  to/gid, [at] is the wall clock of the read in ms. My other devices
+     *  drop the badge for that thread, minus whatever arrived after [at].
+     *  The island never sees this kind (it is inside the sealed blob) and
+     *  the carbon goes out under an ephemeral outer type, so nothing new is
+     *  learned and nothing pushes. */
+    data class ReadMark(val at: Long) : Envelope
+
     /** Cross-island call signaling (wire kind "call", spec §5d). Same-island
      *  calls ride the WS as plaintext call_* events; across islands there is
      *  no shared socket, so the SAME signal payload is wrapped here, v=1-sealed
@@ -375,6 +384,10 @@ sealed interface Envelope {
         is ScreenshotTaken -> JsonObject().apply {
             addProperty("kind", "shot")
             addProperty("id", id)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is ReadMark -> JsonObject().apply {
+            addProperty("kind", "readmark")
+            addProperty("at", at)
         }.toString().toByteArray(Charsets.UTF_8)
         is Carbon -> JsonObject().apply {
             addProperty("kind", "carbon")
@@ -743,6 +756,9 @@ sealed interface Envelope {
                     nickname = obj.get("nickname")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
                     avatarMediaId = obj.get("avatar_media_id")?.takeIf { it.isJsonPrimitive }?.asString,
                     avatarMediaKey = obj.get("avatar_media_key")?.takeIf { it.isJsonPrimitive }?.asString,
+                )
+                "readmark" -> ReadMark(
+                    at = obj.get("at")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
                 )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,
