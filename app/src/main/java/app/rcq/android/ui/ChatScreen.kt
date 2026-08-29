@@ -191,6 +191,7 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.data.LocalStores
 import app.rcq.android.net.CrossIslandStore
+import app.rcq.android.net.RcqApi
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.crypto.Reply
 import app.rcq.android.media.AudioPlayer
@@ -2075,6 +2076,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         runCatching {
                             if (isGroup) session.sendGroupText(groupId!!, body, reply)
                             else session.sendText(peer!!, body, reply)
+                        }.onFailure { e ->
+                            // A slowmode 429 used to fail EXACTLY like a dead
+                            // network: same silent FAILED bubble, so the room
+                            // rule read as an outage (#809). Say what the
+                            // island actually said; every other failure keeps
+                            // the old silence (the bubble's failed state and
+                            // the retry tap are the interface for those).
+                            val r = RcqApi.refusalOf(e.message)
+                            if (r.status == 429 || r.code == "slowmode") {
+                                val wait = r.retryAfter ?: 0
+                                val msg = if (wait > 0) context.getString(R.string.chat_slowmode_wait_in, wait)
+                                else context.getString(R.string.chat_slowmode_wait)
+                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 },

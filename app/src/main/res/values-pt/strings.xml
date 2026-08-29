@@ -1238,4 +1238,6 @@
     <string name="gi_slow_off">Não</string>
     <string name="chat_files_off">O dono do grupo desativou arquivos</string>
     <string name="chat_links_off">O dono do grupo desativou links</string>
+    <string name="chat_slowmode_wait">Modo lento ativado: tente novamente em instantes</string>
+    <string name="chat_slowmode_wait_in">Modo lento ativado: tente em %1$d s</string>
 </resources>

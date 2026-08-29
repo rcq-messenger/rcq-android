@@ -474,7 +474,10 @@ internal fun EmoticonText(
     // the inline-in-text / picker churn that forced static frames elsewhere.
     (tokens.singleOrNull() as? Emoticons.Token.Emo)?.let { emo ->
         if (!hasMention) {
-            AnimatedEmoticon(emo.asset, Modifier.size(28.dp))
+            // 48, not the inline size: a message that IS one emoticon is a
+            // sticker, and at 28 the classic packs were unreadable without
+            // squinting (#810, "рассмотреть можно только под микроскопом").
+            AnimatedEmoticon(emo.asset, Modifier.size(48.dp))
             return
         }
     }
