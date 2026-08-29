@@ -1664,6 +1664,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // `canScrollForward` branch below has said "the end of the list is
             // read" since #676, and it covers the last row whatever its height.
             var deepestSeen by remember(threadKey) { mutableStateOf(-1) }
+            // ⚠ The floor under the badge (#763). `deepestSeen` is born -1 on
+            // every VISIT, so re-entering a chat scrolled back up counted every
+            // inbound row below the first screen as "unread" — three hundred
+            // messages read yesterday, red again. Rows above the unread divider
+            // were read in some earlier visit by definition (no divider = the
+            // whole thread was); only what the reader has not crossed YET may
+            // raise the count.
+            val seenFloor = remember(threadKey, rows.isNotEmpty()) {
+                val div = rows.indexOfFirst { it is ChatRow.Unread }
+                if (div >= 0) div - 1 else rows.lastIndex
+            }
             LaunchedEffect(threadKey) {
                 snapshotFlow {
                     val info = listState.layoutInfo
@@ -1719,8 +1730,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
             val belowCount by remember(rows) {
                 derivedStateOf {
-                    if (deepestSeen < 0) return@derivedStateOf 0
-                    val from = deepestSeen + 1
+                    val base = maxOf(deepestSeen, seenFloor)
+                    if (base < 0) return@derivedStateOf 0
+                    val from = base + 1
                     if (from > rows.lastIndex) 0
                     // Own messages are never unread, so they must not raise the
                     // red badge: sending while scrolled up made it flash "1" for
