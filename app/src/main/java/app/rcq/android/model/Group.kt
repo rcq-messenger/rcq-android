@@ -83,6 +83,20 @@ data class RcqGroup(
     fun moderator(uin: Int): Boolean =
         uin == ownerUin || members.firstOrNull { it.uin == uin }?.canDelete(ownerUin) == true
 
+    /** Is [uin] exempt from the room's CONTENT rules (links/files off, #755)?
+     *  A links-off room is an anti-spam rule for MEMBERS; the owner and the
+     *  moderators are exempt BOTH ways: their sends pass the gate, and their
+     *  links stay clickable in every reader's view (founder decision 29.08).
+     *  "Moderator" here is the wide set the web uses (Chat.tsx roomExempt):
+     *  role "admin" or ANY granted cap, not just `delete` - somebody trusted
+     *  with part of the room is trusted with a link. NOT [moderator], which
+     *  is the narrower may-retract-others check. A uin missing from the
+     *  roster (or a roster not fetched yet, #650) is not exempt, owner aside:
+     *  same failure mode as [moderator], the rule simply is not applied. */
+    fun roomExempt(uin: Int): Boolean =
+        uin == ownerUin || members.firstOrNull { it.uin == uin }
+            ?.let { it.role == "admin" || it.permissions.isNotEmpty() } == true
+
     fun memberName(uin: Int): String =
         members.firstOrNull { it.uin == uin }?.nickname ?: "$uin"
 }

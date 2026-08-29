@@ -371,6 +371,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // it is already here or when the group lives on another island.
     LaunchedEffect(groupId) { groupId?.let { session.ensureRoster(it) } }
     val canPost = group?.canPost(ownUin) ?: true
+    // Room content rules (#755), enforced client-side: the island cannot see
+    // what a sealed envelope carries, so honouring the policy is the sender's
+    // job, same as web and desktop. The owner and the moderators are exempt
+    // both ways (their sends pass, their links stay clickable for every
+    // reader) - founder decision 29.08; see RcqGroup.roomExempt.
+    val readerExempt = group == null || group.roomExempt(ownUin)
+    val linksOff = group != null && !group.linksAllowed && !readerExempt
+    val filesOff = group != null && !group.filesAllowed && !readerExempt
     // Resolve a `#<uin>` mention in a message body to a nick (group member or
     // contact), for clickable mentions in the bubble — like the pinned banner.
     val mentionNick = remember(contacts, group, isGroup) {
@@ -866,6 +874,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             app.rcq.android.ShareIntake.deliver.value = null
             val uris = req.uris
             if (uris.isEmpty()) return@collect
+            // Files switched off for this sender (#755): a share from another
+            // app is the Android drop-to-send, and the web guards that path in
+            // sendFile itself, not just in the menu. Read the group FRESH from
+            // the store - this effect runs once per visit and its captured
+            // vals would hold the policy as of first composition.
+            val gNow = groupId?.let { gid -> session.groups.value.firstOrNull { it.id == gid } }
+            if (gNow != null && !gNow.filesAllowed && !gNow.roomExempt(ownUin)) {
+                android.widget.Toast.makeText(context, context.getString(R.string.chat_files_off), android.widget.Toast.LENGTH_SHORT).show()
+                return@collect
+            }
             val mimes = uris.map { withContext(Dispatchers.IO) { context.contentResolver.getType(it) } ?: "" }
             val allMedia = mimes.all { it.startsWith("image/") || it.startsWith("video/") }
             // A share that arrives unreadable (the sending app revoked the grant, or
@@ -987,6 +1005,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         if (granted) startRecording()
     }
     fun onMic() {
+        // A voice note is a file under the room's content policy (#755): the
+        // web gates startVoice on files_allowed, so the mic follows the same
+        // rule here. Before the permission ask, so a first-time refusal does
+        // not also raise the system permission dialog over the toast.
+        if (filesOff) {
+            android.widget.Toast.makeText(context, context.getString(R.string.chat_files_off), android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
         else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
@@ -1685,6 +1711,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 onTapReply = onTapReply,
                                 onSenderClick = if (isGroup && !m.fromMe) ({ m.senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                                 onShowReactors = { whoReactedMsg = it },
+                                linksEnabled = rowLinksEnabled(linksOff, group, m),
                             )
                             }
                         }
@@ -1701,6 +1728,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         onViewImage = { fullscreenImage = viewerMediaOf(row.items.first(), it) },
                         onViewVideo = { fullscreenVideo = viewerVideoOf(row.items.first(), it) },
                         onOpenAlbum = { idx -> albumViewer = row.items to idx },
+                        linksEnabled = rowLinksEnabled(linksOff, group, row.items.first()),
                     )
                 }
             }
@@ -2021,17 +2049,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 members = group?.members ?: emptyList(),
                 ownUin = ownUin,
                 accentColor = c.accent,
+                linksOff = linksOff,
                 onAttach = {
-                    // Files switched off by the room's owner (#755): the
-                    // island cannot see what a sealed envelope carries, so
-                    // honouring the policy is the sender's job, same as the
-                    // desktop. The owner keeps the button — it is their rule.
-                    val filesOff = group != null && !group.filesAllowed && ownUin != group.ownerUin
-                    if (filesOff) {
-                        android.widget.Toast.makeText(context, context.getString(R.string.chat_files_off), android.widget.Toast.LENGTH_SHORT).show()
-                    } else {
-                        attachMenu = true
-                    }
+                    // The sheet opens even when files are switched off (#755):
+                    // a location is not a file, and blocking the whole button
+                    // made it unreachable for members. The per-row policy
+                    // lives in [AttachSheet].
+                    attachMenu = true
                 },
                 onTyping = { nonBlank ->
                     if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, nonBlank)
@@ -2338,45 +2362,23 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     if (attachMenu) {
-        ModalBottomSheet(
-            onDismissRequest = { attachMenu = false },
-            containerColor = c.bgSecondary,
-        ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-                Text(
-                    stringResource(R.string.chat_attach),
-                    color = c.textSecondary, fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                Column {
-                    MessageAction(stringResource(R.string.chat_attach_photo)) { attachMenu = false; picker.launch("image/*") }
-                    MessageAction(stringResource(R.string.chat_attach_video)) { attachMenu = false; videoPicker.launch("video/*") }
-                    MessageAction(stringResource(R.string.chat_attach_album)) {
-                        attachMenu = false
-                        albumPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                    }
-                    MessageAction(stringResource(R.string.chat_attach_file)) { attachMenu = false; filePicker.launch(arrayOf("*/*")) }
-                    MessageAction(stringResource(R.string.chat_attach_location)) { attachMenu = false; shareLocation() }
-                    MessageAction(stringResource(R.string.chat_attach_group)) { attachMenu = false; showGroupPicker = true }
-                    // No "create poll" row and no "share a connection" row any
-                    // more (founder, items 14a + 14b). Polls were never E2EE:
-                    // the island held voter_uin + option_index in the clear
-                    // even for an "anonymous" ballot, and polls.creator_uin sat
-                    // next to the envelope UUID, which de-anonymized the author
-                    // of that one message. The backend answers 410
-                    // feature_removed and reports polls:false in /server/info,
-                    // so there is nothing left here to call. Relay sharing cost
-                    // no metadata at all (an inner envelope kind inside an
-                    // ordinary sealed message, the island never saw it) and
-                    // went purely as a product cut.
-                    //
-                    // ⚠ Both are OUTGOING cuts only. A poll from an old peer
-                    // still renders (as a "no longer supported" card), and an
-                    // incoming relay share is still ACCEPTED with its Add
-                    // button intact - see RelayBubble below.
-                }
-            }
-        }
+        // Body hoisted to [AttachSheet]: ChatScreen is at the verifier's edge
+        // (see MessageLongPressOverlay), and the sheet grew per-row policy
+        // logic (#755) that must not be inlined back here.
+        AttachSheet(
+            filesOff = filesOff,
+            linksOff = linksOff,
+            onDismiss = { attachMenu = false },
+            onPickPhoto = { attachMenu = false; picker.launch("image/*") },
+            onPickVideo = { attachMenu = false; videoPicker.launch("video/*") },
+            onPickAlbum = {
+                attachMenu = false
+                albumPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            },
+            onPickFile = { attachMenu = false; filePicker.launch(arrayOf("*/*")) },
+            onShareLocation = { attachMenu = false; shareLocation() },
+            onShareGroup = { attachMenu = false; showGroupPicker = true },
+        )
     }
 
     // Pre-send preview: tap the media to mark it a spoiler, then Send.
@@ -2564,6 +2566,9 @@ private fun Composer(
     members: List<app.rcq.android.model.GroupMember>,
     ownUin: Int,
     accentColor: Color,
+    // True when the room's owner turned links off and this sender is not
+    // exempt (#755): a draft carrying an http(s) URL is refused at send.
+    linksOff: Boolean,
     onAttach: () -> Unit,
     onTyping: (Boolean) -> Unit,
     onSend: (String) -> Unit,
@@ -2574,6 +2579,7 @@ private fun Composer(
     onCancelVoice: () -> Unit,
 ) {
     val c = RcqTheme.colors
+    val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
     // Don't let the keyboard auto-reappear after the app is backgrounded and
     // resumed (reading a chat, switch apps, come back → IME used to pop up).
@@ -2765,6 +2771,20 @@ private fun Composer(
                         if (canSend) {
                             Modifier.clickable {
                                 val body = draft.trim()
+                                // Room rule (#755): links switched off for this
+                                // sender. The guard sits HERE, at send-initiation,
+                                // not in the envelope path - an edit or a retry of
+                                // an old row must never be eaten (web Chat.tsx,
+                                // same comment). Refusing BEFORE the field is
+                                // cleared keeps the draft, so nothing typed is
+                                // lost to a toast. An invite link seeded into the
+                                // draft (share sheet) is caught here too: an
+                                // invite IS a link, a room with links off means
+                                // all of them.
+                                if (linksOff && HTTP_URL_GATE.containsMatchIn(body)) {
+                                    android.widget.Toast.makeText(context, context.getString(R.string.chat_links_off), android.widget.Toast.LENGTH_SHORT).show()
+                                    return@clickable
+                                }
                                 field = TextFieldValue("")
                                 ChatDrafts.byThread.remove(threadKey)
                                 // The emoticon panel stayed up after sending, so
@@ -2815,6 +2835,23 @@ private fun Composer(
 /** m:ss for a duration in seconds. */
 private fun formatDuration(sec: Int): String = "%d:%02d".format(sec / 60, sec % 60)
 
+/** The send-gate's link detector for a links-off room (#755): the web's
+ *  /https?:\/\//i verbatim. Deliberately BROADER than the render-side
+ *  [Emoticons.URL_RE] tail-trimming: for refusing a send, "contains a scheme
+ *  anywhere" is the right question, where a URL ends is not. */
+private val HTTP_URL_GATE = Regex("https?://", RegexOption.IGNORE_CASE)
+
+/** May the links in THIS row's text be tapped? True unless the room has links
+ *  off for the reader ([linksOff] already folds in the reader's own
+ *  exemption), and even then true when the SENDER is exempt: a links-off room
+ *  is an anti-spam rule for members, and gating on the reader alone was
+ *  eating the owner's announcements in everyone else's view (founder, 29.08;
+ *  web parity, Chat.tsx MessageRow linksAllowed). A sender missing from the
+ *  roster - or an own row, whose senderUin is null - is not exempt, which
+ *  for own rows falls back to the reader-side answer already in [linksOff]. */
+private fun rowLinksEnabled(linksOff: Boolean, group: app.rcq.android.model.RcqGroup?, m: ChatMessage): Boolean =
+    !linksOff || (group != null && m.senderUin?.let { group.roomExempt(it) } == true)
+
 /** RcqAskSheet grows its own Cancel; a custom-body [RcqSheet] does not, so the
  *  sheets in this file carry their confirm/cancel rows by hand. `dimmed` is the
  *  weight a Cancel had as a dialog button. */
@@ -2832,15 +2869,94 @@ private fun SheetTextRow(label: String, dimmed: Boolean = false, onClick: () -> 
 }
 
 /** A plain text action row. The message menu moved to the L2.11 overlay (see
- *  [MsgOverlayActionRow]); the attach sheet still speaks in these. */
+ *  [MsgOverlayActionRow]); the attach sheet still speaks in these. [dimmed]
+ *  greys the label for a row the room's policy refuses (#755) - the row stays
+ *  visible and TAPPABLE so the tap can say why (a toast), the pattern the
+ *  attach button itself used while it carried the whole files-off gate. */
 @Composable
-private fun MessageAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
+private fun MessageAction(label: String, danger: Boolean = false, dimmed: Boolean = false, onClick: () -> Unit) {
     Text(
         label,
-        color = if (danger) Color(0xFFE5484D) else RcqTheme.colors.textPrimary,
+        color = when {
+            danger -> Color(0xFFE5484D)
+            dimmed -> RcqTheme.colors.textSecondary
+            else -> RcqTheme.colors.textPrimary
+        },
         fontSize = 16.sp,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
     )
+}
+
+/** The composer's attach sheet. EXTRACTED from ChatScreen for the same reason
+ *  as [MessageLongPressOverlay] (the verifier edge; see its kdoc) once the
+ *  rows learned the room's content policy (#755).
+ *
+ *  Files off: the media rows (photo / video / album / file) stay VISIBLE but
+ *  dimmed, and a tap explains with a toast - the owner flipped a switch, and
+ *  a row that silently vanished would read as a broken build. Location is not
+ *  a file and stays live. Links off: the group-invite row dims the same way -
+ *  an invite IS a link (web parity: the web hides that entry; here it dims,
+ *  matching how this sheet treats the file rows). The exempt reader (owner /
+ *  moderator) never sees either flag raised - both are computed against
+ *  RcqGroup.roomExempt upstream. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AttachSheet(
+    filesOff: Boolean,
+    linksOff: Boolean,
+    onDismiss: () -> Unit,
+    onPickPhoto: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickAlbum: () -> Unit,
+    onPickFile: () -> Unit,
+    onShareLocation: () -> Unit,
+    onShareGroup: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    val context = LocalContext.current
+    // One refusal per policy, shared by every row it covers.
+    val refuseFiles = {
+        android.widget.Toast.makeText(context, context.getString(R.string.chat_files_off), android.widget.Toast.LENGTH_SHORT).show()
+    }
+    val refuseLinks = {
+        android.widget.Toast.makeText(context, context.getString(R.string.chat_links_off), android.widget.Toast.LENGTH_SHORT).show()
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgSecondary,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            Text(
+                stringResource(R.string.chat_attach),
+                color = c.textSecondary, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Column {
+                MessageAction(stringResource(R.string.chat_attach_photo), dimmed = filesOff) { if (filesOff) refuseFiles() else onPickPhoto() }
+                MessageAction(stringResource(R.string.chat_attach_video), dimmed = filesOff) { if (filesOff) refuseFiles() else onPickVideo() }
+                MessageAction(stringResource(R.string.chat_attach_album), dimmed = filesOff) { if (filesOff) refuseFiles() else onPickAlbum() }
+                MessageAction(stringResource(R.string.chat_attach_file), dimmed = filesOff) { if (filesOff) refuseFiles() else onPickFile() }
+                MessageAction(stringResource(R.string.chat_attach_location)) { onShareLocation() }
+                MessageAction(stringResource(R.string.chat_attach_group), dimmed = linksOff) { if (linksOff) refuseLinks() else onShareGroup() }
+                // No "create poll" row and no "share a connection" row any
+                // more (founder, items 14a + 14b). Polls were never E2EE:
+                // the island held voter_uin + option_index in the clear
+                // even for an "anonymous" ballot, and polls.creator_uin sat
+                // next to the envelope UUID, which de-anonymized the author
+                // of that one message. The backend answers 410
+                // feature_removed and reports polls:false in /server/info,
+                // so there is nothing left here to call. Relay sharing cost
+                // no metadata at all (an inner envelope kind inside an
+                // ordinary sealed message, the island never saw it) and
+                // went purely as a product cut.
+                //
+                // ⚠ Both are OUTGOING cuts only. A poll from an old peer
+                // still renders (as a "no longer supported" card), and an
+                // incoming relay share is still ACCEPTED with its Add
+                // button intact - see RelayBubble below.
+            }
+        }
+    }
 }
 
 /** The message long-press menu (L2.11): full-screen scrim over the blurred
@@ -3892,7 +4008,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: () -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -3916,6 +4032,7 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
             EmoticonText(
                 cap.body, color = c.textPrimary, fontSize = 14.sp,
                 modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).background(if (first.fromMe) c.bubbleSelf else c.bubbleOther).padding(horizontal = 10.dp, vertical = 6.dp),
+                linksEnabled = linksEnabled,
             )
         }
         Row(
@@ -4147,7 +4264,7 @@ private fun SwipeToReply(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -4206,6 +4323,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 EmoticonText(
                     m.body, color = c.textPrimary, fontSize = 14.sp,
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).background(if (m.fromMe) c.bubbleSelf else c.bubbleOther).padding(horizontal = 10.dp, vertical = 6.dp),
+                    linksEnabled = linksEnabled,
                 )
             }
         } else if (m.kind == "poll") {
@@ -4220,6 +4338,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 EmoticonText(
                     m.body, color = c.textPrimary, fontSize = 14.sp,
                     modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).background(if (m.fromMe) c.bubbleSelf else c.bubbleOther).padding(horizontal = 10.dp, vertical = 6.dp),
+                    linksEnabled = linksEnabled,
                 )
             }
         } else if (m.kind == "voice") {
@@ -4280,6 +4399,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     // The bubble's long-press has to survive on top of a link:
                     // Compose gives every gesture inside one to the link itself.
                     onLongPress = onLongPress,
+                    linksEnabled = linksEnabled,
                 )
                 if (collapsed && (bodyOverflow || manyLines)) {
                     Text(

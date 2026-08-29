@@ -1237,4 +1237,5 @@
     <string name="gi_slowmode_desc">Com que frequência um membro pode escrever</string>
     <string name="gi_slow_off">Não</string>
     <string name="chat_files_off">O dono do grupo desativou arquivos</string>
+    <string name="chat_links_off">O dono do grupo desativou links</string>
 </resources>

@@ -1241,4 +1241,5 @@
     <string name="gi_slowmode_desc">Як часто один учасник може писати</string>
     <string name="gi_slow_off">Вимк</string>
     <string name="chat_files_off">Власник групи вимкнув надсилання файлів</string>
+    <string name="chat_links_off">Власник групи вимкнув посилання</string>
 </resources>
