@@ -2676,7 +2676,11 @@ private fun Composer(
                     Icons.Filled.Mood, stringResource(R.string.chat_emoticons), tint = if (showEmoji) c.accent else c.textSecondary,
                     modifier = Modifier.size(40.dp).clip(CircleShape).clickable {
                         showEmoji = !showEmoji
-                        if (showEmoji) keyboard?.hide()
+                        // Both directions, not one (#741): opening the panel
+                        // parked the keyboard and closing it left the user
+                        // with neither — the field still had focus, so one
+                        // show() is all the way back.
+                        if (showEmoji) keyboard?.hide() else keyboard?.show()
                     }.padding(8.dp),
                 )
                 // Over a chat wallpaper the composer stops being a solid slab
