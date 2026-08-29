@@ -354,6 +354,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Аудиокомнаты</string>
     <string name="home_menu_radio">Рация</string>
+    <string name="home_menu_bypass_title">Релеи RCQ</string>
     <string name="home_menu_bypass_enable">Пускать приложение через релеи RCQ</string>
     <string name="home_menu_bypass_disable">Не пускать через релеи RCQ</string>
 

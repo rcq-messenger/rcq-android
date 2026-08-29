@@ -335,6 +335,7 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Sesli odalar</string>
     <string name="home_menu_radio">Radyo</string>
+    <string name="home_menu_bypass_title">RCQ röleleri</string>
     <string name="home_menu_bypass_enable">Uygulamayı RCQ rölelerinden geçir</string>
     <string name="home_menu_bypass_disable">RCQ rölelerinden geçirmeyi bırak</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
