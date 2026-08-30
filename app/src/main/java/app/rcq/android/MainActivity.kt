@@ -872,6 +872,17 @@ private fun RcqApp(session: Session) {
         // unlocked. Incoming calls only ring here while the app is alive (no
         // FCM/VoIP push yet).
         val callState by session.calls.state.collectAsState()
+        // Proximity blanking is CALL-scoped, not screen-scoped: while a
+        // connected voice call plays through the earpiece the screen blanks
+        // at the ear, whether the call screen is up, minimized behind the
+        // return pill, or left behind on the keyguard (#742 - the old
+        // CallScreen-scoped lock died with the composable on minimize).
+        val callSpeakerOn by session.calls.speakerOn.collectAsState()
+        app.rcq.android.ui.ProximityBlanking(
+            callState is app.rcq.android.call.CallController.State.Connected &&
+                callState.info?.media == app.rcq.android.call.CallController.Media.AUDIO &&
+                !callSpeakerOn,
+        )
         val callMinimized = callMinimizedNow
         val callVisible = s is UiState.Registered && !locked &&
             callState !is app.rcq.android.call.CallController.State.Idle

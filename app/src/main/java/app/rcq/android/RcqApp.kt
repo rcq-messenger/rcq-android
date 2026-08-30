@@ -58,6 +58,7 @@ class RcqApp : Application() {
             override fun onStop(owner: LifecycleOwner) {
                 foreground = false
                 runCatching { onForegroundChange?.invoke(false) }
+                runCatching { onForegroundChangeSession?.invoke(false) }
                 val grace = LocalStores.lockGraceSeconds()
                 if (grace <= 0) PanicPinService.lock(applicationContext)
                 else backgroundedAt = SystemClock.elapsedRealtime()
@@ -70,6 +71,7 @@ class RcqApp : Application() {
             override fun onStart(owner: LifecycleOwner) {
                 foreground = true
                 runCatching { onForegroundChange?.invoke(true) }
+                runCatching { onForegroundChangeSession?.invoke(true) }
                 val grace = LocalStores.lockGraceSeconds()
                 if (grace > 0 && backgroundedAt > 0L &&
                     SystemClock.elapsedRealtime() - backgroundedAt >= grace * 1000L
@@ -100,5 +102,14 @@ class RcqApp : Application() {
          *  listener list here would outlive account switches. */
         @Volatile
         var onForegroundChange: ((Boolean) -> Unit)? = null
+
+        /** Session's own foreground hook: the socket probe and the queue
+         *  drain (report #807). A SECOND named slot, not a listener list and
+         *  not a shared one: 0.151 had Session.start() assign the slot above
+         *  and silently STEAL it from CallController, so the ringing handoff
+         *  between the in-app screen and the full-screen notification never
+         *  fired again. One slot, one owner, each. */
+        @Volatile
+        var onForegroundChangeSession: ((Boolean) -> Unit)? = null
     }
 }

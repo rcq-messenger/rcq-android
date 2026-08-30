@@ -307,6 +307,28 @@ class Session(context: Context) {
             return
         }
         if (ci == null) {
+            // ⚠ `call_end` is the one LIVE signal that must survive a dead
+            // socket. The shade's hang-up runs in a backgrounded process whose
+            // socket is often a silently-dead corpse: `ws.send` buffers into it
+            // and reports success, the frame never leaves the phone, and the
+            // peer's call screen counts on (#724/#730/#733). Two belts: probe
+            // the socket first, so a corpse is torn down and the refused frame
+            // lands in the outbox for the redial to flush - and deposit a
+            // sealed copy the way `call_missed` above already travels, which
+            // reaches the peer through their queue even if this process is
+            // frozen before any reconnect. A double delivery is idempotent:
+            // [CallController.handleRemoteEnd] checks the call id and drops
+            // an end for a call that is already gone.
+            if (toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_end") {
+                socket.ensureAlive()
+                val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
+                val data = mutableMapOf<String, String>()
+                for ((k, v) in obj.entrySet()) {
+                    if (k == "type" || k == "to_uin" || k == "call_id") continue
+                    if (v.isJsonPrimitive) data[k] = v.asString
+                }
+                scope.launch { runCatching { sendControl(toUin, Envelope.callSignal("call_end", callId, data)) } }
+            }
             // same-island: unchanged plaintext WS relay, but no longer fire and
             // forget — a refused frame waits for the socket instead of vanishing.
             if (!socket.send(obj.toString())) {
@@ -1377,7 +1399,9 @@ class Session(context: Context) {
         // throttled so app-switch flurries cost one fetch, and the socket is
         // only redialed when it has been silent past the app-ping cadence.
         var lastForegroundDrain = 0L
-        RcqApp.onForegroundChange = { up ->
+        // ⚠ The SESSION slot. `onForegroundChange` belongs to CallController
+        // (the ringing handoff); 0.151 assigned it here and broke that handoff.
+        RcqApp.onForegroundChangeSession = { up ->
             if (up && started && !duressViewUp) {
                 socket.ensureAlive()
                 val now = android.os.SystemClock.elapsedRealtime()
@@ -6918,7 +6942,6 @@ class Session(context: Context) {
                     )
                     return@runCatching
                 }
-                val host = dec.senderHost ?: return@runCatching // same-island calls use the WS, not envelopes
                 // ⚠ The Cloudflare FRONT is OUR island by another road, and a
                 // build that stamps `cdn.rcq.app` instead of the island is not
                 // a cross-island caller. This gate used to name serverHost()
@@ -6927,7 +6950,27 @@ class Session(context: Context) {
                 // signals was dropped one line later at the CrossIslandStore
                 // lookup: they could write but never ring. Same host set
                 // everywhere now.
-                if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
+                val host = dec.senderHost
+                if (host == null || host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) {
+                    // Same island (by name, or through the front). Live
+                    // signaling rides the WS; a sealed copy exists for exactly
+                    // one signal: the `call_end` sent while the sender's
+                    // socket was a silently-dead corpse (the notification
+                    // hang-up, #724/#730/#733 - see [routeCallSignal]).
+                    // Only that one is believed. An offer or ICE from our own
+                    // island in an envelope is a replayed antique, and
+                    // [handleRemoteEnd]'s call-id check makes the duplicate
+                    // from the WS-plus-envelope double send a no-op.
+                    if (cs.sig == "call_end") {
+                        val sigObj = com.google.gson.JsonObject().apply {
+                            addProperty("from_uin", dec.senderUin)
+                            addProperty("call_id", cs.cid)
+                            cs.data.forEach { (k, v) -> addProperty(k, v) }
+                        }
+                        calls.onSignal(cs.sig, sigObj)
+                    }
+                    return@runCatching
+                }
                 if (CrossIslandStore.get(dec.senderUin, host) == null) return@runCatching
                 if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
                     // Same dedupe as the marker above: a cross-island offer can
