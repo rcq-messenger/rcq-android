@@ -113,10 +113,10 @@ fun CallScreen(controller: CallController, session: Session? = null) {
     androidx.activity.compose.BackHandler(enabled = connected) { controller.minimize() }
 
     KeepScreenOn()
-    // Proximity blanking, but only when the earpiece is the output: on speaker,
-    // in video, or before the call connects, holding a phone near your face is
-    // not a reason to blank.
-    ProximityBlanking(connected && !isVideo && !speakerOn)
+    // Proximity blanking used to live here, which scoped it to THIS SCREEN:
+    // minimizing a connected call, or answering over the keyguard, unmounted
+    // the composable and released the lock, so the lit screen pressed
+    // against a cheek (#742). It is call-scoped now - see MainActivity.
 
     Box(
         Modifier.fillMaxSize().background(Color(0xFF0E0F12)).let {
