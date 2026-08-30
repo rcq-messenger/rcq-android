@@ -1235,6 +1235,8 @@
     <string name="gi_links_desc">成员可以发送链接</string>
     <string name="gi_files">允许文件</string>
     <string name="gi_files_desc">成员可以发送文件和媒体</string>
+    <string name="gi_age_gate">账号最低注册时长</string>
+    <string name="gi_age_gate_desc">低于门槛的账号可以阅读但不能发言。可有效遏制一次性账号的垃圾信息。</string>
     <string name="gi_slowmode">慢速模式</string>
     <string name="gi_slowmode_desc">单个成员的发言频率</string>
     <string name="gi_slow_off">关闭</string>

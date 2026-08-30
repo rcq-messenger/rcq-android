@@ -1237,6 +1237,8 @@
     <string name="gi_links_desc">Üyeler bağlantı gönderebilir</string>
     <string name="gi_files">Dosyalara izin ver</string>
     <string name="gi_files_desc">Üyeler dosya ekleyebilir</string>
+    <string name="gi_age_gate">Hesap yaşı eşiği</string>
+    <string name="gi_age_gate_desc">Eşikten genç hesaplar okuyabilir ama yazamaz. Tek kullanımlık hesaplardan spam yapmayı zorlaştırır.</string>
     <string name="gi_slowmode">Yavaş mod</string>
     <string name="gi_slowmode_desc">Bir üye ne sıklıkla yazabilir</string>
     <string name="gi_slow_off">Kapalı</string>

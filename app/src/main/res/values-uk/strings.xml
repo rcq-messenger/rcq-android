@@ -1241,6 +1241,8 @@
     <string name="gi_links_desc">Учасники можуть надсилати посилання</string>
     <string name="gi_files">Файли дозволені</string>
     <string name="gi_files_desc">Учасники можуть прикріплювати файли та медіа</string>
+    <string name="gi_age_gate">Поріг віку акаунта</string>
+    <string name="gi_age_gate_desc">Акаунти, молодші за поріг, читають, але не пишуть. Ускладнює спам з одноразових акаунтів.</string>
     <string name="gi_slowmode">Повільний режим</string>
     <string name="gi_slowmode_desc">Як часто один учасник може писати</string>
     <string name="gi_slow_off">Вимк</string>

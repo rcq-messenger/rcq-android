@@ -58,6 +58,9 @@ data class RcqGroup(
     val stateVer: Long = 0,
     val filesAllowed: Boolean = true,
     val slowmodeSec: Int = 0,
+    /** Anti-spam age floor, hours (0 = off): an account younger than this
+     *  reads but cannot post. Owner-set; the island enforces it. */
+    val minAccountAgeHours: Int = 0,
     val avatarMediaId: String? = null,
     val avatarMediaKey: String? = null,
     val members: List<GroupMember> = emptyList(),

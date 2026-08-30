@@ -1283,6 +1283,8 @@
     <string name="gi_links_desc">Участники могут отправлять ссылки</string>
     <string name="gi_files">Файлы разрешены</string>
     <string name="gi_files_desc">Участники могут прикреплять файлы и медиа</string>
+    <string name="gi_age_gate">Порог возраста аккаунта</string>
+    <string name="gi_age_gate_desc">Аккаунты моложе порога читают, но не пишут. Затрудняет спам с одноразовых аккаунтов.</string>
     <string name="gi_slowmode">Медленный режим</string>
     <string name="gi_slowmode_desc">Как часто один участник может писать</string>
     <string name="gi_slow_off">Выкл</string>

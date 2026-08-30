@@ -1288,6 +1288,8 @@
     <string name="gi_links_desc">Members may post links</string>
     <string name="gi_files">Files allowed</string>
     <string name="gi_files_desc">Members may attach files and media</string>
+    <string name="gi_age_gate">Account age floor</string>
+    <string name="gi_age_gate_desc">Accounts younger than the floor can read but not post. Blunts spam from throwaway accounts.</string>
     <string name="gi_slowmode">Slow mode</string>
     <string name="gi_slowmode_desc">How often one member may post</string>
     <string name="gi_slow_off">Off</string>

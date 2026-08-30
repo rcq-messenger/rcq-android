@@ -3561,6 +3561,7 @@ class Session(context: Context) {
         stateVer = g.state_ver,
         filesAllowed = g.files_allowed,
         slowmodeSec = g.slowmode_sec,
+        minAccountAgeHours = g.min_account_age_hours,
         avatarMediaId = g.avatar_media_id,
         avatarMediaKey = g.avatar_media_key,
         members = g.members.map {
@@ -4135,6 +4136,7 @@ class Session(context: Context) {
         linksAllowed: Boolean? = null,
         filesAllowed: Boolean? = null,
         slowmodeSec: Int? = null,
+        minAccountAgeHours: Int? = null,
         inCatalog: Boolean? = null,
     ) {
         val ctx = groupCtx(id)
@@ -4142,6 +4144,7 @@ class Session(context: Context) {
             name = name, description = description, pinned_text = pinnedText,
             post_policy = postPolicy, is_closed = isClosed, members_hidden = membersHidden,
             links_allowed = linksAllowed, files_allowed = filesAllowed, slowmode_sec = slowmodeSec,
+            min_account_age_hours = minAccountAgeHours,
             in_catalog = inCatalog,
         ))))
     }

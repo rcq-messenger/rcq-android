@@ -387,6 +387,23 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             }
                         }
                     }
+                    // Anti-spam age floor (#803): accounts younger than the
+                    // step read but cannot post; the island enforces it.
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bgSecondary).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.gi_age_gate), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.gi_age_gate_desc), color = c.textSecondary, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(percent = 50)).background(c.bgPrimary).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            // The island's fixed steps (_AGE_GATE_STEPS): off, 1h, 6h, 24h, 3d, 7d, 30d.
+                            listOf(0 to stringResource(R.string.gi_slow_off), 1 to "1h", 6 to "6h", 24 to "24h", 72 to "3d", 168 to "7d", 720 to "30d").forEach { (h, label) ->
+                                val sel = group.minAccountAgeHours == h
+                                Box(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(percent = 50)).background(if (sel) c.accent else Color.Transparent)
+                                        .clickable { if (!sel) scope.launch { runCatching { session.patchGroup(groupId, minAccountAgeHours = h) } } }.padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text(label, color = if (sel) Color.White else c.textSecondary, fontSize = 12.sp) }
+                            }
+                        }
+                    }
                 }
             }
         }

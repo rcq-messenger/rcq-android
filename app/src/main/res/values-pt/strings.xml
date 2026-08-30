@@ -1237,6 +1237,8 @@
     <string name="gi_links_desc">Membros podem enviar links</string>
     <string name="gi_files">Arquivos permitidos</string>
     <string name="gi_files_desc">Membros podem anexar arquivos</string>
+    <string name="gi_age_gate">Idade mínima da conta</string>
+    <string name="gi_age_gate_desc">Contas mais novas que o limite podem ler, mas não publicar. Dificulta o spam de contas descartáveis.</string>
     <string name="gi_slowmode">Modo lento</string>
     <string name="gi_slowmode_desc">Com que frequência um membro pode escrever</string>
     <string name="gi_slow_off">Não</string>
