@@ -1411,6 +1411,15 @@ object Push {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
             android.util.Log.w("RCQpush", "incoming call: notifications disabled — call UI cannot be shown")
         }
+        // The audible channel carries the system ringtone itself, so an in-app
+        // ring for this same call has to come down or the two play over each
+        // other (the #638/#720 family). On the silent channel the opposite
+        // holds: the process-wide Ringer keeps the melody running unbroken
+        // across the background handoff and the FSI surface joins it
+        // idempotently (#744). No-op when nothing rings in-app.
+        if (!activityWillRing) {
+            app.rcq.android.call.Ringer.shared(ctx).stopFor(callId)
+        }
         val caller = androidx.core.app.Person.Builder().setName(nickname).setImportant(true).build()
         val notif = NotificationCompat.Builder(ctx, if (activityWillRing) CHANNEL_CALLS else CHANNEL_CALLS_RING)
             .setSmallIcon(R.drawable.ic_notification)
