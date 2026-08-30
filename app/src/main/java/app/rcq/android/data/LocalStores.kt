@@ -435,6 +435,7 @@ object LocalStores {
             _allowedStrangers.value = emptySet()
             _gonePeers.value = emptySet()
             _unread.value = emptyMap()
+            _gskeys.value = emptyMap()
             _reactionInbox.value = emptySet()
             _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
@@ -467,6 +468,7 @@ object LocalStores {
         _allowedStrangers.value = prefs.getStringSet(pk(K_STRANGER_ALLOW), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadCounts(pk(K_UNREAD))
+        loadRoomKeys()
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
@@ -889,6 +891,40 @@ object LocalStores {
         cur[thread] = (cur[thread] ?: 0) + 1
         _unread.value = cur
         persistUnread()
+    }
+
+    // ── room state keys (stage 6 phase 2) ────────────────────────────
+    // Per-account gid -> "ver:keyB64". The key that opens a sealed room
+    // identity blob; monotonic with one exception mirrored from the web
+    // (design doc): a roster-gated key of EQUAL version may replace the
+    // stored bytes, which is how a wedged receiver repairs.
+
+    private val _gskeys = MutableStateFlow<Map<Int, Pair<Long, String>>>(emptyMap())
+    val gskeys: StateFlow<Map<Int, Pair<Long, String>>> = _gskeys.asStateFlow()
+
+    fun roomKey(gid: Int): Pair<Long, String>? = _gskeys.value[gid]
+
+    fun putRoomKey(gid: Int, ver: Long, keyB64: String, replaceEqual: Boolean = false): Boolean {
+        if (acct == null) return false
+        val cur = _gskeys.value[gid]
+        if (cur != null && (cur.first > ver || (cur.first == ver && (!replaceEqual || cur.second == keyB64)))) return false
+        _gskeys.value = _gskeys.value + (gid to (ver to keyB64))
+        prefs.edit().putStringSet(
+            pk(K_GSKEYS),
+            _gskeys.value.map { (g, e) -> "$g=${e.first}:${e.second}" }.toSet(),
+        ).apply()
+        return true
+    }
+
+    private fun loadRoomKeys() {
+        _gskeys.value = (prefs.getStringSet(pk(K_GSKEYS), emptySet()) ?: emptySet()).mapNotNull { row ->
+            val eq = row.indexOf('=')
+            val colon = row.indexOf(':', eq + 1)
+            if (eq <= 0 || colon <= eq) return@mapNotNull null
+            val gid = row.substring(0, eq).toIntOrNull() ?: return@mapNotNull null
+            val ver = row.substring(eq + 1, colon).toLongOrNull() ?: return@mapNotNull null
+            gid to (ver to row.substring(colon + 1))
+        }.toMap()
     }
 
     fun clearUnread(thread: String) {
@@ -1355,6 +1391,7 @@ object LocalStores {
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
+    private const val K_GSKEYS = "gskeys"
     private const val K_REACT_INBOX = "reaction_inbox"
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_REACTION_USES = "reaction_uses"

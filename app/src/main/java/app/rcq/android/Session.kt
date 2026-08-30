@@ -3515,7 +3515,14 @@ class Session(context: Context) {
 
     // ── groups ───────────────────────────────────────────────────────
 
-    private fun mapGroup(g: RcqApi.GroupOut): RcqGroup = RcqGroup(
+    private fun mapGroup(g: RcqApi.GroupOut): RcqGroup =
+        // Stage 6 phase 2: overlay the sealed identity when we hold the key.
+        app.rcq.android.crypto.GroupState.overlay(
+            mapGroupRaw(g),
+            LocalStores.roomKey(g.id)?.second,
+        )
+
+    private fun mapGroupRaw(g: RcqApi.GroupOut): RcqGroup = RcqGroup(
         id = g.id,
         name = g.name ?: "Group ${g.id}",
         description = g.description,
@@ -3526,6 +3533,8 @@ class Session(context: Context) {
         pinnedText = g.pinned_text,
         linksAllowed = g.links_allowed,
         inCatalog = g.in_catalog,
+        stateBlob = g.state_blob,
+        stateVer = g.state_ver,
         filesAllowed = g.files_allowed,
         slowmodeSec = g.slowmode_sec,
         avatarMediaId = g.avatar_media_id,
@@ -3549,6 +3558,32 @@ class Session(context: Context) {
         memberCount = if (g.member_count > 0) g.member_count else g.members.size,
     )
 
+    /** One `gsknack` per room per six hours when its sealed blob exists and
+     *  our key (if any) does not open it. The reply lands as a gskey. */
+    private fun maybeAskRoomKey(g: RcqGroup) {
+        val blob = g.stateBlob ?: return
+        val held = LocalStores.roomKey(g.id)
+        if (held != null && app.rcq.android.crypto.GroupState.open(blob, held.second) != null) return
+        val prefs = appCtx.getSharedPreferences("rcq_gsknack", android.content.Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val last: Long = prefs.getLong("g${g.id}", 0L)
+        if (now - last < 6L * 3600_000L) return
+        prefs.edit().putLong("g${g.id}", now).apply()
+        scope.launch {
+            runCatching {
+                ensureRoster(g.id)
+                val owner = groups.value.firstOrNull { it.id == g.id }
+                    ?.members?.firstOrNull { it.uin == g.ownerUin } ?: return@runCatching
+                if (owner.identityKey.isBlank()) return@runCatching
+                sendSealedCopies(
+                    owner.uin,
+                    encryptFor(owner.uin, Envelope.GsKnack(g.id)),
+                    envelopeType = "sknack",
+                )
+            }
+        }
+    }
+
     private suspend fun refreshGroups() {
         // Without the roster: the chat list wants a name, a picture and a count,
         // and the roster is the expensive half — every member with two base64
@@ -3558,6 +3593,9 @@ class Session(context: Context) {
             // Keep a roster we already paid for rather than dropping it.
             if (g.members.isEmpty()) g.copy(members = known[g.id]?.members ?: emptyList()) else g
         }
+        // Stage 6 phase 2: a blob we cannot open earns one throttled ask
+        // toward the owner (six hours per room, mirrored from the web).
+        for (g in own) maybeAskRoomKey(g)
         // §5c: groups hosted on OTHER islands, fetched with that island's creds;
         // ids rewritten to the local alias at this boundary. The host can be a
         // visited/guest island OR one of our BACKUP islands (multihome) — a group
@@ -3683,6 +3721,14 @@ class Session(context: Context) {
         if (groupId < 0) VisitedIslandsStore.refByAlias(groupId)?.host else null
 
     private fun mapGroupCtx(ctx: GroupCtx, g: RcqApi.GroupOut): RcqGroup =
+        // Stage 6 phase 2: a room we hold the key for renders its SEALED
+        // identity over the open columns; everyone else sees the columns.
+        app.rcq.android.crypto.GroupState.overlay(
+            mapGroupCtxRaw(ctx, g),
+            LocalStores.roomKey(g.id)?.second,
+        )
+
+    private fun mapGroupCtxRaw(ctx: GroupCtx, g: RcqApi.GroupOut): RcqGroup =
         if (ctx.host == null) mapGroup(g)
         else mapGroup(g).copy(id = VisitedIslandsStore.aliasFor(ctx.host, g.id), host = ctx.host)
 
@@ -4530,6 +4576,8 @@ class Session(context: Context) {
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.ReadMark -> Unit     // A2 marker rides INSIDE a carbon, never group-sealed
+                is Envelope.GsKey -> Unit        // room keys ride 1:1 sealed only
+                is Envelope.GsKnack -> Unit      // asks ride 1:1 sealed only
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
                 is Envelope.ContactRequest -> Unit // §5f is 1:1 consent, never group-sealed
                 is Envelope.ProfileUpdate -> Unit  // §5e is deposited per-contact, never group-sealed
@@ -7077,6 +7125,32 @@ class Session(context: Context) {
                     // in its destination thread (dedup by id; no badge/sound).
                     if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
                 is Envelope.ReadMark -> Unit   // A2 marker only ever arrives WRAPPED in a carbon
+                is Envelope.GsKey ->
+                    // Room state key (stage 6 phase 2). Roster gate: only a
+                    // fellow member's key is worth holding; equal-version
+                    // replace is the wedge-repair rule from the design doc.
+                    if (groups.value.firstOrNull { it.id == env.gid }?.members?.any { it.uin == dec.senderUin } == true) {
+                        if (LocalStores.putRoomKey(env.gid, env.ver, env.key, replaceEqual = true)) {
+                            scope.launch { runCatching { refreshGroups() } }
+                        }
+                    } else Unit
+                is Envelope.GsKnack ->
+                    // Any holder answers. The asker must be in the roster we
+                    // can see; the reply is a plain sealed gskey.
+                    scope.launch {
+                        runCatching {
+                            val g = groups.value.firstOrNull { it.id == env.gid } ?: return@runCatching
+                            val member = g.members.firstOrNull { it.uin == dec.senderUin } ?: return@runCatching
+                            val k = LocalStores.roomKey(env.gid) ?: return@runCatching
+                            if (member.identityKey.isNotBlank()) {
+                                sendSealedCopies(
+                                    dec.senderUin,
+                                    encryptFor(dec.senderUin, Envelope.GsKey(env.gid, k.first, k.second)),
+                                    envelopeType = "skdm",
+                                )
+                            }
+                        }
+                    }
                 is Envelope.Skdm -> Unit       // sender-keys distribution is group-only
                 is Envelope.Sknack -> Unit     // sender-keys recovery is group-only
                 is Envelope.RelayShare ->

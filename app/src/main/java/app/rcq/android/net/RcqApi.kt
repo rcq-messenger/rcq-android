@@ -1098,6 +1098,11 @@ class RcqApi(
         // Voluntary catalog (stage 6): true only when the owner listed the
         // room; search matches catalog rows only.
         val in_catalog: Boolean = false,
+        // Sealed room identity (stage 6 phase 2): opaque blob + its version.
+        // A client holding the room key overlays it; everyone else renders
+        // the open columns exactly as before.
+        val state_blob: String? = null,
+        val state_ver: Long = 0,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
         val created_at: String? = null,

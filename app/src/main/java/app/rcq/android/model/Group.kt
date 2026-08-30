@@ -54,6 +54,8 @@ data class RcqGroup(
     // what every group had before the fields existed.
     val linksAllowed: Boolean = true,
     val inCatalog: Boolean = false,
+    val stateBlob: String? = null,
+    val stateVer: Long = 0,
     val filesAllowed: Boolean = true,
     val slowmodeSec: Int = 0,
     val avatarMediaId: String? = null,
