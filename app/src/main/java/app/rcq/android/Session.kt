@@ -4482,7 +4482,10 @@ class Session(context: Context) {
                     // The chain landed — anything we held for this kid can be
                     // read now. Without this the broadcasts that arrived first
                     // stay lost even though the key is finally here.
-                    if (ok) replayHeldGmsg(env.kid)
+                    if (ok) {
+                        sknackAnswered(env.kid)
+                        replayHeldGmsg(env.kid)
+                    }
                 }
                 is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
                 else -> routeGroupEnvelope(env, groupId, dec.senderUin, depositAtMs)
@@ -4675,17 +4678,43 @@ class Session(context: Context) {
         copy.forEach { (gid, payload) -> ingestGmsg(payload, gid) }
     }
 
-    /** Per-(kid) debounce so a burst of un-openable gmsg fires at most one NACK
-     *  per recovery window. */
-    private val sknackSent = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Per-kid ask ledger: attempts + last-ask stamp. The flat ten-minute
+     *  window turned a DEAD kid (owner deleted their account, nobody alive
+     *  can answer) into a forever machine: one 24/7 install re-asked a
+     *  971-member room every window, 366 whole-room fan-outs in 12 hours,
+     *  measured on prod 30.08. The window now doubles per unanswered ask
+     *  (10m, 30m, 2h, 6h, 24h) and past the ladder the kid is written off
+     *  for a week; an SKDM that finally lands clears its record (see the
+     *  Skdm branch in [ingestGroup]). The island additionally budgets
+     *  sknack at 10/hour per account, so an old build in this loop now
+     *  degrades to silence instead of a storm. In-memory is enough here:
+     *  the process lives for days, and a restart costs one extra ask. */
+    private val sknackSent = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Long>>()
+
+    private fun sknackAllowed(kid: String): Boolean {
+        val ladder = longArrayOf(10 * 60_000L, 30 * 60_000L, 2 * 3600_000L, 6 * 3600_000L, 24 * 3600_000L)
+        val now = System.currentTimeMillis()
+        val rec = sknackSent[kid]
+        if (rec == null) {
+            sknackSent[kid] = 1 to now
+            return true
+        }
+        val (n, at) = rec
+        val wait = if (n >= ladder.size) 7 * 24 * 3600_000L else ladder[n - 1]
+        if (now - at < wait) return false
+        sknackSent[kid] = minOf(n + 1, ladder.size + 1) to now
+        return true
+    }
+
+    /** The asks worked: forget the ledger for this kid. */
+    private fun sknackAnswered(kid: String) {
+        sknackSent.remove(kid)
+    }
 
     /** Fire one recovery request for an unknown kid to the group's capable
-     *  members (we don't know whose kid it is). Debounced per kid. */
+     *  members (we don't know whose kid it is). Ladder-debounced per kid. */
     private fun sendSknack(groupId: Int, kid: String) {
-        val prev = sknackSent[kid]
-        val now = System.currentTimeMillis()
-        if (prev != null && now - prev < 10 * 60 * 1000) return
-        sknackSent[kid] = now
+        if (!sknackAllowed(kid)) return
         val ctx = groupCtx(groupId)
         val me = ctx.myUin.takeIf { it != 0 } ?: return
         val g = group(groupId) ?: return
