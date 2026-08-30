@@ -191,9 +191,20 @@ object CrossIslandSender {
      *  envelope deposit). Cross-island media: the recipient fetches media from
      *  their OWN island, so the sender puts the blob there itself
      *  (deposit-the-blob — islands never talk to each other). */
-    fun depositBlob(host: String, mediaId: String, blob: ByteArray): Boolean {
+    fun depositBlob(
+        host: String,
+        mediaId: String,
+        blob: ByteArray,
+        /// #831: without this a cross-island picture showed no percentage at
+        /// all — the bar sat indeterminate for the whole upload, which on a
+        /// slow link is the longest part of sending. Same chunked body the
+        /// own-island upload has always used.
+        onProgress: ((sent: Long, total: Long) -> Unit)? = null,
+    ): Boolean {
+        val part = if (onProgress == null) blob.toRequestBody(OCTET)
+                   else ChunkedBlobBody(blob, OCTET, onProgress)
         val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
-            .addFormDataPart("blob", "photo.bin", blob.toRequestBody(OCTET))
+            .addFormDataPart("blob", "photo.bin", part)
             .build()
         val req = Request.Builder().url("https://$host/media/$mediaId").put(body).build()
         return runCatching { viaBestRoute(host) { c -> c.newCall(req).execute() }.use { it.isSuccessful } }.getOrDefault(false)
@@ -504,5 +515,36 @@ object CrossIslandSender {
             }
         }
         return delivered
+    }
+}
+
+/** A blob written to the socket in 64 KB slices so the caller can watch it go.
+ *
+ *  ⚠ Deliberately a local copy of what `RcqApi` does for own-island uploads
+ *  rather than a shared class: this file talks to OTHER islands and has no
+ *  business reaching into the api client's internals. The rule it exists for
+ *  is the same one (#537): handed a byte array, OkHttp writes it in one or two
+ *  goes and a progress callback fires twice, which is a bar that jumps from
+ *  nothing to done instead of a line that moves.
+ */
+private class ChunkedBlobBody(
+    private val bytes: ByteArray,
+    private val type: okhttp3.MediaType,
+    private val onProgress: (sent: Long, total: Long) -> Unit,
+) : okhttp3.RequestBody() {
+    override fun contentType() = type
+    override fun contentLength() = bytes.size.toLong()
+
+    override fun writeTo(sink: okio.BufferedSink) {
+        val total = bytes.size.toLong()
+        var sent = 0L
+        val chunk = 64 * 1024
+        while (sent < total) {
+            val n = minOf(chunk.toLong(), total - sent).toInt()
+            sink.write(bytes, sent.toInt(), n)
+            sink.flush()
+            sent += n
+            onProgress(sent, total)
+        }
     }
 }

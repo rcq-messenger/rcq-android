@@ -5283,8 +5283,9 @@ class Session(context: Context) {
         val ci = CrossIslandStore.findByUin(toUin) ?: return api.uploadBlob(blob, ::reportUpload)
         return withContext(Dispatchers.IO) {
             val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
-            // The peer-island copy is REQUIRED — that's the one they read.
-            if (!CrossIslandSender.depositBlob(ci.host, mediaId, blob)) {
+            // The peer-island copy is REQUIRED — that's the one they read,
+            // and it is the one worth showing a percentage for (#831).
+            if (!CrossIslandSender.depositBlob(ci.host, mediaId, blob, ::reportUpload)) {
                 throw java.io.IOException("cross-island media deposit failed (${ci.host})")
             }
             runCatching { api.putBlob(mediaId, blob) }
@@ -6230,7 +6231,18 @@ class Session(context: Context) {
         //    was ever sent AND the message came back. Nothing in the retraction
         //    belongs to a screen that is already gone.
         deleteLocal(target)
-        scope.launch {
+        scope.launch { pushRetraction(target, env, gid) }
+    }
+
+    /** The wire half of a retraction: fan out, mirror to my own devices, and
+     *  put the message back if nothing left the device. Split out of
+     *  [sendDeleteForEveryone] so a whole album can be retracted ONE AT A TIME
+     *  (#831). Ten parallel fan-outs in a room the size of the beta one is ten
+     *  times 1184 seals and ~13 MB racing each other up one socket; sequential
+     *  is slower to finish and the only version that does not melt the link.
+     *  Callers own the scope and the local delete, exactly as before. */
+    private suspend fun pushRetraction(target: ChatMessage, env: Envelope, gid: Int?) {
+        run {
             val sent = runCatching {
                 if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
             }.getOrDefault(false)
@@ -6248,6 +6260,36 @@ class Session(context: Context) {
                 android.util.Log.w("RCQgroup", "delete-for-everyone did not reach the island for ${target.id}; restoring")
                 restoreAfterFailedDelete(target)
             }
+        }
+    }
+
+    /** Retract a whole album (#831): "приходится удалять их по одной".
+     *
+     *  Same permission rule as one message, asked ONCE — every row of an album
+     *  has the same author and the same room, so re-deriving it per item would
+     *  only re-fetch the roster. Everything vanishes locally at once, which is
+     *  what the user asked for, and the wire half then runs one item at a time
+     *  through [pushRetraction] (see the note there about ten parallel
+     *  fan-outs). A failure restores only the item that failed, so a partial
+     *  send is visible instead of pretending the whole batch went.
+     */
+    fun deleteAlbumForEveryone(items: List<ChatMessage>) {
+        if (items.isEmpty()) return
+        val first = items.first()
+        val gid = first.groupId
+        val mine = first.fromMe || (gid == null && first.peerUin == store.uin)
+        scope.launch {
+            if (!mine) {
+                if (gid == null) return@launch
+                ensureRoster(gid)
+                val g = group(gid)
+                val me = store.uin
+                if (g == null || me == null || !g.moderator(me)) return@launch
+            }
+            // Local first, all of it: the point of the item is that the batch
+            // goes in one action.
+            items.forEach { deleteLocal(it) }
+            items.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId) }
         }
     }
 
