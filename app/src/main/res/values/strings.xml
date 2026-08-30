@@ -1299,4 +1299,5 @@
     <string name="chat_slowmode_wait_in">Slow mode is on: try again in %1$d s</string>
     <string name="push_channel_upload">Sending files</string>
     <string name="push_channel_upload_desc">Files still going up while RCQ is not on screen.</string>
+    <string name="chat_delete_album">Delete all %1$d photos</string>
 </resources>

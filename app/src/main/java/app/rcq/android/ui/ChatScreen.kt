@@ -420,6 +420,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // a character doesn't recompose the whole ChatScreen (header + message
     // LazyColumn). That recomposition-per-keystroke was the input-field lag.
     var actionMsg by remember { mutableStateOf<ChatMessage?>(null) }
+    /// The batch the held tile belongs to, when it was an album (#831). Null
+    /// for a lone message, which is what keeps "delete the whole batch" off
+    /// the menu everywhere it would make no sense.
+    var actionAlbum by remember { mutableStateOf<List<ChatMessage>?>(null) }
     // The composer emoticon panel. The state lives HERE rather than inside
     // Composer (where the draft stays) because the message LIST closes it now:
     // a tap on the list or the start of a scroll puts the panel away, iOS
@@ -1722,7 +1726,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         senderName = if (isGroup && !row.items.first().fromMe && row.showSender) authorName(row.items.first()) else null,
                         senderAvatarId = if (row.showSender) authorMember(row.items.first())?.avatarMediaId else null,
                         senderAvatarKey = if (row.showSender) authorMember(row.items.first())?.avatarMediaKey else null,
-                        onLongPress = { held -> actionMsg = held },
+                        // #749 stays exactly as it was: the HELD tile is the
+                        // message the menu acts on. The batch rides alongside
+                        // it as a separate scope (#831), so "delete all" is an
+                        // extra item rather than a redefinition of the gesture.
+                        onLongPress = { held -> actionMsg = held; actionAlbum = row.items },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
                         // An album is one sender's batch, so the first item
                         // names the whole row.
@@ -2132,7 +2140,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onShare = { shareMessageMedia(it) },
             onSave = { saveMessageMedia(it) },
             onEdit = { editMsg = it },
-            onDismiss = { actionMsg = null },
+            album = actionAlbum?.takeIf { batch -> batch.size > 1 && batch.any { it.id == m.id } },
+            onDismiss = { actionMsg = null; actionAlbum = null },
         )
     }
     }
@@ -3012,6 +3021,9 @@ private fun MessageLongPressOverlay(
     onShare: (ChatMessage) -> Unit,
     onSave: (ChatMessage) -> Unit,
     onEdit: (ChatMessage) -> Unit,
+    /// The whole batch, when [m] is one tile of an album (#831). Null for a
+    /// lone message.
+    album: List<ChatMessage>? = null,
     onDismiss: () -> Unit,
 ) {
     val c = RcqTheme.colors
@@ -3248,6 +3260,27 @@ private fun MessageLongPressOverlay(
                             onDismiss()
                         },
                     )
+                    // #831 "невозможно удалить всю пачку разом". Sits next to
+                    // the single delete and mirrors its meaning exactly, so it
+                    // is offered wherever that one is — including Saved
+                    // Messages, where `canDeleteAll` is false because you ARE
+                    // everyone. Deliberately an extra ITEM and not a new
+                    // meaning for the long-press: making the gesture act on the
+                    // album is the #749 bug with a bigger blast radius, where
+                    // holding one photo would take ten with it.
+                    if (album != null) {
+                        add(
+                            MsgOverlayItem(
+                                stringResource(R.string.chat_delete_album, album.size),
+                                Icons.Filled.DeleteForever,
+                                danger = true,
+                            ) {
+                                if (canDeleteAll || isSelf) session.deleteAlbumForEveryone(album)
+                                else album.forEach { session.deleteLocal(it) }
+                                onDismiss()
+                            },
+                        )
+                    }
                 }
                 Column(
                     Modifier

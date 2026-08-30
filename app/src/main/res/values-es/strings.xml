@@ -1248,4 +1248,5 @@
     <string name="chat_slowmode_wait_in">Modo lento activado: inténtalo en %1$d s</string>
     <string name="push_channel_upload">Envío de archivos</string>
     <string name="push_channel_upload_desc">Archivos que siguen subiendo mientras RCQ no está en pantalla.</string>
+    <string name="chat_delete_album">Eliminar las %1$d fotos</string>
 </resources>
