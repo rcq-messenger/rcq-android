@@ -259,7 +259,13 @@ class CallController(
             ringer.startIncoming(call.id)
         } else {
             if (_incomingViaFsi.value) return
-            ringer.stop()
+            // The ring is NOT stopped here. The FSI surface rings through the
+            // same process-wide [Ringer], keyed by this call id, so the melody
+            // simply continues across the handoff - stopping it first was why
+            // locking the screen mid-ring cut the tune and started it over
+            // (#744). The one case where the in-app ring must yield - the
+            // AUDIBLE notification channel, whose own ringtone would play on
+            // top - is decided inside [Push.ring], which silences us there.
             _incomingViaFsi.value = true
             app.rcq.android.push.Push.showIncomingCall(
                 appContext,
