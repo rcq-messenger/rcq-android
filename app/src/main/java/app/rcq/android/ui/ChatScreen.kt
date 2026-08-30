@@ -2160,6 +2160,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             },
             onPlayVideo = { m, src -> fullscreenVideo = viewerVideoOf(m, src) },
+            onMore = { m -> albumViewer = null; actionMsg = m },
             onDismiss = { albumViewer = null },
         )
     }
@@ -4613,6 +4614,12 @@ private fun AlbumPagerViewer(
     onShare: (ChatMessage, MediaPayload) -> Unit = { _, _ -> },
     onSave: (ChatMessage, MediaPayload) -> Unit = { _, _ -> },
     onPlayVideo: (ChatMessage, VideoSource) -> Unit = { _, _ -> },
+    /// The page's own message menu (delete, reply, edit...). #831: the grid
+    /// draws at most four tiles, so a long-press can only ever reach the first
+    /// four - the fifth photo of a batch had NO route to its own actions. The
+    /// pager is the one place every page is reachable, so the menu opens from
+    /// here. Null hides the disc, which keeps the clearance arithmetic honest.
+    onMore: ((ChatMessage) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) { onDismiss(); return }
@@ -4804,7 +4811,11 @@ private fun AlbumPagerViewer(
             val senderName = current?.let(senderNameOf)
             if (!senderName.isNullOrBlank()) {
                 ViewerChrome(chrome, Modifier.align(Alignment.TopCenter)) {
-                    ViewerSenderLabel(senderName, onClick = current?.let(onSenderClick))
+                    ViewerSenderLabel(
+                        senderName,
+                        trailingActions = if (onMore != null) 3 else 2,
+                        onClick = current?.let(onSenderClick),
+                    )
                 }
             }
             if (current != null) {
@@ -4825,6 +4836,11 @@ private fun AlbumPagerViewer(
                             ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
                                 actionBusy = true
                                 scope.launch { try { payloadOf(current)?.let { onShare(current, it) } } finally { actionBusy = false } }
+                            }
+                            onMore?.let { more ->
+                                ViewerAction(Icons.Filled.MoreVert, stringResource(R.string.chat_menu_cd)) {
+                                    more(current)
+                                }
                             }
                         }
                     }
