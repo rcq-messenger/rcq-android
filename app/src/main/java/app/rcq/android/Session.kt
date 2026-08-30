@@ -57,6 +57,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.flow.collect
@@ -1360,6 +1362,7 @@ class Session(context: Context) {
         started = true
         CrashReporter.crumb(appCtx, "session_start")
         claimInstallToken(token)
+        watchUploadsOffScreen()
         // Seed the chat list from the cached roster FIRST (cheap, DB-free) so it
         // paints immediately. The heavy SQLCipher open + full history read move
         // into the connect coroutine below (off the main thread) instead of
@@ -5306,12 +5309,59 @@ class Session(context: Context) {
     private val _mediaProgress = MutableStateFlow<Float?>(null)
     val mediaProgress: StateFlow<Float?> = _mediaProgress.asStateFlow()
 
+    /// Files finished since the current wave of sending began; reset to zero
+    /// the moment nothing is in flight. Together with [_mediaSending] (what is
+    /// LEFT) it gives the size of the wave without anybody having to remember
+    /// it: total = done + left, which stays right even when a second batch
+    /// starts while the first is still going.
+    private val _mediaDone = MutableStateFlow(0)
+
     /// Called from the upload thread for every chunk that reaches the socket.
-    /// Kept deliberately dumb: the last write wins, because with two uploads in
-    /// flight a shared bar showing the newer one is honest enough, and the
-    /// count next to it already says how many there are.
+    /// Kept deliberately dumb about WHICH upload it is: the last write wins,
+    /// because with two uploads in flight a shared bar is honest enough and
+    /// the count next to it already says how many there are.
+    ///
+    /// #831: what it is NOT dumb about any more is the batch. The fraction
+    /// used to be "this one file", so a batch of ten reset the ring to
+    /// indeterminate ten times and spent most of its life spinning rather than
+    /// filling. Now the file's own fraction is folded into the wave, so the
+    /// ring only ever moves forward.
     private fun reportUpload(sent: Long, total: Long) {
-        _mediaProgress.value = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else null
+        val here = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else 0f
+        val done = _mediaDone.value
+        val whole = done + _mediaSending.value.coerceAtLeast(1)
+        _mediaProgress.value = if (whole > 1) ((done + here) / whole).coerceIn(0f, 1f)
+                               else if (total > 0) here else null
+    }
+
+    /** Mirror an in-flight upload into the shade while the app is NOT on
+     *  screen (#831).
+     *
+     *  The strip above the composer is the in-app answer, and it is enough
+     *  right up to the moment the person leaves — which is exactly what
+     *  sharing from the Gallery does: pick photos, hand them over, go straight
+     *  back to the Gallery, and from there nothing said the upload was still
+     *  running ("загрузка происходит незаметно, кажется как будто ничто не
+     *  отправилось").
+     *
+     *  Reads [RcqApp.foreground] rather than taking a third foreground hook:
+     *  the two named slots there each have an owner, and stealing one is the
+     *  0.151 regression that killed the ringing handoff. Returning to the app
+     *  cancels the notice from MainActivity.onStart, so a finished upload
+     *  cannot leave a stale bar in the shade.
+     */
+    private fun watchUploadsOffScreen() {
+        scope.launch {
+            combine(_mediaSending, _mediaProgress) { left, p -> left to p }
+                .distinctUntilChanged()
+                .collect { (left, p) ->
+                    if (left > 0 && !RcqApp.foreground) {
+                        app.rcq.android.push.Push.showUploadProgress(appCtx, left, p)
+                    } else {
+                        app.rcq.android.push.Push.hideUploadProgress(appCtx)
+                    }
+                }
+        }
     }
 
     /** Last media send that failed, for the chat to surface once. */
@@ -5348,9 +5398,11 @@ class Session(context: Context) {
             if (left > 1) {
                 left -= 1
                 _mediaSending.update { (it - 1).coerceAtLeast(0) }
-                // The next file is read and sealed before its first byte
-                // goes out; "100%" of the previous one would sit there meanwhile.
-                _mediaProgress.value = null
+                // #831: the bar spans the WAVE, so a finished file advances it
+                // instead of blanking it. The next file is read and sealed
+                // before its first byte goes out, and the old `= null` here
+                // dropped the ring back to indeterminate for that whole gap.
+                _mediaDone.update { it + 1 }
             }
         }
         scope.launch {
@@ -5363,7 +5415,11 @@ class Session(context: Context) {
                 _mediaSendFailed.update { it + 1 }
             } finally {
                 val now = _mediaSending.updateAndGet { (it - left).coerceAtLeast(0) }
-                if (now == 0) _mediaProgress.value = null
+                if (now == 0) {
+                    _mediaProgress.value = null
+                    // The wave is over; the next one starts counting from zero.
+                    _mediaDone.value = 0
+                }
             }
         }
     }

@@ -1250,4 +1250,6 @@
     <string name="chat_links_off">Власник групи вимкнув посилання</string>
     <string name="chat_slowmode_wait">Увімкнено повільний режим: повторіть трохи згодом</string>
     <string name="chat_slowmode_wait_in">Увімкнено повільний режим: повторіть через %1$d с</string>
+    <string name="push_channel_upload">Надсилання файлів</string>
+    <string name="push_channel_upload_desc">Файли, що ще завантажуються, поки RCQ не на екрані.</string>
 </resources>
