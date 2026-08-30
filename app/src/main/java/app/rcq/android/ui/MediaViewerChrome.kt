@@ -148,11 +148,15 @@ internal fun ViewerChrome(
 /// Who sent this, at the top of the viewer, as a tappable pill.
 ///
 /// ⚠ The horizontal padding is not cosmetic. This shares the top row with the
-/// close disc (40dp plus a 16dp margin on the left) and the two action discs
-/// (16 + 40 + 12 + 40 on the right), and a long nickname laid across the full
-/// width would sit under both groups and eat their taps. 116dp of clear space
-/// on each side is more than either group needs, the pill centres in what is
-/// left, and the name ellipsises instead of wrapping under a button.
+/// close disc (40dp plus a 16dp margin on the left) and the action discs on
+/// the right, and a long nickname laid across the full width would sit under
+/// both groups and eat their taps. The pill centres in what is left, and the
+/// name ellipsises instead of wrapping under a button.
+///
+/// [trailingActions] is how many discs sit on the right: 16 + 40 + (12 + 40)
+/// per extra one, so two need 108dp and three need 160dp. Pass the real count
+/// — an album page carries a third "more" disc, and 116dp of clearance that
+/// was generous for two is 44dp short for three.
 ///
 /// [onClick] null = not tappable (an unknown sender, or a card the island will
 /// not open for us): the name is still worth showing, it just must not pretend
@@ -161,14 +165,16 @@ internal fun ViewerChrome(
 internal fun ViewerSenderLabel(
     name: String,
     modifier: Modifier = Modifier,
+    trailingActions: Int = 2,
     onClick: (() -> Unit)? = null,
 ) {
     if (name.isBlank()) return
+    val endClear = (16 + 40 + (12 + 40) * (trailingActions - 1).coerceAtLeast(0) + 8).dp
     Box(
         modifier
             .statusBarsPadding()
             .fillMaxWidth()
-            .padding(top = 16.dp, start = 116.dp, end = 116.dp)
+            .padding(top = 16.dp, start = 116.dp, end = maxOf(endClear, 116.dp))
             .height(40.dp),
         contentAlignment = Alignment.Center,
     ) {
