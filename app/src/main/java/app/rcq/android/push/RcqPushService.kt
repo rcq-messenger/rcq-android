@@ -35,7 +35,12 @@ class RcqPushService : PushService() {
             JsonParser.parseString(String(message.content, Charsets.UTF_8)).asJsonObject
         }.getOrNull() ?: return
         when (json.get("type")?.takeIf { !it.isJsonNull }?.asString) {
-            "msg" -> Push.showMessage(applicationContext, json)
+            "msg" -> {
+                Push.showMessage(applicationContext, json)
+                // The push got through; whether the socket did is exactly
+                // what this call finds out (#732/#830 - sound, no message).
+                runCatching { app.rcq.android.Session.live?.pushSaysDrain() }
+            }
             // {type:"call"} = incoming-call wake (kind:"end" = caller cancelled).
             "call" -> Push.showIncomingCall(applicationContext, json)
             else -> Unit

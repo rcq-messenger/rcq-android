@@ -1353,6 +1353,7 @@ class Session(context: Context) {
      *  and refresh the contact graph. Idempotent enough to call on every
      *  app launch when already registered. */
     fun start() {
+        Session.live = this
         if (started) return
         val uin = store.uin ?: return
         val token = store.token ?: return
@@ -9496,7 +9497,38 @@ class Session(context: Context) {
     private fun signingPriv(): ByteArray = store.signingPrivate ?: error("no signing key")
     private fun signingPub(): ByteArray = Ed25519PrivateKeyParameters(signingPriv(), 0).generatePublicKey().encoded
 
-    private companion object {
+    /** A message push landed while this process is ALIVE: the island has a
+     *  row for us that no live frame delivered. Probe the socket (a corpse
+     *  is torn down and redialled) and drain both mailboxes, so the message
+     *  is on screen by the time the finger reaches the icon - instead of
+     *  after the next background/foreground flip (#732, #830). Throttled:
+     *  a burst of pushes for one conversation costs one drain. */
+    private var lastPushDrain = 0L
+
+    fun pushSaysDrain() {
+        if (!started || duressViewUp) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastPushDrain < 10_000) return
+        lastPushDrain = now
+        socket.ensureAlive()
+        scope.launch {
+            runCatching { drainQueue() }
+            runCatching { drainGroupLog() }
+        }
+    }
+
+    companion object {
+        /** The session of this process, for the one caller that lives outside
+         *  it: the push service. A message push while the process is alive is
+         *  PROOF the island holds something this session has not shown, and
+         *  the class of reports where the notification sounds but the chat
+         *  stays empty until an app re-enter (#732, #830) is exactly a
+         *  silently dead socket that nobody probed because the app never left
+         *  the foreground. Set in [start], best-effort by design. */
+        @Volatile
+        var live: Session? = null
+            private set
+
         /** How long the socket must stay down before the route ladder is walked
          *  again. Longer than the socket's own max backoff (30s) so ordinary
          *  blips are handled where they belong. */
