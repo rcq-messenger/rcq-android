@@ -61,7 +61,17 @@ object Push {
      *  which by then is not being looked at. LOW and soundless: this is a
      *  progress notice, not news. */
     const val CHANNEL_UPLOAD = "rcq_upload"
-    private const val UPLOAD_NOTIF_ID = 0x2C03
+    /** ⚠⚠ 0x2C04, and the reason is the comment on [ONGOING_CALL_NOTIF_ID]
+     *  below. The whole app's map is 0x2C01 ringing call, 0x2C02
+     *  PushSocketService's foreground-service notice, 0x2C03 the live call's
+     *  End button, 0x2C04 this. Picking 0x2C03 here — which the first cut of
+     *  #831 did — means [hideUploadProgress] from MainActivity.onStart
+     *  destroys the ongoing-call notification, and since it is re-posted only
+     *  on a call STATE change a stable connected call never gets it back: the
+     *  user is left on a live call with no way to hang up from outside the
+     *  app. That is the 0.100 regression, reintroduced 17 lines under its own
+     *  post-mortem and caught by the release review. */
+    private const val UPLOAD_NOTIF_ID = 0x2C04
     private const val CALL_NOTIF_ID = 0x2C01
     /** How long a §5d offer is worth ringing for, in seconds. Same 60s the
      *  caller rings for ([app.rcq.android.Session]'s callOfferTtlSec and the
@@ -302,7 +312,9 @@ object Push {
      *  composer says the same thing without stealing the shade. */
     fun showUploadProgress(ctx: Context, left: Int, fraction: Float?) {
         if (left <= 0) { hideUploadProgress(ctx); return }
-        ensureChannels(ctx)
+        // ⚠ NOT ensureChannels() here: it walks all five channels and this runs
+        // per progress tick. RcqApp.onCreate already made them before any
+        // upload can start.
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
         val open = PendingIntent.getActivity(
             ctx, 0,

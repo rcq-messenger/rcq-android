@@ -5317,6 +5317,9 @@ class Session(context: Context) {
     /// starts while the first is still going.
     private val _mediaDone = MutableStateFlow(0)
 
+    /// The size of the wave, never shrinking while it runs (see [reportUpload]).
+    private val _mediaWhole = MutableStateFlow(0)
+
     /// Called from the upload thread for every chunk that reaches the socket.
     /// Kept deliberately dumb about WHICH upload it is: the last write wins,
     /// because with two uploads in flight a shared bar is honest enough and
@@ -5330,7 +5333,10 @@ class Session(context: Context) {
     private fun reportUpload(sent: Long, total: Long) {
         val here = if (total > 0) (sent.toFloat() / total).coerceIn(0f, 1f) else 0f
         val done = _mediaDone.value
-        val whole = done + _mediaSending.value.coerceAtLeast(1)
+        // High-water mark: a second batch joining mid-wave GROWS the
+        // denominator, and without this the fraction would jump backwards the
+        // moment it did. Reset with _mediaDone when the wave drains.
+        val whole = _mediaWhole.updateAndGet { maxOf(it, done + _mediaSending.value.coerceAtLeast(1)) }
         _mediaProgress.value = if (whole > 1) ((done + here) / whole).coerceIn(0f, 1f)
                                else if (total > 0) here else null
     }
@@ -5351,16 +5357,24 @@ class Session(context: Context) {
      *  cancels the notice from MainActivity.onStart, so a finished upload
      *  cannot leave a stale bar in the shade.
      */
+    @Volatile private var uploadWatcher: kotlinx.coroutines.Job? = null
+
     private fun watchUploadsOffScreen() {
-        scope.launch {
-            combine(_mediaSending, _mediaProgress) { left, p -> left to p }
+        // One watcher per session. `start()` no-ops on a second call, but
+        // rebindTo (account switch) reaches here too, and a second collector on
+        // the same flows would post and cancel the same notification twice.
+        if (uploadWatcher?.isActive == true) return
+        uploadWatcher = scope.launch {
+            combine(_mediaSending, _mediaProgress) { left, p ->
+                // Map to what the shade should SHOW before deduping, so a
+                // foreground upload does not run cancel() once per 64 KB chunk:
+                // in the foreground every tick maps to the same null.
+                if (left > 0 && !RcqApp.foreground) left to ((p ?: 0f) * 100).toInt() else null
+            }
                 .distinctUntilChanged()
-                .collect { (left, p) ->
-                    if (left > 0 && !RcqApp.foreground) {
-                        app.rcq.android.push.Push.showUploadProgress(appCtx, left, p)
-                    } else {
-                        app.rcq.android.push.Push.hideUploadProgress(appCtx)
-                    }
+                .collect { shown ->
+                    if (shown == null) app.rcq.android.push.Push.hideUploadProgress(appCtx)
+                    else app.rcq.android.push.Push.showUploadProgress(appCtx, shown.first, shown.second / 100f)
                 }
         }
     }
@@ -5420,6 +5434,7 @@ class Session(context: Context) {
                     _mediaProgress.value = null
                     // The wave is over; the next one starts counting from zero.
                     _mediaDone.value = 0
+                    _mediaWhole.value = 0
                 }
             }
         }
