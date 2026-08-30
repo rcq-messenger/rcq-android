@@ -55,6 +55,13 @@ object Push {
      *  the call screen the user was already looking at. Low importance keeps it in
      *  the shade, which is the only place it is needed. */
     const val CHANNEL_CALL_ONGOING = "rcq_call_ongoing"
+    /** Files still going up while the app is not on screen. #831: sharing a
+     *  batch from the Gallery and going straight back to it left the upload
+     *  with no indication anywhere — the in-app strip lives inside the chat,
+     *  which by then is not being looked at. LOW and soundless: this is a
+     *  progress notice, not news. */
+    const val CHANNEL_UPLOAD = "rcq_upload"
+    private const val UPLOAD_NOTIF_ID = 0x2C03
     private const val CALL_NOTIF_ID = 0x2C01
     /** How long a §5d offer is worth ringing for, in seconds. Same 60s the
      *  caller rings for ([app.rcq.android.Session]'s callOfferTtlSec and the
@@ -274,6 +281,54 @@ object Push {
                 },
             )
         }
+    if (nm.getNotificationChannel(CHANNEL_UPLOAD) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_UPLOAD,
+                    ctx.getString(R.string.push_channel_upload),
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = ctx.getString(R.string.push_channel_upload_desc)
+                    setSound(null, null)
+                    enableVibration(false)
+                    setShowBadge(false)
+                },
+            )
+        }
+    }
+
+    /** Show/refresh "still sending N files", with a bar when we know how far.
+     *  Called only while the app is off screen — on screen the strip above the
+     *  composer says the same thing without stealing the shade. */
+    fun showUploadProgress(ctx: Context, left: Int, fraction: Float?) {
+        if (left <= 0) { hideUploadProgress(ctx); return }
+        ensureChannels(ctx)
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
+        val open = PendingIntent.getActivity(
+            ctx, 0,
+            Intent(ctx, app.rcq.android.MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val b = androidx.core.app.NotificationCompat.Builder(ctx, CHANNEL_UPLOAD)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle(ctx.resources.getQuantityString(R.plurals.chat_media_sending, left, left))
+            .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setContentIntent(open)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+        if (fraction == null) b.setProgress(0, 0, true)
+        else b.setProgress(100, (fraction * 100).toInt().coerceIn(0, 100), false)
+        try {
+            NotificationManagerCompat.from(ctx).notify(UPLOAD_NOTIF_ID, b.build())
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS not granted — the upload still runs.
+        }
+    }
+
+    fun hideUploadProgress(ctx: Context) {
+        try { NotificationManagerCompat.from(ctx).cancel(UPLOAD_NOTIF_ID) } catch (_: Exception) {}
     }
 
     /** Ask the active distributor for a push endpoint, if one is set up.

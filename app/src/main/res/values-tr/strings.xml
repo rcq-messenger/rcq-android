@@ -1246,4 +1246,6 @@
     <string name="chat_links_off">Grup sahibi bağlantıları kapattı</string>
     <string name="chat_slowmode_wait">Yavaş mod açık: birazdan tekrar deneyin</string>
     <string name="chat_slowmode_wait_in">Yavaş mod açık: %1$d sn sonra deneyin</string>
+    <string name="push_channel_upload">Dosya gönderimi</string>
+    <string name="push_channel_upload_desc">RCQ ekranda değilken yüklenmeye devam eden dosyalar.</string>
 </resources>

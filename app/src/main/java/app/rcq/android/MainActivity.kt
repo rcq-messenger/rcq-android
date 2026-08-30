@@ -348,6 +348,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onStart() {
         super.onStart()
         if (android.os.Build.VERSION.SDK_INT >= 34) registerScreenshotDetector()
+        // Back on screen: the in-app strip takes over from the shade notice
+        // (#831). Cancelling here rather than only when the upload ends means
+        // a finished send can never leave a stale bar behind.
+        app.rcq.android.push.Push.hideUploadProgress(applicationContext)
     }
 
     override fun onStop() {

@@ -1246,4 +1246,6 @@
     <string name="chat_links_off">El dueño del grupo desactivó los enlaces</string>
     <string name="chat_slowmode_wait">Modo lento activado: inténtalo de nuevo en un momento</string>
     <string name="chat_slowmode_wait_in">Modo lento activado: inténtalo en %1$d s</string>
+    <string name="push_channel_upload">Envío de archivos</string>
+    <string name="push_channel_upload_desc">Archivos que siguen subiendo mientras RCQ no está en pantalla.</string>
 </resources>
