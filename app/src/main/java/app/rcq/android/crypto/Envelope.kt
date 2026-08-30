@@ -161,6 +161,16 @@ sealed interface Envelope {
      *  learned and nothing pushes. */
     data class ReadMark(val at: Long) : Envelope
 
+    /** Room state key hand-off (stage 6 phase 2, wire "gskey", outer type
+     *  "skdm"). Carries the AES key a room's sealed identity blob opens
+     *  under; [ver] is monotonic with the design doc's equal-version repair
+     *  rule. */
+    data class GsKey(val gid: Int, val ver: Long, val key: String) : Envelope
+
+    /** Room state key ask-back (wire "gsknack", outer "sknack"): the sender
+     *  sees the room's blob and holds no key that opens it. */
+    data class GsKnack(val gid: Int) : Envelope
+
     /** Cross-island call signaling (wire kind "call", spec §5d). Same-island
      *  calls ride the WS as plaintext call_* events; across islands there is
      *  no shared socket, so the SAME signal payload is wrapped here, v=1-sealed
@@ -384,6 +394,16 @@ sealed interface Envelope {
         is ScreenshotTaken -> JsonObject().apply {
             addProperty("kind", "shot")
             addProperty("id", id)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is GsKey -> JsonObject().apply {
+            addProperty("kind", "gskey")
+            addProperty("gid", gid)
+            addProperty("ver", ver)
+            addProperty("key", key)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is GsKnack -> JsonObject().apply {
+            addProperty("kind", "gsknack")
+            addProperty("gid", gid)
         }.toString().toByteArray(Charsets.UTF_8)
         is ReadMark -> JsonObject().apply {
             addProperty("kind", "readmark")
@@ -756,6 +776,14 @@ sealed interface Envelope {
                     nickname = obj.get("nickname")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
                     avatarMediaId = obj.get("avatar_media_id")?.takeIf { it.isJsonPrimitive }?.asString,
                     avatarMediaKey = obj.get("avatar_media_key")?.takeIf { it.isJsonPrimitive }?.asString,
+                )
+                "gskey" -> GsKey(
+                    gid = obj.get("gid")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0,
+                    ver = obj.get("ver")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
+                    key = obj.get("key")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                )
+                "gsknack" -> GsKnack(
+                    gid = obj.get("gid")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0,
                 )
                 "readmark" -> ReadMark(
                     at = obj.get("at")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
