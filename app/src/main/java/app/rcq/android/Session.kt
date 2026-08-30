@@ -3875,8 +3875,28 @@ class Session(context: Context) {
      *  the 403 body instead of swallowing it or collapsing the reasons. */
     suspend fun addGroupMember(id: Int, uin: Int): String? {
         val ctx = groupCtx(id)
-        return runCatching { upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, uin))); null }
-            .getOrElse { addMemberReason(it.message) }
+        return runCatching {
+            val g = ctx.api.addGroupMember(ctx.gid, uin)
+            upsertGroup(mapGroupCtx(ctx, g))
+            // Stage 6 phase 2: the inviter hands the new member the room state
+            // key at the moment of adding (design doc, road 3). Only for a
+            // LOCAL room whose key this device holds; best-effort - a missed
+            // hand-off is one gsknack away.
+            if (ctx.host == null) {
+                LocalStores.roomKey(ctx.gid)?.let { k ->
+                    scope.launch {
+                        runCatching {
+                            sendSealedCopies(
+                                uin,
+                                encryptFor(uin, Envelope.GsKey(ctx.gid, k.first, k.second)),
+                                envelopeType = "skdm",
+                            )
+                        }
+                    }
+                }
+            }
+            null
+        }.getOrElse { addMemberReason(it.message) }
     }
 
     /** Map the IOException message ("HTTP <code>: <body>" from RcqApi.execute) to
