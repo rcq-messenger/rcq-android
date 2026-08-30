@@ -1294,5 +1294,6 @@
     <string name="chat_slowmode_wait_in">Включён медленный режим: повторите через %1$d с</string>
     <string name="push_channel_upload">Отправка файлов</string>
     <string name="push_channel_upload_desc">Файлы, которые ещё загружаются, пока RCQ не на экране.</string>
-    <string name="chat_delete_album">Удалить все %1$d фото</string>
+    <string name="chat_delete_album_all">Удалить все %1$d фото у всех</string>
+    <string name="chat_delete_album_me">Удалить все %1$d фото у меня</string>
 </resources>

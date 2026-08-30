@@ -1246,5 +1246,6 @@
     <string name="chat_slowmode_wait_in">已开启慢速模式:请在 %1$d 秒后再试</string>
     <string name="push_channel_upload">正在发送文件</string>
     <string name="push_channel_upload_desc">RCQ 不在前台时仍在上传的文件。</string>
-    <string name="chat_delete_album">删除全部 %1$d 张照片</string>
+    <string name="chat_delete_album_all">为所有人删除全部 %1$d 张照片</string>
+    <string name="chat_delete_album_me">为我删除全部 %1$d 张照片</string>
 </resources>

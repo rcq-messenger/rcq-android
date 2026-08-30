@@ -2169,7 +2169,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             },
             onPlayVideo = { m, src -> fullscreenVideo = viewerVideoOf(m, src) },
-            onMore = { m -> albumViewer = null; actionMsg = m },
+            onMore = { m, batch -> albumViewer = null; actionMsg = m; actionAlbum = batch },
             onDismiss = { albumViewer = null },
         )
     }
@@ -3269,13 +3269,22 @@ private fun MessageLongPressOverlay(
                     // album is the #749 bug with a bigger blast radius, where
                     // holding one photo would take ten with it.
                     if (album != null) {
+                        // Says WHOSE copy it takes, like the two items above it:
+                        // one line reading "delete all 5" over a batch that is
+                        // about to vanish for the whole room is the one place
+                        // ambiguity is expensive.
+                        val forEveryone = canDeleteAll || isSelf
                         add(
                             MsgOverlayItem(
-                                stringResource(R.string.chat_delete_album, album.size),
-                                Icons.Filled.DeleteForever,
+                                stringResource(
+                                    if (forEveryone) R.string.chat_delete_album_all
+                                    else R.string.chat_delete_album_me,
+                                    album.size,
+                                ),
+                                if (forEveryone) Icons.Filled.DeleteForever else Icons.Filled.Delete,
                                 danger = true,
                             ) {
-                                if (canDeleteAll || isSelf) session.deleteAlbumForEveryone(album)
+                                if (forEveryone) session.deleteAlbumForEveryone(album)
                                 else album.forEach { session.deleteLocal(it) }
                                 onDismiss()
                             },
@@ -4652,7 +4661,7 @@ private fun AlbumPagerViewer(
     /// four - the fifth photo of a batch had NO route to its own actions. The
     /// pager is the one place every page is reachable, so the menu opens from
     /// here. Null hides the disc, which keeps the clearance arithmetic honest.
-    onMore: ((ChatMessage) -> Unit)? = null,
+    onMore: ((ChatMessage, List<ChatMessage>) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) { onDismiss(); return }
@@ -4872,7 +4881,11 @@ private fun AlbumPagerViewer(
                             }
                             onMore?.let { more ->
                                 ViewerAction(Icons.Filled.MoreVert, stringResource(R.string.chat_menu_cd)) {
-                                    more(current)
+                                    // The batch rides along: the pager is the
+                                    // only route photos 5+ have, so without it
+                                    // "delete the whole batch" would be missing
+                                    // from the exact place it is reachable.
+                                    more(current, items)
                                 }
                             }
                         }

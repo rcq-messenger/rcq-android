@@ -1248,5 +1248,6 @@
     <string name="chat_slowmode_wait_in">Yavaş mod açık: %1$d sn sonra deneyin</string>
     <string name="push_channel_upload">Dosya gönderimi</string>
     <string name="push_channel_upload_desc">RCQ ekranda değilken yüklenmeye devam eden dosyalar.</string>
-    <string name="chat_delete_album">%1$d fotoğrafın tümünü sil</string>
+    <string name="chat_delete_album_all">%1$d fotoğrafın tümünü herkesten sil</string>
+    <string name="chat_delete_album_me">%1$d fotoğrafın tümünü benden sil</string>
 </resources>
