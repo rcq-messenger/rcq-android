@@ -3174,13 +3174,11 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     AddAccountDoor(
-                        icon = Icons.Filled.VpnKey,
                         title = stringResource(R.string.restore_title),
                         modifier = Modifier.weight(1f),
                         onClick = onRestore,
                     )
                     AddAccountDoor(
-                        icon = Icons.Filled.Keyboard,
                         title = stringResource(R.string.island_manual_entry),
                         modifier = Modifier.weight(1f),
                         onClick = { manual = true },
@@ -3249,19 +3247,19 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
  *  the same width so neither reads as the main action. */
 @Composable
 private fun AddAccountDoor(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val c = RcqTheme.colors
-    Column(
+    // Founder 30.08: the icon-over-label tiles read as two oversized buttons
+    // crowding the deck. One line of text in a capsule says the same and
+    // leaves the island the room.
+    Box(
         modifier.clip(RoundedCornerShape(12.dp)).background(c.bgPrimary).clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+            .padding(vertical = 9.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
         Text(title, color = c.textSecondary, fontSize = 13.sp, maxLines = 1)
     }
 }
