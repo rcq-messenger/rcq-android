@@ -1809,7 +1809,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // row is one fixed height; subtract it for rows that carry one. An
             // approximation (a second chip line would still wait), but it moves
             // the threshold to the message's own edge in the case people hit.
-            val reactionChipPx = with(LocalDensity.current) { 32.dp.toPx() }.toInt()
+            val reactionChipPx = with(LocalDensity.current) { 40.dp.toPx() }.toInt()
             LaunchedEffect(threadKey) {
                 snapshotFlow {
                     val info = listState.layoutInfo

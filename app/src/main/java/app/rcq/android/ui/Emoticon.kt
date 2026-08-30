@@ -336,12 +336,15 @@ internal fun ReactionChip(
         // Animated via the shared-frame cache (AnimatedEmoticon) — safe even
         // with many chips on screen because frames decode ONCE process-wide and
         // cells just cycle them (no per-chip decoder, so not the old OOM).
-        if (isEmoticon) AnimatedEmoticon(asset, Modifier.size(16.dp))
-        else Text(asset, fontSize = 13.sp, color = c.textPrimary)
+        // 24dp, up from 16 (#821): at 16 a good kolobok and a bad one were
+        // the same brown smudge - the whole point of a reaction is telling
+        // them apart at a glance.
+        if (isEmoticon) AnimatedEmoticon(asset, Modifier.size(24.dp))
+        else Text(asset, fontSize = 16.sp, color = c.textPrimary)
         // A single reactor needs no "1" — show the number only once it grows
         // past one (founder feedback). Radio passes null (never numbered).
         if (count != null && count > 1) {
-            Text("$count", fontSize = 11.sp, color = c.textPrimary,
+            Text("$count", fontSize = 12.sp, color = c.textPrimary,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         }
     }
