@@ -60,10 +60,23 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RCQ">
 
+        <!-- ⚠⚠ singleTASK, not singleTop (#832, #831). singleTop only reuses the
+             instance when it is already on top of the SAME task, and the system
+             share sheet launches with FLAG_ACTIVITY_NEW_TASK - so every share
+             from the Gallery built a NEW task with a NEW MainActivity, and
+             MainActivity.onCreate builds a Session per instance. The user saw
+             RCQ pile up in the recents list ("их можно наоткрывать сколько
+             угодно"), and worse: the photos were sent by the new instance's
+             Session, so the ORIGINAL app - the one they came back to - never
+             heard about them and showed neither the sending strip nor the
+             pictures until a restart. That is the whole of #831's "фотки
+             пришли получателю, но отправитель их не видит".
+             singleTask keeps one instance and routes the share through
+             onNewIntent, which this activity already handles. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.RCQ"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout|uiMode|density"
             android:windowSoftInputMode="adjustResize">
