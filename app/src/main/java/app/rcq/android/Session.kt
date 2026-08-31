@@ -1350,6 +1350,7 @@ class Session(context: Context) {
         api = newApi()
         socket = newSocket()
         peerIdentityCache.clear()
+        askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
         noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
@@ -2818,6 +2819,17 @@ class Session(context: Context) {
             DecoyStore.destroy(appCtx)
             wipeDecoyNamespaceStores()
         }
+        // ⚠⚠ Two stores are keyed by NUMBER, not by account id, so the loop
+        // above cannot reach them from `acc.id` - the same omission that had
+        // them surviving a single-account burn. Here it is worse: a wipe PIN
+        // promises there is nothing left, and what stayed behind was the §5f
+        // request list, the numbers this identity blocked, and a LIVE JWT to
+        // every backup island. Wiped wholesale, because a duress wipe has no
+        // account left to be selective about.
+        runCatching {
+            MultihomeStore.wipeAll()
+            CrossIslandRequestsStore.wipeAll()
+        }
         // The install id lived in its own prefs file that nothing above touches,
         // and the island keeps it next to the uin. Left alone, the number this
         // phone registers next arrives wearing the erased account's name tag
@@ -3703,10 +3715,22 @@ class Session(context: Context) {
      *  into a poll. */
     private fun maybeAskProfileKey(uin: Int, identityKey: String) {
         if (identityKey.isBlank()) return
-        val prefs = appCtx.getSharedPreferences("rcq_pkeyask", android.content.Context.MODE_PRIVATE)
+        // Never at somebody we blocked: the ask is an outbound message, and a
+        // blocked number must not receive one because a picture failed to open.
+        if (LocalStores.isBlocked(uin)) return
         val now = System.currentTimeMillis()
-        if (now - prefs.getLong("u$uin", 0L) < 6L * 3600_000L) return
-        prefs.edit().putLong("u$uin", now).apply()
+        // ⚠⚠ IN MEMORY, deliberately. The first version of this kept the
+        // throttle in SharedPreferences under "u<uin>" keys, which is a
+        // plaintext list of contact numbers, device-wide, outside any account
+        // namespace, and swept by nothing - not a burn, not the duress
+        // teardown. In this project that is precisely the shape of thing being
+        // taken off disk everywhere else, and it was bought for nothing: the
+        // throttle exists to stop a roster of unopenable faces turning into a
+        // poll WITHIN a session, and a restart is already rate-limited by
+        // being a restart. Cleared on rebind with the rest of the per-account
+        // state.
+        if (now - (askedProfileKeyAt[uin] ?: 0L) < 6L * 3600_000L) return
+        askedProfileKeyAt[uin] = now
         val ep = epochNow()
         scope.launch {
             if (!stillOn(ep)) return@launch
@@ -4299,7 +4323,10 @@ class Session(context: Context) {
             val roster = _contacts.value
             roster.forEachIndexed { i, c ->
                 if (!stillOn(ep)) return@launch
-                if (c.identityKey.isNotBlank()) {
+                // A blocked number is not entitled to the key to our face, and
+                // handing it over is also an outbound message to somebody we
+                // said we wanted nothing from.
+                if (c.identityKey.isNotBlank() && !LocalStores.isBlocked(c.uin)) {
                     runCatching {
                         sendSealedCopies(
                             c.uin,
@@ -4318,6 +4345,16 @@ class Session(context: Context) {
 
     /** My own picture (id to key), so Settings can draw it without a round
      *  trip. Seeded from the profile load, updated by [setOwnAvatar]. */
+    /// Who we already asked for a profile key, and when. In memory only, see
+    /// [maybeAskProfileKey]. Cleared on rebind like every other per-account map.
+    private val askedProfileKeyAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /// Who we already answered a `pkeyask` for, and when. Answering costs a
+    /// vault round trip plus a sealed send, so an unthrottled asker could make
+    /// this device work on demand; and the answer is the same key every time,
+    /// so repeating it inside the window buys the asker nothing.
+    private val answeredProfileKeyAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
     private val _ownAvatar = MutableStateFlow<Pair<String, String>?>(null)
     val ownAvatar: StateFlow<Pair<String, String>?> = _ownAvatar.asStateFlow()
 
@@ -5067,6 +5104,7 @@ class Session(context: Context) {
             app.rcq.android.data.VisitStore.wipe()
         }
         peerIdentityCache.clear()
+        askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
         noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
@@ -5417,6 +5455,7 @@ class Session(context: Context) {
         store.updateAccount(newUin, token)
         api.setToken(token)
         peerIdentityCache.clear()
+        askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
         noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
@@ -7613,6 +7652,12 @@ class Session(context: Context) {
                     epochNow().let { ep ->
                     scope.launch {
                         runCatching {
+                            if (LocalStores.isBlocked(dec.senderUin)) return@runCatching
+                            val nowAsk = System.currentTimeMillis()
+                            if (nowAsk - (answeredProfileKeyAt[dec.senderUin] ?: 0L) < 6L * 3600_000L) {
+                                return@runCatching
+                            }
+                            answeredProfileKeyAt[dec.senderUin] = nowAsk
                             // Vault-backed, not just the local copy: an
                             // install that never set the picture itself still
                             // has to answer for the account. Read-only, so a

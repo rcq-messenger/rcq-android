@@ -70,6 +70,13 @@ object CrossIslandRequestsStore {
      *  this identity's refusals, and a new identity has made none. Nothing
      *  here is a privacy SETTING - a wipe must never quietly turn one of those
      *  off for somebody who turned it on. */
+    /** Forget EVERY account's held requests and blocks. Only for the duress
+     *  wipe, which leaves no account behind to be selective about. */
+    fun wipeAll() {
+        if (!::prefs.isInitialized) return
+        prefs.edit().remove(KEY).remove(KEY_BLOCKED).apply()
+    }
+
     fun wipeOwn(ownUin: Int) {
         if (!::prefs.isInitialized) return
         val pre = "$ownUin:"

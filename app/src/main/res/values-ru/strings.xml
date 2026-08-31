@@ -1299,6 +1299,6 @@
     <string name="last_seen_this_week">на этой неделе</string>
     <string name="last_seen_this_month">в этом месяце</string>
     <string name="last_seen_long_ago">давно</string>
-    <string name="settings_economy_title">Экономный режим</string>
-    <string name="settings_economy_desc">Разом выключает анимированные аватарки и обои. Для старого или медленного телефона.</string>
+    <string name="settings_economy_title">Экономный режим (RCQ Lite)</string>
+    <string name="settings_economy_desc">Это и есть RCQ Lite: не отдельное приложение, а тумблер здесь. Разом выключает анимированные аватарки и обои, для старого или медленного телефона.</string>
 </resources>

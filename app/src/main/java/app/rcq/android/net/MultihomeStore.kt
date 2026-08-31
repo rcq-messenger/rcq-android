@@ -62,6 +62,13 @@ object MultihomeStore {
      *  swept from here leaves LIVE CREDENTIALS to its backup mailboxes on disk,
      *  and the 30s multihome drain keeps presenting them. Burn wipes eight
      *  other stores and missed this one. */
+    /** Forget EVERY account's backup islands. Only for the duress wipe, which
+     *  leaves no account behind to be selective about. */
+    fun wipeAll() {
+        if (!::prefs.isInitialized) return
+        prefs.edit().remove(KEY_HOMES).remove(KEY_PEER_CACHE).apply()
+    }
+
     fun wipeOwn(ownUin: Int) {
         if (!::prefs.isInitialized) return
         write(all().filterNot { it.ownUin == ownUin })

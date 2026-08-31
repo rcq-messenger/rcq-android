@@ -1253,6 +1253,6 @@
     <string name="last_seen_this_week">esta semana</string>
     <string name="last_seen_this_month">este mes</string>
     <string name="last_seen_long_ago">hace mucho</string>
-    <string name="settings_economy_title">Modo ahorro</string>
-    <string name="settings_economy_desc">Desactiva de una vez los avatares animados y los fondos. Para un teléfono antiguo o lento.</string>
+    <string name="settings_economy_title">Modo ahorro (RCQ Lite)</string>
+    <string name="settings_economy_desc">Esto ES RCQ Lite: no una app aparte, sino un interruptor aquí. Desactiva de una vez los avatares animados y los fondos, para un teléfono antiguo o lento.</string>
 </resources>
