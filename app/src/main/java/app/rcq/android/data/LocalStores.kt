@@ -469,6 +469,7 @@ object LocalStores {
         _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadCounts(pk(K_UNREAD))
         loadRoomKeys()
+        loadProfileKeys()
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
@@ -914,6 +915,48 @@ object LocalStores {
             _gskeys.value.map { (g, e) -> "$g=${e.first}:${e.second}" }.toSet(),
         ).apply()
         return true
+    }
+
+    // ── profile keys ─────────────────────────────────────────────────────
+    // The key that opens a person's avatar. The island used to hold it in
+    // users.avatar_media_key, next to the uin and the nickname, so a seized
+    // island opened every face; now the owner seals it to their contacts and
+    // this is where it lands. docs/profile-key-design.md.
+
+    private val _pkeys = MutableStateFlow<Map<Int, String>>(emptyMap())
+
+    /** The key for [peer]'s picture, or null when we were never given it.
+     *  ⚠ Null must render exactly like "no picture at all", or the tile
+     *  becomes an oracle for "am I entitled to see this". */
+    fun profileKey(peer: Int): String? = _pkeys.value[peer]
+
+    fun putProfileKey(peer: Int, keyB64: String): Boolean {
+        if (acct == null || keyB64.isBlank() || _pkeys.value[peer] == keyB64) return false
+        _pkeys.value = _pkeys.value + (peer to keyB64)
+        prefs.edit().putStringSet(
+            pk(K_PKEYS),
+            _pkeys.value.map { (u, k) -> "$u=$k" }.toSet(),
+        ).apply()
+        return true
+    }
+
+    /** My own profile key, minted once and reused: changing the picture must
+     *  NOT change the key, or every change costs a fan-out and leaves contacts
+     *  looking at a blank tile until it lands. */
+    fun myProfileKey(): String? = prefs.getString(pk(K_MY_PKEY), null)
+
+    fun setMyProfileKey(keyB64: String) {
+        if (acct == null || keyB64.isBlank()) return
+        prefs.edit().putString(pk(K_MY_PKEY), keyB64).apply()
+    }
+
+    private fun loadProfileKeys() {
+        _pkeys.value = (prefs.getStringSet(pk(K_PKEYS), emptySet()) ?: emptySet()).mapNotNull { row ->
+            val eq = row.indexOf('=')
+            if (eq <= 0) return@mapNotNull null
+            val uin = row.substring(0, eq).toIntOrNull() ?: return@mapNotNull null
+            uin to row.substring(eq + 1)
+        }.toMap()
     }
 
     private fun loadRoomKeys() {
@@ -1392,6 +1435,8 @@ object LocalStores {
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
     private const val K_GSKEYS = "gskeys"
+    private const val K_PKEYS = "pkeys"      // peer uin -> their profile key
+    private const val K_MY_PKEY = "mypkey"   // my own, handed to contacts
     private const val K_REACT_INBOX = "reaction_inbox"
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_REACTION_USES = "reaction_uses"

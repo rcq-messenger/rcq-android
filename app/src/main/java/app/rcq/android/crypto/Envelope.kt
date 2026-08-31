@@ -171,6 +171,21 @@ sealed interface Envelope {
      *  sees the room's blob and holds no key that opens it. */
     data class GsKnack(val gid: Int) : Envelope
 
+    /** Profile key hand-off (wire "pkey", outer "skdm"). The AES-256-GCM key
+     *  the sender's avatar blob is sealed under, handed to ONE contact.
+     *
+     *  ⚠ The island used to hold this key itself, in `users.avatar_media_key`,
+     *  next to the uin and the nickname - so a seized island opened every face
+     *  it held. It rides "skdm" because that token already exists and is
+     *  already filed as critical: a NEW outer type would itself announce
+     *  "this account just changed its picture". See docs/profile-key-design.md. */
+    data class PKey(val key: String) : Envelope
+
+    /** Profile key ask-back (wire "pkeyask", outer "sknack"): I can see that
+     *  you have a picture and hold no key for it. Only the OWNER can answer,
+     *  unlike a room key where any member can. */
+    data object PKeyAsk : Envelope
+
     /** Cross-island call signaling (wire kind "call", spec §5d). Same-island
      *  calls ride the WS as plaintext call_* events; across islands there is
      *  no shared socket, so the SAME signal payload is wrapped here, v=1-sealed
@@ -394,6 +409,13 @@ sealed interface Envelope {
         is ScreenshotTaken -> JsonObject().apply {
             addProperty("kind", "shot")
             addProperty("id", id)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is PKey -> JsonObject().apply {
+            addProperty("kind", "pkey")
+            addProperty("key", key)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is PKeyAsk -> JsonObject().apply {
+            addProperty("kind", "pkeyask")
         }.toString().toByteArray(Charsets.UTF_8)
         is GsKey -> JsonObject().apply {
             addProperty("kind", "gskey")
@@ -777,6 +799,10 @@ sealed interface Envelope {
                     avatarMediaId = obj.get("avatar_media_id")?.takeIf { it.isJsonPrimitive }?.asString,
                     avatarMediaKey = obj.get("avatar_media_key")?.takeIf { it.isJsonPrimitive }?.asString,
                 )
+                "pkey" -> PKey(
+                    key = obj.get("key")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                )
+                "pkeyask" -> PKeyAsk
                 "gskey" -> GsKey(
                     gid = obj.get("gid")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0,
                     ver = obj.get("ver")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
