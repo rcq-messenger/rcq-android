@@ -223,6 +223,39 @@ class Session(context: Context) {
     private val gson = com.google.gson.Gson()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Which account this session is serving, as a number that changes on every
+     *  [rebindTo].
+     *
+     *  ⚠⚠ Why this exists. [switchToAccount] is a HOT SWAP: the same Session
+     *  object keeps running and `store`, `api`, `socket`, `signalStores` and
+     *  every per-account singleton are re-pointed under it. [scope] is never
+     *  cancelled, and `started = false` is only read on the way IN to [start],
+     *  so every suspend function that was already in flight when the switch
+     *  happened comes back and writes through fields that now belong to
+     *  SOMEBODY ELSE. That is not hypothetical: on iOS the same shape put one
+     *  account's cross-island contact requests in front of another account
+     *  (fixed 2026-08-31, f50a7b0), and the audit of this file found six of
+     *  them here, including an island's own token landing in another account's
+     *  SecureStore.
+     *
+     *  The rule, for every new suspend function that writes anything:
+     *  read [accountEpoch] BEFORE the first suspension point and check
+     *  [stillOn] after EVERY one of them, including before an ack, which is a
+     *  second network call that would otherwise ride the current token and
+     *  baseURL to the wrong island.
+     *
+     *  ⚠ Reading the epoch AFTER the await is the exact bug this prevents:
+     *  the guard then compares B with B and always passes. */
+    @Volatile private var accountEpoch: Int = 0
+
+    /** The epoch to hold on to, read before the first suspension. */
+    private fun epochNow(): Int = accountEpoch
+
+    /** True while this session still serves the account [epoch] was taken for.
+     *  False means the work in hand belongs to a previous account and must be
+     *  dropped, not written down. */
+    private fun stillOn(epoch: Int): Boolean = accountEpoch == epoch
+
     /** 1:1 audio/video calls. Same-island signalling rides the WS (call_*
      *  events routed in [handleEvent]); signals to a CROSS-ISLAND peer are
      *  wrapped as an Envelope.CallSignal, v=1-sealed and deposited to the
@@ -1287,6 +1320,9 @@ class Session(context: Context) {
     /** Tear the in-memory session state down and re-point every per-account
      *  store at [accountId]; [start] then loads its history + connects. */
     private fun rebindTo(accountId: String) {
+        // FIRST, before a single field moves: everything already in flight is
+        // now working for the previous account. See [accountEpoch].
+        accountEpoch++
         calls.teardown()   // drop any in-flight call before the identity swaps
         audioRooms.teardown()
         nearby.teardown()
@@ -1428,10 +1464,16 @@ class Session(context: Context) {
         // independent of the primary socket — when the primary island is down,
         // this loop IS the delivery path.
         scope.launch {
-            while (true) {
+            // ⚠ This loop is per ACCOUNT, not per app run. [start] runs again
+            // after every switch and would otherwise leave the previous
+            // account's loop ticking beside the new one forever, one more on
+            // every switch, each draining somebody else's backup mailboxes.
+            val ep = epochNow()
+            while (stillOn(ep)) {
                 delay(30_000)
-                runCatching { drainBackupQueuesOnce() }
-                runCatching { drainVisitedQueuesOnce() }
+                if (!stillOn(ep)) return@launch
+                runCatching { drainBackupQueuesOnce(ep) }
+                runCatching { drainVisitedQueuesOnce(ep) }
             }
         }
         // Disappearing-message reaper: expire messages whose TTL lapsed while a
@@ -2299,13 +2341,18 @@ class Session(context: Context) {
     /** Drain every backup mailbox into the normal ingest path. Copies of
      *  messages the primary already delivered are collapsed by the
      *  INSERT-OR-IGNORE envelope-uuid dedup in [store]. Never throws. */
-    private suspend fun drainBackupQueuesOnce() {
+    private suspend fun drainBackupQueuesOnce(epoch: Int = epochNow()) {
         // The island DELETES each row once it is handed over (Multihome.ack),
         // so draining into the decoy store does not copy a message — it moves
         // it there and destroys the only other copy. This loop runs on a timer
         // that survives the lock, so the guard belongs here and not only at the
         // call site.
         if (duressViewUp) return
+        // ⚠⚠ And the same "acked and gone" hazard is what makes an account
+        // switch mid-drain worse than a leak here: the ack destroys account
+        // A's mail on the backup island while the rows are being filed under
+        // account B, where they will never decrypt. See [accountEpoch].
+        if (!stillOn(epoch)) return
         val uin = store.uin ?: return
         if (MultihomeStore.list(uin).isEmpty()) return
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
@@ -2328,20 +2375,33 @@ class Session(context: Context) {
             _receivingViaBackup.value =
                 !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())
         }
+        if (!stillOn(epoch)) return
+        // Read ONCE, here, while the epoch still holds: myDeviceId() reads the
+        // live store, and after a switch it answers for the other account.
+        val dev = myDeviceId()
         withContext(Dispatchers.IO) {
             // Marked per row, not around the whole sweep — see drainQueue.
             // Stage 5: a backup island that keeps one log per room is drained
             // from it too, right after its queue; a log row is filed exactly
             // like a legacy group row of the same mailbox, under the alias.
-            Multihome.drainBackupQueues(uin, sp, pp, myDeviceId(), onLogRow = { payload, groupId, host ->
-                asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
+            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) }, onLogRow = { payload, groupId, host ->
+                // null = nothing was filed, which is exactly true once the
+                // account has been switched out from under this drain.
+                if (!stillOn(epoch)) null
+                else asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
             }) { payload, groupId, host ->
-                asBacklog {
-                    // A group row in a BACKUP mailbox = that island also hosts a
-                    // group we joined (§5c, same identity = same mailbox) — file it
-                    // under the local alias like the visited-island drain does.
-                    if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
-                    else ingest(payload)
+                // ⚠ VisitedIslandsStore is a SINGLETON re-pointed by rebindTo,
+                // so aliasFor here would mint account A's room aliases in
+                // account B's namespace, and no decryption is needed for that
+                // to be a leak: the alias carries the foreign host and room id.
+                if (stillOn(epoch)) {
+                    asBacklog {
+                        // A group row in a BACKUP mailbox = that island also hosts a
+                        // group we joined (§5c, same identity = same mailbox) — file it
+                        // under the local alias like the visited-island drain does.
+                        if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
+                        else ingest(payload)
+                    }
                 }
             }
         }
@@ -2352,21 +2412,34 @@ class Session(context: Context) {
      *  1:1 row (someone on that island messaged our guest uin) goes through the
      *  normal ingest, whose cross-island consent gate quarantines unknown
      *  senders. Never throws. */
-    private suspend fun drainVisitedQueuesOnce() {
+    private suspend fun drainVisitedQueuesOnce(epoch: Int = epochNow()) {
         if (duressViewUp) return   // same acked-and-gone hazard as the backup drain
-        if (VisitedIslandsStore.list().isEmpty()) return
+        if (!stillOn(epoch)) return
+        // The list is a snapshot ON PURPOSE. VisitedIslandsStore is a singleton
+        // that rebindTo re-points, so reading it again after a suspension gives
+        // the NEXT account's islands, and the drain would then present the
+        // previous account's guest credentials to them.
+        val visited = VisitedIslandsStore.list()
+        if (visited.isEmpty()) return
         val sp = runCatching { signingPriv() }.getOrNull() ?: return
         val pp = runCatching { signingPub() }.getOrNull() ?: return
+        val dev = myDeviceId()
+        if (!stillOn(epoch)) return
         withContext(Dispatchers.IO) {
             // Stage 5 on the guest mailbox too: the rooms we visit live on
             // their island, and one that keeps a log is read from it (the
             // same filing under the alias as the legacy rows below).
-            Multihome.drainVisitedQueues(sp, pp, myDeviceId(), onLogRow = { payload, groupId, host ->
-                asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
+            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) }, onLogRow = { payload, groupId, host ->
+                // null = nothing was filed, which is exactly true once the
+                // account has been switched out from under this drain.
+                if (!stillOn(epoch)) null
+                else asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
             }) { payload, groupId, host ->
-                asBacklog {
-                    if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
-                    else ingest(payload)
+                if (stillOn(epoch)) {
+                    asBacklog {
+                        if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
+                        else ingest(payload)
+                    }
                 }
             }
         }
@@ -3619,10 +3692,17 @@ class Session(context: Context) {
         // and the roster is the expensive half — every member with two base64
         // keys. It is fetched per group, on demand, by `ensureRoster`.
         val known = _groups.value.associateBy { it.id }
+        // Held across the whole function: room names end up ENCRYPTED IN
+        // SecureStore for the headless push wake, and that write is put-only
+        // (SecureStore.cacheGroupNames merges), so one poisoned refresh leaves
+        // account A's room names in account B's slot for good, surfacing in the
+        // text of B's notifications. See [accountEpoch].
+        val ep = epochNow()
         val own = api.groups(withMembers = false).map(::mapGroup).map { g ->
             // Keep a roster we already paid for rather than dropping it.
             if (g.members.isEmpty()) g.copy(members = known[g.id]?.members ?: emptyList()) else g
         }
+        if (!stillOn(ep)) return
         // Stage 6 phase 2: a blob we cannot open earns one throttled ask
         // toward the owner (six hours per room, mirrored from the web).
         for (g in own) maybeAskRoomKey(g)
@@ -3645,6 +3725,7 @@ class Session(context: Context) {
                 guest.groups().map { mapGroup(it).copy(id = VisitedIslandsStore.aliasFor(host, it.id), host = host) }
             }.getOrElse { emptyList() }
         }
+        if (!stillOn(ep)) return
         _groups.value = (own + foreign).distinctBy { it.id }.sortedByDescending { it.createdAt ?: 0L }
         // Persist the roster so groups are reachable offline (report #7).
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
@@ -5165,14 +5246,27 @@ class Session(context: Context) {
     private fun claimInstallToken(current: String) {
         if (JwtPeek.hasDeviceClaim(current)) return
         scope.launch {
-            val fresh = runCatching { api.claimDevice(DeviceId.get(appCtx)) }.getOrNull() ?: return@launch
+            // ⚠⚠ Everything below writes CREDENTIALS, so hold the account we
+            // started for and the objects that belonged to it. Written through
+            // the live fields instead, a switch during the round trip put the
+            // token ISLAND A MINTED into account B's SecureStore, where it
+            // survives a restart — and when both accounts sit on the same
+            // island (which is allowed), account B then talks to it as A.
+            val ep = epochNow()
+            val forStore = store
+            val forApi = api
+            val forSocket = socket
+            val fresh = runCatching { forApi.claimDevice(DeviceId.get(appCtx)) }.getOrNull() ?: return@launch
             if (fresh.token.isBlank()) return@launch
-            store.updateToken(fresh.token)
-            api.setToken(fresh.token)
+            if (!stillOn(ep)) return@launch
+            forStore.updateToken(fresh.token)
+            forApi.setToken(fresh.token)
             // The socket authenticates with the token it was handed at dial
             // time; reconnect so it comes back under the install's own name
-            // instead of "primary".
-            socket.reconnectNow()
+            // instead of "primary". The captured one, so a switch that raced
+            // us cannot make this redial the NEW account's socket with a token
+            // the OLD account's island issued.
+            forSocket.reconnectNow()
         }
     }
 
@@ -7475,6 +7569,15 @@ class Session(context: Context) {
 
     private suspend fun drainQueueLocked() {
         CrashReporter.crumb(appCtx, "drain_queue")
+        // Who this drain is FOR, taken before the first network call. The ack
+        // at the end is a second request, and sent through the live `api` it
+        // rides whatever token and baseURL the session holds by then: after a
+        // switch that is the OTHER account's island, and the ack moves the
+        // OTHER account's cursor past rows it never received. See
+        // [accountEpoch]; [drainGroupLog] below has carried this shape for
+        // longer and is the pattern being copied.
+        val ep = epochNow()
+        val drainApi = api
         // ── poison-row guard (#616) ──
         // A native crash inside ingest (libsignal decrypt dies with a signal,
         // there is no JVM exception to catch) kills the process BEFORE the ack,
@@ -7513,7 +7616,12 @@ class Session(context: Context) {
         // in that prefix as a row we never acked — the cursor then stops there
         // for good and the queue never moves again.
         val drainDev = mine ?: SealedSender.PRIMARY_DEVICE_ID
-        val rows = api.drainQueue(drainDev)
+        val rows = drainApi.drainQueue(drainDev)
+        // The rows in hand belong to the account we asked for. If that is no
+        // longer the account this session serves, they must not be ingested:
+        // the message database, the roster and the stores under `ingest` all
+        // point at somebody else now.
+        if (!stillOn(ep)) return
         asBacklog {
             rows.forEach { q ->
                 val payload = q.payload ?: return@forEach
@@ -7561,7 +7669,10 @@ class Session(context: Context) {
         }
         // Best-effort ack. If it fails the server redelivers next drain and the
         // UUID dedupe collapses the repeat, so we never lose and never double.
-        runCatching { api.ackQueue(directIds, groupIds, drainDev) }
+        // Through the CAPTURED client, and only while the account still holds:
+        // an ack is a promise that these rows were filed, and after a switch
+        // neither half of that promise is true any more.
+        if (stillOn(ep)) runCatching { drainApi.ackQueue(directIds, groupIds, drainDev) }
         CrashReporter.crumb(appCtx, "drain_done")
     }
 
@@ -8344,7 +8455,10 @@ class Session(context: Context) {
      *  and find nothing to announce. */
     private val contactsRefreshLock = Mutex()
 
-    private suspend fun refreshContacts() = contactsRefreshLock.withLock {
+    // Explicit Unit: the body bails out early on an account switch, and a bare
+    // `return@withLock` needs the lambda's type to be Unit rather than whatever
+    // its last expression happens to be.
+    private suspend fun refreshContacts(): Unit = contactsRefreshLock.withLock {
         // Snapshot presence before the refresh so we can play a sound on
         // online/offline transitions (iOS SoundService parity).
         //
@@ -8365,7 +8479,17 @@ class Session(context: Context) {
         // air rebinds `store`, and the list must not be sealed into the new
         // account's vault (the mirror checks the pin before it starts).
         val fetchedFor = store.uin
-        _contacts.value = api.contacts().map {
+        val ep = epochNow()
+        val fetched = api.contacts()
+        // ⚠⚠ The pin above guarded ONLY the vault mirror. Everything between
+        // here and the end of this function writes the roster somewhere else:
+        // the live flow the screens render, and the plaintext cache on disk
+        // that a cold start reads back. Under a switch mid-fetch those two put
+        // account A's contacts — numbers, nicknames, statuses, keys — into
+        // account B's screen and account B's prefs slot, where they survive a
+        // restart. Stop before any of it.
+        if (!stillOn(ep)) return@withLock
+        _contacts.value = fetched.map {
             Contact(
                 uin = it.uin,
                 nickname = it.nickname ?: "${it.uin}",
@@ -8405,7 +8529,11 @@ class Session(context: Context) {
             }
         }
         // Persist the roster so the chat list is reachable offline (report #7).
-        runCatching { LocalStores.setCachedContactsJson(profileGson.toJson(_contacts.value)) }
+        // LocalStores is a singleton bound to whoever is active NOW, so this
+        // write is only safe while the epoch still holds.
+        if (stillOn(ep)) {
+            runCatching { LocalStores.setCachedContactsJson(profileGson.toJson(_contacts.value)) }
+        }
         mirrorContactsToVault(_contacts.value, fetchedFor)
         // Cross-island contacts aren't in the server roster — surface them too.
         mergeCrossIslandContacts()
