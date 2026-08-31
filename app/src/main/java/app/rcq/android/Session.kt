@@ -2384,7 +2384,7 @@ class Session(context: Context) {
             // Stage 5: a backup island that keeps one log per room is drained
             // from it too, right after its queue; a log row is filed exactly
             // like a legacy group row of the same mailbox, under the alias.
-            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) }, onLogRow = { payload, groupId, host ->
+            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -2433,7 +2433,7 @@ class Session(context: Context) {
             // Stage 5 on the guest mailbox too: the rooms we visit live on
             // their island, and one that keeps a log is read from it (the
             // same filing under the alias as the legacy rows below).
-            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) }, onLogRow = { payload, groupId, host ->
+            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -4190,8 +4190,16 @@ class Session(context: Context) {
      *  "remove", while leaving both fields out entirely means "do not touch",
      *  which is what every other profile patch does. */
     suspend fun setOwnAvatar(bytes: ByteArray?) {
+        // FIRST, before a single network call. Reading it later is the exact
+        // mistake [accountEpoch] warns about: taken after the upload, it is
+        // already the NEW account's number and every check passes. Setting a
+        // picture is three round trips (vault, blob, profile) and an upload
+        // takes seconds on a phone, so this is a wide window, not a race.
+        val ep = epochNow()
         if (bytes == null) {
+            if (!stillOn(ep)) return
             api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = "", avatar_media_key = ""))
+            if (!stillOn(ep)) return
             _ownAvatar.value = null
             // §5e: a cleared picture is a profile change like any other — the
             // envelope names no picture and the far side drops the old one.
@@ -4218,7 +4226,14 @@ class Session(context: Context) {
         // ⚠ The id ALONE. An id without a key also CLEARS whatever key the
         // island still holds for us, which is what retires the plaintext one
         // for an account that had set a picture before this shipped.
+        // ⚠⚠ These two are the WORST of the unguarded lines, not the fan-out
+        // below: `updateMe` PATCHes this picture onto whatever account the api
+        // now serves, so account A's face becomes account B's on B's island,
+        // sealed under a key B's contacts do not have. And `_ownAvatar` then
+        // shows it to B as their own.
+        if (!stillOn(ep)) return
         api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = upload.media_id))
+        if (!stillOn(ep)) return
         _ownAvatar.value = upload.media_id to keyB64
         // Hand the key to everyone entitled to it. Own scope, not the caller's:
         // backing out of Settings must not cost the roster their copy. A peer
@@ -4234,7 +4249,6 @@ class Session(context: Context) {
             // who hold those numbers there get account A's profile key filed
             // against account B, which breaks B's face for them. See
             // [accountEpoch].
-            val ep = epochNow()
             val roster = _contacts.value
             roster.forEachIndexed { i, c ->
                 if (!stillOn(ep)) return@launch
@@ -4251,6 +4265,7 @@ class Session(context: Context) {
             }
         }
         // §5e: push the new picture (blob + key) to the cross-island contacts.
+        if (!stillOn(ep)) return
         broadcastProfileCrossIsland()
     }
 
@@ -7509,8 +7524,12 @@ class Session(context: Context) {
                     // the live api, so after a switch it would answer one
                     // account's question with the other account's key, over
                     // the other account's island. See [accountEpoch].
+                    // ⚠ Taken HERE, in the synchronous ingest, not inside the
+                    // launch: by the time the coroutine is dispatched the
+                    // account may already have changed, and the epoch read
+                    // there would be the new one.
+                    epochNow().let { ep ->
                     scope.launch {
-                        val ep = epochNow()
                         runCatching {
                             val k = LocalStores.myProfileKey() ?: return@runCatching
                             if (!stillOn(ep)) return@runCatching
@@ -7520,6 +7539,7 @@ class Session(context: Context) {
                                 envelopeType = "skdm",
                             )
                         }
+                    }
                     }
                 is Envelope.GsKey ->
                     // Room state key (stage 6 phase 2). Roster gate: only a
