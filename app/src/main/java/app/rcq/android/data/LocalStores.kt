@@ -441,6 +441,10 @@ object LocalStores {
             _gonePeers.value = emptySet()
             _unread.value = emptyMap()
             _gskeys.value = emptyMap()
+            // ⚠ The profile keys of every contact. Added with the feature and
+            // left out of this list, so unbinding kept one account's map of
+            // "number -> key to their face" live in memory for the next one.
+            _pkeys.value = emptyMap()
             _reactionInbox.value = emptySet()
             _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
