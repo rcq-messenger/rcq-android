@@ -2391,7 +2391,14 @@ class Session(context: Context) {
             _receivingViaBackup.value =
                 !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())
         }
-        if (!stillOn(epoch)) return
+        if (!stillOn(epoch)) {
+            // ⚠ The probe above LATCHES the banner. Bailing out here without
+            // clearing it leaves "your mail is arriving through the backup
+            // island" on screen for the account we just switched TO, about a
+            // probe run for the account we left.
+            _receivingViaBackup.value = false
+            return
+        }
         // Read ONCE, here, while the epoch still holds: myDeviceId() reads the
         // live store, and after a switch it answers for the other account.
         val dev = myDeviceId()
@@ -2479,6 +2486,23 @@ class Session(context: Context) {
         // EDITOR was opened, so a fresh launch showed the status flower in the
         // header until you went looking for your own profile.
         _ownAvatar.value = ownAvatarPair(profile.avatar_media_id, profile.avatar_media_key)
+        // ⚠⚠ An install that never SET the picture has nothing in LocalStores,
+        // so the resolver above finds no key and the face stays blank - on a
+        // second phone, a browser-linked device, or any reinstall. The key is
+        // the ACCOUNT's, not the install's, and the vault is where it lives.
+        // Read-only (publishedKey never mints), once, and only when the island
+        // says there IS a picture whose key we do not hold.
+        if (!profile.avatar_media_id.isNullOrEmpty() && LocalStores.myProfileKey() == null) {
+            val ep = epochNow()
+            scope.launch {
+                val k = runCatching {
+                    ProfileKeyVault.publishedKey(api, store.identityPrivate ?: ByteArray(0))
+                }.getOrNull()
+                if (k != null && stillOn(ep)) {
+                    _ownAvatar.value = ownAvatarPair(profile.avatar_media_id, profile.avatar_media_key)
+                }
+            }
+        }
     }
 
     fun stop() = socket.disconnect()
