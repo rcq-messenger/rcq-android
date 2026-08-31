@@ -56,6 +56,17 @@ object MultihomeStore {
         write(all().filterNot { it.ownUin == ownUin && it.host == host })
     }
 
+    /** Forget every backup island registered under [ownUin].
+     *
+     *  ⚠⚠ These rows carry a JWT per island, so a burned identity that is not
+     *  swept from here leaves LIVE CREDENTIALS to its backup mailboxes on disk,
+     *  and the 30s multihome drain keeps presenting them. Burn wipes eight
+     *  other stores and missed this one. */
+    fun wipeOwn(ownUin: Int) {
+        if (!::prefs.isInitialized) return
+        write(all().filterNot { it.ownUin == ownUin })
+    }
+
     /** Replace the token (and per-island uin) after a /auth/recover refresh. */
     fun updateCreds(ownUin: Int, host: String, uin: Int, jwt: String) {
         write(all().map { if (it.ownUin == ownUin && it.host == host) it.copy(uin = uin, jwt = jwt) else it })

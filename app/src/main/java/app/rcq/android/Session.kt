@@ -4920,6 +4920,10 @@ class Session(context: Context) {
      *  the account no longer exists and there is no server call left to make. */
     private suspend fun eraseActiveAccountLocally(burnedId: String?): Int? {
         socket.disconnect()
+        // Read BEFORE the wipes below take the identity away: these two stores
+        // are keyed by NUMBER, not by account id, so they cannot be swept from
+        // `burnedId` afterwards.
+        val burnedUin = store.uin
         if (burnedId != null) {
             SecureStore.wipeAccount(appCtx, burnedId)
             MessageDb.wipeAccount(appCtx, burnedId)
@@ -4930,7 +4934,17 @@ class Session(context: Context) {
             LocalStores.clearAccount(burnedId)
             app.rcq.android.data.AccountCards.forget(appCtx, burnedId)
             AccountManager.remove(burnedId)   // active falls back to first remaining (or null)
-        } else {
+        }
+        // Keyed by number rather than by account id, so they sit outside the
+        // block above and were simply never swept: §5f requests addressed to
+        // the burned identity, the numbers it blocked, and LIVE JWTs to its
+        // backup islands. Same shape as the fourth hole of the iOS
+        // cross-island leak (f50a7b0).
+        burnedUin?.let {
+            CrossIslandRequestsStore.wipeOwn(it)
+            MultihomeStore.wipeOwn(it)
+        }
+        if (burnedId == null) {
             store.wipe()
             db.wipe()
             app.rcq.android.data.VisitStore.wipe()
