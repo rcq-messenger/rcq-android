@@ -326,6 +326,17 @@ object Multihome {
                 if (!stillOurs()) return
                 val acks = GroupLogPage.Acks()
                 page.rows.forEach { r ->
+                    // ⚠⚠ BETWEEN rows, not just around the page. A page is up
+                    // to fifty rows and each one is a libsignal decrypt, so the
+                    // switch usually lands INSIDE this loop. The handler writes
+                    // to per-account singletons before it even gets to the
+                    // decrypt (the room alias is computed as its argument), so
+                    // rows fed to it after the switch put one account's foreign
+                    // rooms in the other account's prefs, where they stay.
+                    // `forEach` is inline, so this returns out of drainGroupLog
+                    // itself - which is the point: it also skips the ack below,
+                    // leaving every unread row on the island.
+                    if (!stillOurs()) return
                     val payload = r.payload
                     val why = if (payload == null) null else onRow(payload, r.gid, host)
                     val key = "$host:${r.gid}:${r.seq}"
@@ -378,11 +389,14 @@ object Multihome {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         deviceId: Int = 1,
-        /** False once the caller's account has been switched out from under it.
+        /** False once this drain no longer speaks for the account it started
+         *  for. That covers an account SWITCH and also the duress view coming
+         *  up, which rebinds every per-account store without being a switch.
+         *
          *  ⚠⚠ Checked before the ack in particular: [ack] tells the island the
          *  rows were taken and the island DELETES them, so a drain that keeps
-         *  going after a switch does not merely misfile account A's mail under
-         *  account B, it destroys the only copy. */
+         *  going does not merely misfile account A's mail under account B, it
+         *  destroys the only copy. */
         stillOurs: () -> Boolean = { true },
         onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
