@@ -1252,4 +1252,6 @@
     <string name="last_seen_this_week">esta semana</string>
     <string name="last_seen_this_month">este mes</string>
     <string name="last_seen_long_ago">hace mucho</string>
+    <string name="settings_economy_title">Modo ahorro</string>
+    <string name="settings_economy_desc">Desactiva de una vez los avatares animados y los fondos. Para un teléfono antiguo o lento.</string>
 </resources>

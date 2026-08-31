@@ -1524,6 +1524,23 @@ private fun AppearanceScreen(onOpen: (SettingsRoute) -> Unit, onBack: () -> Unit
                     stringResource(R.string.settings_anim_avatars_desc),
                     animAvatars,
                 ) { LocalStores.setAnimateAvatars(it) }
+                Divider()
+                // RCQ Lite as a MODE, not a second app (founder, 30.08). It
+                // switches off the heavy things that already have their own
+                // toggles, so somebody on an old phone does not have to find
+                // three settings and know which of them cost battery. The
+                // individual switches stay theirs afterwards: this writes
+                // them rather than shadowing them, so turning economy off
+                // leaves the phone exactly where the person last set it.
+                var economy by remember { mutableStateOf(LocalStores.economyMode()) }
+                SettingToggleRow(
+                    stringResource(R.string.settings_economy_title),
+                    stringResource(R.string.settings_economy_desc),
+                    economy,
+                ) {
+                    economy = it
+                    LocalStores.setEconomyMode(it)
+                }
             }
             Spacer(Modifier.height(10.dp))
             Text(stringResource(R.string.settings_swipe_reply), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))

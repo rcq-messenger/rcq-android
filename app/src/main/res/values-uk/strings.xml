@@ -1256,4 +1256,6 @@
     <string name="last_seen_this_week">цього тижня</string>
     <string name="last_seen_this_month">цього місяця</string>
     <string name="last_seen_long_ago">давно</string>
+    <string name="settings_economy_title">Економний режим</string>
+    <string name="settings_economy_desc">Одразу вимикає анімовані аватарки та шпалери. Для старого або повільного телефона.</string>
 </resources>

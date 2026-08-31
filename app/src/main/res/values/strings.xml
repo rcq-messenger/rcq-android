@@ -1303,4 +1303,6 @@
     <string name="last_seen_this_week">this week</string>
     <string name="last_seen_this_month">this month</string>
     <string name="last_seen_long_ago">a long time ago</string>
+    <string name="settings_economy_title">Economy mode</string>
+    <string name="settings_economy_desc">Switches off animated avatars and wallpapers at once. For an older or slower phone.</string>
 </resources>
