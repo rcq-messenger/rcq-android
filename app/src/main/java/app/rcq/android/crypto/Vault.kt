@@ -40,6 +40,18 @@ object Vault {
      *  the same way, so the island still sees only 32 hex characters. */
     const val SECTIONS = "sections"
 
+    /** My profile key: the AES key my avatar blob is sealed under, mirrored
+     *  here so a second install of this account reuses it instead of minting a
+     *  rival one (docs/profile-key-design.md).
+     *
+     *  ⚠⚠ The literal is load-bearing and must stay exactly "pkey". [slotId]
+     *  hashes the NAME, and the web derives the same 16 bytes from the same
+     *  literal (web-chat/src/lib/profile-key.ts, VAULT_PKEY). A different
+     *  spelling does not fail - it succeeds against a slot nobody else reads,
+     *  so a phone and a browser on one account mint two keys and half the
+     *  contacts end up holding one that opens nothing. */
+    const val PKEY = "pkey"
+
     private const val FORMAT_V1: Byte = 0x01
     private const val NONCE_LEN = 12
     private const val BLOCK = 512
