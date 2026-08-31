@@ -2097,17 +2097,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             if (isGroup) session.sendGroupText(groupId!!, body, reply)
                             else session.sendText(peer!!, body, reply)
                         }.onFailure { e ->
-                            // A slowmode 429 used to fail EXACTLY like a dead
-                            // network: same silent FAILED bubble, so the room
-                            // rule read as an outage (#809). Say what the
-                            // island actually said; every other failure keeps
-                            // the old silence (the bubble's failed state and
-                            // the retry tap are the interface for those).
-                            val r = RcqApi.refusalOf(e.message)
-                            if (r.status == 429 || r.code == "slowmode") {
-                                val wait = r.retryAfter ?: 0
-                                val msg = if (wait > 0) context.getString(R.string.chat_slowmode_wait_in, wait)
-                                else context.getString(R.string.chat_slowmode_wait)
+                            sendRefusalText(context, e.message)?.let { msg ->
                                 android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -2871,6 +2861,34 @@ private fun Composer(
 
 /** m:ss for a duration in seconds. */
 private fun formatDuration(sec: Int): String = "%d:%02d".format(sec / 60, sec % 60)
+
+/** What to SAY when a send was refused by the island, or null to stay silent.
+ *
+ *  A slowmode 429 used to fail EXACTLY like a dead network: same silent FAILED
+ *  bubble, so the room rule read as an outage (#809). The newcomer waiting
+ *  period (#833) arrived the same way - the island answers 403 with how many
+ *  hours are left and the phone said nothing, while the web has spoken that
+ *  sentence since 30.08 (Chat.tsx, `chat.age_gate.wait`). Every OTHER failure
+ *  keeps the old silence: the bubble's failed state and the retry tap are the
+ *  interface for those.
+ *
+ *  ⚠ Lives out here, not inlined at the call site, because ChatScreen's own
+ *  register map is at the ART verifier's limit - see [MessageLongPressOverlay]. */
+private fun sendRefusalText(context: android.content.Context, message: String?): String? {
+    val r = RcqApi.refusalOf(message)
+    if (r.status == 429 || r.code == "slowmode") {
+        val wait = r.retryAfter ?: 0
+        return if (wait > 0) context.getString(R.string.chat_slowmode_wait_in, wait)
+        else context.getString(R.string.chat_slowmode_wait)
+    }
+    if (r.code == "account_too_young") {
+        // An island too old to send the number still refuses with the code, so
+        // the sentence has to work without it: "about 1 h" is the floor the
+        // island itself reports (max(1, ceil(...)), messages.py:816).
+        return context.getString(R.string.chat_age_gate_wait, r.hoursLeft ?: 1)
+    }
+    return null
+}
 
 /** The send-gate's link detector for a links-off room (#755): the web's
  *  /https?:\/\//i verbatim. Deliberately BROADER than the render-side

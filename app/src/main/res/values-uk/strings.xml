@@ -1237,8 +1237,8 @@
     <string name="gi_links_desc">Учасники можуть надсилати посилання</string>
     <string name="gi_files">Файли дозволені</string>
     <string name="gi_files_desc">Учасники можуть прикріплювати файли та медіа</string>
-    <string name="gi_age_gate">Поріг віку акаунта</string>
-    <string name="gi_age_gate_desc">Акаунти, молодші за поріг, читають, але не пишуть. Ускладнює спам з одноразових акаунтів.</string>
+    <string name="gi_age_gate">Випробувальний термін новачків</string>
+    <string name="gi_age_gate_desc">Нові учасники спочатку читають, а пишуть, коли пробудуть у групі вказаний час. Виключення повертає відлік на початок.</string>
     <string name="gi_slowmode">Повільний режим</string>
     <string name="gi_slowmode_desc">Як часто один учасник може писати</string>
     <string name="gi_slow_off">Вимк</string>
@@ -1246,6 +1246,7 @@
     <string name="chat_links_off">Власник групи вимкнув посилання</string>
     <string name="chat_slowmode_wait">Увімкнено повільний режим: повторіть трохи згодом</string>
     <string name="chat_slowmode_wait_in">Увімкнено повільний режим: повторіть через %1$d с</string>
+    <string name="chat_age_gate_wait">У цій групі новачки пишуть не одразу. Ви зможете приблизно через %1$d год.</string>
     <string name="push_channel_upload">Надсилання файлів</string>
     <string name="push_channel_upload_desc">Файли, що ще завантажуються, поки RCQ не на екрані.</string>
     <string name="chat_delete_album_all">Видалити всі %1$d фото в усіх</string>

@@ -1231,8 +1231,8 @@
     <string name="gi_links_desc">成员可以发送链接</string>
     <string name="gi_files">允许文件</string>
     <string name="gi_files_desc">成员可以发送文件和媒体</string>
-    <string name="gi_age_gate">账号最低注册时长</string>
-    <string name="gi_age_gate_desc">低于门槛的账号可以阅读但不能发言。可有效遏制一次性账号的垃圾信息。</string>
+    <string name="gi_age_gate">新成员等待期</string>
+    <string name="gi_age_gate_desc">新成员先只能阅读,在群里满足该时长后才能发言。被移出会重新开始计时。</string>
     <string name="gi_slowmode">慢速模式</string>
     <string name="gi_slowmode_desc">单个成员的发言频率</string>
     <string name="gi_slow_off">关闭</string>
@@ -1240,6 +1240,7 @@
     <string name="chat_links_off">群主已禁用链接</string>
     <string name="chat_slowmode_wait">已开启慢速模式:请稍后再试</string>
     <string name="chat_slowmode_wait_in">已开启慢速模式:请在 %1$d 秒后再试</string>
+    <string name="chat_age_gate_wait">这个群的新成员不能立刻发言。大约 %1$d 小时后你就可以了。</string>
     <string name="push_channel_upload">正在发送文件</string>
     <string name="push_channel_upload_desc">RCQ 不在前台时仍在上传的文件。</string>
     <string name="chat_delete_album_all">为所有人删除全部 %1$d 张照片</string>

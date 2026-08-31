@@ -2092,7 +2092,16 @@ private class SealingBody(
          *  [code] is null when the endpoint answered with the plain-string
          *  `detail` most of them use ("owner only"), which is prose, not a
          *  branch. */
-        data class Refusal(val status: Int?, val code: String?, val retryAfter: Int?)
+        data class Refusal(
+            val status: Int?,
+            val code: String?,
+            val retryAfter: Int?,
+            /** Hours the caller still has to wait, when the island refused with
+             *  `account_too_young` (messages.py:815). Null for every other
+             *  refusal, including a young-account 403 from an island too old to
+             *  send the number. */
+            val hoursLeft: Int? = null,
+        )
 
         /** Read one. Never throws: an unparseable or truncated body simply has
          *  no code, and the caller falls back to its generic sentence. */
@@ -2105,7 +2114,8 @@ private class SealingBody(
             }.getOrNull() ?: return Refusal(status, null, null)
             val code = runCatching { detail.get("code")?.asString }.getOrNull()
             val retry = runCatching { detail.get("retry_after")?.asInt }.getOrNull()
-            return Refusal(status, code, retry)
+            val hours = runCatching { detail.get("hours_left")?.asInt }.getOrNull()
+            return Refusal(status, code, retry, hours)
         }
 
         /** The longest report `reason` the island stores, in CODE POINTS.
