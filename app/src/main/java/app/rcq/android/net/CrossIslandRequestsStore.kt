@@ -57,6 +57,27 @@ object CrossIslandRequestsStore {
 
     private fun reqKey(ownUin: Int, uin: Int, host: String) = "$ownUin:$uin@${host.lowercase()}"
 
+    /** Forget everything held for [ownUin]: pending cross-island requests and
+     *  the numbers this identity blocked.
+     *
+     *  ⚠⚠ Burn wipes SecureStore, the message database, the libsignal stores,
+     *  visits, cross-island contacts, visited islands and the roster caches,
+     *  and this store was simply missing from that list, so §5f requests
+     *  addressed to a burned identity outlived it on disk. Same shape as the
+     *  fourth hole of the iOS cross-island leak (f50a7b0).
+     *
+     *  ⚠ The blocked entries go with it BY NUMBER, which is right: they are
+     *  this identity's refusals, and a new identity has made none. Nothing
+     *  here is a privacy SETTING - a wipe must never quietly turn one of those
+     *  off for somebody who turned it on. */
+    fun wipeOwn(ownUin: Int) {
+        if (!::prefs.isInitialized) return
+        val pre = "$ownUin:"
+        writeAll(all().filterKeys { !it.startsWith(pre) })
+        val keptBlocks = blockedSet().filterTo(mutableSetOf()) { !it.startsWith(pre) }
+        prefs.edit().putString(KEY_BLOCKED, gson.toJson(keptBlocks)).apply()
+    }
+
     private fun all(): MutableMap<String, Request> = runCatching {
         val raw = prefs.getString(KEY, null) ?: return mutableMapOf()
         gson.fromJson<MutableMap<String, Request>>(raw, object : TypeToken<MutableMap<String, Request>>() {}.type) ?: mutableMapOf()
