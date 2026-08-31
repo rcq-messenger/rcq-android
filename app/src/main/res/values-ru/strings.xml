@@ -558,10 +558,6 @@
 
     <!-- Last seen -->
     <string name="last_seen_fmt">был в сети %1$s</string>
-    <string name="last_seen_just_now">только что</string>
-    <string name="last_seen_min">%1$d мин назад</string>
-    <string name="last_seen_hour">%1$d ч назад</string>
-    <string name="last_seen_day">%1$d дн назад</string>
 
     <!-- Visibility options -->
     <string name="vis_everyone">Все</string>
@@ -1296,4 +1292,10 @@
     <string name="push_channel_upload_desc">Файлы, которые ещё загружаются, пока RCQ не на экране.</string>
     <string name="chat_delete_album_all">Удалить все %1$d фото у всех</string>
     <string name="chat_delete_album_me">Удалить все %1$d фото у меня</string>
+    <string name="last_seen_recently">недавно</string>
+    <string name="last_seen_today">сегодня</string>
+    <string name="last_seen_yesterday">вчера</string>
+    <string name="last_seen_this_week">на этой неделе</string>
+    <string name="last_seen_this_month">в этом месяце</string>
+    <string name="last_seen_long_ago">давно</string>
 </resources>

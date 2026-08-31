@@ -81,18 +81,34 @@ internal fun RelayLearnMore(modifier: Modifier = Modifier) {
 internal fun formatTime(ts: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
-/** Coarse "last seen" buckets — minutes / hours / days, else a date.
- *  Mirrors iOS ContactRow.relativeLastSeen. Localized via [context]. */
+/** "Last seen" in WORDS, not numbers (founder, 31.08).
+ *
+ *  ⚠ "was here 47 minutes ago" is an activity pattern: read it a few times a
+ *  day and you know when someone wakes up, commutes and sleeps. Nobody needs
+ *  that to decide whether to write - "recently" answers the same question.
+ *  The island already floors what it serves to the hour (A7), so the minutes
+ *  were never real anyway; printing them dressed a floored hour up as
+ *  precision it does not have. Same buckets on every client.
+ */
 internal fun relativeLastSeen(ts: Long, context: android.content.Context): String {
-    val secs = ((System.currentTimeMillis() - ts) / 1000).toInt()
-    if (secs < 60) return context.getString(app.rcq.android.R.string.last_seen_just_now)
-    val mins = secs / 60
-    if (mins < 60) return context.getString(app.rcq.android.R.string.last_seen_min, mins)
-    val hours = mins / 60
-    if (hours < 24) return context.getString(app.rcq.android.R.string.last_seen_hour, hours)
-    val days = hours / 24
-    if (days < 7) return context.getString(app.rcq.android.R.string.last_seen_day, days)
-    return SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(ts))
+    val now = System.currentTimeMillis()
+    if (now - ts < 3_600_000L) return context.getString(app.rcq.android.R.string.last_seen_recently)
+    // Calendar days, not 24-hour blocks: "yesterday" has to mean yesterday to
+    // a person, not "between 24 and 48 hours ago".
+    val midnight = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val day = 86_400_000L
+    return when {
+        ts >= midnight -> context.getString(app.rcq.android.R.string.last_seen_today)
+        ts >= midnight - day -> context.getString(app.rcq.android.R.string.last_seen_yesterday)
+        ts >= midnight - 6 * day -> context.getString(app.rcq.android.R.string.last_seen_this_week)
+        ts >= midnight - 29 * day -> context.getString(app.rcq.android.R.string.last_seen_this_month)
+        else -> context.getString(app.rcq.android.R.string.last_seen_long_ago)
+    }
 }
 
 /** Chevron that points right when collapsed, down when expanded. */

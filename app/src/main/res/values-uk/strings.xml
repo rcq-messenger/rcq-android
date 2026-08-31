@@ -538,10 +538,6 @@
     <string name="members_compact">%1$s учасників</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">був у мережі %1$s</string>
-    <string name="last_seen_just_now">щойно</string>
-    <string name="last_seen_min">%1$d хв тому</string>
-    <string name="last_seen_hour">%1$d год тому</string>
-    <string name="last_seen_day">%1$d дн тому</string>
     <!-- Visibility options -->
     <string name="vis_everyone">Усі</string>
     <string name="vis_contacts">Контакти</string>
@@ -1254,4 +1250,10 @@
     <string name="push_channel_upload_desc">Файли, що ще завантажуються, поки RCQ не на екрані.</string>
     <string name="chat_delete_album_all">Видалити всі %1$d фото в усіх</string>
     <string name="chat_delete_album_me">Видалити всі %1$d фото в мене</string>
+    <string name="last_seen_recently">нещодавно</string>
+    <string name="last_seen_today">сьогодні</string>
+    <string name="last_seen_yesterday">вчора</string>
+    <string name="last_seen_this_week">цього тижня</string>
+    <string name="last_seen_this_month">цього місяця</string>
+    <string name="last_seen_long_ago">давно</string>
 </resources>

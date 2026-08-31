@@ -538,10 +538,6 @@
     <string name="members_compact">%1$s üye</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">son görülme %1$s</string>
-    <string name="last_seen_just_now">az önce</string>
-    <string name="last_seen_min">%1$d dk önce</string>
-    <string name="last_seen_hour">%1$d sa önce</string>
-    <string name="last_seen_day">%1$d gün önce</string>
     <!-- Visibility options -->
     <string name="vis_everyone">Herkes</string>
     <string name="vis_contacts">Yalnızca kişiler</string>
@@ -1250,4 +1246,10 @@
     <string name="push_channel_upload_desc">RCQ ekranda değilken yüklenmeye devam eden dosyalar.</string>
     <string name="chat_delete_album_all">%1$d fotoğrafın tümünü herkesten sil</string>
     <string name="chat_delete_album_me">%1$d fotoğrafın tümünü benden sil</string>
+    <string name="last_seen_recently">az önce</string>
+    <string name="last_seen_today">bugün</string>
+    <string name="last_seen_yesterday">dün</string>
+    <string name="last_seen_this_week">bu hafta</string>
+    <string name="last_seen_this_month">bu ay</string>
+    <string name="last_seen_long_ago">uzun zaman önce</string>
 </resources>

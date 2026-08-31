@@ -562,10 +562,6 @@
 
     <!-- Last seen -->
     <string name="last_seen_fmt">last seen %1$s</string>
-    <string name="last_seen_just_now">just now</string>
-    <string name="last_seen_min">%1$dm ago</string>
-    <string name="last_seen_hour">%1$dh ago</string>
-    <string name="last_seen_day">%1$dd ago</string>
 
     <!-- Visibility options -->
     <string name="vis_everyone">Everyone</string>
@@ -1301,4 +1297,10 @@
     <string name="push_channel_upload_desc">Files still going up while RCQ is not on screen.</string>
     <string name="chat_delete_album_all">Delete all %1$d photos for everyone</string>
     <string name="chat_delete_album_me">Delete all %1$d photos for me</string>
+    <string name="last_seen_recently">recently</string>
+    <string name="last_seen_today">today</string>
+    <string name="last_seen_yesterday">yesterday</string>
+    <string name="last_seen_this_week">this week</string>
+    <string name="last_seen_this_month">this month</string>
+    <string name="last_seen_long_ago">a long time ago</string>
 </resources>

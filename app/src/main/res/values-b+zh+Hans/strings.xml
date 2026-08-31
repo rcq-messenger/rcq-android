@@ -538,10 +538,6 @@
     <string name="members_compact">%1$s 名成员</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">最后上线 %1$s</string>
-    <string name="last_seen_just_now">刚刚</string>
-    <string name="last_seen_min">%1$d 分钟前</string>
-    <string name="last_seen_hour">%1$d 小时前</string>
-    <string name="last_seen_day">%1$d 天前</string>
     <!-- Visibility options -->
     <string name="vis_everyone">所有人</string>
     <string name="vis_contacts">联系人</string>
@@ -1248,4 +1244,10 @@
     <string name="push_channel_upload_desc">RCQ 不在前台时仍在上传的文件。</string>
     <string name="chat_delete_album_all">为所有人删除全部 %1$d 张照片</string>
     <string name="chat_delete_album_me">为我删除全部 %1$d 张照片</string>
+    <string name="last_seen_recently">最近</string>
+    <string name="last_seen_today">今天</string>
+    <string name="last_seen_yesterday">昨天</string>
+    <string name="last_seen_this_week">本周</string>
+    <string name="last_seen_this_month">本月</string>
+    <string name="last_seen_long_ago">很久以前</string>
 </resources>
