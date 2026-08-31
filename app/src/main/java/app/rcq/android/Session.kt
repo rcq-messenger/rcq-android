@@ -2580,6 +2580,19 @@ class Session(context: Context) {
         // locked one is what the switcher-card recorder would write onto that
         // identity's row.
         _ownAvatar.value = null
+        // ⚠⚠ BEFORE the database closes. A lock is not an account switch, so
+        // this used to leave the epoch alone and every guard written for a
+        // switch read "nothing changed" straight through it. The thirty second
+        // multihome loop kept draining: ingest then hit a CLOSED SQLCipher
+        // handle, the failure looked to it like an undecryptable row, and the
+        // ack that followed told the island the rows were taken - so the island
+        // DELETED mail that was never written anywhere. With the default grace
+        // of zero that happens on every trip to the home screen.
+        //
+        // The bump also stops the loops accumulating: `started = false` below
+        // lets the next unlock start a second copy of every one of them, and
+        // only a changed epoch retires the first.
+        accountEpoch++
         if (::db.isInitialized) { db.close() }
         started = false
         everConnected = false
@@ -3737,8 +3750,12 @@ class Session(context: Context) {
      *  allowed to see this". A peer who is not entitled simply never answers,
      *  and the throttle keeps a roster of faces we cannot open from turning
      *  into a poll. */
-    private fun maybeAskProfileKey(uin: Int, identityKey: String) {
+    private fun maybeAskProfileKey(uin: Int, identityKey: String, host: String?) {
         if (identityKey.isBlank()) return
+        // Never at ourselves, and never at a CROSS-ISLAND row: that number
+        // belongs to their island, so asking it here reaches whoever holds it
+        // on ours. Their key rides the §5e profile envelope instead.
+        if (host != null || uin == store.uin) return
         // Never at somebody we blocked: the ask is an outbound message, and a
         // blocked number must not receive one because a picture failed to open.
         if (LocalStores.isBlocked(uin)) return
@@ -4347,10 +4364,28 @@ class Session(context: Context) {
             val roster = _contacts.value
             roster.forEachIndexed { i, c ->
                 if (!stillOn(ep)) return@launch
+                // The same filter pushHomeRecordToContacts uses, for the same
+                // reasons.
+                //
+                // ⚠⚠ `c.host != null` is the one that matters most. The roster
+                // has cross-island rows merged into it, and their number belongs
+                // to THEIR island: sending to it here addresses whoever holds
+                // that number on OURS. The outer seal for device 1 is unreadable
+                // to them, but a second device of that stranger is addressed
+                // with a bundle fetched from our island, so it opens the
+                // envelope and reads our profile key. The real cross-island
+                // contact gets id and key from depositProfileTo anyway, so this
+                // send is wrong AND redundant.
+                //
                 // A blocked number is not entitled to the key to our face, and
                 // handing it over is also an outbound message to somebody we
                 // said we wanted nothing from.
-                if (c.identityKey.isNotBlank() && !LocalStores.isBlocked(c.uin)) {
+                val skip = c.host != null ||
+                    c.uin == store.uin ||
+                    c.blocked ||
+                    LocalStores.isBlocked(c.uin) ||
+                    c.identityKey.isBlank()
+                if (!skip) {
                     runCatching {
                         sendSealedCopies(
                             c.uin,
@@ -8740,7 +8775,7 @@ class Session(context: Context) {
                     // never. See [maybeAskProfileKey].
                     ?: run {
                         if (!it.avatar_media_id.isNullOrEmpty()) {
-                            maybeAskProfileKey(it.uin, it.identity_key ?: "")
+                            maybeAskProfileKey(it.uin, it.identity_key ?: "", null)
                         }
                         null
                     },
