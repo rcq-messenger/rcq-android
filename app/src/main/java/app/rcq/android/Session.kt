@@ -2385,10 +2385,14 @@ class Session(context: Context) {
             // from it too, right after its queue; a log row is filed exactly
             // like a legacy group row of the same mailbox, under the alias.
             Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) }, onLogRow = { payload, groupId, host ->
-                // null = nothing was filed, which is exactly true once the
-                // account has been switched out from under this drain.
-                if (!stillOn(epoch)) null
-                else asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
+                // ⚠⚠ NO account guard here, deliberately. This lambda's answer
+                // means "is the row done with": null closes it and lets the
+                // room's ack move past it. Refusing a row by answering null
+                // would therefore DESTROY it - the cursor only goes forward and
+                // the log cannot be re-read from a given seq. The switch is
+                // handled where it can actually stop the work, in
+                // drainGroupLog's page loop, before the ack.
+                asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
             }) { payload, groupId, host ->
                 // ⚠ VisitedIslandsStore is a SINGLETON re-pointed by rebindTo,
                 // so aliasFor here would mint account A's room aliases in
@@ -2430,10 +2434,14 @@ class Session(context: Context) {
             // their island, and one that keeps a log is read from it (the
             // same filing under the alias as the legacy rows below).
             Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) }, onLogRow = { payload, groupId, host ->
-                // null = nothing was filed, which is exactly true once the
-                // account has been switched out from under this drain.
-                if (!stillOn(epoch)) null
-                else asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
+                // ⚠⚠ NO account guard here, deliberately. This lambda's answer
+                // means "is the row done with": null closes it and lets the
+                // room's ack move past it. Refusing a row by answering null
+                // would therefore DESTROY it - the cursor only goes forward and
+                // the log cannot be re-read from a given seq. The switch is
+                // handled where it can actually stop the work, in
+                // drainGroupLog's page loop, before the ack.
+                asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
             }) { payload, groupId, host ->
                 if (stillOn(epoch)) {
                     asBacklog {
@@ -4216,8 +4224,20 @@ class Session(context: Context) {
         // backing out of Settings must not cost the roster their copy. A peer
         // we cannot reach today asks with `pkeyask` tomorrow.
         scope.launch {
+            // ⚠⚠ One round trip PER CONTACT, with retries: this loop runs for
+            // tens of seconds, and `scope` is never cancelled. Without the
+            // epoch it keeps going after an account switch, and then
+            // `encryptFor`/`sendSealedCopies` read the LIVE store and api - so
+            // the island of account B receives a send-sealed for every number
+            // in account A's ROSTER. On one island (which is allowed) that
+            // hands the island the two accounts as one graph, and the peers
+            // who hold those numbers there get account A's profile key filed
+            // against account B, which breaks B's face for them. See
+            // [accountEpoch].
+            val ep = epochNow()
             val roster = _contacts.value
             roster.forEachIndexed { i, c ->
+                if (!stillOn(ep)) return@launch
                 if (c.identityKey.isNotBlank()) {
                     runCatching {
                         sendSealedCopies(
@@ -7484,10 +7504,16 @@ class Session(context: Context) {
                     } else Unit
                 is Envelope.PKeyAsk ->
                     // Only the owner can answer this one. Nothing to send if
-                    // we never set a picture.
+                    // we never set a picture. Epoch-held like the fan-out in
+                    // setOwnAvatar: this reads LocalStores and sends through
+                    // the live api, so after a switch it would answer one
+                    // account's question with the other account's key, over
+                    // the other account's island. See [accountEpoch].
                     scope.launch {
+                        val ep = epochNow()
                         runCatching {
                             val k = LocalStores.myProfileKey() ?: return@runCatching
+                            if (!stillOn(ep)) return@runCatching
                             sendSealedCopies(
                                 dec.senderUin,
                                 encryptFor(dec.senderUin, Envelope.PKey(k)),

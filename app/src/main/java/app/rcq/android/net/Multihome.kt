@@ -308,12 +308,22 @@ object Multihome {
     private suspend fun drainGroupLog(
         api: RcqApi,
         host: String,
+        /** False once the caller's account has been switched out from under it.
+         *
+         *  ⚠⚠ This has to STOP THE LOOP, and it cannot be expressed by [onRow]
+         *  answering null: null means the row is DONE WITH, which advances the
+         *  room's ack. The cursor only ever moves forward and [fetchGroupLog]
+         *  cannot be asked to start from a given seq, so an ack over rows that
+         *  were never filed loses them for good, in silence. */
+        stillOurs: () -> Boolean = { true },
         onRow: (payload: String, groupId: Int, host: String) -> String?,
     ) {
         runCatching {
             var pages = 0
             while (true) {
+                if (!stillOurs()) return
                 val page = api.fetchGroupLog()
+                if (!stillOurs()) return
                 val acks = GroupLogPage.Acks()
                 page.rows.forEach { r ->
                     val payload = r.payload
@@ -334,6 +344,9 @@ object Multihome {
                     }
                     acks.row(r.gid, r.seq, done)
                 }
+                // The last gate before the cursor moves. Everything above this
+                // line is recoverable; an ack is not.
+                if (!stillOurs()) return
                 if (acks.upto.isNotEmpty() && runCatching { api.ackGroupLog(acks.upto) }.isFailure) break
                 pages++
                 if (!page.more || acks.blocked.isNotEmpty() || page.rows.isEmpty() || pages >= 40) break
@@ -399,8 +412,18 @@ object Multihome {
                 }
                 if (!stillOurs()) return@runCatching
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
+                // ⚠⚠ Asked AGAIN, after the loop. The account can change while
+                // the rows are being filed, and the handler then drops the rest
+                // of them - but the ack does not know that and would tell the
+                // island they were taken, which DELETES them. Skipping the ack
+                // costs one redelivery, which the envelope-uuid dedup collapses.
+                if (!stillOurs()) return@runCatching
                 ack(api, rows, deviceId)
-                if (onLogRow != null && advertisesGroupLog(api, home.host)) drainGroupLog(api, home.host, onLogRow)
+                // ⚠ Two network calls stand between the last check and this one
+                // (the ack above and the capability probe), so it is asked again
+                // here rather than inherited.
+                if (!stillOurs()) return@runCatching
+                if (onLogRow != null && advertisesGroupLog(api, home.host)) drainGroupLog(api, home.host, stillOurs, onLogRow)
             }.onFailure {
                 android.util.Log.w("RCQfed", "multihome drain ${home.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
@@ -449,8 +472,15 @@ object Multihome {
                 }
                 if (!stillOurs()) return@runCatching
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
+                // Same as the backup drain: the ack is a deletion, so it is
+                // asked again after the rows have actually been handed over.
+                if (!stillOurs()) return@runCatching
                 ack(api, rows, deviceId)
-                if (onLogRow != null && advertisesGroupLog(api, v.host)) drainGroupLog(api, v.host, onLogRow)
+                // ⚠ Two network calls stand between the last check and this one
+                // (the ack above and the capability probe), so it is asked again
+                // here rather than inherited.
+                if (!stillOurs()) return@runCatching
+                if (onLogRow != null && advertisesGroupLog(api, v.host)) drainGroupLog(api, v.host, stillOurs, onLogRow)
             }.onFailure {
                 android.util.Log.w("RCQfed", "visited drain ${v.host}: ${it.javaClass.simpleName}: ${it.message}")
             }
