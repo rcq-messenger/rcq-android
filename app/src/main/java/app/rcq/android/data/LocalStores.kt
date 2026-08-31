@@ -782,6 +782,27 @@ object LocalStores {
     }
 
     fun animateAvatarsOn() = _animateAvatars.value
+    /** Economy mode: one switch for a slow or old phone (founder's RCQ Lite
+     *  decision, 30.08 - a mode inside this app rather than a second client).
+     *
+     *  It does not add a new rendering path. It TURNS OFF the heavy ones that
+     *  already have switches - animated avatars and both wallpapers - so the
+     *  person with a five-year-old phone does not have to find three settings
+     *  and know which of them cost battery. Turning it off restores nothing by
+     *  itself: the individual switches are still there and still theirs, which
+     *  is why this writes them rather than shadowing them.
+     */
+    fun setEconomyMode(on: Boolean) {
+        prefs.edit().putBoolean(K_ECONOMY, on).apply()
+        if (on) {
+            setAnimateAvatars(false)
+            setChatBackground("")
+            setHomeBackground("")
+        }
+    }
+
+    fun economyMode(): Boolean = prefs.getBoolean(K_ECONOMY, false)
+
     fun setAnimateAvatars(on: Boolean) {
         _animateAvatars.value = on
         if (::prefs.isInitialized) prefs.edit().putBoolean(K_ANIM_AVATARS, on).apply()
@@ -1435,6 +1456,7 @@ object LocalStores {
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
     private const val K_GSKEYS = "gskeys"
+    private const val K_ECONOMY = "economy_mode"
     private const val K_PKEYS = "pkeys"      // peer uin -> their profile key
     private const val K_MY_PKEY = "mypkey"   // my own, handed to contacts
     private const val K_REACT_INBOX = "reaction_inbox"

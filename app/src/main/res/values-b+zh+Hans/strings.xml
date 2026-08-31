@@ -1250,4 +1250,6 @@
     <string name="last_seen_this_week">本周</string>
     <string name="last_seen_this_month">本月</string>
     <string name="last_seen_long_ago">很久以前</string>
+    <string name="settings_economy_title">省电模式</string>
+    <string name="settings_economy_desc">一次性关闭动画头像和聊天背景。适合较旧或较慢的手机。</string>
 </resources>
