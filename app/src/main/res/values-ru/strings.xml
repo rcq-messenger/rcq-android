@@ -1279,8 +1279,8 @@
     <string name="gi_links_desc">Участники могут отправлять ссылки</string>
     <string name="gi_files">Файлы разрешены</string>
     <string name="gi_files_desc">Участники могут прикреплять файлы и медиа</string>
-    <string name="gi_age_gate">Порог возраста аккаунта</string>
-    <string name="gi_age_gate_desc">Аккаунты моложе порога читают, но не пишут. Затрудняет спам с одноразовых аккаунтов.</string>
+    <string name="gi_age_gate">Испытательный срок новичков</string>
+    <string name="gi_age_gate_desc">Новые участники сначала читают, а пишут, когда пробудут в группе указанное время. Кик возвращает отсчёт в начало, поэтому спамить с одноразовых аккаунтов невыгодно.</string>
     <string name="gi_slowmode">Медленный режим</string>
     <string name="gi_slowmode_desc">Как часто один участник может писать</string>
     <string name="gi_slow_off">Выкл</string>
@@ -1288,6 +1288,7 @@
     <string name="chat_links_off">Владелец группы отключил ссылки</string>
     <string name="chat_slowmode_wait">Включён медленный режим: повторите чуть позже</string>
     <string name="chat_slowmode_wait_in">Включён медленный режим: повторите через %1$d с</string>
+    <string name="chat_age_gate_wait">В этой группе новички пишут не сразу. Вы сможете примерно через %1$d ч.</string>
     <string name="push_channel_upload">Отправка файлов</string>
     <string name="push_channel_upload_desc">Файлы, которые ещё загружаются, пока RCQ не на экране.</string>
     <string name="chat_delete_album_all">Удалить все %1$d фото у всех</string>

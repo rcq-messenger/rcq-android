@@ -1233,8 +1233,8 @@
     <string name="gi_links_desc">Los miembros pueden enviar enlaces</string>
     <string name="gi_files">Archivos permitidos</string>
     <string name="gi_files_desc">Los miembros pueden adjuntar archivos</string>
-    <string name="gi_age_gate">Antigüedad mínima de cuenta</string>
-    <string name="gi_age_gate_desc">Las cuentas más nuevas que el umbral pueden leer pero no publicar. Dificulta el spam desde cuentas desechables.</string>
+    <string name="gi_age_gate">Periodo de espera para nuevos</string>
+    <string name="gi_age_gate_desc">Los nuevos miembros primero leen y publican cuando llevan este tiempo en el grupo. Una expulsión reinicia la espera.</string>
     <string name="gi_slowmode">Modo lento</string>
     <string name="gi_slowmode_desc">Con qué frecuencia puede escribir un miembro</string>
     <string name="gi_slow_off">No</string>
@@ -1242,6 +1242,7 @@
     <string name="chat_links_off">El dueño del grupo desactivó los enlaces</string>
     <string name="chat_slowmode_wait">Modo lento activado: inténtalo de nuevo en un momento</string>
     <string name="chat_slowmode_wait_in">Modo lento activado: inténtalo en %1$d s</string>
+    <string name="chat_age_gate_wait">Aquí los nuevos no pueden publicar de inmediato. Podrás dentro de unas %1$d h.</string>
     <string name="push_channel_upload">Envío de archivos</string>
     <string name="push_channel_upload_desc">Archivos que siguen subiendo mientras RCQ no está en pantalla.</string>
     <string name="chat_delete_album_all">Eliminar las %1$d fotos para todos</string>
