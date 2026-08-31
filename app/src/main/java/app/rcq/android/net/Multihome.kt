@@ -365,10 +365,17 @@ object Multihome {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         deviceId: Int = 1,
+        /** False once the caller's account has been switched out from under it.
+         *  ⚠⚠ Checked before the ack in particular: [ack] tells the island the
+         *  rows were taken and the island DELETES them, so a drain that keeps
+         *  going after a switch does not merely misfile account A's mail under
+         *  account B, it destroys the only copy. */
+        stillOurs: () -> Boolean = { true },
         onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
+            if (!stillOurs()) return
             // ⚠ A phantom front home is OUR OWN island by another road: this
             // drain would pull the account's REAL queue through the front on a
             // recover-minted token and then ack the rows away from the primary
@@ -382,12 +389,15 @@ object Multihome {
                     api.drainQueue(deviceId)
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
+                        if (!stillOurs()) return@runCatching
                         val fresh = recoverOn(home.host, signingPriv, signingPub) ?: return@runCatching
+                        if (!stillOurs()) return@runCatching
                         MultihomeStore.updateCreds(ownUin, home.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)
                         api.drainQueue(deviceId)
                     } else throw e
                 }
+                if (!stillOurs()) return@runCatching
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
                 ack(api, rows, deviceId)
                 if (onLogRow != null && advertisesGroupLog(api, home.host)) drainGroupLog(api, home.host, onLogRow)
@@ -404,10 +414,24 @@ object Multihome {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         deviceId: Int = 1,
+        /** The islands to drain, taken as a SNAPSHOT by the caller before its
+         *  first suspension. ⚠⚠ Reading [VisitedIslandsStore] here instead is
+         *  the bug this parameter exists to prevent: it is a singleton that
+         *  Session.rebindTo re-points on an account switch, so a drain that
+         *  started under account A would come back and walk account B's list
+         *  while still holding A's signing keys, and the 401 branch below would
+         *  then sign a recovery challenge as A and write the resulting guest
+         *  credentials into B's store. */
+        visited: List<VisitedIslandsStore.Visited> = VisitedIslandsStore.list(),
+        /** False once the caller's account has been switched out from under it.
+         *  Checked before every write and before the ack, because the ack is a
+         *  second network call and the island DELETES what it acknowledges. */
+        stillOurs: () -> Boolean = { true },
         onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
         onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
     ) {
-        for (v in VisitedIslandsStore.list()) {
+        for (v in visited) {
+            if (!stillOurs()) return
             runCatching {
                 val api = RcqApi("https://${v.host}")
                 api.setToken(v.jwt)
@@ -415,12 +439,15 @@ object Multihome {
                     api.drainQueue(deviceId)
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
+                        if (!stillOurs()) return@runCatching
                         val fresh = recoverOn(v.host, signingPriv, signingPub) ?: return@runCatching
+                        if (!stillOurs()) return@runCatching
                         VisitedIslandsStore.updateCreds(v.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)
                         api.drainQueue(deviceId)
                     } else throw e
                 }
+                if (!stillOurs()) return@runCatching
                 rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
                 ack(api, rows, deviceId)
                 if (onLogRow != null && advertisesGroupLog(api, v.host)) drainGroupLog(api, v.host, onLogRow)
