@@ -28,6 +28,38 @@ object ProfileKeyVault {
     private fun slotOf(identityPriv: ByteArray): String = Vault.slotId(identityPriv, Vault.PKEY)
 
     /**
+     * The key this ACCOUNT published, read only. Never mints and never writes
+     * to the vault.
+     *
+     * ⚠⚠ Why a read-only twin exists. Answering a contact's `pkeyask` needs the
+     * key, and an install that never set a picture itself has nothing in
+     * LocalStores - a second phone, a browser, a fresh device after a restore.
+     * Answering "I have none" there is wrong: the account HAS a key, this
+     * install simply never minted it. The same hole was found and closed on the
+     * web and the CLI. Using [ensureMyKey] instead would be worse than silence:
+     * it MINTS when the vault is empty, so a stranger's question could make a
+     * device publish a rival key and break the face for everyone who already
+     * holds the real one.
+     */
+    suspend fun publishedKey(api: RcqApi, identityPriv: ByteArray): String? {
+        LocalStores.myProfileKey()?.takeIf { it.isNotBlank() }?.let { return it }
+        val slot = slotOf(identityPriv)
+        val forAccount = LocalStores.boundAccount()
+        val cur = runCatching { api.vaultGet(slot) }.getOrNull() ?: return null
+        val key = cur.blob
+            ?.let { runCatching { Vault.open(identityPriv, slot, cur.version, Base64.decode(it, Base64.NO_WRAP)) }.getOrNull() }
+            ?.toString(Charsets.UTF_8)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        // Cache it, pinned: this install now knows the account's key and can
+        // answer the next ask without a round trip.
+        LocalStores.setMyProfileKey(key, forAccount)
+        LocalStores.setVaultSlotVersion(slot, cur.version, forAccount)
+        return key
+    }
+
+    /**
      * The key to use for my picture: the local copy, else whatever the vault
      * already holds, else a fresh one published to the vault.
      *
