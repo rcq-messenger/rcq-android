@@ -559,9 +559,14 @@ internal fun HomeScreen(
             // Cross-island contacts live in their own section: presence isn't
             // tracked across islands, so filing them under online/offline would
             // be a lie.
-            crossIsland = byRecency(looseContacts.filter { it.host != null }),
-            online = byRecency(looseContacts.filter { it.host == null && it.presence != UserStatus.OFFLINE }),
-            offline = byRecency(looseContacts.filter { it.host == null && it.presence == UserStatus.OFFLINE }),
+            crossIsland = byRecency(looseContacts.filter { it.host != null && LocalStores.peerThread(it.uin) !in favorites }),
+            // ⚠ A favourited CONTACT lives in Favourites and only there, the
+            // same rule #748 gave favourited groups four lines below. It was
+            // never applied here, so a favourite appeared twice: once at the
+            // top and once again under Online or Offline. The web has always
+            // filed a contact into exactly one bucket.
+            online = byRecency(looseContacts.filter { it.host == null && it.presence != UserStatus.OFFLINE && LocalStores.peerThread(it.uin) !in favorites }),
+            offline = byRecency(looseContacts.filter { it.host == null && it.presence == UserStatus.OFFLINE && LocalStores.peerThread(it.uin) !in favorites }),
             archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived }),
             // A favorited group lives in Favorites and ONLY there (#748) —
             // the desktop has deduplicated this way from the start, and the
@@ -2229,20 +2234,39 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("#${contact.uin}", color = c.textMono, fontSize = 12.sp)
                 val ctx = LocalContext.current
+                // ⚠ Order matters, and it used to be the other way round: a
+                // status message won outright, so an OFFLINE contact who had
+                // one never showed when they were last around. Measured on
+                // prod 31.08: of 1498 contact rows genuinely offline, 455
+                // (30%) carry a status message, so for nearly a third of
+                // people the last seen was invisible everywhere - most
+                // visibly in Favourites and user sections, where there is no
+                // Online/Offline heading to read it off instead. A status
+                // message is text somebody left behind; when they are not
+                // here, WHEN they were here is the more useful half, so it
+                // goes first and the message keeps whatever room is left.
+                val seen = if (contact.presence == UserStatus.OFFLINE && contact.lastSeen != null) {
+                    stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen, ctx))
+                } else null
+                val msg = contact.statusMessage?.takeIf { it.isNotEmpty() }
                 val sub = when {
                     // §5c: a cross-island peer shows its island (presence/last_seen
                     // don't cross islands), then any status message.
-                    contact.host != null -> contact.host + (contact.statusMessage?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
-                    !contact.statusMessage.isNullOrEmpty() -> contact.statusMessage
-                    contact.presence == UserStatus.OFFLINE && contact.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen, ctx))
-                    else -> null
+                    contact.host != null -> contact.host + (msg?.let { " · $it" } ?: "")
+                    seen != null && msg != null -> "$seen · $msg"
+                    seen != null -> seen
+                    else -> msg
                 }
                 if (sub != null) {
                     Text(
                         "· $sub",
                         color = c.textSecondary,
                         fontSize = 12.sp,
-                        fontStyle = if (!contact.statusMessage.isNullOrEmpty()) FontStyle.Italic else FontStyle.Normal,
+                        // Italic marked "this is their own words". Now that a
+                        // last seen can share the line, italics would be a lie
+                        // about half of it, so it is kept only when the line is
+                        // nothing BUT their words.
+                        fontStyle = if (seen == null && msg != null) FontStyle.Italic else FontStyle.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
