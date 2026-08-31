@@ -50,6 +50,12 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
 
+    <!-- ⚠ enableOnBackInvokedCallback: predictive back (founder 31.08, and a
+         beta report - "свайп сворачивает приложение, хотелось бы возврат на
+         предыдущую страницу"). The system animates the gesture instead of
+         committing it blind, so you see where you are going and can let go
+         halfway. Every BackHandler in the app keeps working: Compose routes
+         them through OnBackPressedDispatcher, which speaks the new callback. -->
     <application
         android:name=".RcqApp"
         android:allowBackup="false"
@@ -58,6 +64,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.RCQ">
 
         <!-- ⚠⚠ singleTASK, not singleTop (#832, #831). singleTop only reuses the
