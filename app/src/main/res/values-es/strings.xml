@@ -538,10 +538,6 @@
     <string name="members_compact">%1$s miembros</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">última vez %1$s</string>
-    <string name="last_seen_just_now">ahora mismo</string>
-    <string name="last_seen_min">hace %1$d min</string>
-    <string name="last_seen_hour">hace %1$d h</string>
-    <string name="last_seen_day">hace %1$d d</string>
     <!-- Visibility options -->
     <string name="vis_everyone">Todos</string>
     <string name="vis_contacts">Solo contactos</string>
@@ -1250,4 +1246,10 @@
     <string name="push_channel_upload_desc">Archivos que siguen subiendo mientras RCQ no está en pantalla.</string>
     <string name="chat_delete_album_all">Eliminar las %1$d fotos para todos</string>
     <string name="chat_delete_album_me">Eliminar las %1$d fotos para mí</string>
+    <string name="last_seen_recently">hace poco</string>
+    <string name="last_seen_today">hoy</string>
+    <string name="last_seen_yesterday">ayer</string>
+    <string name="last_seen_this_week">esta semana</string>
+    <string name="last_seen_this_month">este mes</string>
+    <string name="last_seen_long_ago">hace mucho</string>
 </resources>
