@@ -18,6 +18,7 @@ import org.signal.libsignal.protocol.DuplicateMessageException
 import app.rcq.android.data.AccountManager
 import app.rcq.android.data.DecoyStore
 import app.rcq.android.data.LocalStores
+import app.rcq.android.data.ProfileKeyVault
 import app.rcq.android.data.MessageDb
 import app.rcq.android.data.SecureStore
 import app.rcq.android.model.ChatMessage
@@ -4108,17 +4109,46 @@ class Session(context: Context) {
             broadcastProfileCrossIsland(pictureCleared = true)
             return
         }
-        val key = MediaCrypto.newKey()
+        // My picture is sealed under MY profile key, not a fresh one per upload
+        // (docs/profile-key-design.md). Two consequences, both deliberate:
+        // the island is never told the key, so it cannot open the face it
+        // stores; and changing the picture does NOT change the key, so every
+        // contact who already holds it keeps seeing me without a second
+        // fan-out. Vault-first, so a second install adopts what this one
+        // published rather than minting a rival key.
+        val keyB64 = ProfileKeyVault.ensureMyKey(api, store.identityPrivate ?: ByteArray(0))
+            ?: Base64.encodeToString(MediaCrypto.newKey(), Base64.NO_WRAP)
+        val key = Base64.decode(keyB64, Base64.NO_WRAP)
         val blob = MediaCrypto.seal(bytes, key)
-        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = api.uploadBlob(blob)
         imageCache.put(upload.media_id, bytes)
         // Keep the SEALED bytes on disk too: §5e re-deposits this exact blob to
         // each cross-island contact's island, and pulling our own picture back
         // from our island every time to do it would be silly.
         runCatching { mediaDiskFile(upload.media_id).writeBytes(blob); trimMediaDiskCache() }
-        api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = upload.media_id, avatar_media_key = keyB64))
+        // ⚠ The id ALONE. An id without a key also CLEARS whatever key the
+        // island still holds for us, which is what retires the plaintext one
+        // for an account that had set a picture before this shipped.
+        api.updateMe(RcqApi.UpdateMeBody(avatar_media_id = upload.media_id))
         _ownAvatar.value = upload.media_id to keyB64
+        // Hand the key to everyone entitled to it. Own scope, not the caller's:
+        // backing out of Settings must not cost the roster their copy. A peer
+        // we cannot reach today asks with `pkeyask` tomorrow.
+        scope.launch {
+            val roster = _contacts.value
+            roster.forEachIndexed { i, c ->
+                if (c.identityKey.isNotBlank()) {
+                    runCatching {
+                        sendSealedCopies(
+                            c.uin,
+                            encryptFor(c.uin, Envelope.PKey(keyB64)),
+                            envelopeType = "skdm",
+                        )
+                    }
+                }
+                if (i % 16 == 15) kotlinx.coroutines.yield()
+            }
+        }
         // §5e: push the new picture (blob + key) to the cross-island contacts.
         broadcastProfileCrossIsland()
     }
