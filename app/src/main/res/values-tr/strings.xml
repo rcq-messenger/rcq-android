@@ -1253,6 +1253,6 @@
     <string name="last_seen_this_week">bu hafta</string>
     <string name="last_seen_this_month">bu ay</string>
     <string name="last_seen_long_ago">uzun zaman önce</string>
-    <string name="settings_economy_title">Tasarruf modu</string>
-    <string name="settings_economy_desc">Hareketli avatarları ve duvar kağıtlarını tek seferde kapatır. Eski veya yavaş telefonlar için.</string>
+    <string name="settings_economy_title">Tasarruf modu (RCQ Lite)</string>
+    <string name="settings_economy_desc">RCQ Lite budur: ayrı bir uygulama değil, buradaki bir anahtar. Hareketli avatarları ve duvar kağıtlarını tek seferde kapatır, eski veya yavaş telefonlar için.</string>
 </resources>
