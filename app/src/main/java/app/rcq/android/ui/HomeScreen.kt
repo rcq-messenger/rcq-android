@@ -628,9 +628,10 @@ internal fun HomeScreen(
             // those apart: no profile on disk means we do not know yet, and the
             // stored card keeps whatever face it had (see AccountCards.record).
             val profile = session.cachedProfile()
-            val fromDisk = profile?.avatar_media_id?.takeIf { it.isNotEmpty() }?.let { mid ->
-                profile.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { mid to it }
-            }
+            // Through the session's resolver, not by hand: the island no
+            // longer returns our own avatar key (profile-key model), so the
+            // inline version here recorded a BLANK face over a good one.
+            val fromDisk = session.ownAvatarOf(profile)
             val avatar = ownAvatarForCard ?: fromDisk
             app.rcq.android.data.AccountCards.record(
                 context = context,

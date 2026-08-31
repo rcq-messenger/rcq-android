@@ -36,6 +36,13 @@ object ProfileKeyVault {
      */
     suspend fun ensureMyKey(api: RcqApi, identityPriv: ByteArray): String? {
         LocalStores.myProfileKey()?.takeIf { it.isNotBlank() }?.let { return it }
+        // ⚠⚠ Whose key this is, taken BEFORE the first round trip. Everything
+        // below writes into LocalStores, which is a singleton the session
+        // re-points on an account switch, and there are three vault calls in
+        // between. Without this pin a switch mid-mint puts account A's profile
+        // key in account B's slot, and B then hands A's key to B's roster.
+        // Same shape as SectionsVault, which has carried the pin for longer.
+        val forAccount = LocalStores.boundAccount()
         val slot = slotOf(identityPriv)
         val floor = LocalStores.vaultSlotVersion(slot)
 
@@ -47,8 +54,8 @@ object ProfileKeyVault {
                 ?.toString(Charsets.UTF_8)
                 ?.trim()
             if (!existing.isNullOrBlank()) {
-                LocalStores.setMyProfileKey(existing)
-                LocalStores.setVaultSlotVersion(slot, cur.version)
+                LocalStores.setMyProfileKey(existing, forAccount)
+                LocalStores.setVaultSlotVersion(slot, cur.version, forAccount)
                 return existing
             }
         }
@@ -63,8 +70,8 @@ object ProfileKeyVault {
             api.vaultPut(slot, Base64.encodeToString(sealed, Base64.NO_WRAP), base)
         }.getOrNull()
         if (w?.version != null) {
-            LocalStores.setMyProfileKey(minted)
-            LocalStores.setVaultSlotVersion(slot, w.version!!)
+            LocalStores.setMyProfileKey(minted, forAccount)
+            LocalStores.setVaultSlotVersion(slot, w.version!!, forAccount)
             return minted
         }
         // Lost the race (or no vault on this island). Re-read once: if a rival
@@ -77,11 +84,11 @@ object ProfileKeyVault {
             ?.toString(Charsets.UTF_8)
             ?.trim()
         if (!theirs.isNullOrBlank()) {
-            LocalStores.setMyProfileKey(theirs)
-            LocalStores.setVaultSlotVersion(slot, again.version)
+            LocalStores.setMyProfileKey(theirs, forAccount)
+            LocalStores.setVaultSlotVersion(slot, again.version, forAccount)
             return theirs
         }
-        LocalStores.setMyProfileKey(minted)
+        LocalStores.setMyProfileKey(minted, forAccount)
         return minted
     }
 }

@@ -1300,6 +1300,21 @@ class Session(context: Context) {
      * per-account store HERE or it will be missed the same way.
      */
     private fun bindPerAccountStores(accountId: String?) {
+        // ⚠⚠ The epoch belongs HERE, not only in [rebindTo]. Every caller of
+        // this function moves the ground under work that is already in flight,
+        // and the duress path is a caller: entering the decoy re-points all
+        // four stores and the message database at DecoyStore.STORE_ID without
+        // being an account switch. With the bump only in rebindTo, every guard
+        // written for the switch read "still the same account" straight through
+        // the panic PIN, so a drain in progress kept acking - the island
+        // DELETED the real account's rows and walked its room cursors past
+        // history nobody had read, at the exact moment the phone is in somebody
+        // else's hands. One line here is what makes the two dozen existing
+        // guards cover duress as well, in both directions, for free.
+        //
+        // Bumping twice on the rebindTo path is harmless: this is a change
+        // token, not a counter anybody reads the value of.
+        accountEpoch++
         LocalStores.bindAccount(accountId)
         app.rcq.android.data.VisitStore.bindAccount(accountId)
         CrossIslandStore.bindAccount(accountId)
@@ -2462,9 +2477,7 @@ class Session(context: Context) {
         // Seed my own picture here too. It used to arrive only when the profile
         // EDITOR was opened, so a fresh launch showed the status flower in the
         // header until you went looking for your own profile.
-        _ownAvatar.value = profile.avatar_media_id
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { id -> profile.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { id to it } }
+        _ownAvatar.value = ownAvatarPair(profile.avatar_media_id, profile.avatar_media_key)
     }
 
     fun stop() = socket.disconnect()
@@ -4274,6 +4287,36 @@ class Session(context: Context) {
     private val _ownAvatar = MutableStateFlow<Pair<String, String>?>(null)
     val ownAvatar: StateFlow<Pair<String, String>?> = _ownAvatar.asStateFlow()
 
+    /** My own picture as (mediaId, key), from whatever the island just said.
+     *
+     *  ⚠⚠ The key has to be resolved, not read. Under the profile-key model we
+     *  PUT the media id ALONE, and the island answers by clearing the column it
+     *  used to keep (users.py) - which is the entire point, it must not hold
+     *  the key to our face. So `avatar_media_key` comes back null forever after
+     *  the first change, and every place that insisted on a non-empty key found
+     *  none: the picture vanished from Settings and from the account switcher
+     *  on the next launch, for everyone, with no switching and no race.
+     *
+     *  Worse than the blank face: `depositProfileTo` sends the profile as a
+     *  SNAPSHOT, and an envelope naming no picture reads on the far side as "I
+     *  removed mine". A pair that failed to resolve here therefore DELETED our
+     *  face for every cross-island contact on the next nickname edit.
+     *
+     *  The key we published under lives in [LocalStores.myProfileKey]; the
+     *  mirror of this for OTHER people is `avatarKeyResolved` in the contact
+     *  mapper. Both are single points on purpose - the resolution must not be
+     *  copied into the eight screens that draw a face. */
+    private fun ownAvatarPair(mediaId: String?, mediaKey: String?): Pair<String, String>? {
+        val id = mediaId?.takeIf { it.isNotEmpty() } ?: return null
+        val key = mediaKey?.takeIf { it.isNotEmpty() } ?: LocalStores.myProfileKey() ?: return null
+        return id to key
+    }
+
+    /** [ownAvatarPair] over a profile as the island serves it. Public because
+     *  the account-switcher card resolves the same pair off disk. */
+    fun ownAvatarOf(profile: RcqApi.MeProfile?): Pair<String, String>? =
+        profile?.let { ownAvatarPair(it.avatar_media_id, it.avatar_media_key) }
+
     /** Owner/admin: rename / re-describe / re-pin a group. */
     suspend fun patchGroup(
         id: Int,
@@ -4324,9 +4367,7 @@ class Session(context: Context) {
         if (net == null) return cached
         // Keep the settings avatar in step with the island without a second
         // round trip: the profile load already carries it.
-        _ownAvatar.value = net.avatar_media_id
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { id -> net.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { id to it } }
+        _ownAvatar.value = ownAvatarPair(net.avatar_media_id, net.avatar_media_key)
         // Re-hydrate the CHOSEN status. The picker was writing to the island and
         // then reading nothing back, so every relaunch quietly answered "Online"
         // for someone who had chosen Invisible (#533). Offline is what the
@@ -4660,6 +4701,13 @@ class Session(context: Context) {
      *  row (a held broadcast counts as done, its SKDM rides its own row), a
      *  tag when the row may still pass on a later delivery. */
     private fun ingestGmsg(payloadB64: String, groupId: Int, depositAtMs: Long? = null): String? {
+        // ⚠⚠ The third of the three ingests, and the only one that was missing
+        // this. `db` is the DECOY database once the panic PIN is up, so without
+        // it a real room broadcast is decrypted and written where the person
+        // holding the phone can read it. A NON-null tag, not null: null is this
+        // function's way of saying the row is done with, which would move the
+        // room's cursor past it.
+        if (duressViewUp) return "duress"
         return runCatching {
             val me = store.uin ?: return null
             val hdr = SenderKeys.parseGmsgHeader(payloadB64) ?: return null
@@ -7732,7 +7780,7 @@ class Session(context: Context) {
         // Through the CAPTURED client, and only while the account still holds:
         // an ack is a promise that these rows were filed, and after a switch
         // neither half of that promise is true any more.
-        if (stillOn(ep)) runCatching { drainApi.ackQueue(directIds, groupIds, drainDev) }
+        if (stillOn(ep) && !duressViewUp) runCatching { drainApi.ackQueue(directIds, groupIds, drainDev) }
         CrashReporter.crumb(appCtx, "drain_done")
     }
 
@@ -7793,6 +7841,13 @@ class Session(context: Context) {
      *  carries the rooms. */
     private suspend fun drainGroupLog() {
         if (duressViewUp) return   // same hazard as drainQueue: an ack from the decoy view loses the row
+        // ⚠⚠ And the entry check alone is not enough: the panic PIN can be
+        // entered WHILE a page is being ingested, and from that moment ingest
+        // files nothing while the ack below would still tell the island the
+        // rows were taken. The host/uin pin used here does not see that (a
+        // migrated decoy leaves `store` pointing at the real account); the
+        // epoch does, because bindPerAccountStores bumps it.
+        val logEpoch = epochNow()
         if (!groupLogReader) return
         drainLock.withLock {
             CrashReporter.crumb(appCtx, "drain_group_log")
@@ -7827,6 +7882,8 @@ class Session(context: Context) {
                 page.cursors.forEach { (gid, seq) -> gid.toIntOrNull()?.let { groupLogSeq[it] = seq } }
                 asBacklog {
                     page.rows.forEach { r ->
+                        // Between rows: a page is up to five hundred of them.
+                        if (!stillOn(logEpoch) || duressViewUp) return@forEach
                         val rowKey = "l:${r.gid}:${r.seq}"
                         // Whatever happens to the row, the cursor moves past
                         // it: an empty row, a poison row, a held row and a
@@ -7857,6 +7914,10 @@ class Session(context: Context) {
                     guard.edit().remove("attempt").commit()
                 }
                 if ((serverHost() to store.uin) != drainFor) break
+                // The ack is a deletion of the room's past. It must not ride a
+                // duress flip or an account rebind that the pin above cannot
+                // see.
+                if (!stillOn(logEpoch) || duressViewUp) break
                 val upto = acks.upto
                 val blocked = acks.blocked
                 if (upto.isNotEmpty()) {
@@ -8200,11 +8261,7 @@ class Session(context: Context) {
         // Without this the envelope would name NO picture and every recipient
         // would dutifully drop the one they have — a profile refresh that
         // deletes the face is worse than no refresh.
-        val own = if (pictureCleared) null else _ownAvatar.value ?: cachedProfile()?.let { p ->
-            p.avatar_media_id?.takeIf { it.isNotEmpty() }?.let { id ->
-                p.avatar_media_key?.takeIf { it.isNotEmpty() }?.let { k -> id to k }
-            }
-        }
+        val own = if (pictureCleared) null else _ownAvatar.value ?: ownAvatarOf(cachedProfile())
         val blob = own?.let { (id, _) -> ownAvatarBlob(id) }
         // ⚠ HAVE a picture but cannot hand over its bytes → send NOTHING. The
         // envelope is a SNAPSHOT of the whole display state, so one that names

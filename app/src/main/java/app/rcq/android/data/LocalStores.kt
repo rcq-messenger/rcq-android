@@ -34,6 +34,11 @@ object LocalStores {
      *  is bound (fresh install, pre-onboarding). */
     private var acct: String? = null
 
+    /** Which account this singleton is currently bound to. For callers that
+     *  have to hold on to it across a suspension and pin their writes with it
+     *  (see [setMyProfileKey], [setVaultSlotVersion]). */
+    fun boundAccount(): String? = acct
+
     // ── per-account flows ────────────────────────────────────────────────
     private val _favorites = MutableStateFlow<Set<String>>(emptySet())
     val favorites: StateFlow<Set<String>> = _favorites.asStateFlow()
@@ -966,7 +971,14 @@ object LocalStores {
      *  looking at a blank tile until it lands. */
     fun myProfileKey(): String? = prefs.getString(pk(K_MY_PKEY), null)
 
-    fun setMyProfileKey(keyB64: String) {
+    /** [forAccount] pins the write to the account it was computed for, the
+     *  same way [setVaultSlotVersion] does. ⚠⚠ Minting this key is three
+     *  network round trips against the vault, and this store is a singleton
+     *  the session re-points on an account switch: without the pin, a switch
+     *  mid-mint writes account A's profile key into account B's slot, and B
+     *  then hands A's key to B's whole roster. */
+    fun setMyProfileKey(keyB64: String, forAccount: String? = null) {
+        if (forAccount != null && forAccount != acct) return
         if (acct == null || keyB64.isBlank()) return
         prefs.edit().putString(pk(K_MY_PKEY), keyB64).apply()
     }
@@ -1428,7 +1440,15 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS).forEach { e.remove("$accountId.$it") }
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
+            // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
+            // the profile key of every contact, stored BY NUMBER, so leaving it
+            // behind keeps a plaintext roster of the burned identity plus the
+            // keys that open their faces, in rcq_local.xml, after a burn and
+            // after a duress session is taken apart. K_GSKEYS and K_MY_PKEY are
+            // the same class. This is the list 36181d1 filled in for two other
+            // stores in this release and did not notice here.
+            K_PKEYS, K_GSKEYS, K_MY_PKEY).forEach { e.remove("$accountId.$it") }
         // The vault floors are keyed by SLOT NAME (see [vaultSlotVersion]), so
         // they cannot be listed by hand: sweep the prefix instead. Leaving one
         // behind would lock a later account on this device out of a slot whose
