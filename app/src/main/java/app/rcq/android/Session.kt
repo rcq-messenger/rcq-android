@@ -3682,6 +3682,40 @@ class Session(context: Context) {
         memberCount = if (g.member_count > 0) g.member_count else g.members.size,
     )
 
+    /** One `pkeyask` per contact per six hours, when they HAVE a picture and we
+     *  hold no key for it.
+     *
+     *  ⚠⚠ The second half of the profile-key design, and it was missing here
+     *  entirely: the type was declared, serialised, parsed and answered, and
+     *  nothing on this client ever SENT one. The key is handed out once, to the
+     *  roster as it stood when the picture was set, so without this a contact
+     *  added afterwards - or any reinstall - saw a lettered tile forever, with
+     *  no way back. The web has had both halves since the feature shipped
+     *  (profile-key.ts askForProfileKey).
+     *
+     *  ★ Asked exactly where the fallback is resolved, not on the eight screens
+     *  that draw a face, for the same reason the fallback lives there.
+     *
+     *  ⚠ No key and no picture must stay INDISTINGUISHABLE on screen; this asks
+     *  only when a picture is named, so it never becomes an oracle for "am I
+     *  allowed to see this". A peer who is not entitled simply never answers,
+     *  and the throttle keeps a roster of faces we cannot open from turning
+     *  into a poll. */
+    private fun maybeAskProfileKey(uin: Int, identityKey: String) {
+        if (identityKey.isBlank()) return
+        val prefs = appCtx.getSharedPreferences("rcq_pkeyask", android.content.Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong("u$uin", 0L) < 6L * 3600_000L) return
+        prefs.edit().putLong("u$uin", now).apply()
+        val ep = epochNow()
+        scope.launch {
+            if (!stillOn(ep)) return@launch
+            runCatching {
+                sendSealedCopies(uin, encryptFor(uin, Envelope.PKeyAsk), envelopeType = "sknack")
+            }
+        }
+    }
+
     /** One `gsknack` per room per six hours when its sealed blob exists and
      *  our key (if any) does not open it. The reply lands as a gskey. */
     private fun maybeAskRoomKey(g: RcqGroup) {
@@ -7579,7 +7613,14 @@ class Session(context: Context) {
                     epochNow().let { ep ->
                     scope.launch {
                         runCatching {
-                            val k = LocalStores.myProfileKey() ?: return@runCatching
+                            // Vault-backed, not just the local copy: an
+                            // install that never set the picture itself still
+                            // has to answer for the account. Read-only, so a
+                            // stranger's question can never make us publish a
+                            // rival key.
+                            val k = ProfileKeyVault.publishedKey(
+                                api, store.identityPrivate ?: ByteArray(0),
+                            ) ?: return@runCatching
                             if (!stillOn(ep)) return@runCatching
                             sendSealedCopies(
                                 dec.senderUin,
@@ -8624,7 +8665,16 @@ class Session(context: Context) {
                 // one its owner sealed to us. Done HERE, in the one mapper, so
                 // every screen that draws a face gets it without eight copies
                 // of the same fallback. docs/profile-key-design.md.
-                avatarMediaKey = it.avatar_media_key ?: LocalStores.profileKey(it.uin),
+                avatarMediaKey = (it.avatar_media_key ?: LocalStores.profileKey(it.uin))
+                    // Named a picture but we hold no key for it: ask its owner
+                    // once, so the face appears on a later refresh instead of
+                    // never. See [maybeAskProfileKey].
+                    ?: run {
+                        if (!it.avatar_media_id.isNullOrEmpty()) {
+                            maybeAskProfileKey(it.uin, it.identity_key ?: "")
+                        }
+                        null
+                    },
             )
         }
         presenceBaselineLive = true
