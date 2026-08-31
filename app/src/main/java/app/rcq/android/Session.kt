@@ -4630,6 +4630,8 @@ class Session(context: Context) {
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
                 is Envelope.ReadMark -> Unit     // A2 marker rides INSIDE a carbon, never group-sealed
+                is Envelope.PKey -> Unit         // profile keys ride 1:1 sealed only
+                is Envelope.PKeyAsk -> Unit      // ditto
                 is Envelope.GsKey -> Unit        // room keys ride 1:1 sealed only
                 is Envelope.GsKnack -> Unit      // asks ride 1:1 sealed only
                 is Envelope.HomeRecord -> Unit   // self-push is 1:1 only, intercepted in ingest()
@@ -7334,6 +7336,27 @@ class Session(context: Context) {
                     // in its destination thread (dedup by id; no badge/sound).
                     if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
                 is Envelope.ReadMark -> Unit   // A2 marker only ever arrives WRAPPED in a carbon
+                is Envelope.PKey ->
+                    // A contact handing us the key to their picture. Filed
+                    // against the SEALED sender, never against anything the
+                    // wire claimed, or one account could publish a face as
+                    // another. Refreshing the roster repaints the avatars.
+                    if (LocalStores.putProfileKey(dec.senderUin, env.key)) {
+                        scope.launch { runCatching { refreshContacts() } }
+                    } else Unit
+                is Envelope.PKeyAsk ->
+                    // Only the owner can answer this one. Nothing to send if
+                    // we never set a picture.
+                    scope.launch {
+                        runCatching {
+                            val k = LocalStores.myProfileKey() ?: return@runCatching
+                            sendSealedCopies(
+                                dec.senderUin,
+                                encryptFor(dec.senderUin, Envelope.PKey(k)),
+                                envelopeType = "skdm",
+                            )
+                        }
+                    }
                 is Envelope.GsKey ->
                     // Room state key (stage 6 phase 2). Roster gate: only a
                     // fellow member's key is worth holding; equal-version
@@ -8325,7 +8348,12 @@ class Session(context: Context) {
                 lastSeen = parseIso(it.last_seen),
                 callable = it.callable,
                 avatarMediaId = it.avatar_media_id,
-                avatarMediaKey = it.avatar_media_key,
+                // The island no longer holds the key to a picture set under the
+                // profile-key model, so it serves null and the real key is the
+                // one its owner sealed to us. Done HERE, in the one mapper, so
+                // every screen that draws a face gets it without eight copies
+                // of the same fallback. docs/profile-key-design.md.
+                avatarMediaKey = it.avatar_media_key ?: LocalStores.profileKey(it.uin),
             )
         }
         presenceBaselineLive = true
