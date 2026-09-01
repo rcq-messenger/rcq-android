@@ -151,6 +151,20 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
             // hit it rather than only in the refusal at the eleventh number.
             val owned = data?.owned.orEmpty()
             val cap = data?.max_owned ?: 10
+            // A cap of zero means the island closed collections (2026-09-01:
+            // one number per account, everywhere). Then there is no shelf to
+            // draw and no count to draw it with — "0 of 0" over an empty list
+            // reads as a bug, and the honest version is one sentence.
+            val closed = cap <= 0 && owned.isEmpty()
+            if (closed) {
+                Text(
+                    stringResource(R.string.my_uins_closed),
+                    color = c.textSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    textAlign = TextAlign.Center,
+                )
+            } else {
             SectionCaption(
                 c,
                 stringResource(R.string.my_uins_held_caption) + "  " +
@@ -177,6 +191,7 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
                     )
                 }
             }
+            }
 
             error?.let {
                 Text(
@@ -189,7 +204,7 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
             }
 
             Spacer(Modifier.height(8.dp))
-            Text(
+            if (!closed) Text(
                 stringResource(R.string.my_uins_footer),
                 color = c.textSecondary,
                 fontSize = 11.sp,

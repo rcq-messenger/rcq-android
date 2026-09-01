@@ -493,6 +493,7 @@
     <string name="my_uins_confirm_title">Відповідати як %1$s?</string>
     <string name="my_uins_confirm_body">Контакти, групи, профіль і історія переїжджають на нього. Номер %1$s лишається твоїм і лишається на цьому екрані, тож повернутися можна коли завгодно.</string>
     <string name="my_uins_confirm_cta">Перемкнути</string>
+    <string name="my_uins_closed">Колекції закрито: на акаунті один номер. Той, яким ви користуєтесь, вище, більше за вами нічого не числиться.</string>
     <string name="my_uins_footer">Поки ти відповідаєш під одним номером, решта просто зарезервовані за тобою. Ніхто інший їх не візьме.</string>
     <string name="settings_foot_appearance">Обери світлу, темну або системну тему.</string>
     <string name="settings_text_size">Розмір тексту</string>

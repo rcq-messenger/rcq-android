@@ -511,6 +511,7 @@
     <string name="my_uins_confirm_title">Отвечать как %1$s?</string>
     <string name="my_uins_confirm_body">Контакты, группы, профиль и история переедут на этот номер. Номер %1$s останется вашим и останется на этом экране, вернуться на него можно в любой момент.</string>
     <string name="my_uins_confirm_cta">Перейти</string>
+    <string name="my_uins_closed">Коллекции закрыты: на аккаунте один номер. Тот, которым вы пользуетесь, выше, больше за вами ничего не числится.</string>
     <string name="my_uins_footer">Пока вы отвечаете как один номер, остальные просто закреплены за вами. Занять их никто не может.</string>
     <string name="settings_foot_appearance">Светлая, тёмная или как в системе.</string>
     <string name="settings_text_size">Размер текста</string>

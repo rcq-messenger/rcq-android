@@ -493,6 +493,7 @@
     <string name="my_uins_confirm_title">改用 %1$s 对外回应？</string>
     <string name="my_uins_confirm_body">联系人、群组、个人资料和聊天记录都会迁移过去。号码 %1$s 仍归你所有，也会留在这个页面，你随时可以迁回。</string>
     <string name="my_uins_confirm_cta">切换</string>
+    <string name="my_uins_closed">收藏已关闭：一个账号只有一个号码。你正在使用的号码在上面，不再为你保留其他号码。</string>
     <string name="my_uins_footer">当你用其中一个号码对外回应时，其余号码只是为你保留。别人无法占用。</string>
     <string name="settings_foot_appearance">选择浅色、深色，或跟随系统主题。</string>
     <string name="settings_text_size">文字大小</string>
