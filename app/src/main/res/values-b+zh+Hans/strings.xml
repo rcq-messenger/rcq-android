@@ -538,6 +538,8 @@
     <string name="members_compact">%1$s 名成员</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">最后上线 %1$s</string>
+    <string name="last_seen_fmt_m">最后上线 %1$s</string>
+    <string name="last_seen_fmt_f">最后上线 %1$s</string>
     <!-- Visibility options -->
     <string name="vis_everyone">所有人</string>
     <string name="vis_contacts">联系人</string>

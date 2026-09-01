@@ -90,6 +90,25 @@ internal fun formatTime(ts: Long): String =
  *  were never real anyway; printing them dressed a floored hour up as
  *  precision it does not have. Same buckets on every client.
  */
+/** "был вчера" / "была вчера" / "был(а) вчера", by the contact's gender.
+ *
+ *  ⚠ The profile said "Был(а)" and the contact row said "был", which is two
+ *  answers to one question (founder, 01.09). Neither was right on its own:
+ *  the bare masculine is wrong for half the people, and the bracketed form is
+ *  visual noise in a compact row. We already HAVE the gender - the row draws
+ *  an icon from it - so it is used, and the bracket is only the fallback for
+ *  when it is genuinely unknown (unset, or hidden by its own visibility
+ *  setting). Languages without a gendered past tense pass the same string
+ *  three times, which costs nothing and keeps one call site. */
+internal fun lastSeenPhrase(ts: Long, gender: String?, context: android.content.Context): String {
+    val fmt = when (gender?.lowercase()) {
+        "m", "male" -> app.rcq.android.R.string.last_seen_fmt_m
+        "f", "female" -> app.rcq.android.R.string.last_seen_fmt_f
+        else -> app.rcq.android.R.string.last_seen_fmt
+    }
+    return context.getString(fmt, relativeLastSeen(ts, context))
+}
+
 internal fun relativeLastSeen(ts: Long, context: android.content.Context): String {
     val now = System.currentTimeMillis()
     if (now - ts < 3_600_000L) return context.getString(app.rcq.android.R.string.last_seen_recently)

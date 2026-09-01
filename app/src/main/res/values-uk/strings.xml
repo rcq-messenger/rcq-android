@@ -537,7 +537,9 @@
          over (999, then 1K, 2.1K); the argument is already formatted. -->
     <string name="members_compact">%1$s учасників</string>
     <!-- Last seen -->
-    <string name="last_seen_fmt">був %1$s</string>
+    <string name="last_seen_fmt">був(ла) %1$s</string>
+    <string name="last_seen_fmt_m">був %1$s</string>
+    <string name="last_seen_fmt_f">була %1$s</string>
     <!-- Visibility options -->
     <string name="vis_everyone">Усі</string>
     <string name="vis_contacts">Контакти</string>

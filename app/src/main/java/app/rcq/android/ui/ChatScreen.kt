@@ -1405,7 +1405,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // Cross-island peer: show their island, not a fake "offline"
                     // (presence isn't tracked across islands).
                     peerContact.host != null -> peerContact.host
-                    peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null -> stringResource(R.string.last_seen_fmt, relativeLastSeen(peerContact.lastSeen, context))
+                    peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null -> lastSeenPhrase(peerContact.lastSeen, peerContact.gender, context)
                     else -> stringResource(peerContact.presence.labelRes).lowercase()
                 }
                 Text(sub, color = if (isTyping) c.accent else c.textSecondary, fontSize = 12.sp)

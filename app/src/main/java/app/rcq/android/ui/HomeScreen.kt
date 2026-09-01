@@ -2246,7 +2246,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
                 // here, WHEN they were here is the more useful half, so it
                 // goes first and the message keeps whatever room is left.
                 val seen = if (contact.presence == UserStatus.OFFLINE && contact.lastSeen != null) {
-                    stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen, ctx))
+                    lastSeenPhrase(contact.lastSeen, contact.gender, ctx)
                 } else null
                 val msg = contact.statusMessage?.takeIf { it.isNotEmpty() }
                 val sub = when {

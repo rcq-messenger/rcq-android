@@ -538,6 +538,8 @@
     <string name="members_compact">%1$s miembros</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">última vez %1$s</string>
+    <string name="last_seen_fmt_m">última vez %1$s</string>
+    <string name="last_seen_fmt_f">última vez %1$s</string>
     <!-- Visibility options -->
     <string name="vis_everyone">Todos</string>
     <string name="vis_contacts">Solo contactos</string>

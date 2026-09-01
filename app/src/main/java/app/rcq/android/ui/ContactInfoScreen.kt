@@ -205,7 +205,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 val sub = when {
                     crossIslandHost != null -> crossIslandHost
                     presence == UserStatus.OFFLINE && contact?.lastSeen != null ->
-                        stringResource(R.string.last_seen_fmt, relativeLastSeen(contact.lastSeen!!, context))
+                        lastSeenPhrase(contact.lastSeen!!, contact.gender, context)
                     else -> null
                 }
                 sub?.let { Text(it, color = c.textSecondary, fontSize = 13.sp) }

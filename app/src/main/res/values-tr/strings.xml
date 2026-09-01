@@ -538,6 +538,8 @@
     <string name="members_compact">%1$s üye</string>
     <!-- Last seen -->
     <string name="last_seen_fmt">son görülme %1$s</string>
+    <string name="last_seen_fmt_m">son görülme %1$s</string>
+    <string name="last_seen_fmt_f">son görülme %1$s</string>
     <!-- Visibility options -->
     <string name="vis_everyone">Herkes</string>
     <string name="vis_contacts">Yalnızca kişiler</string>
