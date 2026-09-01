@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
@@ -4407,10 +4408,23 @@ class Session(context: Context) {
     /// Who we already asked for a profile key, and when. In memory only, see
     /// [maybeAskProfileKey]. Cleared on rebind like every other per-account map.
     /// What the island said when it refused the last send, or null when the
-    /// last send was fine. Read by the composer to turn a refusal into a
-    /// sentence; see [ingest] for why the send cannot simply throw.
-    @Volatile var lastSendRefusal: String? = null
-        private set
+    /// last send was fine. See [ingest] for why the send cannot simply throw.
+    ///
+    /// ★ A FLOW, not a return value, because there are eight send paths in the
+    /// chat screen (text, photo, album, video, voice, file, share, retry) and
+    /// wiring an explanation into each of them means the next one added will
+    /// not have it - which is how photo, voice and file ended up saying
+    /// "check your connection" to somebody the room had refused. One collector
+    /// covers them all, including the ones that do not exist yet.
+    private val _sendRefusal = MutableStateFlow<String?>(null)
+    val sendRefusal: StateFlow<String?> = _sendRefusal.asStateFlow()
+
+    /// Consume the last refusal, so one refusal is spoken once.
+    fun takeSendRefusal(): String? = _sendRefusal.getAndUpdate { null }
+
+    var lastSendRefusal: String?
+        get() = _sendRefusal.value
+        private set(v) { _sendRefusal.value = v }
 
     private val askedProfileKeyAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
 
