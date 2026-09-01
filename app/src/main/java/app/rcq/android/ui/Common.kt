@@ -53,6 +53,11 @@ import app.rcq.android.model.RcqGroup
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.alpha
 
 /** The FAQ entry that explains what a relay is.
  *
@@ -100,6 +105,46 @@ internal fun formatTime(ts: Long): String =
  *  when it is genuinely unknown (unset, or hidden by its own visibility
  *  setting). Languages without a gendered past tense pass the same string
  *  three times, which costs nothing and keeps one call site. */
+/** Two pieces of text taking turns in one line.
+ *
+ *  A contact row has room for one thing and two worth saying: when they were
+ *  last around, and the status message they left. Sharing the line truncates on
+ *  a phone; letting the status message win outright hid the last seen for about
+ *  a third of offline contacts. So they alternate (founder, 01.09).
+ *
+ *  ⚠ The halves must not fade AT THE SAME TIME: animated together they both sit
+ *  at half opacity for the whole crossfade, and the one drawn on top smears
+ *  over the one arriving. The outgoing half goes first and the incoming one
+ *  waits for it, so the swap looks the same in both directions - the same bug
+ *  and the same cure as the chat header on the web.
+ *
+ *  Both halves stay laid out in the same box, so the row never changes height. */
+@Composable
+internal fun AltText(a: String, b: String, color: androidx.compose.ui.graphics.Color, fontSize: androidx.compose.ui.unit.TextUnit) {
+    var alt by remember { mutableStateOf(false) }
+    LaunchedEffect(a, b) {
+        while (true) {
+            kotlinx.coroutines.delay(4000)
+            alt = !alt
+        }
+    }
+    val fade = 500
+    val aAlpha by animateFloatAsState(
+        targetValue = if (alt) 0f else 1f,
+        animationSpec = tween(durationMillis = fade, delayMillis = if (alt) 0 else fade),
+        label = "altA",
+    )
+    val bAlpha by animateFloatAsState(
+        targetValue = if (alt) 1f else 0f,
+        animationSpec = tween(durationMillis = fade, delayMillis = if (alt) fade else 0),
+        label = "altB",
+    )
+    Box {
+        Text(a, color = color, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(aAlpha))
+        Text(b, color = color, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(bAlpha))
+    }
+}
+
 internal fun lastSeenPhrase(ts: Long, gender: String?, context: android.content.Context): String {
     val fmt = when (gender?.lowercase()) {
         "m", "male" -> app.rcq.android.R.string.last_seen_fmt_m

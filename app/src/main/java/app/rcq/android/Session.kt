@@ -4047,10 +4047,17 @@ class Session(context: Context) {
      *  renamed themselves, which the old every-poll roster used to do. */
     private val rosterFetched = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
-    suspend fun ensureRoster(id: Int): RcqGroup? {
+    /** [refresh] fetches even when a roster is already held.
+     *
+     *  ⚠ A roster carries PRESENCE, and that field is as old as the fetch, so
+     *  one held for an hour reports a room full of offline people. Anything
+     *  that puts a status in front of somebody asks for it fresh; anything
+     *  that only needs keys or names does not, because the roster of a big
+     *  room is expensive (the beta group is 2200 people). */
+    suspend fun ensureRoster(id: Int, refresh: Boolean = false): RcqGroup? {
         val cached = group(id) ?: return null
         if (cached.host != null) return cached
-        if (cached.members.isNotEmpty() && id in rosterFetched) return cached
+        if (!refresh && cached.members.isNotEmpty() && id in rosterFetched) return cached
         val full = runCatching { mapGroup(api.groupInfo(id)) }.getOrNull() ?: return cached
         rosterFetched.add(id)
         // ⚠ `ownerUin` comes from the ANSWER, not from the cached row. The
