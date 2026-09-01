@@ -4991,6 +4991,7 @@ class Session(context: Context) {
                 is Envelope.ScreenshotTaken -> Unit
                 is Envelope.CallSignal -> Unit   // 1:1 only (§5d); group calls don't cross islands
                 is Envelope.Carbon -> Unit       // carbons arrive 1:1 (to self), never group-sealed
+                is Envelope.CiAck -> Unit        // rides inside a carbon, never group-sealed
                 is Envelope.ReadMark -> Unit     // A2 marker rides INSIDE a carbon, never group-sealed
                 is Envelope.PKey -> Unit         // profile keys ride 1:1 sealed only
                 is Envelope.PKeyAsk -> Unit      // ditto
@@ -7762,8 +7763,18 @@ class Session(context: Context) {
                     // A message I sent from ANOTHER device, echoed to my own uin.
                     // Only honour my own carbon; file the inner message as fromMe
                     // in its destination thread (dedup by id; no badge/sound).
-                    if (dec.senderUin == store.uin) storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
+                    //
+                    // ⚠ A request answer belongs to NO thread, so it is taken
+                    // here rather than in storeCarbon, whose whole shape is
+                    // "which thread does this row go in" (to/gid, both null on
+                    // this one).
+                    if (dec.senderUin == store.uin) {
+                        val inner = env.env
+                        if (inner is Envelope.CiAck) applyCiAck(inner)
+                        else storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
+                    }
                 is Envelope.ReadMark -> Unit   // A2 marker only ever arrives WRAPPED in a carbon
+                is Envelope.CiAck -> Unit      // only ever arrives WRAPPED in a carbon
                 is Envelope.PKey ->
                     // A contact handing us the key to their picture. Filed
                     // against the SEALED sender, never against anything the
@@ -8695,17 +8706,97 @@ class Session(context: Context) {
         if (host.isEmpty()) {
             LocalStores.allowStranger(uin)
             CrossIslandRequestsStore.clear(me, uin, "")?.msgs?.forEach { ingest(it.payload) }
+            sendCiAck(uin, "", "accept")
             refreshCiRequests()
             return true
         }
         if (addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT) == CiAdd.FAILED) return false
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload) }
         mergeCrossIslandContacts()
+        // My other devices hold their own copy of this request and would offer
+        // to accept it a second time, which re-TOFUs the peer. Hand them the
+        // answer and the card just pinned instead.
+        CrossIslandStore.get(uin, host)?.let { c ->
+            sendCiAck(uin, host, "accept", Envelope.CiCard(
+                nick = c.nickname, ik = c.identityKey, sk = c.signingKey,
+                sik = c.signalIdentityKey, gender = c.gender, status = c.statusMessage,
+            ))
+        }
         refreshCiRequests()
         // §5e: newly accepted → send our current name + picture once, so they
         // do not sit on the snapshot their card fetch took.
         depositProfileToNewContact(uin, host)
         return true
+    }
+
+    /** Tell my OWN other devices that a cross-island request has been answered,
+     *  and hand them the card this device pinned when it was an accept.
+     *
+     *  Rides the self-carbon the read marker uses, under the same ephemeral
+     *  outer type, so the island sees nothing it has not always seen. Best
+     *  effort: a lost ack costs exactly what the bug costs today, a request
+     *  still sitting on the other device, so it must never fail an accept that
+     *  already happened here. */
+    private fun sendCiAck(uin: Int, host: String, act: String, card: Envelope.CiCard? = null) {
+        val me = store.uin ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                // ⚠⚠ Addressed to MYSELF, not to nobody. The answer belongs to
+                // no thread, but a client that predates `ciack` resolves the
+                // carbon's destination first, and on iOS a destination-less
+                // carbon is dropped BEFORE it is acked - the island would then
+                // hand the row back on every drain for the queue's whole TTL.
+                // To myself it resolves to the self-thread, where an unknown
+                // inner kind files nothing on any of the three clients.
+                val carbon = Envelope.Carbon(to = me, gid = null, env = Envelope.CiAck(uin, host, act, card))
+                sendSealedCopies(me, encryptFor(me, carbon), envelopeType = "read")
+            }
+        }
+    }
+
+    /** Apply an ack another of my devices sent (and the echo of my own).
+     *
+     *  ⚠ Never fetches anything. The card in the envelope is the one the
+     *  accepting device pinned; copying it is the point, because two devices
+     *  each doing their own TOFU on the same cross-island peer is how the keys
+     *  they encrypt with drift apart. A device that already holds the contact
+     *  keeps what it has. */
+    private fun applyCiAck(ack: Envelope.CiAck) {
+        val me = store.uin ?: return
+        if (ack.uin <= 0) return
+        when (ack.act) {
+            "block" -> {
+                CrossIslandRequestsStore.block(me, ack.uin, ack.host)
+                // Same set, one surface: the visible Blocked-users list, so a
+                // block made on another device can be undone on this one.
+                LocalStores.setBlocked(ack.uin, true)
+            }
+            "decline" -> CrossIslandRequestsStore.clear(me, ack.uin, ack.host)
+            "accept" -> {
+                if (ack.host.isEmpty()) {
+                    // Same-island stranger: the allowance IS the acceptance.
+                    LocalStores.allowStranger(ack.uin)
+                } else if (CrossIslandStore.get(ack.uin, ack.host) == null) {
+                    ack.card?.let { c ->
+                        CrossIslandStore.save(CrossIslandStore.Contact(
+                            uin = ack.uin, host = ack.host,
+                            nickname = c.nick?.takeIf { it.isNotBlank() } ?: "${ack.uin}@${ack.host}",
+                            identityKey = c.ik, signingKey = c.sk,
+                            signalIdentityKey = c.sik, addedAt = System.currentTimeMillis(),
+                            gender = c.gender, statusMessage = c.status,
+                        ))
+                    }
+                }
+                // The held payloads stay held here: releasing a backlog into a
+                // chat list nobody is looking at is worse than the row going
+                // quiet, and the next message from an accepted contact flows
+                // normally either way.
+                CrossIslandRequestsStore.clear(me, ack.uin, ack.host)
+                mergeCrossIslandContacts()
+            }
+            else -> return
+        }
+        refreshCiRequests()
     }
 
     /** Turn a cross-island request down without blocking the person.
@@ -8718,12 +8809,14 @@ class Session(context: Context) {
     fun dismissCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
         CrossIslandRequestsStore.clear(me, uin, host)
+        sendCiAck(uin, host, "decline")
         refreshCiRequests()
     }
 
     fun blockCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
         CrossIslandRequestsStore.block(me, uin, host)
+        sendCiAck(uin, host, "block")
         // ...and in the list the user can actually SEE. The quarantine store
         // keeps its own per-(uin,host) denylist, so blocking a cross-island
         // stranger silenced them but left Settings → Blocked users empty, which

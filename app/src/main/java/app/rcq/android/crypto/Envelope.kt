@@ -161,6 +161,39 @@ sealed interface Envelope {
      *  learned and nothing pushes. */
     data class ReadMark(val at: Long) : Envelope
 
+    /** A cross-island request ANSWERED, told to my own other devices (wire
+     *  kind "ciack"). Rides INSIDE a [Carbon] to my own uin, under the same
+     *  ephemeral outer type the read marker uses, so the island sees nothing
+     *  new.
+     *
+     *  ⚠⚠ Why it exists: a cross-island request is per-INSTALL state. The
+     *  conveyor row carries no device id, so every device of the account holds
+     *  its own copy, while accepting speaks only to the PEER. Accept on the
+     *  desktop and the phone still shows the request - and accepting it there
+     *  too is NOT idempotent: it re-fetches the key card and overwrites the
+     *  pinned keys, on the one class of peer whose every message is encrypted
+     *  to exactly those keys.
+     *
+     *  [card] rides along on an accept so the other devices copy the TOFU the
+     *  accepting device did instead of each doing their own. */
+    data class CiAck(
+        val uin: Int,
+        val host: String,
+        val act: String,
+        val card: CiCard? = null,
+    ) : Envelope
+
+    /** The half of a peer's key card another device needs to hold the same
+     *  cross-island contact without fetching anything. */
+    data class CiCard(
+        val nick: String?,
+        val ik: String,
+        val sk: String,
+        val sik: String?,
+        val gender: String?,
+        val status: String?,
+    )
+
     /** Room state key hand-off (stage 6 phase 2, wire "gskey", outer type
      *  "skdm"). Carries the AES key a room's sealed identity blob opens
      *  under; [ver] is monotonic with the design doc's equal-version repair
@@ -430,6 +463,22 @@ sealed interface Envelope {
         is ReadMark -> JsonObject().apply {
             addProperty("kind", "readmark")
             addProperty("at", at)
+        }.toString().toByteArray(Charsets.UTF_8)
+        is CiAck -> JsonObject().apply {
+            addProperty("kind", "ciack")
+            addProperty("uin", uin)
+            addProperty("host", host)
+            addProperty("act", act)
+            card?.let { c ->
+                add("card", JsonObject().apply {
+                    c.nick?.let { addProperty("nick", it) }
+                    addProperty("ik", c.ik)
+                    addProperty("sk", c.sk)
+                    c.sik?.let { addProperty("sik", it) }
+                    c.gender?.let { addProperty("gender", it) }
+                    c.status?.let { addProperty("status", it) }
+                })
+            }
         }.toString().toByteArray(Charsets.UTF_8)
         is Carbon -> JsonObject().apply {
             addProperty("kind", "carbon")
@@ -813,6 +862,27 @@ sealed interface Envelope {
                 )
                 "readmark" -> ReadMark(
                     at = obj.get("at")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L,
+                )
+                "ciack" -> CiAck(
+                    uin = obj.get("uin")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0,
+                    host = obj.get("host")?.takeIf { it.isJsonPrimitive }?.asString ?: "",
+                    act = obj.get("act")?.takeIf { it.isJsonPrimitive }?.asString ?: "",
+                    card = obj.getAsJsonObject("card")?.let { c ->
+                        val ik = c.get("ik")?.takeIf { it.isJsonPrimitive }?.asString
+                        val sk = c.get("sk")?.takeIf { it.isJsonPrimitive }?.asString
+                        // A card without both halves is not a card: dropping it
+                        // leaves the accept to work without one rather than
+                        // writing a contact nobody can encrypt to.
+                        if (ik.isNullOrBlank() || sk.isNullOrBlank()) null
+                        else CiCard(
+                            nick = c.get("nick")?.takeIf { it.isJsonPrimitive }?.asString,
+                            ik = ik,
+                            sk = sk,
+                            sik = c.get("sik")?.takeIf { it.isJsonPrimitive }?.asString,
+                            gender = c.get("gender")?.takeIf { it.isJsonPrimitive }?.asString,
+                            status = c.get("status")?.takeIf { it.isJsonPrimitive }?.asString,
+                        )
+                    },
                 )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,
