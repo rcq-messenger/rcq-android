@@ -557,7 +557,7 @@
     <string name="members_compact">%1$s участников</string>
 
     <!-- Last seen -->
-    <string name="last_seen_fmt">был в сети %1$s</string>
+    <string name="last_seen_fmt">был %1$s</string>
 
     <!-- Visibility options -->
     <string name="vis_everyone">Все</string>
