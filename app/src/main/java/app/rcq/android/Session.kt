@@ -9254,6 +9254,21 @@ class Session(context: Context) {
             ?: "#$uin"
     }
 
+    /** The name this person CHOSE, never the one I gave them.
+     *
+     *  ⚠⚠ [contactName] applies my local alias, and that is right for anything
+     *  drawn on this device and wrong for anything that leaves it. A reply
+     *  quote ships INSIDE the sealed envelope, so its author label reaches the
+     *  person it names: quoting them with my private nickname for them handed
+     *  them the note I keep about them (founder, 01.09). Device-only means
+     *  device-only.
+     */
+    fun contactWireName(uin: Int, host: String? = null): String {
+        val c = _contacts.value.firstOrNull { it.uin == uin && (host == null || it.host == host) }
+            ?: _contacts.value.firstOrNull { it.uin == uin }
+        return c?.nickname ?: "#$uin"
+    }
+
     /** Append a call-summary line to the 1:1 thread (kind="call"), so a
      *  finished/missed call shows in the chat history. Called by
      *  [CallController] on every call end. */

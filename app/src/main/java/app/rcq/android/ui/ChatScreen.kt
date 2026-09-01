@@ -736,6 +736,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // The sender's roster row, for the picture that goes beside their nick.
     // Null for my own messages and for anyone who is not in the roster yet;
     // a member without a picture simply keeps the plain nick.
+    // The same name, minus my private alias, for anything that goes on the wire.
+    // The roster already carries what people chose for themselves, so a group
+    // needs no separate lookup.
+    fun wireAuthorName(m: ChatMessage): String = when {
+        m.fromMe -> session.nickname ?: youLabel
+        isGroup -> group?.memberName(m.senderUin ?: 0) ?: "${m.senderUin}"
+        else -> session.contactWireName(peer ?: 0)
+    }
     fun authorMember(m: ChatMessage): app.rcq.android.model.GroupMember? =
         if (isGroup && !m.fromMe) group?.members?.firstOrNull { it.uin == m.senderUin } else null
 
@@ -2125,7 +2133,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // Carry the REAL author nick in the quote (never the literal
                     // "You") so other people see the nick; the viewer's own
                     // client localizes "You" via replyMine at render time.
-                    val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), if (it.fromMe) session.nickname else authorName(it)) }
+                    // ⚠⚠ `wireAuthorName`, not `authorName`: the quote travels
+                    // inside the sealed envelope and its label reaches the very
+                    // person it names. My own alias for them is device-only.
+                    val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), if (it.fromMe) session.nickname else wireAuthorName(it)) }
                     replyTarget = null
                     // Both, here and now. Clearing only the state left the
                     // parked note on disk for the moment it took the effect
