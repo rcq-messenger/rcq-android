@@ -426,6 +426,7 @@ private fun RcqApp(session: Session) {
     var showAudioRooms by remember { mutableStateOf(false) }
     var showNearby by remember { mutableStateOf(false) }
     var showRadio by remember { mutableStateOf(false) }
+    var showSites by remember { mutableStateOf(false) }
     var showRestore by remember { mutableStateOf(false) }
     var showOutgoing by remember { mutableStateOf(false) }
 
@@ -476,7 +477,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; showRestore = false; showOutgoing = false
     }
 
     // #655: the island said the active account no longer exists (burned from
@@ -582,6 +583,7 @@ private fun RcqApp(session: Session) {
             showRandom = false
             showNearby = false
             showRadio = false
+            showSites = false
             showProfile = false
             showManageAccounts = false
             showOutgoing = false
@@ -618,7 +620,7 @@ private fun RcqApp(session: Session) {
         val backPopsOverlay = (s is UiState.Registered && !locked && (
             shareReq != null || groupInfoId != null || peerInfoUin != null || chatTarget != null ||
                 showManageAccounts || showNews || showOutgoing || showRandom ||
-                showAudioRooms || showNearby || showRadio || showProfile || showSettings || showRestore
+                showAudioRooms || showNearby || showRadio || showSites || showProfile || showSettings || showRestore
             )) || (s is UiState.Onboarding && showRestore)
         BackHandler(enabled = backPopsOverlay) {
             when {
@@ -642,6 +644,7 @@ private fun RcqApp(session: Session) {
                 showRandom -> showRandom = false
                 showNearby -> showNearby = false
                 showRadio -> showRadio = false
+                showSites -> showSites = false
                 showProfile -> showProfile = false
                 // ⚠ The flags go with it. Leaving them set meant the NEXT
                 // time Settings was opened by hand it jumped straight back
@@ -820,6 +823,10 @@ private fun RcqApp(session: Session) {
                 session,
                 onBack = { showRadio = false },
             )
+            s is UiState.Registered && showSites -> app.rcq.android.ui.SitesScreen(
+                session,
+                onBack = { showSites = false },
+            )
             s is UiState.Registered && showProfile -> ProfileEditScreen(
                 session,
                 onBack = {
@@ -859,6 +866,7 @@ private fun RcqApp(session: Session) {
                     onOpenAudioRooms = { showAudioRooms = true },
                     onOpenNearby = { showNearby = true },
                     onOpenRadio = { showRadio = true },
+                    onOpenSites = { showSites = true },
                     onOpenRandom = { showRandom = true },
                     onSwitchAccount = ::switchAccount,
                     onAddAccount = ::addAccount,

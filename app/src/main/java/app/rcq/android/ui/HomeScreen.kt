@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -297,6 +298,7 @@ internal fun HomeScreen(
     onOpenRandom: () -> Unit = {},
     onOpenNearby: () -> Unit = {},
     onOpenRadio: () -> Unit = {},
+    onOpenSites: () -> Unit = {},
     onSwitchAccount: (String) -> Unit = {},
     onAddAccount: (String?) -> Unit = {},
     /** Add an account from its recovery phrase. Same destination the onboarding
@@ -860,6 +862,7 @@ internal fun HomeScreen(
                 onOpenSaved = onOpenSaved,
                 onOpenAudioRooms = onOpenAudioRooms,
                 onOpenRadio = onOpenRadio,
+                onOpenSites = onOpenSites,
                 onOpenRandom = onOpenRandom,
                 // Random chat is a secondary destination and an operator can
                 // switch it off entirely (admin console -> Features).
@@ -1754,6 +1757,7 @@ private fun HomeHeader(
     onOpenSaved: () -> Unit,
     onOpenAudioRooms: () -> Unit,
     onOpenRadio: () -> Unit,
+    onOpenSites: () -> Unit,
     onOpenRandom: () -> Unit,
     showRandom: Boolean = true,
     onToggleBypass: (Boolean) -> Unit,
@@ -2090,6 +2094,15 @@ private fun HomeHeader(
                     text = { Text(stringResource(R.string.home_menu_radio), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.Sensors, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenRadio() },
+                )
+                // `.rcq` pages. Here rather than in the bottom bar for the same
+                // reason random chat is: it is a place you go to now and then,
+                // not one of the four you reach every day. `Icons.Filled.Public`
+                // is spoken for on this screen as the cross-island glyph.
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.home_menu_sites), color = c.textPrimary) },
+                    leadingIcon = { Icon(Icons.Filled.Language, null, tint = c.accent) },
+                    onClick = { overflowMenu = false; onOpenSites() },
                 )
                 // Random chat used to sit in the bottom bar, next to the things
                 // you reach every day. It is a side attraction, not one of

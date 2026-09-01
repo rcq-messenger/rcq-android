@@ -73,9 +73,14 @@ data class SiteManifest(
         /** What a bundle may call its mark when the manifest does not say. */
         private val ICON_NAMES = listOf("icon.png", "icon.webp", "favicon.png")
 
-        /** The image types this app already decodes for avatars. Deliberately
-         *  no `svg`: see [iconPathOf]. */
-        private val RASTER_MARK_TYPES = setOf("png", "webp", "jpg", "jpeg", "gif")
+        /** ⚠⚠ png and webp ONLY, and this set is the same on every client on
+         *  purpose. Deliberately no `svg` (see [iconPathOf]) - and deliberately
+         *  no jpg or gif either, which this app decodes happily: a mark that
+         *  draws on Android and not on the web or iOS makes one site look like
+         *  two different sites in two catalogues, and the reader has no way to
+         *  tell which of them is real. The rule is the network's, not the
+         *  platform's. */
+        private val RASTER_MARK_TYPES = setOf("png", "webp")
 
         private fun isRasterMark(path: String): Boolean =
             path.substringAfterLast('.', "").lowercase() in RASTER_MARK_TYPES

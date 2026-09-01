@@ -339,6 +339,7 @@
     <string name="sites_title">Sitios</string>
     <string name="sites_address_hint">nombre.rcq</string>
     <string name="sites_open">Abrir</string>
+    <string name="sites_reload">Recargar</string>
     <string name="sites_loading">Abriendo…</string>
     <string name="sites_catalogue">En tu isla</string>
     <string name="sites_empty_title">Pages inside the network</string>

@@ -339,6 +339,7 @@
     <string name="sites_title">站点</string>
     <string name="sites_address_hint">名称.rcq</string>
     <string name="sites_open">打开</string>
+    <string name="sites_reload">刷新</string>
     <string name="sites_loading">正在打开…</string>
     <string name="sites_catalogue">你的岛屿上</string>
     <string name="sites_empty_title">Pages inside the network</string>

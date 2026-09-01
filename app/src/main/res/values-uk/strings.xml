@@ -337,8 +337,9 @@
     <string name="home_menu_radio">Рація</string>
     <string name="home_menu_sites">Сайти (.rcq)</string>
     <string name="sites_title">Сайти</string>
-    <string name="sites_address_hint">ім'я.rcq</string>
+    <string name="sites_address_hint">ім\'я.rcq</string>
     <string name="sites_open">Відкрити</string>
+    <string name="sites_reload">Оновити</string>
     <string name="sites_loading">Відкриваю…</string>
     <string name="sites_catalogue">На вашому острові</string>
     <string name="sites_empty_title">Pages inside the network</string>
