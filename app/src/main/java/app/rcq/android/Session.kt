@@ -4406,6 +4406,12 @@ class Session(context: Context) {
      *  trip. Seeded from the profile load, updated by [setOwnAvatar]. */
     /// Who we already asked for a profile key, and when. In memory only, see
     /// [maybeAskProfileKey]. Cleared on rebind like every other per-account map.
+    /// What the island said when it refused the last send, or null when the
+    /// last send was fine. Read by the composer to turn a refusal into a
+    /// sentence; see [ingest] for why the send cannot simply throw.
+    @Volatile var lastSendRefusal: String? = null
+        private set
+
     private val askedProfileKeyAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
 
     /// Who we already answered a `pkeyask` for, and when. Answering costs a
@@ -4775,7 +4781,15 @@ class Session(context: Context) {
             // group id, which another of our devices would misread as a LOCAL
             // group (alias maps are per-device) — §5c v1 limit.
             if (ctx.host == null) sendMessageCarbon(env, toPeer = null, toGroup = groupId)
+            lastSendRefusal = null
         } catch (e: Exception) {
+            // ⚠⚠ Keep WHAT the island said. This catch swallowed the whole
+            // answer and painted a red bubble, so a room rule ("you are still
+            // in the newcomer waiting period", "slow mode") reached the person
+            // as a generic delivery failure. The sentences for those were added
+            // in 0.157 and were unreachable, because nothing ever threw out of
+            // here for the UI to read (#836).
+            lastSendRefusal = e.message
             updateGroupMsgState(groupId, id, DeliveryState.FAILED)
         }
     }
@@ -4793,7 +4807,10 @@ class Session(context: Context) {
      *  message whose sender was too old to put a `ts` in the envelope. Null on
      *  a live socket delivery (where now IS arrival) and on a replay. */
     private fun ingestGroup(payloadB64: String, groupId: Int, depositAtMs: Long? = null): String? {
-        if (duressViewUp) return null   // see ingest(): `db` is the duress store here
+        // ⚠ A non-null tag, not null: null means the row is DONE WITH and lets
+        // the ack move past it. See [ingest].
+        if (duressViewUp) return "duress"
+        if (!::db.isInitialized) return "db_closed"
         return runCatching {
             val me = store.uin ?: return null
             val dec = decryptInbound(payloadB64)
@@ -6472,6 +6489,9 @@ class Session(context: Context) {
             val rescued = runCatching {
                 withContext(Dispatchers.IO) { depositToPeerExtraHomes(toUin, env) }
             }.getOrDefault(0)
+            // Only when nothing rescued it: a copy that landed on another home
+            // is a delivered message, not a refusal to explain.
+            lastSendRefusal = if (rescued > 0) null else e.message
             updateMessageState(id, toUin, if (rescued > 0) DeliveryState.SENT else DeliveryState.FAILED)
             if (rescued == 0) notePeerLivenessAfterFailure(toUin)
         }
@@ -7352,15 +7372,38 @@ class Session(context: Context) {
     }
 
     /** [depositAtMs]: see [ingestGroup]. */
-    private fun ingest(payloadB64: String, depositAtMs: Long? = null) {
+    /** File one sealed 1:1 row. Returns null when the row is DONE WITH, or a
+     *  short tag naming how it failed in a way a later delivery may survive.
+     *
+     *  ⚠⚠ The answer used to be thrown away, and so did the caller's. The
+     *  legacy queue drain acked every row it had been handed, whether or not
+     *  anything was written, and the island DELETES what is acked. So a row
+     *  that failed here was gone for good, most easily when the PIN lock had
+     *  closed the database under a drain that kept running. That is #835: a
+     *  person's OWN messages reach their phone only as a carbon on this queue,
+     *  while everybody else's arrive through the room log, where the ack has
+     *  always been tied to the result. Own messages vanished, everyone else's
+     *  did not, which is exactly what the two screenshots showed.
+     *
+     *  Same contract as [ingestGmsg] and the room log's onRow. */
+    private fun ingest(payloadB64: String, depositAtMs: Long? = null): String? {
         // Last line of defence: in a migrated decoy session `db` is the duress
         // store, and a real message written there is a real message lost.
-        if (duressViewUp) return
+        if (duressViewUp) return "duress"
+        // A closed database is not a decryption problem and must not look like
+        // one: bail before touching it so the row stays on the island.
+        if (!::db.isInitialized) return "db_closed"
+        var why: String? = null
         runCatching {
             val dec = decryptInbound(payloadB64)
             // Removed contacts are silently dropped — sealed sender means
             // the server can't filter by sender, so we gate on receipt.
-            if (LocalStores.isRemoved(dec.senderUin) || LocalStores.isBlocked(dec.senderUin)) return@runCatching
+            // ⚠ Never ourselves: a carbon always arrives from our own uin, and
+            // the code that CLEARS the removed flag skips our own uin, so one
+            // stray entry would silently kill every self-carbon forever.
+            if (dec.senderUin != store.uin &&
+                (LocalStores.isRemoved(dec.senderUin) || LocalStores.isBlocked(dec.senderUin))
+            ) return@runCatching
             // §5d cross-island call signaling rides sealed envelopes (kind
             // "call") — route to the call state machine, never the message
             // store, and never the request quarantine (signals are ephemeral).
@@ -7770,7 +7813,11 @@ class Session(context: Context) {
                         store(ChatMessage(env.id, dec.senderUin, false, env.relay.toString(), now, kind = "relay"))
                 is Envelope.Unknown -> Unit
             }
-        }.onFailure { logDecryptFailure(payloadB64, it) }
+        }.onFailure {
+            logDecryptFailure(payloadB64, it)
+            why = it.javaClass.simpleName
+        }
+        return why
     }
 
     /** File a carbon's inner message as a fromMe row in its destination thread
@@ -7907,7 +7954,14 @@ class Session(context: Context) {
                 // reached the SERVER is much nearer the send than the moment
                 // this phone came back online and drained is.
                 val depositAt = parseIso(q.received_at)
-                when {
+                // ⚠⚠ READ the answer. All three of these say whether the row is
+                // done with (null) or failed in a way a later delivery may
+                // survive, and this drain used to throw that away and ack
+                // regardless. The island DELETES what is acked, so every such
+                // failure was a message destroyed - #835, and the #547/#544
+                // class before it. The room log twenty lines below has always
+                // done it properly; this is the same rule, same helper.
+                val why = when {
                     q.envelope_type == "gmsg" && q.group_id != null -> ingestGmsg(payload, q.group_id, depositAt)
                     q.group_id != null -> ingestGroup(payload, q.group_id, depositAt)
                     else -> ingest(payload, depositAt)
@@ -7915,8 +7969,13 @@ class Session(context: Context) {
                 // Survived — a stale strike from an interrupted PREVIOUS run
                 // (the between-rows window marks the row already ingested)
                 // must not accumulate toward the skip threshold.
-                if (guard.contains("strikes:$rowKey")) guard.edit().remove("strikes:$rowKey").apply()
-                if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
+                if (why == null && guard.contains("strikes:$rowKey")) guard.edit().remove("strikes:$rowKey").apply()
+                // A row that failed stays on the island and comes back next
+                // drain. After a few attempts it is written off, so one poison
+                // row cannot freeze the queue behind it forever.
+                if (why == null || logRowWrittenOff(guard, rowKey, why)) {
+                    if (q.group_id != null) groupIds.add(q.id) else directIds.add(q.id)
+                }
             }
             guard.edit().remove("attempt").commit()
         }

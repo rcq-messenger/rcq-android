@@ -2096,10 +2096,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         runCatching {
                             if (isGroup) session.sendGroupText(groupId!!, body, reply)
                             else session.sendText(peer!!, body, reply)
-                        }.onFailure { e ->
-                            sendRefusalText(context, e.message)?.let { msg ->
-                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                            }
+                        }
+                        // ⚠⚠ Read the refusal from the SESSION, not from a
+                        // thrown exception. Both send paths catch everything
+                        // internally and only paint the bubble red, so
+                        // onFailure never ran and the sentences added in 0.157
+                        // were dead code (#836).
+                        sendRefusalText(context, session.lastSendRefusal)?.let { msg ->
+                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -2876,10 +2880,14 @@ private fun formatDuration(sec: Int): String = "%d:%02d".format(sec / 60, sec % 
  *  register map is at the ART verifier's limit - see [MessageLongPressOverlay]. */
 private fun sendRefusalText(context: android.content.Context, message: String?): String? {
     val r = RcqApi.refusalOf(message)
-    if (r.status == 429 || r.code == "slowmode") {
+    if (r.status == 429) {
+        // ⚠ The island answers `rate_limited` (core/rate_limit.py), never
+        // "slowmode", so that half of the test was dead. And a 429 is not
+        // always slow mode: a fan-out budget refusal is one too, and calling
+        // that "slow mode is on" in a room that has none is a lie. Only the
+        // countdown form claims slow mode; anything else stays generic.
         val wait = r.retryAfter ?: 0
-        return if (wait > 0) context.getString(R.string.chat_slowmode_wait_in, wait)
-        else context.getString(R.string.chat_slowmode_wait)
+        return if (wait > 0) context.getString(R.string.chat_slowmode_wait_in, wait) else null
     }
     if (r.code == "account_too_young") {
         // An island too old to send the number still refuses with the code, so
