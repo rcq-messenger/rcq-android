@@ -562,6 +562,8 @@
 
     <!-- Last seen -->
     <string name="last_seen_fmt">last seen %1$s</string>
+    <string name="last_seen_fmt_m">last seen %1$s</string>
+    <string name="last_seen_fmt_f">last seen %1$s</string>
 
     <!-- Visibility options -->
     <string name="vis_everyone">Everyone</string>

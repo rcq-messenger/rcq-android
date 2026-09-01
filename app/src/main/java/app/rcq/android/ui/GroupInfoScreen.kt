@@ -161,6 +161,20 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // granted the "members" cap. Mirrors the backend `_member_can(.,'members')`.
     val ownMember = group.members.firstOrNull { it.uin == ownUin }
     val canManageMembers = isOwner || (ownMember?.permissions?.contains("members") == true)
+    /** May I edit the room's name, description, picture and pin?
+     *
+     *  ⚠⚠ This client never asked. `members` was honoured one line above, but
+     *  `info` was read NOWHERE: every edit here was gated on ownership alone,
+     *  so an owner could grant the right, the island would have accepted every
+     *  edit the grantee made (groups.py `_member_can(g, me, "info")` guards
+     *  exactly these branches), and the grantee's own app kept the controls
+     *  hidden. Granting it did visibly nothing, which is #836. The web has
+     *  `canEditInfo` and iOS has `canEditChrome`; iOS's comment records that
+     *  it once had this same bug and was fixed. Android was the last one left.
+     *
+     *  ⚠ Deliberately NOT extended to deleting the room or handing out
+     *  permissions: those stay with the owner, matching the island. */
+    val canEditInfo = isOwner || (ownMember?.permissions?.contains("info") == true)
 
     // Owner first, then admins, then everyone else. Within a rank: whoever is
     // online, then by name.
@@ -231,7 +245,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 Spacer(Modifier.width(12.dp))
                 Text(stringResource(R.string.gi_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                if (isOwner) {
+                if (canEditInfo) {
                     Icon(Icons.Filled.Edit, stringResource(R.string.gi_rename), tint = c.accent, modifier = Modifier.size(22.dp).clickable { showRename = true })
                 }
             }
@@ -240,10 +254,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         item {
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(contentAlignment = Alignment.BottomEnd) {
-                    Box(Modifier.then(if (isOwner) Modifier.clickable { avatarPicker.launch("image/*") } else Modifier)) {
+                    Box(Modifier.then(if (canEditInfo) Modifier.clickable { avatarPicker.launch("image/*") } else Modifier)) {
                         GroupAvatar(group, session, 72.dp, glyphSize = 40.dp, animated = true)
                     }
-                    if (isOwner) {
+                    if (canEditInfo) {
                         Box(Modifier.size(26.dp).clip(CircleShape).background(c.accent).clickable { avatarPicker.launch("image/*") }, contentAlignment = Alignment.Center) {
                             Icon(Icons.Filled.CameraAlt, stringResource(R.string.gi_change_avatar), tint = Color.White, modifier = Modifier.size(15.dp))
                         }
@@ -331,7 +345,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             }
         }
 
-        if (isOwner) {
+        if (canEditInfo) {
             item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.gi_settings), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
