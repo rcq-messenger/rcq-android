@@ -335,6 +335,22 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Salas de audio</string>
     <string name="home_menu_radio">Radio</string>
+    <string name="home_menu_sites">Sitios (.rcq)</string>
+    <string name="sites_title">Sitios</string>
+    <string name="sites_address_hint">nombre.rcq</string>
+    <string name="sites_open">Abrir</string>
+    <string name="sites_loading">Abriendo…</string>
+    <string name="sites_catalogue">En tu isla</string>
+    <string name="sites_empty_title">Pages inside the network</string>
+    <string name="sites_empty_body">Type an address, for example blog.rcq. Pages are text and pictures only: no scripts, no outward links, nothing loaded from outside.</string>
+    <string name="sites_error_address">An address looks like name.rcq or name.island.rcq</string>
+    <string name="sites_error_missing">No such site, or the island did not answer.</string>
+    <string name="sites_error_frozen">The island has frozen this site.</string>
+    <string name="sites_error_unsigned">The signature on this site does not check out. Nothing was shown.</string>
+    <string name="sites_error_tampered">A file does not match what the owner signed. Nothing was shown.</string>
+    <string name="sites_error_offline">Could not reach that island.</string>
+    <string name="sites_key_changed">This site is signed by a different key than the last time you opened it.</string>
+    <string name="sites_key_changed_accept">Trust the new key</string>
     <string name="stealth_shield_turn_off">Apagar los relés</string>
     <string name="home_menu_bypass_title">Relés RCQ</string>
     <string name="home_menu_bypass_enable">Llevar la app por los relays de RCQ</string>

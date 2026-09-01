@@ -354,6 +354,22 @@
     <!-- Audio rooms -->
     <string name="home_menu_audio_rooms">Аудиокомнаты</string>
     <string name="home_menu_radio">Рация</string>
+    <string name="home_menu_sites">Сайты (.rcq)</string>
+    <string name="sites_title">Сайты</string>
+    <string name="sites_address_hint">имя.rcq</string>
+    <string name="sites_open">Открыть</string>
+    <string name="sites_loading">Открываю…</string>
+    <string name="sites_catalogue">На вашем острове</string>
+    <string name="sites_empty_title">Страницы внутри сети</string>
+    <string name="sites_empty_body">Введите адрес, например blog.rcq. Страницы это только текст и картинки: без скриптов, без ссылок наружу, ничего не грузится извне.</string>
+    <string name="sites_error_address">Адрес выглядит так: имя.rcq или имя.остров.rcq</string>
+    <string name="sites_error_missing">Такого сайта нет, или остров не ответил.</string>
+    <string name="sites_error_frozen">Остров заморозил этот сайт.</string>
+    <string name="sites_error_unsigned">Подпись сайта не сходится. Ничего не показано.</string>
+    <string name="sites_error_tampered">Файл не совпадает с тем, что подписал владелец. Ничего не показано.</string>
+    <string name="sites_error_offline">Не удалось достучаться до острова.</string>
+    <string name="sites_key_changed">Сайт подписан другим ключом, чем в прошлый раз.</string>
+    <string name="sites_key_changed_accept">Доверять новому ключу</string>
     <string name="stealth_shield_turn_off">Выключить релеи</string>
     <string name="home_menu_bypass_title">Релеи RCQ</string>
     <string name="home_menu_bypass_enable">Пускать приложение через релеи RCQ</string>
