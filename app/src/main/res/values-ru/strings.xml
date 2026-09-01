@@ -358,6 +358,7 @@
     <string name="sites_title">Сайты</string>
     <string name="sites_address_hint">имя.rcq</string>
     <string name="sites_open">Открыть</string>
+    <string name="sites_reload">Обновить</string>
     <string name="sites_loading">Открываю…</string>
     <string name="sites_catalogue">На вашем острове</string>
     <string name="sites_empty_title">Страницы внутри сети</string>

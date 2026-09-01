@@ -116,7 +116,7 @@ object SitesRepository {
         SitePins.init(ctx)
         val m = manifest(addr, fresh)
         val raw = file(addr, m, path, fresh)
-        val html = SiteSanitizer.render(String(raw, Charsets.UTF_8), path, m.files.keys) { p ->
+        val html = SiteSanitizer.render(SiteSanitizer.decodeDeclared(raw), path, m.files.keys) { p ->
             // A stylesheet or image that is absent or unreachable costs its own
             // element and not the page. A hash MISMATCH is different and is
             // rethrown: that is the island serving bytes the owner did not

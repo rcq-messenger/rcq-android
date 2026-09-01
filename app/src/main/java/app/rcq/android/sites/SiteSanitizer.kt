@@ -39,6 +39,31 @@ import android.util.Base64
 internal object SiteSanitizer {
 
     /**
+     * Decode a text file the way its author declared it, not the way we would
+     * prefer.
+     *
+     * The first site anybody published on this network was a 2000s frameset in
+     * windows-1251, and that is not an accident: a format with no scripts and
+     * no tracking attracts exactly the people whose pages predate UTF-8.
+     * Reading their Russian as UTF-8 turns it into mojibake. The label is read
+     * out of the first kilobyte, the way a browser sniffs it.
+     */
+    fun decodeDeclared(bytes: ByteArray): String {
+        val head = String(bytes, 0, minOf(bytes.size, 1024), Charsets.ISO_8859_1)
+        val label = Regex("charset\\s*=\\s*[\"']?([A-Za-z0-9_-]+)").find(head)?.groupValues?.get(1)
+        if (label != null && !label.equals("utf-8", true) && !label.equals("utf8", true)) {
+            try {
+                return String(bytes, java.nio.charset.Charset.forName(label))
+            } catch (_: Exception) {
+                // A charset this device does not know. UTF-8 at least renders
+                // the ASCII half rather than nothing.
+            }
+        }
+        return String(bytes, Charsets.UTF_8)
+    }
+
+
+    /**
      * What a page may contain. An ALLOW-LIST, not a list of things to remove: a
      * deny-list is a promise that we thought of everything, and the web keeps
      * inventing elements. Anything not named here is UNWRAPPED (its text stays,
@@ -208,7 +233,7 @@ internal object SiteSanitizer {
             // never fetched: CSS decides what the reader sees, and an
             // unverified one could hide or fake the whole page.
             val css = if (rel == "stylesheet" && href != null && href in files) {
-                read(href)?.let { String(it, Charsets.UTF_8) }
+                read(href)?.let { decodeDeclared(it) }
             } else null
             if (css == null) { nodes.removeAt(k); continue }
             nodes[k] = SiteNode.Element("style").also { it.children.add(SiteNode.Text(cleanCss(css))) }

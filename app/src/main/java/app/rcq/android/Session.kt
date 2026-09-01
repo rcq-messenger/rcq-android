@@ -147,6 +147,12 @@ class Session(context: Context) {
     // or the default public server. Both clients are rebuilt from it after
     // a registration that picks a custom server.
     private fun serverHost(): String = store.serverHost ?: RcqApi.DEFAULT_HOST
+
+    /** The island this session belongs to, for screens that address it by
+     *  name rather than by API call: `.rcq` resolves a bare `name.rcq` against
+     *  it (ui/SitesScreen). Deliberately the ISLAND, not [apiHost]: a site
+     *  lives on the island, and the Cloudflare front is a road to the API. */
+    fun islandHost(): String = serverHost()
     // Cloudflare front for the flagship: when set (boot found direct api.rcq.app
     // blocked but the CF front reachable), the API + WS connect to this host
     // instead. It rides Cloudflare's collateral-resistant IPs and proxies to
