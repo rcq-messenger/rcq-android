@@ -895,6 +895,7 @@
     <string name="media_video_too_old">This video was sent in the old format and is too big to open here (%1$d MB). Ask the sender to send it again from a newer version.</string>
     <string name="media_video_damaged">This video did not arrive in one piece and stopped part way. Ask the sender to send it again.</string>
     <string name="media_too_large_for_island">This video is %1$d MB and this server takes at most %2$d MB.</string>
+    <string name="file_read_failed">Could not read that file. Try another one, or copy it somewhere else first.</string>
     <string name="chat_pin">Pin</string>
     <string name="chat_pinned_media">📎 Attachment</string>
     <string name="chat_pin_failed">Could not pin that message.</string>
