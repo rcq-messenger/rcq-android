@@ -85,6 +85,7 @@ fun UinShopScreen(
     // Resolved here (composable scope) so the purchase callback can use them.
     val takenMsg = stringResource(R.string.uin_shop_error_taken)
     val tooManyMsg = stringResource(R.string.uin_shop_error_too_many)
+    val reservedMsg = stringResource(R.string.uin_shop_error_reserved)
     val genericMsg = stringResource(R.string.uin_shop_error_generic)
 
     val isValidLength = typed.length in 3..9
@@ -124,7 +125,10 @@ fun UinShopScreen(
         val parsed = typed.toIntOrNull() ?: return
         buying = true
         scope.launch {
-            when (val r = session.purchaseUin(parsed, switch = false)) {
+            // ⚠ switch = true. Collections closed 2026-09-01: a number you take
+            // is a number you move onto, so there is no "held" outcome to land
+            // in any more (the island refuses switch=false outright).
+            when (val r = session.purchaseUin(parsed, switch = true)) {
                 is Session.PurchaseResult.Held -> {
                     buying = false
                     held = parsed
@@ -140,6 +144,11 @@ fun UinShopScreen(
                 is Session.PurchaseResult.TooMany -> {
                     buying = false
                     error = tooManyMsg
+                }
+                is Session.PurchaseResult.Reserved -> {
+                    buying = false
+                    quote = null
+                    error = reservedMsg
                 }
                 else -> {
                     buying = false
