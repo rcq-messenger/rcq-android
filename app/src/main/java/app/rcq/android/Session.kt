@@ -9448,6 +9448,16 @@ class Session(context: Context) {
                     // composer of an owner-only room shut for the person who
                     // now runs it, until the next boot.
                     val gid = obj.get("group_id")?.takeIf { !it.isJsonNull }?.asInt
+                    // ⚠ The ROSTER this frame describes is now stale here, and
+                    // saying so is the whole of #836's first point. Above
+                    // SNAPSHOT_BROADCAST_LIMIT members the island deliberately
+                    // does not push the list (2200 people would each be handed
+                    // 2200 rows), so a member who joined reached everyone else
+                    // only after a RESTART - `ensureRoster` answers from cache
+                    // once it has fetched a room, and nothing ever cleared that.
+                    // Dropping the mark costs one fetch, and only for whoever
+                    // actually opens the member list.
+                    gid?.let { rosterFetched.remove(it) }
                     val owner = obj.get("owner_uin")?.takeIf { !it.isJsonNull }?.asInt
                     // Both or nothing: an older island sends the bare id (the
                     // beta-group broadcast), and there is nothing to apply.

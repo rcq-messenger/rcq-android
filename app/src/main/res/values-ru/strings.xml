@@ -891,6 +891,7 @@
     <string name="media_video_too_old">Это видео отправлено в старом формате и слишком большое, чтобы открыть его здесь (%1$d МБ). Попросите отправителя прислать заново из новой версии.</string>
     <string name="media_video_damaged">Это видео пришло повреждённым и оборвалось на середине. Попросите отправителя прислать его заново.</string>
     <string name="media_too_large_for_island">Это видео весит %1$d МБ, а сервер принимает не больше %2$d МБ.</string>
+    <string name="file_read_failed">Не удалось прочитать этот файл. Попробуйте другой или сначала скопируйте его в память телефона.</string>
     <string name="chat_pin">Закрепить</string>
     <string name="chat_pinned_media">📎 Вложение</string>
     <string name="chat_pin_failed">Не получилось закрепить сообщение.</string>

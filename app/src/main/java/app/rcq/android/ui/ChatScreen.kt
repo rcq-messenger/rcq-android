@@ -798,10 +798,33 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // type incl. APKs/docs; the old GetContent (ACTION_GET_CONTENT) is
     // media-skewed on modern Android and hid arbitrary files, so picking a
     // file "did nothing". Matches iOS UIDocumentPicker([.item]).
+    //
+    // ⚠⚠ Through the SESSION, not this screen's scope, and never inside a bare
+    // `runCatching` (#838). A file used to be read and uploaded on the
+    // composable's own scope with every failure swallowed, so all three ways
+    // this can go wrong looked identical to the person who picked the file -
+    // nothing appeared in the chat and nothing was said:
+    //   * the read returned null (an unreadable provider, or an OOM on a big
+    //     file inside `readPickedFile`'s own runCatching),
+    //   * the island refused the blob for size, which it does while reading the
+    //     body, i.e. AFTER the upload,
+    //   * the upload failed, and `sendFile` only writes its local row AFTER the
+    //     upload returns, so there was not even a red bubble to retry.
+    // Now: the size is checked before anything is sent, the read failure says
+    // so, and the send itself rides `sendMediaDetached` like every other
+    // attachment - which gives it the sending strip, counts a failure into the
+    // one the composer already shows, and survives leaving the chat.
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             val picked = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
-            if (picked != null) runCatching {
+            if (picked == null) {
+                android.widget.Toast.makeText(
+                    context, context.getString(R.string.file_read_failed), android.widget.Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            if (!fileFitsIsland(context, session, picked.bytes.size.toLong())) return@launch
+            session.sendMediaDetached("file") {
                 if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime)
                 else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime)
             }
@@ -5727,6 +5750,24 @@ private fun videoFitsIsland(context: Context, session: Session, v: PickedVideo):
         context.getString(
             R.string.media_too_large_for_island,
             (v.sizeBytes / (1024 * 1024)).toInt(),
+            (max / (1024 * 1024)).toInt(),
+        ),
+        android.widget.Toast.LENGTH_LONG,
+    ).show()
+    return false
+}
+
+/** Same question as [videoFitsIsland], for an arbitrary file: the island
+ *  enforces its cap while reading the body, so without this the refusal
+ *  arrives after the whole upload rather than before it (#838). */
+private fun fileFitsIsland(context: Context, session: Session, sizeBytes: Long): Boolean {
+    val max = session.mediaMaxBlobBytes
+    if (app.rcq.android.crypto.MediaStream.blobLength(sizeBytes) <= max) return true
+    android.widget.Toast.makeText(
+        context,
+        context.getString(
+            R.string.media_too_large_for_island,
+            (sizeBytes / (1024 * 1024)).toInt(),
             (max / (1024 * 1024)).toInt(),
         ),
         android.widget.Toast.LENGTH_LONG,
