@@ -515,6 +515,7 @@
     <string name="my_uins_confirm_title">Answer as %1$s?</string>
     <string name="my_uins_confirm_body">Contacts, groups, profile and history move onto it. Number %1$s stays yours and stays on this screen, so you can move back whenever you like.</string>
     <string name="my_uins_confirm_cta">Switch</string>
+    <string name="my_uins_closed">Collections are closed: an account keeps one number. The one you use is above; nothing else is held for you.</string>
     <string name="my_uins_footer">While you answer as one number, the rest are simply reserved for you. Nobody else can take them.</string>
     <string name="settings_foot_appearance">Choose light, dark, or follow the system theme.</string>
     <string name="settings_text_size">Text size</string>

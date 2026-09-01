@@ -493,6 +493,7 @@
     <string name="my_uins_confirm_title">Responder como %1$s?</string>
     <string name="my_uins_confirm_body">Contatos, grupos, perfil e histórico passam para ele. O número %1$s continua seu e continua nesta tela, então dá para voltar quando quiser.</string>
     <string name="my_uins_confirm_cta">Trocar</string>
+    <string name="my_uins_closed">As coleções estão fechadas: uma conta tem um número. O que você usa está acima, nada mais está reservado para você.</string>
     <string name="my_uins_footer">Enquanto você responde por um número, os outros ficam simplesmente reservados para você. Ninguém mais pode pegar.</string>
     <string name="settings_foot_appearance">Escolha claro, escuro, ou siga o tema do sistema.</string>
     <string name="settings_text_size">Tamanho do texto</string>

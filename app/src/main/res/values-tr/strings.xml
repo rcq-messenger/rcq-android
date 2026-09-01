@@ -493,6 +493,7 @@
     <string name="my_uins_confirm_title">%1$s olarak cevap verilsin mi?</string>
     <string name="my_uins_confirm_body">Kişiler, gruplar, profil ve geçmiş bu numaraya taşınır. %1$s senin kalır ve bu ekranda durur, istediğin zaman geri dönebilirsin.</string>
     <string name="my_uins_confirm_cta">Geç</string>
+    <string name="my_uins_closed">Koleksiyonlar kapandı: bir hesapta tek numara olur. Kullandığınız numara yukarıda, başka bir şey size ayrılmış değil.</string>
     <string name="my_uins_footer">Sen bir numarayla cevap verirken diğerleri senin için ayrılmış durur. Kimse alamaz.</string>
     <string name="settings_foot_appearance">Açık, koyu ya da sistem temasını izle.</string>
     <string name="settings_text_size">Yazı boyutu</string>
