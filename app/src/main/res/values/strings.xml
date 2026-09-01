@@ -1295,9 +1295,9 @@
     <string name="gi_slow_off">Off</string>
     <string name="chat_files_off">The owner turned off files in this group</string>
     <string name="chat_links_off">The owner turned off links in this group</string>
-    <string name="chat_slowmode_wait">Slow mode is on: try again in a moment</string>
-    <string name="chat_slowmode_wait_in">Slow mode is on: try again in %1$d s</string>
-    <string name="chat_age_gate_wait">Newcomers cannot post here right away. You will be able to in about %1$d h.</string>
+    <string name="chat_slowmode_wait">Slow mode: try again shortly</string>
+    <string name="chat_slowmode_wait_in">Slow mode: %1$d s left</string>
+    <string name="chat_age_gate_wait">New here: you can post in ~%1$d h</string>
     <string name="push_channel_upload">Sending files</string>
     <string name="push_channel_upload_desc">Files still going up while RCQ is not on screen.</string>
     <string name="chat_delete_album_all">Delete all %1$d photos for everyone</string>
