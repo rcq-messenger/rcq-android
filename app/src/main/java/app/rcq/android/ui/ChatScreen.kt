@@ -1723,7 +1723,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 highlighted = m.id == highlightId,
                                 onTapReply = onTapReply,
                                 onSenderClick = if (isGroup && !m.fromMe) ({ m.senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
-                                onShowReactors = { whoReactedMsg = it },
+                                onShowReactors = {
+                                    whoReactedMsg = it
+                                    // ⚠ The roster carries PRESENCE, and that
+                                    // field is as old as the fetch, so a roster
+                                    // held for an hour shows a room full of
+                                    // offline people - which is the whole
+                                    // complaint about this sheet. Ask for a
+                                    // fresh one as it opens.
+                                    if (isGroup) groupId?.let { g -> scope.launch { runCatching { session.ensureRoster(g, refresh = true) } } }
+                                },
                                 linksEnabled = rowLinksEnabled(linksOff, group, m),
                             )
                             }

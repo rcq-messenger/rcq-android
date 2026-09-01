@@ -2249,11 +2249,16 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
                     lastSeenPhrase(contact.lastSeen, contact.gender, ctx)
                 } else null
                 val msg = contact.statusMessage?.takeIf { it.isNotEmpty() }
+                // Both worth saying, room for one: they take turns (founder).
+                if (contact.host == null && seen != null && msg != null) {
+                    Text("·", color = c.textSecondary, fontSize = 12.sp)
+                    AltText(seen, msg, c.textSecondary, 12.sp)
+                    return@Row
+                }
                 val sub = when {
                     // §5c: a cross-island peer shows its island (presence/last_seen
                     // don't cross islands), then any status message.
                     contact.host != null -> contact.host + (msg?.let { " · $it" } ?: "")
-                    seen != null && msg != null -> "$seen · $msg"
                     seen != null -> seen
                     else -> msg
                 }
