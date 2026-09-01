@@ -1031,6 +1031,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
         }
     }
+    // ⚠⚠ ONE place that speaks a refusal, for all eight send paths. Both sends
+    // catch everything internally and only paint the bubble red, so nothing
+    // ever threw for a per-call-site handler to read, and the sentences added
+    // in 0.157 were dead code (#836). Collecting the session's flow also covers
+    // photo, voice, file, share and retry, which never had an explanation at
+    // all and answered a room rule with "check your connection".
+    SendRefusalToasts(session)
+
     fun cancelRecording() { recording = false; recorder.cancel() }
 
     // Mark this thread active+read while open; clear again on a new
@@ -2097,14 +2105,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             if (isGroup) session.sendGroupText(groupId!!, body, reply)
                             else session.sendText(peer!!, body, reply)
                         }
-                        // ⚠⚠ Read the refusal from the SESSION, not from a
-                        // thrown exception. Both send paths catch everything
-                        // internally and only paint the bubble red, so
-                        // onFailure never ran and the sentences added in 0.157
-                        // were dead code (#836).
-                        sendRefusalText(context, session.lastSendRefusal)?.let { msg ->
-                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                        }
                     }
                 },
                 recording = recording,
@@ -2860,6 +2860,21 @@ private fun Composer(
         // the bar): the panel swaps with the IME, so it stands where the IME
         // stood, not between the bar and the list.
         if (showEmoji && !recording) EmoticonPanel(onPick = insertAtCaret)
+    }
+}
+
+/** Speak whatever the island last refused a send with, once each.
+ *
+ *  ⚠ Its own composable, outside ChatScreen, because ChatScreen's register map
+ *  sits at the ART verifier's limit - see [MessageLongPressOverlay]. */
+@Composable
+private fun SendRefusalToasts(session: Session) {
+    val context = LocalContext.current
+    val refusal by session.sendRefusal.collectAsState()
+    LaunchedEffect(refusal) {
+        if (refusal == null) return@LaunchedEffect
+        val msg = sendRefusalText(context, session.takeSendRefusal())
+        if (msg != null) android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
