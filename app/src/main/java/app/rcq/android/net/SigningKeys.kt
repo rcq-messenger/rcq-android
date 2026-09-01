@@ -76,6 +76,25 @@ object SigningKeys {
      * must read as unsigned, not crash the caller that was about to fall back
      * to its bundled list.
      */
+    /**
+     * Verify [message] against [sigB64] under a key that came WITH the payload.
+     *
+     * ⚠ This is deliberately not a [Role], and adding one for it would be the
+     * mistake the doc above argues against. It exists for `.rcq` site
+     * manifests, where the signing key is the site owner's and this build has
+     * never heard of it: what the signature proves there is not "we authorised
+     * this" but "one key signed every byte of this bundle", and the key itself
+     * is anchored by [app.rcq.android.sites.SitePins] on first use, the way a
+     * safety number is. Never call this with a key from a payload that is
+     * supposed to carry OUR authority — for those the answer is a Role, and
+     * the set is compiled in for the reasons above.
+     */
+    fun verifyWith(pubKey: ByteArray, message: ByteArray, sigB64: String): Boolean = runCatching {
+        val pub = Ed25519PublicKeyParameters(pubKey, 0)
+        Ed25519Signer().apply { init(false, pub); update(message, 0, message.size) }
+            .verifySignature(Base64.decode(sigB64, Base64.DEFAULT))
+    }.getOrDefault(false)
+
     fun verify(role: Role, message: ByteArray, sigB64: String): Boolean = runCatching {
         val sig = Base64.decode(sigB64, Base64.DEFAULT)
         var ok = false

@@ -353,7 +353,7 @@ object RelayConfigStore {
         // Sign over everything except `sig`.
         val signed = root.deepCopy()
         signed.remove("sig")
-        val message = canonical(signed).toByteArray(Charsets.UTF_8)
+        val message = CanonicalJson.bytes(signed)
         if (!SigningKeys.verify(SigningKeys.Role.RELAY_CONFIG, message, sigB64)) return null
 
         val parsedVersion = root.get("version")?.takeIf { !it.isJsonNull }
@@ -401,52 +401,4 @@ object RelayConfigStore {
         out.sortBy { it.first }
         out.map { it.second }.takeIf { it.isNotEmpty() }
     }.getOrNull()
-
-    /** Canonical JSON byte-for-byte matching Python `json.dumps(sort_keys=True,
-     *  separators=(",",":"), ensure_ascii=False)` and iOS JSONSerialization
-     *  `[.sortedKeys, .withoutEscapingSlashes]`: recursively sorted keys,
-     *  compact, numbers as their source text, slashes + non-ASCII unescaped. */
-    private fun canonical(e: JsonElement): String = StringBuilder().also { write(e, it) }.toString()
-
-    private fun write(e: JsonElement, sb: StringBuilder) {
-        when {
-            e.isJsonObject -> {
-                sb.append('{')
-                e.asJsonObject.keySet().sorted().forEachIndexed { i, k ->
-                    if (i > 0) sb.append(',')
-                    writeString(k, sb); sb.append(':'); write(e.asJsonObject.get(k), sb)
-                }
-                sb.append('}')
-            }
-            e.isJsonArray -> {
-                sb.append('[')
-                e.asJsonArray.forEachIndexed { i, el -> if (i > 0) sb.append(','); write(el, sb) }
-                sb.append(']')
-            }
-            e.isJsonNull -> sb.append("null")
-            else -> {
-                val p = e.asJsonPrimitive
-                when {
-                    p.isString -> writeString(p.asString, sb)
-                    p.isBoolean -> sb.append(if (p.asBoolean) "true" else "false")
-                    else -> sb.append(p.asString) // number: source text (no .0, no exponent)
-                }
-            }
-        }
-    }
-
-    private fun writeString(s: String, sb: StringBuilder) {
-        sb.append('"')
-        for (c in s) when (c) {
-            '"' -> sb.append("\\\"")
-            '\\' -> sb.append("\\\\")
-            '\n' -> sb.append("\\n")
-            '\r' -> sb.append("\\r")
-            '\t' -> sb.append("\\t")
-            '\b' -> sb.append("\\b")
-            '\u000C' -> sb.append("\\f")
-            else -> if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
-        }
-        sb.append('"')
-    }
 }

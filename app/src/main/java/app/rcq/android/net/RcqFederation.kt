@@ -2,7 +2,6 @@ package app.rcq.android.net
 
 import android.util.Base64
 import com.google.gson.JsonArray
-import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
@@ -69,55 +68,12 @@ object RcqFederation {
     fun isFlagship(host: String): Boolean = host.lowercase() == FLAGSHIP_HOST
 
     // ─────────────────── canonical JSON (spec §2.2) ───────────────────
-    // Recursively sorted keys, compact, numbers as source text, slashes +
-    // non-ASCII unescaped, UTF-8. Byte-for-byte identical to the relay-config
-    // writer in RelayConfigStore (kept in sync deliberately).
+    // The writer itself is [CanonicalJson], shared with the relay config and
+    // the .rcq site manifests. It used to be copied here; three copies of a
+    // signing format is three chances for one platform to quietly stop
+    // verifying, so there is one.
 
-    private fun canonical(e: JsonElement): String = StringBuilder().also { write(e, it) }.toString()
-
-    private fun write(e: JsonElement, sb: StringBuilder) {
-        when {
-            e.isJsonObject -> {
-                sb.append('{')
-                e.asJsonObject.keySet().sorted().forEachIndexed { i, k ->
-                    if (i > 0) sb.append(',')
-                    writeString(k, sb); sb.append(':'); write(e.asJsonObject.get(k), sb)
-                }
-                sb.append('}')
-            }
-            e.isJsonArray -> {
-                sb.append('[')
-                e.asJsonArray.forEachIndexed { i, el -> if (i > 0) sb.append(','); write(el, sb) }
-                sb.append(']')
-            }
-            e.isJsonNull -> sb.append("null")
-            else -> {
-                val p = e.asJsonPrimitive
-                when {
-                    p.isString -> writeString(p.asString, sb)
-                    p.isBoolean -> sb.append(if (p.asBoolean) "true" else "false")
-                    else -> sb.append(p.asString) // number: source text (no .0, no exponent)
-                }
-            }
-        }
-    }
-
-    private fun writeString(s: String, sb: StringBuilder) {
-        sb.append('"')
-        for (c in s) when (c) {
-            '"' -> sb.append("\\\"")
-            '\\' -> sb.append("\\\\")
-            '\n' -> sb.append("\\n")
-            '\r' -> sb.append("\\r")
-            '\t' -> sb.append("\\t")
-            '\b' -> sb.append("\\b")
-            '\u000C' -> sb.append("\\f")
-            else -> if (c < ' ') sb.append("\\u%04x".format(c.code)) else sb.append(c)
-        }
-        sb.append('"')
-    }
-
-    private fun canonicalBytes(o: JsonObject): ByteArray = canonical(o).toByteArray(Charsets.UTF_8)
+    private fun canonicalBytes(o: JsonObject): ByteArray = CanonicalJson.bytes(o)
 
     // ─────────────────── the home-island record (spec §2) ───────────────────
 
