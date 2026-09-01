@@ -5337,16 +5337,21 @@ class Session(context: Context) {
         return resp.new_uin
     }
 
-    /** Take [uin] from the UIN shop. With [switch] false (the default) the
-     *  number joins this account's collection and nothing else changes — the
-     *  account keeps answering as it does. With [switch] true the server
-     *  performs the SAME migration as [migrateToNewUin], so local handling is
-     *  identical: history survives (peer-keyed), contacts/groups re-sync.
+    /** Take [uin] from the UIN shop, moving this account onto it.
+     *
+     *  ⚠⚠ [switch] now defaults to TRUE, and false is refused by the island.
+     *  Collections closed on 2026-09-01: taking a number without moving onto it
+     *  is how 161 numbers ended up parked in 54 private hoards while the short
+     *  ones everyone else picks from ran out. Taking one means becoming it, and
+     *  the server performs the SAME migration as [migrateToNewUin], so local
+     *  handling is identical: history survives (peer-keyed), contacts and
+     *  groups re-sync.
      *
      *  A 409 (someone grabbed it first between quote and purchase) maps to
-     *  [PurchaseResult.Taken] so the shop can prompt for a different number;
-     *  other failures bubble up as [PurchaseResult.Other]. */
-    suspend fun purchaseUin(uin: Int, switch: Boolean = false): PurchaseResult {
+     *  [PurchaseResult.Taken] so the shop can prompt for a different number; a
+     *  403 on a short or patterned number is [PurchaseResult.Reserved]; other
+     *  failures bubble up as [PurchaseResult.Other]. */
+    suspend fun purchaseUin(uin: Int, switch: Boolean = true): PurchaseResult {
         val resp = try {
             api.purchaseUin(uin, switch)
         } catch (e: Exception) {
@@ -5355,6 +5360,8 @@ class Session(context: Context) {
             // is full" are different answers to the user, so tell them apart by
             // the code the island sends rather than by the status alone.
             return when {
+                msg.contains("reserved") -> PurchaseResult.Reserved
+                msg.contains("collections_closed") -> PurchaseResult.Reserved
                 msg.contains("too_many_uins") -> PurchaseResult.TooMany
                 msg.contains("HTTP 409") -> PurchaseResult.Taken
                 else -> PurchaseResult.Other(msg)
@@ -5488,6 +5495,10 @@ class Session(context: Context) {
          *  the collection afterwards. */
         data class Held(val owned: List<Int>) : PurchaseResult()
         object Taken : PurchaseResult()
+        /** The island keeps this one as stock: short (six digits or fewer) or a
+         *  recognisable shape. Not "try again later" — it is not on offer, and
+         *  the answer is a different number. */
+        object Reserved : PurchaseResult()
         /** The collection is full. The island caps how many numbers one
          *  account may hold, so the answer is "let one go first", not
          *  "try another number". */
