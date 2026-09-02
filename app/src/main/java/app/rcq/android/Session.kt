@@ -2968,6 +2968,18 @@ class Session(context: Context) {
             MultihomeStore.wipeAll()
             CrossIslandRequestsStore.wipeAll()
         }
+        // ⚠ Two more device-wide stores the account loop cannot reach, and the
+        // same promise broken: the island pins are the list of every island
+        // this phone ever dialled (host, port and the hour of the first
+        // connection) and the site pins the list of every `.rcq` site it
+        // opened. Both are plain files, both outlived a wipe that had just
+        // erased the multihome and visited-island rows the private islands
+        // appear in — so the one place they were still written down was the
+        // trust store nothing cleared.
+        runCatching {
+            app.rcq.android.net.IslandTrust.wipeAll(appCtx)
+            app.rcq.android.sites.SitePins.wipeAll(appCtx)
+        }
         // The install id lived in its own prefs file that nothing above touches,
         // and the island keeps it next to the uin. Left alone, the number this
         // phone registers next arrives wearing the erased account's name tag

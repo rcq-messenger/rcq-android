@@ -28,8 +28,8 @@ import com.google.gson.reflect.TypeToken
  * and per-account pins would silently reset every key warning on an account
  * switch — which is the one moment a warning is worth most. The cost is that
  * the pin file records which sites this DEVICE has opened; it is the same trade
- * web-chat makes in localStorage, and the panic wipe clears it with everything
- * else under the app's data directory.
+ * web-chat makes in localStorage, and [wipeAll] is what the panic wipe clears
+ * it with everything else through.
  */
 object SitePins {
 
@@ -72,6 +72,18 @@ object SitePins {
 
     fun forget(addr: SiteAddress) {
         write(read() - addr.pinKey)
+    }
+
+    /** The panic wipe. ⚠ The paragraph above used to claim this happened by
+     *  itself, "with everything else under the app's data directory" — nothing
+     *  in the wipe touched shared_prefs, so what stayed behind was the list of
+     *  every `.rcq` site this device had opened. `commit`, not `apply`: the
+     *  phone may be taken away before a queued write lands. */
+    fun wipeAll(ctx: Context) {
+        // Nothing but a site read ever opens this file, so the wiping process
+        // may never have touched it.
+        init(ctx)
+        prefs?.edit()?.clear()?.commit()
     }
 
     private fun read(): Map<String, String> {
