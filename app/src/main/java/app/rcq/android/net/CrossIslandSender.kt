@@ -76,12 +76,22 @@ object CrossIslandSender {
         // real key: §5e profile broadcasts, sealed deposits to foreign islands,
         // contact-request cards. See [DuressGate].
         app.rcq.android.security.DuressGate.check()
-        if (host in needsTunnel && SingBoxTransport.engageForBlockedDestination(host)) {
+        // The memo outlives a refusal, so it is asked the same question as the
+        // catch below: a refused island must not ride the tunnel either.
+        if (host in needsTunnel && !IslandTrust.isHostRefused(host) &&
+            SingBoxTransport.engageForBlockedDestination(host)
+        ) {
             return call(http())
         }
         return try {
             call(http())
         } catch (e: java.io.IOException) {
+            // ⚠ A refused certificate is not a blocked route (design §5.5): a
+            // foreign island whose operator rotated its certificate answered
+            // perfectly well, and pulling relays to re-attempt the same refused
+            // handshake through them lights the shield and reports a hostile
+            // network for an island that is simply waiting on the person.
+            if (IslandTrust.isChangedRefusal(e)) throw e
             // Already tunnelled: a failure here is the island or the relay path,
             // and re-running the same call would only double the wait.
             if (SingBoxTransport.proxy() != null) throw e

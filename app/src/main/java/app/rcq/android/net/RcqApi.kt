@@ -165,12 +165,27 @@ class RcqApi(
         // — or write to — the real account. See [DuressGate].
         app.rcq.android.security.DuressGate.check()
         if (isPrimary || !autoEngage) return call(http())
-        if (host in blockedHosts && SingBoxTransport.engageForBlockedDestination("api:$host")) {
+        // ⚠ Not through the memo either: the entry outlives the refusal, so a
+        // host found blocked in the morning would keep forcing the tunnel on
+        // for a certificate the person has yet to judge — and keep it on after
+        // they accept it.
+        if (host in blockedHosts && !IslandTrust.isHostRefused(host) &&
+            SingBoxTransport.engageForBlockedDestination("api:$host")
+        ) {
             return call(http())
         }
         return try {
             call(http())
         } catch (e: IOException) {
+            // ⚠ A trust refusal is NOT a blocked route (design §5.5). It
+            // arrives here as the SSLHandshakeException Conscrypt wrapped
+            // IslandTrustRefused in, which is an IOException like any other,
+            // and without this the island that refused pulled relay configs,
+            // lit the shield, re-attempted the same refused handshake through
+            // the tunnel and left this host tunnelled for the rest of the
+            // process. Session's ladder was taught the third state; this
+            // second ladder, the one every non-primary island takes, was not.
+            if (IslandTrust.isChangedRefusal(e)) throw e
             // Already tunnelled: another attempt would only double the wait.
             if (SingBoxTransport.proxy() != null) throw e
             if (!SingBoxTransport.engageForBlockedDestination("api:$host")) throw e
