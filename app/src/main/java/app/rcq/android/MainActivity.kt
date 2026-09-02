@@ -427,6 +427,9 @@ private fun RcqApp(session: Session) {
     var showNearby by remember { mutableStateOf(false) }
     var showRadio by remember { mutableStateOf(false) }
     var showSites by remember { mutableStateOf(false) }
+    // The address the browser opens on, when it was opened by tapping one in
+    // a message rather than from the overflow menu (null = the catalogue).
+    var sitesAddress by remember { mutableStateOf<String?>(null) }
     var showRestore by remember { mutableStateOf(false) }
     var showOutgoing by remember { mutableStateOf(false) }
 
@@ -477,7 +480,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; sitesAddress = null; showRestore = false; showOutgoing = false
     }
 
     // #655: the island said the active account no longer exists (burned from
@@ -546,6 +549,20 @@ private fun RcqApp(session: Session) {
     // pending until there IS an account and the PIN is off, rather than being
     // dropped because the app happened to be launched cold and locked.
     val sharePending by ShareIntake.pending.collectAsState()
+    // A `.rcq` address tapped in a message body. The renderer that draws it
+    // sits inside a bubble and holds no navigation state, so it parks the
+    // address (app.rcq.android.ui.SiteOpen) and this is what moves the UI —
+    // the same shape a share handoff and a notification tap already use.
+    val sitePending by app.rcq.android.ui.SiteOpen.pending.collectAsState()
+    LaunchedEffect(sitePending, state, locked) {
+        val raw = sitePending ?: return@LaunchedEffect
+        // Waits, rather than being dropped, if the PIN lock came up between
+        // the tap and here.
+        if (state !is UiState.Registered || locked) return@LaunchedEffect
+        app.rcq.android.ui.SiteOpen.pending.value = null
+        sitesAddress = raw
+        showSites = true
+    }
     LaunchedEffect(state, locked, notifOpen) {
         val req = notifOpen ?: return@LaunchedEffect
         if (state !is UiState.Registered || locked) return@LaunchedEffect
@@ -584,6 +601,7 @@ private fun RcqApp(session: Session) {
             showNearby = false
             showRadio = false
             showSites = false
+            sitesAddress = null
             showProfile = false
             showManageAccounts = false
             showOutgoing = false
@@ -633,6 +651,11 @@ private fun RcqApp(session: Session) {
                 // room opened from the strip over a chat ate one Back to close
                 // the INVISIBLE chat underneath and needed a second to leave.
                 showAudioRooms -> showAudioRooms = false
+                // ⚠ The browser outranks a chat too, for the same reason the
+                // room screen does: it is opened FROM one, by tapping an
+                // address in a message. Popped here, Back lands back in the
+                // chat the address was read in.
+                showSites -> { showSites = false; sitesAddress = null }
                 // peerInfo first to match the render precedence (a profile
                 // opened from group-info sits on top of it).
                 peerInfoUin != null -> peerInfoUin = null
@@ -644,7 +667,6 @@ private fun RcqApp(session: Session) {
                 showRandom -> showRandom = false
                 showNearby -> showNearby = false
                 showRadio -> showRadio = false
-                showSites -> showSites = false
                 showProfile -> showProfile = false
                 // ⚠ The flags go with it. Leaving them set meant the NEXT
                 // time Settings was opened by hand it jumped straight back
@@ -749,6 +771,17 @@ private fun RcqApp(session: Session) {
                 session,
                 onBack = { showAudioRooms = false },
             )
+            // ⚠ The `.rcq` browser outranks a chat, a profile and the info
+            // screens, for the same reason the room screen above it does: an
+            // address is tapped INSIDE a message, so the chat is still open
+            // underneath. Below them the flag would flip, the chat branch
+            // would keep winning, and the tap would do nothing at all — the
+            // 0.142 room bug, verbatim. Back pops it and returns to the chat.
+            s is UiState.Registered && showSites -> app.rcq.android.ui.SitesScreen(
+                session,
+                onBack = { showSites = false; sitesAddress = null },
+                initialAddress = sitesAddress,
+            )
             // peerInfo is checked BEFORE groupInfo so that opening a member's
             // profile FROM the group-info screen (which leaves groupInfoId set)
             // shows the profile, and backing out of it returns to group-info.
@@ -823,10 +856,6 @@ private fun RcqApp(session: Session) {
                 session,
                 onBack = { showRadio = false },
             )
-            s is UiState.Registered && showSites -> app.rcq.android.ui.SitesScreen(
-                session,
-                onBack = { showSites = false },
-            )
             s is UiState.Registered && showProfile -> ProfileEditScreen(
                 session,
                 onBack = {
@@ -866,7 +895,7 @@ private fun RcqApp(session: Session) {
                     onOpenAudioRooms = { showAudioRooms = true },
                     onOpenNearby = { showNearby = true },
                     onOpenRadio = { showRadio = true },
-                    onOpenSites = { showSites = true },
+                    onOpenSites = { sitesAddress = null; showSites = true },
                     onOpenRandom = { showRandom = true },
                     onSwitchAccount = ::switchAccount,
                     onAddAccount = ::addAccount,
