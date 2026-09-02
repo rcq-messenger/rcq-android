@@ -3412,7 +3412,11 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
     // adopt) could never run. Pressing Save on a disagreement raises the
     // banner below instead of switching.
     val disagrees = entry is app.rcq.android.net.IslandTrust.Entry.Disagrees
-    val isDirty = target != current && (addressError == null || disagrees)
+    // ⚠ And it enables Save for the island already in use, where `target ==
+    // current` and nothing would be switched: the FRAGMENT is what changed,
+    // and typing one for the island you are on is the commonest way to reach
+    // this at all. Pressing Save there raises the notice, never a switch.
+    val isDirty = disagrees || (target != current && addressError == null)
     val onCustom = current != RcqApi.DEFAULT_HOST
 
     fun applySwitch(input: String?, inviteCode: String?) {
