@@ -1111,7 +1111,7 @@
     <string name="myreports_delete_error">没能移除，请再试一次。</string>
     <string name="myreports_remove_title">要从列表中移除吗？</string>
     <string name="myreports_remove_body">它会从你的列表中消失。反馈本身仍留在我们这里，也仍然计入名人堂。</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">编辑</string>
     <string name="myreports_edited">已编辑</string>
     <string name="myreports_edit_locked">这条反馈已经有回复了，正文不能再改。</string>

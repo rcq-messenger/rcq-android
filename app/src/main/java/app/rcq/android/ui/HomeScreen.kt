@@ -992,7 +992,7 @@ internal fun HomeScreen(
                             // name must never be able to pass as a local contact.
                             // host "" = a same-island stranger from the Privacy
                             // quarantine: a plain #uin, not a dangling "@".
-                            val address = if (r.host.isEmpty()) "#${r.uin}" else "${r.uin}@${r.host}"
+                            val address = if (r.host.isEmpty()) "${r.uin}" else "${r.uin}@${r.host}"
                             CiPendingRow(
                                 tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
                                 preview = r.preview.ifEmpty {
@@ -1308,7 +1308,7 @@ internal fun HomeScreen(
         previewContact?.let { ct ->
             PreviewOverlay(
                 title = session.contactName(ct.uin),
-                subtitle = "#${ct.uin}",
+                subtitle = "${ct.uin}",
                 // No host: a PERSON's picture always lives on OUR island —
                 // ours natively, a cross-island contact's because §5e DEPOSITS
                 // the blob here rather than having us pull it from theirs.
@@ -1555,8 +1555,8 @@ internal fun HomeScreen(
                 if (byKey.containsKey(key)) continue
                 byKey[key] = SectionCandidate(
                     key = key,
-                    title = session.contactName(ct.uin).ifBlank { "#${ct.uin}" },
-                    subtitle = if (ct.host != null) "#${ct.uin} \u00b7 ${ct.host}" else "#${ct.uin}",
+                    title = session.contactName(ct.uin).ifBlank { "${ct.uin}" },
+                    subtitle = if (ct.host != null) "${ct.uin} \u00b7 ${ct.host}" else "${ct.uin}",
                     group = false,
                     avatar = { PersonAvatar(ct.avatarMediaId, ct.avatarMediaKey, ct.presence, session, 30.dp) },
                 )
@@ -1906,7 +1906,7 @@ private fun HomeHeader(
                                         color = c.textSecondary, fontSize = 12.sp,
                                     )
                                 }
-                                a.uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
+                                a.uin?.let { Text("$it", color = c.textMono, fontSize = 12.sp) }
                             }
                         },
                         // The account's own face, from the cache it wrote when it
@@ -1995,7 +1995,7 @@ private fun HomeHeader(
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenProfile).padding(horizontal = 6.dp, vertical = 4.dp),
             ) {
                 Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
-                Text("#$uin", color = chrome.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+                Text("$uin", color = chrome.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
             }
             // Right of the nick/UIN: a status-width slot holding the shield
             // while the app is going through RCQ relays (iOS StealthHeaderBadge
@@ -2294,7 +2294,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("#${contact.uin}", color = c.textMono, fontSize = 12.sp)
+                Text("${contact.uin}", color = c.textMono, fontSize = 12.sp)
                 val ctx = LocalContext.current
                 // ⚠ Order matters, and it used to be the other way round: a
                 // status message won outright, so an OFFLINE contact who had
@@ -2675,7 +2675,7 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
                     StatusIcon(ct.presence, size = 26.dp)
                     Column {
                         Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
-                        Text("#${ct.uin}", color = c.textMono, fontSize = 12.sp)
+                        Text("${ct.uin}", color = c.textMono, fontSize = 12.sp)
                     }
                 }
             }
@@ -2960,7 +2960,7 @@ private fun AddContactDialog(
                             // is2 typing an api number must see the mismatch
                             // (beta report: the request "never arrived").
                             val known = (resolved as? Session.UinLookup.Found)?.info
-                            AddResultRow(known?.nickname?.takeIf { it.isNotBlank() } ?: "#$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
+                            AddResultRow(known?.nickname?.takeIf { it.isNotBlank() } ?: "$digits", stringResource(R.string.add_on_own_island, session.currentServer), accent = true) {
                                 // Open the profile first so you can preview before
                                 // sending the request (the profile has the button).
                                 // ⚠ Pinned to our island: the row promises "on
@@ -3070,7 +3070,7 @@ private fun AddContactDialog(
                                 .filter { it.isNotEmpty() }
                                 .distinct()
                                 .joinToString(" · ")
-                            AddResultRow("#${u.uin}", sub) {
+                            AddResultRow("${u.uin}", sub) {
                                 // Contact → open chat; not yet a contact → open the
                                 // profile preview where you can send the request.
                                 if (already) onOpenChat(u.uin) else onOpenProfile(u.uin)
@@ -3078,7 +3078,7 @@ private fun AddContactDialog(
                         }
                         groups.forEach { g ->
                             AddResultRow(
-                                g.name ?: "#${g.id}",
+                                g.name ?: "${g.id}",
                                 memberCountLabel(g.member_count),
                                 isGroup = true,
                                 session = session,
@@ -3147,7 +3147,7 @@ private fun GroupJoinConfirmSheet(
             GroupAvatarMedia(preview.avatar_media_id, preview.avatar_media_key, session, 44.dp)
             Column(Modifier.weight(1f)) {
                 Text(
-                    preview.name?.takeIf { it.isNotBlank() } ?: "#${preview.id}",
+                    preview.name?.takeIf { it.isNotBlank() } ?: "${preview.id}",
                     color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )

@@ -2384,6 +2384,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     modifier = Modifier.fillMaxWidth().focusRequester(editFocus),
                 )
             }
+            // A message being edited can name somebody too (#862). Same picker
+            // as the composer, and here the caret really can be in the middle
+            // of the text, which is why [Mentions.query] looks behind it rather
+            // than at the tail.
+            if (isGroup) {
+                val eq = Mentions.query(editValue.text, editValue.selection.end)
+                if (eq != null) {
+                    val (eStart, ePartial) = eq
+                    MentionPickerList(
+                        candidates = Mentions.candidates(
+                            group?.members ?: emptyList(), ePartial, { it.nickname }, { it.uin }, ownUin,
+                        ),
+                        nickname = { it.nickname },
+                        uin = { it.uin },
+                        onPick = { mbr ->
+                            val (text, caret) = Mentions.applied(editValue.text, eStart, ePartial, mbr.nickname)
+                            editValue = TextFieldValue(text, selection = TextRange(caret))
+                        },
+                    )
+                }
+            }
             SheetGap()
             SheetTextRow(stringResource(R.string.common_save)) {
                 val newText = editValue.text.trim()
@@ -2695,46 +2716,18 @@ private fun Composer(
         // @-mention autocomplete (groups): an "@partial" at the input tail pops a
         // member picker; tapping inserts "@nick ". iOS parity (activeMentionQuery).
         if (isGroup) {
-            val q: Pair<Int, String>? = run {
-                var i = draft.length
-                while (i > 0) {
-                    val ch = draft[i - 1]
-                    if (ch == '@') {
-                        val partial = draft.substring(i)
-                        return@run if (partial.isNotEmpty()) (i - 1) to partial else null
-                    }
-                    if (ch.isWhitespace()) return@run null
-                    i--
-                }
-                null
-            }
-            val candidates = q?.let { (_, partial) ->
-                val p = partial.lowercase()
-                members.filter { it.uin != ownUin && it.nickname.lowercase().contains(p) }.take(8)
-            } ?: emptyList()
-            if (q != null && candidates.isNotEmpty()) {
+            // The list appears as soon as the `@` is typed, in alphabetical
+            // order with names that BEGIN with what was typed first - see
+            // [Mentions] for why each of those is a repair and not a taste.
+            val q = Mentions.query(draft, draft.length)
+            if (q != null) {
                 val (mStart, mPartial) = q
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
-                        .heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp)).background(c.bgSecondary),
-                ) {
-                    LazyColumn {
-                        items(candidates, key = { it.uin }) { mbr ->
-                            Row(
-                                Modifier.fillMaxWidth().clickable {
-                                    setDraft(
-                                        draft.substring(0, mStart) + "@" + mbr.nickname + " " +
-                                            draft.substring(mStart + 1 + mPartial.length),
-                                    )
-                                }.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(mbr.nickname, color = c.textPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                                Text("#${mbr.uin}", color = c.textMono, fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
+                MentionPickerList(
+                    candidates = Mentions.candidates(members, mPartial, { it.nickname }, { it.uin }, ownUin),
+                    nickname = { it.nickname },
+                    uin = { it.uin },
+                    onPick = { mbr -> setDraft(Mentions.applied(draft, mStart, mPartial, mbr.nickname).first) },
+                )
             }
         }
         Row(

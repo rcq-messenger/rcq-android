@@ -1111,7 +1111,7 @@
     <string name="myreports_delete_error">No se pudo quitar. Inténtalo otra vez.</string>
     <string name="myreports_remove_title">¿Quitar de la lista?</string>
     <string name="myreports_remove_body">Desaparece de tu lista. El informe sigue con nosotros y sigue contando para el salón de la fama.</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">Editar</string>
     <string name="myreports_edited">editado</string>
     <string name="myreports_edit_locked">Este informe ya tiene respuesta, así que su texto ya no cambia.</string>

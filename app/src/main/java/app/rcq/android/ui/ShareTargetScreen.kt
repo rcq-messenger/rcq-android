@@ -141,7 +141,7 @@ fun ShareTargetScreen(
             items(people, key = { "p${it.uin}" }) { ct ->
                 ShareRow(
                     title = session.contactName(ct.uin),
-                    subtitle = "#${ct.uin}",
+                    subtitle = "${ct.uin}",
                     onClick = { onPick(ChatTarget.Peer(ct.uin)) },
                 ) {
                     // No host: a person's picture is on OUR island either way —

@@ -72,6 +72,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.layout.imePadding
+import androidx.lifecycle.repeatOnLifecycle
 
 /** A tap-row for a sheet that brings its own body: [RcqAskSheet] lays out its
  *  actions and appends a cancel by itself, [RcqSheet] leaves both to the caller.
@@ -125,6 +127,25 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // that actually shows the members — asks for it on arrival. No-op when it
     // is already here or when the group lives on another island.
     androidx.compose.runtime.LaunchedEffect(groupId) { session.ensureRoster(groupId) }
+
+    // ⚠ A roster carries PRESENCE, and presence is a snapshot of the moment it
+    // was fetched. A screen left open, or reopened from the cache, put whoever
+    // came online since at the bottom under "everyone else" and kept whoever
+    // left near the top (#859, and the founder the same day). So it is asked
+    // again whenever this screen comes back to the front, and on a timer for
+    // rooms small enough that a roster is cheap - the flagship's two thousand
+    // members are hundreds of kilobytes and that one is left alone.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.LaunchedEffect(groupId, lifecycle) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            session.ensureRoster(groupId, refresh = true)
+            val small = (session.group(groupId)?.members?.size ?: 0) <= 200
+            while (small) {
+                kotlinx.coroutines.delay(45_000)
+                session.ensureRoster(groupId, refresh = true)
+            }
+        }
+    }
     val ownUin = session.uin ?: 0
     val isOwner = group?.ownerUin == ownUin
     var confirmDestructive by remember { mutableStateOf(false) }
@@ -212,7 +233,12 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // scrolls away with the list. With exactly one vertical scroller nothing
     // can starve, and there is no nested vertical scrolling (a Compose crash)
     // to dodge.
-    LazyColumn(Modifier.fillMaxSize().background(c.bgPrimary)) {
+    // ⚠ `imePadding`, or the keyboard raised by the member search sits on top
+    // of the results it is filtering: with a long roster the last rows were
+    // under it, and the only way to read them was to dismiss the keyboard,
+    // which is the opposite of searching (#860). The padding is on the list, so
+    // the rows move up with it and the whole roster stays reachable.
+    LazyColumn(Modifier.fillMaxSize().imePadding().background(c.bgPrimary)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = c.accent, modifier = Modifier.size(26.dp).clickable(onClick = onBack))
@@ -492,7 +518,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         )
                         Column(Modifier.weight(1f)) {
                             Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)
-                            Text("#${m.uin}", color = c.textMono, fontSize = 12.sp)
+                            Text("${m.uin}", color = c.textMono, fontSize = 12.sp)
                         }
                         if (m.uin == group.ownerUin) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {

@@ -149,7 +149,7 @@ fun NearbyScreen(session: Session, onBack: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(p.nickname, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                                 Text(
-                                    if (p.anonymous) stringResource(R.string.nearby_stranger) else "#${p.uin}",
+                                    if (p.anonymous) stringResource(R.string.nearby_stranger) else "${p.uin}",
                                     color = c.textSecondary, fontSize = 12.sp,
                                 )
                             }

@@ -116,7 +116,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     val crossIslandHost = contact?.host ?: groupHost?.takeIf { !here }
     // ⚠ "The island answered 404" is a different fact from "the island did not
     // answer", and this screen used to lose the difference: loadPeerProfile
-    // returned null for both, the card fell back to "#$uin", and a number nobody
+    // returned null for both, the card fell back to "$uin", and a number nobody
     // holds was drawn as a person with an avatar, a presence dot and a button
     // offering to send them a contact request (#483).
     var notFound by remember(uin) { mutableStateOf(false) }
@@ -147,7 +147,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     // who you are actually talking to.
     val aliases by app.rcq.android.data.LocalStores.aliases.collectAsState()
     val alias = aliases[app.rcq.android.data.LocalStores.aliasKey(uin, crossIslandHost)]
-    val theirNickname = profile?.nickname ?: ciCardName ?: contact?.nickname ?: "#$uin"
+    val theirNickname = profile?.nickname ?: ciCardName ?: contact?.nickname ?: "$uin"
     val nickname = alias ?: theirNickname
     var editAlias by remember(uin) { mutableStateOf<String?>(null) }
     val presence = contact?.presence ?: UserStatus.OFFLINE
@@ -318,7 +318,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("UIN", color = c.textSecondary, fontSize = 12.sp)
-                    Text(fullAddress ?: "#$uin", color = c.textMono, fontSize = 15.sp)
+                    Text(fullAddress ?: "$uin", color = c.textMono, fontSize = 15.sp)
                 }
                 Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary, modifier = Modifier.size(18.dp))
             }

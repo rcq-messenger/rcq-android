@@ -1111,7 +1111,7 @@
     <string name="myreports_delete_error">Не вдалося прибрати. Спробуйте ще раз.</string>
     <string name="myreports_remove_title">Прибрати зі списку?</string>
     <string name="myreports_remove_body">Звернення зникне з твого списку. Саме воно лишається у нас і далі рахується в залі слави.</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">Змінити</string>
     <string name="myreports_edited">змінено</string>
     <string name="myreports_edit_locked">На це звернення вже відповіли, тому текст більше не змінюється.</string>

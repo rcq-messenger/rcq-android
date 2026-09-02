@@ -53,7 +53,7 @@ class AudioRoomController(
 
     private fun memberOf(m: com.google.gson.JsonObject, uin: Int): Member = Member(
         uin = uin,
-        nickname = m.get("nickname")?.takeIf { !it.isJsonNull }?.asString ?: "#$uin",
+        nickname = m.get("nickname")?.takeIf { !it.isJsonNull }?.asString ?: "$uin",
         mutedByOwner = m.get("muted_by_owner")?.takeIf { !it.isJsonNull }?.asBoolean ?: false,
         avatarMediaId = m.get("avatar_media_id")?.takeIf { !it.isJsonNull }?.asString,
         avatarMediaKey = m.get("avatar_media_key")?.takeIf { !it.isJsonNull }?.asString,
