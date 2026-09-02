@@ -1282,11 +1282,11 @@
     <string name="island_trust_changed_typed">%1$s apresentou uma impressão digital diferente da que você digitou.</string>
     <string name="island_trust_changed_short">%1$s apresentou um certificado em que este aparelho não confia. Decida no aviso.</string>
     <string name="island_trust_disagrees">Este aparelho já confia em %1$s com uma impressão digital diferente da digitada. Nada foi conectado; decida no aviso.</string>
-    <string name="island_trust_disagrees_banner">%1$s já está registrado com uma impressão digital diferente da digitada. Nenhuma conexão foi estabelecida.</string>
+    <string name="island_trust_changed_entered">A impressão digital digitada para %1$s difere daquela em que este aparelho já confia.</string>
     <string name="island_trust_not_an_address">Não é um endereço de ilha. Uma ilha é um host, com porta se não for a 443: island.example:8443</string>
     <string name="island_trust_on_file">Guardada</string>
     <string name="island_trust_presented">Apresentada agora</string>
-    <string name="island_trust_entered">Digitada agora</string>
+    <string name="island_trust_entered">Digitada</string>
     <string name="island_trust_via_ca">uma autoridade certificadora</string>
     <string name="island_trust_accept">Confiar na nova impressão digital</string>
     <string name="island_trust_later">Agora não</string>

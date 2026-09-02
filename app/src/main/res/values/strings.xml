@@ -1335,11 +1335,11 @@
     <string name="island_trust_changed_typed">%1$s presented a different fingerprint than the one you entered.</string>
     <string name="island_trust_changed_short">%1$s presented a certificate this device does not trust. Decide at the notice.</string>
     <string name="island_trust_disagrees">This device already trusts %1$s with a different fingerprint than the one entered. Nothing was connected; decide at the notice.</string>
-    <string name="island_trust_disagrees_banner">%1$s is already on file with a different fingerprint than the one entered. Nothing was dialled.</string>
+    <string name="island_trust_changed_entered">The fingerprint entered for %1$s differs from the one this device already trusts.</string>
     <string name="island_trust_not_an_address">Not an island address. An island is a host, with a port if it is not 443: island.example:8443</string>
     <string name="island_trust_on_file">On file</string>
     <string name="island_trust_presented">Presented now</string>
-    <string name="island_trust_entered">Entered now</string>
+    <string name="island_trust_entered">Entered</string>
     <string name="island_trust_via_ca">a certificate authority</string>
     <string name="island_trust_accept">Trust the new fingerprint</string>
     <string name="island_trust_later">Not now</string>

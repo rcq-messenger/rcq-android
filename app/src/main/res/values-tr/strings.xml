@@ -1282,11 +1282,11 @@
     <string name="island_trust_changed_typed">%1$s, girdiğinizden farklı bir parmak izi sundu.</string>
     <string name="island_trust_changed_short">%1$s, bu cihazın güvenmediği bir sertifika sundu. Uyarıda karar verin.</string>
     <string name="island_trust_disagrees">Bu cihaz %1$s adasına zaten girilenden farklı bir parmak iziyle güveniyor. Hiçbir şey bağlanmadı; uyarıda karar verin.</string>
-    <string name="island_trust_disagrees_banner">%1$s zaten girilenden farklı bir parmak iziyle kayıtlı. Hiçbir bağlantı kurulmadı.</string>
+    <string name="island_trust_changed_entered">%1$s için girilen parmak izi, bu cihazın zaten güvendiğinden farklı.</string>
     <string name="island_trust_not_an_address">Bu bir ada adresi değil. Adres bir sunucu adıdır, 443 değilse portuyla: island.example:8443</string>
     <string name="island_trust_on_file">Kayıtlı</string>
     <string name="island_trust_presented">Şimdi sunulan</string>
-    <string name="island_trust_entered">Şimdi girilen</string>
+    <string name="island_trust_entered">Girilen</string>
     <string name="island_trust_via_ca">bir sertifika otoritesi</string>
     <string name="island_trust_accept">Yeni parmak izine güven</string>
     <string name="island_trust_later">Şimdi değil</string>
