@@ -3367,22 +3367,9 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
                     // screen and stops here too. What goes on to the gate
                     // and the registration is the bare host:port, with the
                     // typed pin already on file.
-                    val h = when (val e = app.rcq.android.net.IslandTrust.adopt(host)) {
-                        is app.rcq.android.net.IslandTrust.Entry.Ok -> e.hostPort
-                        is app.rcq.android.net.IslandTrust.Entry.Empty -> null
-                        is app.rcq.android.net.IslandTrust.Entry.Malformed -> {
-                            err = ctx.getString(R.string.csrv_unreachable); return@TextButton
-                        }
-                        is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint -> {
-                            err = ctx.getString(R.string.island_trust_not_fingerprint); return@TextButton
-                        }
-                        is app.rcq.android.net.IslandTrust.Entry.CaOnly -> {
-                            err = ctx.getString(R.string.island_trust_ca_only, e.host); return@TextButton
-                        }
-                        is app.rcq.android.net.IslandTrust.Entry.Disagrees -> {
-                            err = ctx.getString(R.string.island_trust_disagrees, e.changed.hostPort); return@TextButton
-                        }
-                    }
+                    val entry = app.rcq.android.net.IslandTrust.adopt(host)
+                    islandAddressError(ctx, entry)?.let { err = it; return@TextButton }
+                    val h = (entry as? app.rcq.android.net.IslandTrust.Entry.Ok)?.hostPort
                     if (h != null && token.isNotBlank()) {
                         // Redeem the access token for this host FIRST (stores the
                         // durable token so the registration call passes the gate),

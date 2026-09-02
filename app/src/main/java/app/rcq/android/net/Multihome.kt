@@ -169,7 +169,7 @@ object Multihome {
                     return@runCatching null
                 }
                 val doc = JsonParser.parseString(jsonBytes.toString(Charsets.UTF_8)).asJsonObject
-                doc.getAsJsonArray("islands")?.mapNotNull { normalizeHost(it.asString) } ?: emptyList()
+                doc.getAsJsonArray("islands")?.mapNotNull { listedHost(it.asString) } ?: emptyList()
             }.getOrNull()
             if (islands != null) return islands
         }
@@ -220,12 +220,32 @@ object Multihome {
         http().newCall(req).execute().use { it.isSuccessful }
     }.getOrDefault(false)
 
-    /** `is2.rcq.app`, `https://is2.rcq.app/x` → `is2.rcq.app`. */
-    fun normalizeHost(input: String): String? = runCatching {
-        val t = input.trim().lowercase()
-        if (t.isEmpty()) return null
-        java.net.URI(if (t.contains("://")) t else "https://$t").host
-    }.getOrNull()
+    /**
+     * `is2.rcq.app`, `https://is2.rcq.app/x` → `is2.rcq.app`; a port is KEPT
+     * (`10.0.2.2:8443`) and a `#fp` fragment is taken on file before anything
+     * is dialled, the same [IslandTrust.adopt] backstop every other path runs
+     * (`Session.normalizeHost`).
+     *
+     * ⚠ This was `java.net.URI(…).host`, which drops both without a word, and
+     * this is what a backup home and a visited island are added through. The
+     * dropped port dialled 443 on an island that answers on 8443 and keyed the
+     * pin there, so a fingerprint typed for `host:8443` was never consulted —
+     * an island on a non-443 port could not be added at all. The dropped
+     * fragment connected on a first-use pin while the person believed they had
+     * pinned out of band, which is the failure design §3 exists to prevent.
+     *
+     * Null when it is not an address, when the fragment is not a fingerprint,
+     * or when the store disagrees with it (the banner is raised, nothing is
+     * dialled): the caller answers `invalid_host` and stops.
+     */
+    fun normalizeHost(input: String): String? =
+        (IslandTrust.adopt(input) as? IslandTrust.Entry.Ok)?.hostPort
+
+    /** A host out of the SIGNED island list: parsed, never pinned. A fetched
+     *  document does not get to write a fingerprint into the store, so a fragment
+     *  here (there is none today) drops the entry instead of adopting it. */
+    private fun listedHost(input: String): String? =
+        IslandTrust.splitAddress(input)?.takeIf { it.fragment == null }?.hostPort
 
     /** PUT the signed record to every backup home. Best-effort per island; a
      *  401 refreshes the token via recover once. 409 (stale ts) is fine — an

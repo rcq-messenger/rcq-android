@@ -996,18 +996,9 @@ class Session(context: Context) {
      *  they pinned. The forms validate before they get here; this is the
      *  backstop for every path that does not. */
     private fun normalizeHost(input: String?): String? {
-        val host = when (val e = app.rcq.android.net.IslandTrust.adopt(input)) {
-            is app.rcq.android.net.IslandTrust.Entry.Ok -> e.hostPort
-            is app.rcq.android.net.IslandTrust.Entry.Empty -> return null
-            is app.rcq.android.net.IslandTrust.Entry.Malformed ->
-                throw IllegalArgumentException(appCtx.getString(R.string.csrv_unreachable))
-            is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint ->
-                throw IllegalArgumentException(appCtx.getString(R.string.island_trust_not_fingerprint))
-            is app.rcq.android.net.IslandTrust.Entry.CaOnly ->
-                throw IllegalArgumentException(appCtx.getString(R.string.island_trust_ca_only, e.host))
-            is app.rcq.android.net.IslandTrust.Entry.Disagrees ->
-                throw IllegalArgumentException(appCtx.getString(R.string.island_trust_disagrees, e.changed.hostPort))
-        }
+        val entry = app.rcq.android.net.IslandTrust.adopt(input)
+        app.rcq.android.ui.islandAddressError(appCtx, entry)?.let { throw IllegalArgumentException(it) }
+        val host = (entry as? app.rcq.android.net.IslandTrust.Entry.Ok)?.hostPort ?: return null
         return host.takeIf { it != RcqApi.DEFAULT_HOST }
     }
 
