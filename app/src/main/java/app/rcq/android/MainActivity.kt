@@ -654,7 +654,10 @@ private fun RcqApp(session: Session) {
                 // ⚠ The browser outranks a chat too, for the same reason the
                 // room screen does: it is opened FROM one, by tapping an
                 // address in a message. Popped here, Back lands back in the
-                // chat the address was read in.
+                // chat the address was read in. This fires only from the
+                // browser's catalogue: with a page or an address error open,
+                // SitesScreen's own BackHandler (composed inside this one, so
+                // consulted first) takes Back and returns to the catalogue.
                 showSites -> { showSites = false; sitesAddress = null }
                 // peerInfo first to match the render precedence (a profile
                 // opened from group-info sits on top of it).
@@ -776,7 +779,9 @@ private fun RcqApp(session: Session) {
             // address is tapped INSIDE a message, so the chat is still open
             // underneath. Below them the flag would flip, the chat branch
             // would keep winning, and the tap would do nothing at all — the
-            // 0.142 room bug, verbatim. Back pops it and returns to the chat.
+            // 0.142 room bug, verbatim. Back from the catalogue pops it and
+            // returns to the chat; from a page it returns to the catalogue
+            // first, in SitesScreen's own handler.
             s is UiState.Registered && showSites -> app.rcq.android.ui.SitesScreen(
                 session,
                 onBack = { showSites = false; sitesAddress = null },
