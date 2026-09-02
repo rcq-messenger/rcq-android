@@ -358,13 +358,16 @@ internal fun HomeScreen(
     val trustFirstUse by app.rcq.android.net.IslandTrust.firstUse.collectAsState()
     val trustNotice = remember { SnackbarHostState() }
     val pendingFirstUse = trustFirstUse.firstOrNull()
+    // Held apart from the list because `noticed` empties it the moment the
+    // snackbar is answered, and the fingerprint has to survive the animation
+    // out; the body draws it in a fixed-width font, so it is not in the
+    // message string.
+    var noticeFp by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(pendingFirstUse?.key) {
         val n = pendingFirstUse ?: return@LaunchedEffect
+        noticeFp = n.fp
         trustNotice.showSnackbar(
-            message = context.getString(
-                R.string.island_trust_first_use, n.hostPort,
-                app.rcq.android.net.IslandTrust.displayFingerprint(n.fp),
-            ),
+            message = context.getString(R.string.island_trust_first_use, n.hostPort),
             actionLabel = context.getString(R.string.common_ok),
             duration = SnackbarDuration.Indefinite,
         )
@@ -1339,13 +1342,7 @@ internal fun HomeScreen(
         // per host. Not a modal: onboarding must not stop on a dialog most
         // people cannot evaluate; the careful person types `host#fp` instead.
         SnackbarHost(trustNotice, Modifier.align(Alignment.BottomCenter)) { data ->
-            Snackbar(
-                snackbarData = data,
-                actionOnNewLine = true,
-                containerColor = c.bgSecondary,
-                contentColor = c.textPrimary,
-                actionColor = c.accent,
-            )
+            IslandFirstUseSnackbar(data, noticeFp)
         }
     }
     } // CompositionLocalProvider(LocalHomeVeil)

@@ -1276,7 +1276,8 @@
     <string name="settings_economy_title">Modo ahorro (RCQ Lite)</string>
     <string name="settings_economy_desc">Esto ES RCQ Lite: no una app aparte, sino un interruptor aquí. Desactiva de una vez los avatares animados y los fondos, para un teléfono antiguo o lento.</string>
     <!-- Island trust: an island trusted by its certificate fingerprint rather than a CA (island-fingerprint-design.md §5) -->
-    <string name="island_trust_first_use">Primera conexión a %1$s. Su huella es:\n%2$s\nCompárala con la que publicó el operador antes de confiar en esta isla.</string>
+    <string name="island_trust_first_use">Primera conexión a %1$s. Su huella es:</string>
+    <string name="island_trust_first_use_check">Compárala con la que publicó el operador antes de confiar en esta isla.</string>
     <string name="island_trust_changed">%1$s presentó un certificado distinto de aquel en el que este dispositivo confía. Puede que alguien esté interceptando la conexión, o que el operador haya cambiado el certificado. Compara la nueva huella con la que publicó el operador antes de confiar en ella.</string>
     <string name="island_trust_changed_typed">%1$s presentó una huella distinta de la que introdujiste.</string>
     <string name="island_trust_changed_short">%1$s presentó un certificado en el que este dispositivo no confía. Decide en el aviso.</string>
