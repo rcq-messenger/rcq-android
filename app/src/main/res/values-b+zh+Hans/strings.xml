@@ -1274,7 +1274,8 @@
     <string name="settings_economy_title">省电模式(RCQ Lite)</string>
     <string name="settings_economy_desc">这就是 RCQ Lite:不是另一个应用,而是这里的一个开关。一次性关闭动画头像和聊天背景,适合较旧或较慢的手机。</string>
     <!-- Island trust: an island trusted by its certificate fingerprint rather than a CA (island-fingerprint-design.md §5) -->
-    <string name="island_trust_first_use">首次连接 %1$s。它的指纹是:\n%2$s\n在依赖这个岛之前,请与运营者公布的指纹核对。</string>
+    <string name="island_trust_first_use">首次连接 %1$s。它的指纹是:</string>
+    <string name="island_trust_first_use_check">在依赖这个岛之前,请与运营者公布的指纹核对。</string>
     <string name="island_trust_changed">%1$s 出示的证书与此设备信任的不同。可能有人在截取连接,也可能是运营者更换了证书。信任之前,请将新指纹与运营者公布的核对。</string>
     <string name="island_trust_changed_typed">%1$s 出示的指纹与你输入的不同。</string>
     <string name="island_trust_changed_short">%1$s 出示了此设备不信任的证书。请在提示中决定。</string>

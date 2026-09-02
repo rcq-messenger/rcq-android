@@ -1324,7 +1324,8 @@
     <string name="settings_economy_title">Экономный режим (RCQ Lite)</string>
     <string name="settings_economy_desc">Это и есть RCQ Lite: не отдельное приложение, а тумблер здесь. Разом выключает анимированные аватарки и обои, для старого или медленного телефона.</string>
     <!-- Island trust: an island trusted by its certificate fingerprint rather than a CA (island-fingerprint-design.md §5) -->
-    <string name="island_trust_first_use">Первое подключение к %1$s. Его отпечаток:\n%2$s\nСверьте его с тем, что опубликовал оператор, прежде чем полагаться на этот остров.</string>
+    <string name="island_trust_first_use">Первое подключение к %1$s. Его отпечаток:</string>
+    <string name="island_trust_first_use_check">Сверьте его с тем, что опубликовал оператор, прежде чем полагаться на этот остров.</string>
     <string name="island_trust_changed">%1$s предъявил не тот сертификат, которому доверяет это устройство. Возможно, соединение перехватывают, или оператор сменил сертификат. Сверьте новый отпечаток с тем, что опубликовал оператор, прежде чем ему доверять.</string>
     <string name="island_trust_changed_typed">%1$s предъявил не тот отпечаток, который вы ввели.</string>
     <string name="island_trust_changed_short">%1$s предъявил сертификат, которому это устройство не доверяет. Решите в уведомлении.</string>

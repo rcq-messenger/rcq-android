@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -115,6 +117,46 @@ internal fun IslandTrustBanner(ch: IslandTrust.Changed) {
             TextButton(onClick = { IslandTrust.accept(ch.key) }) {
                 Text(stringResource(R.string.island_trust_accept), color = c.accent)
             }
+        }
+    }
+}
+
+/**
+ * The first-use notice (design §5.1), with its own snackbar body.
+ *
+ * ⚠ The default `Snackbar(snackbarData = …)` draws the message in the theme's
+ * body style, which is proportional, and the fingerprint is 16 groups of 4
+ * wrapped four to a line: in a proportional font the columns drift, and this
+ * notice exists for exactly one purpose, holding four lines of hex next to
+ * what the operator published. The banner and the Settings row already set
+ * Monospace; the one place the fingerprint is FIRST seen did not.
+ */
+@Composable
+internal fun IslandFirstUseSnackbar(data: SnackbarData, fp: String?) {
+    val c = RcqTheme.colors
+    Snackbar(
+        actionOnNewLine = true,
+        containerColor = c.bgSecondary,
+        contentColor = c.textPrimary,
+        action = {
+            data.visuals.actionLabel?.let {
+                TextButton(onClick = { data.dismiss() }) { Text(it, color = c.accent) }
+            }
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(data.visuals.message, color = c.textPrimary, fontSize = 13.sp, lineHeight = 18.sp)
+            if (fp != null) {
+                Text(
+                    IslandTrust.displayFingerprint(fp),
+                    color = c.textPrimary, fontSize = 13.sp, lineHeight = 18.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            Text(
+                stringResource(R.string.island_trust_first_use_check),
+                color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+            )
         }
     }
 }
