@@ -1252,7 +1252,7 @@
     <string name="gi_links">Enlaces permitidos</string>
     <string name="gi_links_desc">Los miembros pueden enviar enlaces</string>
     <string name="gi_files">Archivos permitidos</string>
-    <string name="gi_files_desc">Los miembros pueden adjuntar archivos</string>
+    <string name="gi_files_desc">Los miembros pueden enviar fotos, vídeos y archivos. No: quedan bloqueados, los mensajes de voz sí se envían.</string>
     <string name="gi_age_gate">Periodo de espera para nuevos</string>
     <string name="gi_age_gate_desc">Los nuevos miembros primero leen y publican cuando llevan este tiempo en el grupo. Una expulsión reinicia la espera.</string>
     <string name="gi_slowmode">Modo lento</string>

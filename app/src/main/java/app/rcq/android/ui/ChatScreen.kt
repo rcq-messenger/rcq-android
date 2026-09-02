@@ -1041,14 +1041,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         if (granted) startRecording()
     }
     fun onMic() {
-        // A voice note is a file under the room's content policy (#755): the
-        // web gates startVoice on files_allowed, so the mic follows the same
-        // rule here. Before the permission ask, so a first-time refusal does
-        // not also raise the system permission dialog over the toast.
-        if (filesOff) {
-            android.widget.Toast.makeText(context, context.getString(R.string.chat_files_off), android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
+        // Deliberately NOT behind the room's files-off gate. A voice note is a
+        // spoken message, not a file: `files_allowed=false` blocks what a
+        // recipient downloads and opens (documents, photos, videos, shares)
+        // and nothing else. The room rules (#755) counted voice as a file and
+        // this client copied the gate from the web's startVoice; the founder's
+        // decision of 02.09 reversed it on every client, the web first. The
+        // attach menu and the share intake keep their gates.
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
         else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }

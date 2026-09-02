@@ -1305,7 +1305,7 @@
     <string name="gi_links">Links allowed</string>
     <string name="gi_links_desc">Members may post links</string>
     <string name="gi_files">Files allowed</string>
-    <string name="gi_files_desc">Members may attach files and media</string>
+    <string name="gi_files_desc">Members may send photos, videos and files. Off: those are blocked, voice messages still go through.</string>
     <string name="gi_age_gate">Newcomer waiting period</string>
     <string name="gi_age_gate_desc">New members read first and post once they have been in the group for this long. A kick starts the wait over, so throwaway accounts gain nothing.</string>
     <string name="gi_slowmode">Slow mode</string>

@@ -30,6 +30,13 @@ data class GroupMember(
      *  existing delete-moderators keep the power they were given. */
     fun canDelete(ownerUin: Int): Boolean =
         uin == ownerUin || role == "admin" || "delete" in permissions
+    /** The WIDE moderator set: role "admin" or ANY granted cap. Somebody
+     *  trusted with part of the room is trusted with all of it for two
+     *  purposes that must agree - what the room rules exempt
+     *  ([RcqGroup.roomExempt]) and who the roster ranks right after the owner
+     *  ([rosterTier]). One definition, so the two cannot drift. NOT
+     *  [canDelete], which is the narrower may-retract-others check. */
+    val isModerator: Boolean get() = role == "admin" || permissions.isNotEmpty()
     /** True if this member may manage group info — pin, rename, etc. (owner OR
      *  `info` cap). Used to gate pinning a message from the chat. */
     fun canManageInfo(ownerUin: Int): Boolean = uin == ownerUin || "info" in permissions
@@ -100,9 +107,46 @@ data class RcqGroup(
      *  roster (or a roster not fetched yet, #650) is not exempt, owner aside:
      *  same failure mode as [moderator], the rule simply is not applied. */
     fun roomExempt(uin: Int): Boolean =
-        uin == ownerUin || members.firstOrNull { it.uin == uin }
-            ?.let { it.role == "admin" || it.permissions.isNotEmpty() } == true
+        uin == ownerUin || members.firstOrNull { it.uin == uin }?.isModerator == true
 
     fun memberName(uin: Int): String =
         members.firstOrNull { it.uin == uin }?.nickname ?: "$uin"
 }
+
+/** Where a member sits in the roster: 0 the owner, 1 a moderator, 2 someone
+ *  who is around, 3 everyone else (founder, 02.09: the same order on every
+ *  client; the web's GroupInfo has the same `rosterTier`). Around is the
+ *  contact list's definition: away and do-not-disturb count, invisible and
+ *  offline do not, and neither does a member the island declines to report a
+ *  presence for.
+ *
+ *  ⚠ The crown is read off [ownerUin], not off the row's `role`. The two
+ *  agree in any snapshot the island sends, but the COMPACT
+ *  `group_membership_changed` a big room gets carries the owner alone, so a
+ *  handover reaches the screen as a changed number over a roster that has not
+ *  moved. The screen keys its memo on the owner as well for the same reason. */
+fun GroupMember.rosterTier(ownerUin: Int): Int = when {
+    uin == ownerUin -> 0
+    isModerator -> 1
+    presence == UserStatus.ONLINE || presence == UserStatus.AWAY || presence == UserStatus.DND -> 2
+    else -> 3
+}
+
+/** The roster in display order: by [rosterTier], then by name
+ *  case-insensitively inside a tier, then by uin.
+ *
+ *  ⚠ "Stable within a tier" was not an order at all. `sortedBy` keeps the
+ *  order the roster arrived in, the roster query has no ORDER BY, and the
+ *  rows behind it were inserted from an unordered set, so the tail of a big
+ *  group looked shuffled and moved between openings (#688). A name is what
+ *  people scan for; two equal names would fall back to that same arrival
+ *  order, so the uin breaks the tie.
+ *
+ *  Decorated once, not per comparison: the group screen is built for rosters
+ *  of two thousand, and `thenBy { it.nickname.lowercase() }` allocates two
+ *  strings on every one of the ~n log n comparisons. */
+fun orderedRoster(members: List<GroupMember>, ownerUin: Int): List<GroupMember> =
+    members
+        .map { m -> Triple(m.rosterTier(ownerUin), m.nickname.lowercase(), m) }
+        .sortedWith(compareBy({ it.first }, { it.second }, { it.third.uin }))
+        .map { it.third }

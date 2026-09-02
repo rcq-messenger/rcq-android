@@ -1256,7 +1256,7 @@
     <string name="gi_links">Посилання дозволені</string>
     <string name="gi_links_desc">Учасники можуть надсилати посилання</string>
     <string name="gi_files">Файли дозволені</string>
-    <string name="gi_files_desc">Учасники можуть прикріплювати файли та медіа</string>
+    <string name="gi_files_desc">Учасники можуть надсилати фото, відео та файли. Вимк: їх не можна, голосові повідомлення залишаються.</string>
     <string name="gi_age_gate">Випробувальний термін новачків</string>
     <string name="gi_age_gate_desc">Нові учасники спочатку читають, а пишуть, коли пробудуть у групі вказаний час. Виключення повертає відлік на початок.</string>
     <string name="gi_slowmode">Повільний режим</string>
