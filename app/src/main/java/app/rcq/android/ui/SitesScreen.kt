@@ -83,13 +83,25 @@ import kotlinx.coroutines.launch
  *   journal of what its users read elsewhere.
  */
 @Composable
-fun SitesScreen(session: Session, onBack: () -> Unit) {
+fun SitesScreen(
+    session: Session,
+    onBack: () -> Unit,
+    /**
+     * An address to open straight away, e.g. the one tapped in a message.
+     * Null (the default, and what the overflow menu passes) is the browser as
+     * it has always been: the catalogue, and an empty address bar.
+     */
+    initialAddress: String? = null,
+) {
     val c = RcqTheme.colors
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
 
-    var typed by remember { mutableStateOf("") }
+    // Seeded, not left blank and filled in on success: an address that fails
+    // to load must still be readable in the bar, so the reader can see what
+    // was asked for and try it again.
+    var typed by remember { mutableStateOf(initialAddress.orEmpty()) }
     var addr by remember { mutableStateOf<SiteAddress?>(null) }
     var page by remember { mutableStateOf<SitesRepository.SitePage?>(null) }
     var errorCode by remember { mutableStateOf<String?>(null) }
@@ -134,6 +146,13 @@ fun SitesScreen(session: Session, onBack: () -> Unit) {
                 loading = false
             }
         }
+    }
+
+    // Opened on an address somebody tapped: load it at once. Keyed on the
+    // address so re-entering the browser on a different one loads that one,
+    // and a recomposition on the same one does not re-fetch.
+    LaunchedEffect(initialAddress) {
+        if (!initialAddress.isNullOrBlank()) open(initialAddress)
     }
 
     // The catalogue of the reader's own island: what there is to look at at

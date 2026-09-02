@@ -466,8 +466,12 @@ internal fun EmoticonText(
     // (linksEnabled=false) skips this whole branch: the body takes the same
     // plain-text path a link-free message always took.
     val hasUrl = linksEnabled && body.contains("://") && Emoticons.URL_RE.containsMatchIn(body)
+    // A `.rcq` address in the body opens the app's own browser (SiteLinks).
+    // Gated on the same links-off switch: a room with links turned off keeps
+    // the address literal too, exactly as the web does.
+    val hasSite = linksEnabled && SiteLinks.mayContain(body)
     // Fast path: a pure-text body with no resolvable mentions and no links.
-    if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention && !hasUrl) {
+    if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention && !hasUrl && !hasSite) {
         Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
         return
     }
@@ -601,9 +605,17 @@ private fun AnnotatedString.Builder.appendWithMentions(
     // stay clickable either way, they are not links out of the app.
     linkify: Boolean = true,
 ) {
-    // url=true -> a tappable http(s) link (display = the URL); otherwise a
-    // mention (uin + display nick). Both kinds are merged in source order.
-    data class Hit(val range: IntRange, val url: Boolean, val uin: Int, val display: String)
+    // url=true -> a tappable http(s) link (display = the URL); site=true -> a
+    // `.rcq` address, which opens the app's own browser instead of leaving for
+    // the web; otherwise a mention (uin + display nick). All three kinds are
+    // merged in source order.
+    data class Hit(
+        val range: IntRange,
+        val url: Boolean,
+        val uin: Int,
+        val display: String,
+        val site: Boolean = false,
+    )
     val hits = ArrayList<Hit>()
     if (mentionNick != null) {
         for (m in Emoticons.MENTION_RE.findAll(text)) {
@@ -630,8 +642,16 @@ private fun AnnotatedString.Builder.appendWithMentions(
         }
     }
     if (linkify) {
+        val urls = ArrayList<IntRange>()
         for (m in Emoticons.URL_RE.findAll(text)) {
             hits.add(Hit(m.range, true, 0, m.value))
+            urls.add(m.range)
+        }
+        // `.rcq` addresses in what the URLs left over — the web's two-pass
+        // order, so the `blog.rcq` inside `https://blog.rcq.app/x` stays part
+        // of somebody else's URL and is never taken for a site here.
+        for (r in SiteLinks.find(text, urls)) {
+            hits.add(Hit(r, false, 0, text.substring(r), site = true))
         }
     }
     if (hits.isEmpty()) { append(text); return }
@@ -640,7 +660,19 @@ private fun AnnotatedString.Builder.appendWithMentions(
     for (h in hits) {
         if (h.range.first < cursor) continue // skip overlaps
         if (h.range.first > cursor) append(text.substring(cursor, h.range.first))
-        if (h.url) {
+        if (h.site) {
+            // Drawn like a link because it is one, but it never leaves the
+            // app: the address is parked for RcqApp, which opens the `.rcq`
+            // browser over whatever is on screen with it already loading.
+            withLink(
+                LinkAnnotation.Clickable(
+                    tag = "s${h.display}",
+                    linkInteractionListener = { SiteOpen.request(h.display) },
+                ),
+            ) {
+                withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(h.display) }
+            }
+        } else if (h.url) {
             // LinkAnnotation.Url auto-opens via LocalUriHandler = InAppBrowser
             // (Custom Tab for the web; rcq deep links keep routing in-app).
             withLink(LinkAnnotation.Url(h.display)) {
