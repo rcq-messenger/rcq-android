@@ -500,8 +500,15 @@ private fun RcqApp(session: Session) {
     // Kept for "Try again": retrying after a transient failure must re-use the
     // ISLAND the user picked — retrying with null silently registered a
     // self-hoster's account on the flagship.
-    var lastRegisterServer: String? = null
-    var lastRegisterInvite: String? = null
+    //
+    // ⚠ `remember`, or the two are plain locals in a composable and every
+    // recomposition sets them back to null — which is the very failure above,
+    // because the state change that draws the Failed screen IS a
+    // recomposition. Seen on the emulator: register on a fingerprint island,
+    // accept its new fingerprint at the notice, press Try again, and the
+    // account lands on api.rcq.app.
+    var lastRegisterServer by remember { mutableStateOf<String?>(null) }
+    var lastRegisterInvite by remember { mutableStateOf<String?>(null) }
 
     fun register(server: String? = null, invite: String? = null) {
         lastRegisterServer = server
