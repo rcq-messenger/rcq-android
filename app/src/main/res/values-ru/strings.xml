@@ -1300,7 +1300,7 @@
     <string name="gi_links">Ссылки разрешены</string>
     <string name="gi_links_desc">Участники могут отправлять ссылки</string>
     <string name="gi_files">Файлы разрешены</string>
-    <string name="gi_files_desc">Участники могут прикреплять файлы и медиа</string>
+    <string name="gi_files_desc">Участники могут отправлять фото, видео и файлы. Выкл: их нельзя, голосовые сообщения остаются.</string>
     <string name="gi_age_gate">Испытательный срок новичков</string>
     <string name="gi_age_gate_desc">Новые участники сначала читают, а пишут, когда пробудут в группе указанное время. Кик возвращает отсчёт в начало, поэтому спамить с одноразовых аккаунтов невыгодно.</string>
     <string name="gi_slowmode">Медленный режим</string>

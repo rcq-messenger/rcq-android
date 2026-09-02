@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.model.GroupMember
+import app.rcq.android.model.orderedRoster
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -176,47 +177,18 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
      *  permissions: those stay with the owner, matching the island. */
     val canEditInfo = isOwner || (ownMember?.permissions?.contains("info") == true)
 
-    // Owner first, then admins, then everyone else. Within a rank: whoever is
-    // online, then by name.
+    // The owner, then the moderators (the wide set: `admin` or any granted
+    // cap, the same people the composer exempts from the room rules), then
+    // whoever is around, then everyone else; by name inside a tier (founder,
+    // 02.09: the same order on every client). The rule and its traps live in
+    // `orderedRoster`, a plain function with a JVM test; this screen only
+    // memoises it.
     //
-    // ⚠ "Stable within a rank" was not an order at all. `sortedBy` keeps the
-    // order the roster arrived in, the roster query has no ORDER BY, and the
-    // rows behind it were inserted from an unordered set, so the tail of a big
-    // group looked shuffled and moved between openings (#688). A name is what
-    // people scan for, and who is here now is what they scan for first.
-    //
-    // ⚠ The crown is read off `group.ownerUin`, not off the row's `role`. The
-    // two agree in any snapshot the island sends, but the COMPACT
+    // ⚠ Keyed on `group.ownerUin` as well as the roster: the compact
     // `group_membership_changed` a big room gets carries the owner alone, so a
-    // handover reaches this screen as a changed number over a roster that has
-    // not moved. Keyed on it as well for the same reason.
-    val sortedMembers = remember(group.members, group.ownerUin) {
-        // Decorated once, not per comparison: this screen is built for rosters
-        // of two thousand, and `thenBy { it.nickname.lowercase() }` allocates
-        // two strings on every one of the ~n log n comparisons.
-        group.members
-            .map { m ->
-                val rank = when {
-                    m.uin == group.ownerUin -> 0
-                    m.role == "admin" -> 1
-                    else -> 2
-                }
-                // Away and do-not-disturb count as present; invisible and
-                // offline do not, and neither does a member the server
-                // declines to report a presence for.
-                val here = when (m.presence) {
-                    app.rcq.android.model.UserStatus.ONLINE -> 0
-                    app.rcq.android.model.UserStatus.AWAY,
-                    app.rcq.android.model.UserStatus.DND -> 1
-                    else -> 2
-                }
-                Triple(rank, here, m.nickname.lowercase()) to m
-            }
-            .sortedWith(
-                compareBy({ it.first.first }, { it.first.second }, { it.first.third }, { it.second.uin }),
-            )
-            .map { it.second }
-    }
+    // handover arrives here as a changed number over a roster that has not
+    // moved (see `rosterTier`).
+    val sortedMembers = remember(group.members, group.ownerUin) { orderedRoster(group.members, group.ownerUin) }
     val previewLimit = 8
     val q = memberSearch.trim().lowercase()
     val searching = q.isNotEmpty()
@@ -382,6 +354,9 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     // slowmode server-side; links/files are honoured by
                     // clients on render and compose.
                     GroupToggleRow(stringResource(R.string.gi_links), stringResource(R.string.gi_links_desc), group.linksAllowed) { v -> scope.launch { runCatching { session.patchGroup(groupId, linksAllowed = v) } } }
+                    // Covers photos, videos and documents; voice messages stay
+                    // (founder, 02.09). The hint says so, because the person
+                    // switching it has to know what they are switching.
                     GroupToggleRow(stringResource(R.string.gi_files), stringResource(R.string.gi_files_desc), group.filesAllowed) { v -> scope.launch { runCatching { session.patchGroup(groupId, filesAllowed = v) } } }
                     // Voluntary catalog (stage 6): listing publishes the name
                     // and description so island search can match the room.

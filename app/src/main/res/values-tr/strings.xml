@@ -1252,7 +1252,7 @@
     <string name="gi_links">Bağlantılara izin ver</string>
     <string name="gi_links_desc">Üyeler bağlantı gönderebilir</string>
     <string name="gi_files">Dosyalara izin ver</string>
-    <string name="gi_files_desc">Üyeler dosya ekleyebilir</string>
+    <string name="gi_files_desc">Üyeler fotoğraf, video ve dosya gönderebilir. Kapalı: bunlar engellenir, sesli mesajlar gönderilebilir.</string>
     <string name="gi_age_gate">Yeni üyeler için bekleme süresi</string>
     <string name="gi_age_gate_desc">Yeni üyeler önce okur, grupta bu süreyi doldurunca yazabilir. Gruptan atılmak süreyi baştan başlatır.</string>
     <string name="gi_slowmode">Yavaş mod</string>

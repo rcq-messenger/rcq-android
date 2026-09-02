@@ -1250,7 +1250,7 @@
     <string name="gi_links">允许链接</string>
     <string name="gi_links_desc">成员可以发送链接</string>
     <string name="gi_files">允许文件</string>
-    <string name="gi_files_desc">成员可以发送文件和媒体</string>
+    <string name="gi_files_desc">成员可以发送照片、视频和文件。关闭后这些会被拦截，语音消息不受影响。</string>
     <string name="gi_age_gate">新成员等待期</string>
     <string name="gi_age_gate_desc">新成员先只能阅读,在群里满足该时长后才能发言。被移出会重新开始计时。</string>
     <string name="gi_slowmode">慢速模式</string>
