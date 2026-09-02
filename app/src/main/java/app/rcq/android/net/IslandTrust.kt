@@ -469,6 +469,31 @@ object IslandTrust {
         _hidden.update { it + key }
     }
 
+    /**
+     * The panic wipe (design §4: "the panic wipe clears it with everything
+     * else"). A pin is not a secret, but the store is the list of every island
+     * this device has dialled — `host:port` and the hour of the first
+     * connection — and after a duress wipe the private, self-hosted islands in
+     * it appear nowhere else on the phone: MultihomeStore and
+     * VisitedIslandsStore are gone by then. It is device-wide, so it also spans
+     * accounts the wipe already removed.
+     *
+     * ⚠ `commit`, not `apply`: a wipe PIN is entered by somebody who expects
+     * the phone to be taken away in the next minute, and an `apply` still
+     * queued when the process is killed is a file that survived.
+     */
+    fun wipeAll(ctx: Context) {
+        // The wipe may be the first thing this process does with the store.
+        init(ctx)
+        synchronized(lock) {
+            pins.clear()
+            prefs?.edit()?.clear()?.commit()
+            publishLocked()
+        }
+        _changed.value = emptyMap()
+        _hidden.value = emptySet()
+    }
+
     /** The first-use notice for this host was seen; never again. */
     fun noticed(key: String) {
         synchronized(lock) {
