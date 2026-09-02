@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.rcq.android.R
@@ -49,6 +50,18 @@ fun NewsScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
     var feed by remember { mutableStateOf<RcqApi.NewsFeed?>(null) }
     var loading by remember { mutableStateOf(true) }
+
+    // The island this feed comes from, drawn the way every other screen draws
+    // an island: off the card the last `/server/info` wrote, so the header is
+    // complete on the first frame and no island is asked anything to render
+    // it. GET /news is the session's own island and nobody else's, which is
+    // why the host is the session's rather than anything a post carries.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    remember { app.rcq.android.data.IslandCards.warm(context) }
+    val islandCards by app.rcq.android.data.IslandCards.cards.collectAsState()
+    val host = session.currentServer
+    val card = islandCards[host.lowercase()]
+    val author = NewsAuthor(host, card?.name?.takeIf { it.isNotBlank() } ?: host, card?.logoVersion)
 
     // Keyed on the news_posted tick (A4), not Unit: a post published while
     // this screen is open re-fetches in place. Re-marking seen keeps the home
@@ -91,7 +104,7 @@ fun NewsScreen(session: Session, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { Box(Modifier.size(4.dp)) }
-                items(items) { post -> NewsCard(post) }
+                items(items) { post -> NewsCard(post, author) }
                 item { Box(Modifier.size(8.dp)) }
             }
         }
@@ -100,7 +113,7 @@ fun NewsScreen(session: Session, onBack: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NewsCard(post: RcqApi.NewsPost) {
+private fun NewsCard(post: RcqApi.NewsPost, author: NewsAuthor) {
     val c = RcqTheme.colors
     val context = androidx.compose.ui.platform.LocalContext.current
     var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -130,9 +143,11 @@ private fun NewsCard(post: RcqApi.NewsPost) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(post.author_label ?: "RCQ", color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            formatNewsDate(post.published_at)?.let { Text(it, color = c.textSecondary, fontSize = 12.sp) }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            NewsAuthorLine(post.author_label, author, Modifier.weight(1f))
+            formatNewsDate(post.published_at)?.let {
+                Text(it, color = c.textSecondary, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+            }
         }
         if (!body.isNullOrBlank()) {
             // A post announcing a release or a page is mostly there to hand
@@ -161,6 +176,64 @@ private fun NewsCard(post: RcqApi.NewsPost) {
         }
         if (copied) {
             Text(stringResource(R.string.news_copied), color = c.accent, fontSize = 12.sp)
+        }
+    }
+}
+
+/** The island a feed belongs to, resolved once per screen rather than once per
+ *  post: every post on the feed has the same author. [name] already falls back
+ *  to the host, which is all anybody knows about an island that has never
+ *  answered `/server/info`. */
+private data class NewsAuthor(val host: String, val name: String, val logoVersion: String?)
+
+/** Labels an island sends for a post its operator signed with nothing. The
+ *  stock server said "RCQ Team" for every post until 02.09, and this screen
+ *  drew "RCQ" for a missing label; neither names an island, so neither earns
+ *  a suffix. Matched without case: a fork writing "RCQ team" means the same
+ *  default. */
+private val STOCK_AUTHOR_LABELS = listOf("RCQ Team", "RCQ")
+
+/** The island's label, or null when it would only repeat what the island's
+ *  face already says. Split out of the composable so the rule has a JVM test. */
+internal fun newsAuthorSuffix(label: String?, islandName: String): String? =
+    label?.trim()?.takeIf { l ->
+        l.isNotEmpty() &&
+            STOCK_AUTHOR_LABELS.none { it.equals(l, ignoreCase = true) } &&
+            !l.equals(islandName, ignoreCase = true)
+    }
+
+/**
+ * Who a post is from: the island, drawn as an island.
+ *
+ * The line used to print whatever label the island sent, and the island sent
+ * "RCQ Team" unless told otherwise, so a self-hoster's own announcements came
+ * out signed by a team that never wrote them. The author of a feed is the
+ * island serving it, and it gets the island's logo (or lettered tile) and the
+ * name its operator typed, the same face the switcher and Settings draw for it
+ * (founder, 02.09: the island's logo and name on every client, not RCQ Team).
+ *
+ * The island's label survives as a dim suffix only when it adds something: an
+ * operator signing posts as "Support" keeps that, while a stock label, or one
+ * that merely repeats the island's name, would print the author twice.
+ */
+@Composable
+private fun NewsAuthorLine(label: String?, author: NewsAuthor, modifier: Modifier = Modifier) {
+    val c = RcqTheme.colors
+    val suffix = newsAuthorSuffix(label, author.name)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        IslandAvatar(author.host, author.logoVersion, author.name, size = 16.dp)
+        // The name is measured before the suffix and ellipsised on its own: a
+        // long island name shortens the suffix, never the other way round.
+        Text(
+            author.name, color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        if (suffix != null) {
+            Text(
+                suffix, color = c.textSecondary, fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
         }
     }
 }
