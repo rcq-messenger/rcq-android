@@ -2,6 +2,7 @@ package app.rcq.android.sites
 
 import android.content.Context
 import app.rcq.android.net.SingBoxTransport
+import app.rcq.android.net.islandTrust
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -83,6 +84,10 @@ object SitesRepository {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
+        // A site lives on an island, and an island may be trusted by its
+        // fingerprint rather than a CA (design §6). Nothing else is added:
+        // see the note in [get] on what this client must NOT carry.
+        .islandTrust()
         .build()
 
     /** Ride the sing-box tunnel when it is up, exactly as the signed relay

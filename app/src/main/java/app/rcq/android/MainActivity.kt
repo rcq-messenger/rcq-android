@@ -283,6 +283,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         app.rcq.android.data.LanguageManager.init(applicationContext)
         LocalStores.init(applicationContext)
         app.rcq.android.net.SingBoxTransport.init(applicationContext)
+        // Island pins, before any client is built: the store every island
+        // handshake consults (design §7.1).
+        app.rcq.android.net.IslandTrust.init(applicationContext)
         app.rcq.android.net.ContactRelayStore.init(applicationContext)
         app.rcq.android.net.BrokerRelayStore.init(applicationContext)
         app.rcq.android.data.VisitStore.init(applicationContext)

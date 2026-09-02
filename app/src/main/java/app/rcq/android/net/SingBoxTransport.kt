@@ -331,41 +331,73 @@ object SingBoxTransport {
      *  answers well inside the first one; a slow one needs the second. The
      *  total is 15s, the same wait a genuinely blocked user had before, so the
      *  patience is paid for out of the retries rather than added on top. */
-    fun probeDirect(host: String): Boolean =
-        intArrayOf(4_000, 11_000).any { tlsReachable(host, 443, it) }
+    fun probeDirect(host: String): Reachability {
+        val (h, port) = IslandTrust.hostAndPort(host)
+        for (budget in intArrayOf(4_000, 11_000)) {
+            val r = tlsReachable(h, port, budget)
+            if (r != Reachability.UNREACHABLE) return r
+        }
+        return Reachability.UNREACHABLE
+    }
+
+    /** What a probe found. [REFUSED] is the island answering perfectly well
+     *  with a certificate this device does not trust (design §5.5): not a
+     *  blocked route, so no front, no relay, no retry and no broker outcome
+     *  until the person decides at the banner. Without the third state the
+     *  banner and the bypass fight each other: the client pulls relays and
+     *  re-attempts the same refused handshake through every one of them,
+     *  lights the shield, and reports `tunnel_dead` for a healthy island. */
+    enum class Reachability { REACHABLE, REFUSED, UNREACHABLE }
 
     /** TCP connect plus a completed TLS handshake, both inside [budgetMs].
      *  Certificate validation is left ON: an intercepting middlebox is not a
-     *  route to our island either. */
-    private fun tlsReachable(host: String, port: Int, budgetMs: Int): Boolean {
+     *  route to our island either. The socket comes from [IslandTrust]'s
+     *  context, so a fingerprint island is validated by the same rule OkHttp
+     *  applies a moment later, and the port is the island's own rather than
+     *  443: left as it was, this reported every island on `:8443` as
+     *  unreachable and engaged relays for it. */
+    private fun tlsReachable(host: String, port: Int, budgetMs: Int): Reachability {
         val deadline = System.currentTimeMillis() + budgetMs
         val sock = java.net.Socket()
         return try {
             sock.connect(java.net.InetSocketAddress(host, port), budgetMs)
             val left = (deadline - System.currentTimeMillis()).toInt()
-            if (left <= 0) return false
+            if (left <= 0) return Reachability.UNREACHABLE
             sock.soTimeout = left
-            val factory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+            val factory = IslandTrust.socketFactory
             val ssl = factory.createSocket(sock, host, port, true) as javax.net.ssl.SSLSocket
-            ssl.sslParameters = ssl.sslParameters.apply {
-                serverNames = listOf(javax.net.ssl.SNIHostName(host))
+            // SNI carries names, never addresses (RFC 6066): an IP literal
+            // island is dialled without it, as OkHttp does.
+            if (!isIpLiteral(host)) {
+                ssl.sslParameters = ssl.sslParameters.apply {
+                    serverNames = listOf(javax.net.ssl.SNIHostName(host))
+                }
             }
             ssl.startHandshake()
+            // The same name gate OkHttp runs, so REACHABLE means what the API
+            // client is about to find and not merely that a handshake ended.
+            val named = IslandTrust.hostnameVerifier.verify(host, ssl.session)
             runCatching { ssl.close() }
-            true
+            if (named) Reachability.REACHABLE else Reachability.UNREACHABLE
         } catch (e: Exception) {
             runCatching { sock.close() }
-            false
+            if (IslandTrust.isChangedRefusal(e)) Reachability.REFUSED else Reachability.UNREACHABLE
         }
     }
 
+    private fun isIpLiteral(host: String): Boolean =
+        host.contains(':') || host.all { it.isDigit() || it == '.' }
+
     /** Reach the backend through whatever route is live RIGHT NOW — the tunnel
      *  if engaged, else direct. Used by the diagnostics screen. Blocking. */
-    fun probeCurrentRoute(host: String): Boolean = runCatching {
-        OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS).proxy(proxy() ?: Proxy.NO_PROXY).build()
+    fun probeCurrentRoute(host: String): Reachability = try {
+        OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS).proxy(proxy() ?: Proxy.NO_PROXY)
+            .islandTrust().build()
             .newCall(Request.Builder().url("https://$host/health").get().build())
-            .execute().use { it.isSuccessful }
-    }.getOrElse { false }
+            .execute().use { if (it.isSuccessful) Reachability.REACHABLE else Reachability.UNREACHABLE }
+    } catch (e: Exception) {
+        if (IslandTrust.isChangedRefusal(e)) Reachability.REFUSED else Reachability.UNREACHABLE
+    }
 
     fun setEnabled(ctx: Context, on: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()

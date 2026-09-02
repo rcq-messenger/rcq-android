@@ -77,6 +77,10 @@ class RcqApi(
         // island — own OR foreign — is reachable; no token = no header.
         .addInterceptor(AccessTokenInterceptor)
         .addInterceptor(UserAgentInterceptor)
+        // An island trusted by fingerprint rather than a CA (design §7.1).
+        // Every newBuilder() twin below (proxied, media, large media)
+        // inherits the trust manager and the verifier with everything else.
+        .islandTrust()
         .build()
     private val gson = Gson()
 

@@ -61,6 +61,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.flow.collect
@@ -982,13 +983,38 @@ class Session(context: Context) {
         return backupHomes.value.any { it.uin == uin && it.host == host }
     }
 
-    /** Normalize a user-typed server into a bare host (drop scheme/path).
-     *  Blank / the default host → null (= default public server). */
-    private fun normalizeHost(input: String?): String? =
-        input?.trim()
-            ?.removePrefix("https://")?.removePrefix("http://")?.removePrefix("wss://")?.removePrefix("ws://")
-            ?.substringBefore('/')?.trim()
-            ?.takeIf { it.isNotBlank() && it != RcqApi.DEFAULT_HOST }
+    /** Normalize a user-typed server into a bare `host[:port]` (drop
+     *  scheme/path). Blank / the default host → null (= default public server).
+     *
+     *  The fragment of `host#fp` (design §3) is split off FIRST and handled by
+     *  [app.rcq.android.net.IslandTrust.adopt]: a null record is pinned as
+     *  typed before anything is dialled, a record that disagrees raises the
+     *  banner, and a fragment that is not a fingerprint is an address error.
+     *  ⚠ The old `substringBefore('/')` kept the fragment inside the host and
+     *  handed it to a plain HTTP client, a TLS failure with no banner; dropping
+     *  it instead would connect on a first-use pin while the person believes
+     *  they pinned. The forms validate before they get here; this is the
+     *  backstop for every path that does not. */
+    private fun normalizeHost(input: String?): String? {
+        val host = when (val e = app.rcq.android.net.IslandTrust.adopt(input)) {
+            is app.rcq.android.net.IslandTrust.Entry.Ok -> e.hostPort
+            is app.rcq.android.net.IslandTrust.Entry.Empty -> return null
+            is app.rcq.android.net.IslandTrust.Entry.Malformed ->
+                throw IllegalArgumentException(appCtx.getString(R.string.csrv_unreachable))
+            is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint ->
+                throw IllegalArgumentException(appCtx.getString(R.string.island_trust_not_fingerprint))
+            is app.rcq.android.net.IslandTrust.Entry.CaOnly ->
+                throw IllegalArgumentException(appCtx.getString(R.string.island_trust_ca_only, e.host))
+            is app.rcq.android.net.IslandTrust.Entry.Disagrees ->
+                throw IllegalArgumentException(appCtx.getString(R.string.island_trust_disagrees, e.changed.hostPort))
+        }
+        return host.takeIf { it != RcqApi.DEFAULT_HOST }
+    }
+
+    /** The island refused at the trust layer, with the banner up: said in the
+     *  words the banner uses, so the toast and the banner agree. */
+    private fun trustRefusedError(host: String): IllegalStateException =
+        IllegalStateException(appCtx.getString(R.string.island_trust_changed_short, host))
 
     /** Register a brand-new anonymous identity on the chosen server (the
      *  default public one if null) and swap the session onto it. Serves
@@ -1023,7 +1049,17 @@ class Session(context: Context) {
             // is the user asking); only the probe-driven half is gated, the
             // same way [runRouteLadder] gates it.
             val forced = transport.isEnabled(appCtx)
-            val blocked = !forced && !transport.probeDirect(host)
+            val direct = if (forced) null else transport.probeDirect(host)
+            // The island answered, with a certificate this device refuses:
+            // terminal (design §5.5). No relay is raised for it and the
+            // register/recover call that follows must not go out; the caller
+            // throws with the banner's words.
+            if (direct == app.rcq.android.net.SingBoxTransport.Reachability.REFUSED) {
+                _stealthActive.value = transport.isActive
+                _bypassManual.value = transport.isEnabled(appCtx)
+                return@withContext
+            }
+            val blocked = direct == app.rcq.android.net.SingBoxTransport.Reachability.UNREACHABLE
             if (forced || (blocked && transport.mayAutoEngage(appCtx))) {
                 app.rcq.android.net.RelayConfigStore.prime(appCtx)
                 transport.start()
@@ -1047,6 +1083,9 @@ class Session(context: Context) {
         // times out ("Couldn't connect"), and they have to switch on a VPN
         // just to sign up. The RcqApi built next captures the SOCKS proxy.
         ensureTransportForHost(host ?: RcqApi.DEFAULT_HOST)
+        if (app.rcq.android.net.IslandTrust.isRefused(host ?: RcqApi.DEFAULT_HOST)) {
+            throw trustRefusedError(host ?: RcqApi.DEFAULT_HOST)
+        }
         val regApi = RcqApi("https://${host ?: RcqApi.DEFAULT_HOST}")
         // Derive the identity from a fresh 32-byte recovery seed so the account
         // is restorable from a BIP39 phrase (the seed is persisted below).
@@ -1178,6 +1217,9 @@ class Session(context: Context) {
         // Same as registration: a blocked user must be able to RESTORE without
         // a manual VPN, so bring the RCQ relays up before the challenge call.
         ensureTransportForHost(host ?: RcqApi.DEFAULT_HOST)
+        if (app.rcq.android.net.IslandTrust.isRefused(host ?: RcqApi.DEFAULT_HOST)) {
+            throw trustRefusedError(host ?: RcqApi.DEFAULT_HOST)
+        }
         val regApi = RcqApi("https://${host ?: RcqApi.DEFAULT_HOST}")
         val signingPubB64 = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP)
         val challenge = regApi.recoverChallenge(signingPubB64).challenge
@@ -1534,7 +1576,8 @@ class Session(context: Context) {
                 if (transport.isActive && !transport.isEnabled(appCtx) &&
                     !transport.onionMode() && !transport.localProxyMode()
                 ) {
-                    val directBack = withContext(Dispatchers.IO) { transport.probeDirect(serverHost()) }
+                    val directBack = withContext(Dispatchers.IO) { transport.probeDirect(serverHost()) } ==
+                        app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
                     if (directBack) {
                         withContext(Dispatchers.IO) { transport.stop() }
                         socket.disconnect()
@@ -1554,8 +1597,12 @@ class Session(context: Context) {
                 // while the app was open simply never recovered.
                 val down = offlineSince
                 val now = android.os.SystemClock.elapsedRealtime()
+                // Not while the island is refused at the trust layer: it is
+                // offline because the person has not decided, and walking the
+                // ladder would pull relays for a healthy island (design §5.5).
                 if (!_connected.value && down != 0L && now - down >= OFFLINE_RELADDER_MS &&
-                    now - lastLadderAt >= LADDER_COOLDOWN_MS
+                    now - lastLadderAt >= LADDER_COOLDOWN_MS &&
+                    !app.rcq.android.net.IslandTrust.isRefused(serverHost())
                 ) {
                     lastLadderAt = now
                     android.util.Log.i("RCQroute", "offline ${(now - down) / 1000}s — walking the route ladder again")
@@ -1573,7 +1620,8 @@ class Session(context: Context) {
                     continue
                 }
                 if (!transport.isActive || !transport.onionMode()) { deadStreak = 0; continue }
-                val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) }
+                val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) } ==
+                    app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
                 _routeVerified.value = ok   // keep the home shield honest for onion (never dropped)
                 if (ok) { deadStreak = 0; continue }
                 deadStreak++
@@ -1619,6 +1667,32 @@ class Session(context: Context) {
             // thread; api/socket are rebuilt so they capture the SOCKS proxy.
             runRouteLadder()
             connectAndSync(uin, token)
+            // The island refused at the trust layer comes back the moment the
+            // person accepts at the banner: the ladder is walked again (it was
+            // never walked while refused) and the API + socket are rebuilt,
+            // the way a route change rebuilds them. Watches the trust store's
+            // own state, so nothing in the accept path has to remember to
+            // tell the session. Per account, like every loop here.
+            launch {
+                val ep = epochNow()
+                var refused = app.rcq.android.net.IslandTrust.isRefused(serverHost())
+                app.rcq.android.net.IslandTrust.changed
+                    .takeWhile { stillOn(ep) }
+                    .collect { m ->
+                        val now = m.containsKey(app.rcq.android.net.IslandTrust.keyOf(serverHost()))
+                        if (refused && !now && stillOn(ep)) {
+                            android.util.Log.i("RCQroute", "${serverHost()} trusted again — reconnecting")
+                            withContext(Dispatchers.IO) { runCatching { runRouteLadder() } }
+                            if (!stillOn(ep)) return@collect
+                            socket.disconnect()
+                            api = newApi()
+                            socket = newSocket()
+                            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                            store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+                        }
+                        refused = now
+                    }
+            }
             // (Crash reports are NOT auto-sent. A captured crash is offered to
             // the user on next launch via a consent dialog in MainActivity —
             // sending technical data silently would clash with the privacy
@@ -1668,7 +1742,8 @@ class Session(context: Context) {
             socket = newSocket()
             _stealthActive.value = transport.isActive
             _bypassManual.value = transport.isEnabled(appCtx)
-            _routeVerified.value = transport.isActive && transport.probeCurrentRoute(serverHost())
+            _routeVerified.value = transport.isActive &&
+                transport.probeCurrentRoute(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
             connectAndSync(uin, token)
         }
     }
@@ -1702,7 +1777,8 @@ class Session(context: Context) {
             socket = newSocket()
             _stealthActive.value = transport.isActive
             _bypassManual.value = transport.isEnabled(appCtx)
-            _routeVerified.value = transport.isActive && transport.probeCurrentRoute(serverHost())
+            _routeVerified.value = transport.isActive &&
+                transport.probeCurrentRoute(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
             connectAndSync(uin, token)
         }
     }
@@ -1724,7 +1800,20 @@ class Session(context: Context) {
     private suspend fun runRouteLadder(): Boolean {
         val before = frontHost to app.rcq.android.net.SingBoxTransport.isActive
         val transport = app.rcq.android.net.SingBoxTransport
-        val directOk = transport.probeDirect(serverHost())
+        val direct = transport.probeDirect(serverHost())
+        // The island answered and this device refused its certificate: the
+        // banner is up and the person decides. Terminal for the ladder (design
+        // §5.5): no front, no relay, no retry and no broker outcome, because a
+        // refusal is not censorship and every rung would only repeat the same
+        // refused handshake. The route is left exactly as it was.
+        if (direct == app.rcq.android.net.SingBoxTransport.Reachability.REFUSED) {
+            android.util.Log.w("RCQroute", "${serverHost()} refused at the trust layer — ladder not walked")
+            _stealthActive.value = transport.isActive
+            _bypassManual.value = transport.isEnabled(appCtx)
+            _routeVerified.value = false
+            return false
+        }
+        val directOk = direct == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
         val flagship = store.serverHost.isNullOrBlank() || store.serverHost == RcqApi.DEFAULT_HOST
         // CF FRONT FALLBACK (tried BEFORE the relay): the flagship is blocked
         // directly, the user isn't forcing the relay/local-proxy, and the
@@ -1735,7 +1824,7 @@ class Session(context: Context) {
         // under a forced relay/local-proxy and for custom islands (the front only
         // proxies the flagship).
         if (!directOk && flagship && !transport.isEnabled(appCtx) && !transport.localProxyMode() &&
-            transport.probeDirect(FRONT_HOST)
+            transport.probeDirect(FRONT_HOST) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
         ) {
             frontHost = FRONT_HOST
             api = newApi()
@@ -1808,18 +1897,31 @@ class Session(context: Context) {
             // Probe the live route once: it tells the shield whether the tunnel
             // actually carries traffic (read-only /health through the proxy; safe
             // for onion too — it does NOT tear the chain down).
-            routeOk = transport.probeCurrentRoute(serverHost())
+            val route = transport.probeCurrentRoute(serverHost())
+            // Refused THROUGH the tunnel: the island answered with a
+            // certificate this device does not trust. Same terminal case as
+            // the direct refusal above; the tunnel stays as the person left it.
+            if (route == app.rcq.android.net.SingBoxTransport.Reachability.REFUSED) {
+                android.util.Log.w("RCQroute", "${serverHost()} refused at the trust layer through the tunnel — ladder stops")
+                _stealthActive.value = transport.isActive
+                _bypassManual.value = transport.isEnabled(appCtx)
+                _routeVerified.value = false
+                return (frontHost to app.rcq.android.net.SingBoxTransport.isActive) != before
+            }
+            routeOk = route == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
             // DIRECT fallback only when droppable: tunnel up but dead AND direct
             // works -> drop. NEVER under a local proxy (Tor-leak rule) nor an
             // explicit onion opt-in (preserve chosen metadata-resistance).
             val droppable = !routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx)
-            if (droppable && transport.probeDirect(serverHost())) {
+            if (droppable && transport.probeDirect(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE) {
                 android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
                 fallbackTaken = "fell_to_direct"
                 transport.stop()
                 api = newApi()
                 socket = newSocket()
-            } else if (droppable && flagship && transport.probeDirect(FRONT_HOST)) {
+            } else if (droppable && flagship &&
+                transport.probeDirect(FRONT_HOST) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+            ) {
                 // Tunnel dead AND direct dead — the state where this install has
                 // nothing left. The front was skipped on the way in because the
                 // relays were engaged, and that is right while they work:
@@ -2396,7 +2498,8 @@ class Session(context: Context) {
         }
         withContext(Dispatchers.IO) {
             _receivingViaBackup.value =
-                !app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost())
+                app.rcq.android.net.SingBoxTransport.probeCurrentRoute(serverHost()) !=
+                    app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
         }
         if (!stillOn(epoch)) {
             // ⚠ The probe above LATCHES the banner. Bailing out here without
@@ -6576,6 +6679,10 @@ class Session(context: Context) {
             } catch (e: Exception) {
                 last = e
                 android.util.Log.w("RCQnet", "attempt ${i + 1}/$attempts failed: ${e.javaClass.simpleName}: ${e.message}")
+                // Not transient: the island answered and this device refused
+                // its certificate. Another attempt is the same handshake
+                // against the same certificate; the banner is what changes it.
+                if (app.rcq.android.net.IslandTrust.isChangedRefusal(e)) throw e
                 if (i < attempts - 1) {
                     // Most cellular send failures are a dead pooled connection
                     // the server already closed. Evict the pool so the retry

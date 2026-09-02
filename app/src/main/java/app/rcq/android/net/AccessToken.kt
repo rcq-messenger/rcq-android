@@ -140,6 +140,9 @@ object AccessRedeemer {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        // A closed island is the likeliest of all to run without a CA
+        // (design §6): plain here means plain of interceptors, not of trust.
+        .islandTrust()
         .build()
     @Volatile private var proxiedClient: OkHttpClient? = null
 
