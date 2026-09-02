@@ -216,10 +216,10 @@ object IslandTrust {
                 // A bare IPv6 literal has more than one colon and no port to
                 // tell apart from its last group; it is written bracketed.
                 if (s.indexOf(':') != colon) return null
-                host = s.substring(0, colon).lowercase()
+                host = punycode(s.substring(0, colon)) ?: return null
                 port = s.substring(colon + 1).toIntOrNull() ?: return null
             } else {
-                host = s.lowercase()
+                host = punycode(s) ?: return null
                 port = null
             }
         }
@@ -228,10 +228,31 @@ object IslandTrust {
         return Address(host, port, fragment)
     }
 
-    /** Store key: lowercase host, brackets kept on an IPv6 literal, the port
-     *  always spelled out. OkHttp hands the verifier an UNbracketed IPv6 host
-     *  (`HttpUrl.host`), so the brackets are put back here. */
-    fun key(host: String, port: Int): String = "${bracketed(host)}:$port"
+    /**
+     * The wire form of a host, lowercase: what the connection actually dials.
+     *
+     * ⚠ A name with non-ASCII characters is punycode by the time it reaches
+     * the socket — OkHttp canonicalises `HttpUrl.host` through `IDN.toASCII`
+     * and hands the trust manager and the verifier `xn--…`. Without the same
+     * step here the store key for `остров.рф` was written in Unicode and no
+     * handshake ever looked it up: a typed fingerprint was quietly bypassed
+     * and the first connection took a first-use pin instead, the one thing
+     * design §3 promises the careful path cannot do. `ALLOW_UNASSIGNED` is
+     * OkHttp's own flag, so the two agree on the same name. Null when it is
+     * not a name at all.
+     */
+    private fun punycode(host: String): String? {
+        val h = host.trim()
+        if (h.isEmpty()) return null
+        if (h.all { it.code < 0x80 }) return h.lowercase()
+        return runCatching { java.net.IDN.toASCII(h, java.net.IDN.ALLOW_UNASSIGNED).lowercase() }
+            .getOrNull()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Store key: the wire form of the host, brackets kept on an IPv6 literal,
+     *  the port always spelled out. OkHttp hands the verifier an UNbracketed
+     *  IPv6 host (`HttpUrl.host`), so the brackets are put back here. */
+    fun key(host: String, port: Int): String = "${bracketed(punycode(host) ?: host)}:$port"
 
     /** `host` when the port is the default, else `host:port`. */
     fun hostPort(host: String, port: Int): String =
