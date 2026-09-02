@@ -1280,11 +1280,11 @@
     <string name="island_trust_changed_typed">%1$s 出示的指纹与你输入的不同。</string>
     <string name="island_trust_changed_short">%1$s 出示了此设备不信任的证书。请在提示中决定。</string>
     <string name="island_trust_disagrees">此设备已用另一个指纹信任 %1$s,与输入的不同。没有建立任何连接;请在提示中决定。</string>
-    <string name="island_trust_disagrees_banner">%1$s 已用另一个指纹记录在此,与输入的不同。未建立任何连接。</string>
+    <string name="island_trust_changed_entered">为 %1$s 输入的指纹与此设备已经信任的不同。</string>
     <string name="island_trust_not_an_address">这不是岛的地址。地址是主机名,端口不是 443 时还要写上:island.example:8443</string>
     <string name="island_trust_on_file">已记录</string>
     <string name="island_trust_presented">现在出示</string>
-    <string name="island_trust_entered">现在输入</string>
+    <string name="island_trust_entered">已输入</string>
     <string name="island_trust_via_ca">证书颁发机构</string>
     <string name="island_trust_accept">信任新指纹</string>
     <string name="island_trust_later">暂不</string>

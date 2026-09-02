@@ -1330,11 +1330,11 @@
     <string name="island_trust_changed_typed">%1$s предъявил не тот отпечаток, который вы ввели.</string>
     <string name="island_trust_changed_short">%1$s предъявил сертификат, которому это устройство не доверяет. Решите в уведомлении.</string>
     <string name="island_trust_disagrees">Это устройство уже доверяет %1$s с другим отпечатком, не тем, что введён. Ничего не подключено; решите в уведомлении.</string>
-    <string name="island_trust_disagrees_banner">%1$s уже записан здесь с другим отпечатком, не с тем, что введён. Соединение не устанавливалось.</string>
+    <string name="island_trust_changed_entered">Отпечаток, введённый для %1$s, отличается от того, которому это устройство уже доверяет.</string>
     <string name="island_trust_not_an_address">Это не адрес острова. Адрес — это хост и порт, если он не 443: island.example:8443</string>
     <string name="island_trust_on_file">На устройстве</string>
     <string name="island_trust_presented">Предъявлен сейчас</string>
-    <string name="island_trust_entered">Введён сейчас</string>
+    <string name="island_trust_entered">Введён</string>
     <string name="island_trust_via_ca">удостоверяющий центр</string>
     <string name="island_trust_accept">Доверять новому отпечатку</string>
     <string name="island_trust_later">Не сейчас</string>

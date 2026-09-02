@@ -84,7 +84,7 @@ internal fun IslandTrustBanner(ch: IslandTrust.Changed) {
     val body = when {
         // Not the form's sentence: this IS the notice it points at, and being
         // sent to look for it from inside it is no help.
-        ch.typedNew -> stringResource(R.string.island_trust_disagrees_banner, ch.hostPort)
+        ch.typedNew -> stringResource(R.string.island_trust_changed_entered, ch.hostPort)
         ch.typed -> stringResource(R.string.island_trust_changed_typed, ch.hostPort)
         else -> stringResource(R.string.island_trust_changed, ch.hostPort)
     }

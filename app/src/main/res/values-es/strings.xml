@@ -1282,11 +1282,11 @@
     <string name="island_trust_changed_typed">%1$s presentó una huella distinta de la que introdujiste.</string>
     <string name="island_trust_changed_short">%1$s presentó un certificado en el que este dispositivo no confía. Decide en el aviso.</string>
     <string name="island_trust_disagrees">Este dispositivo ya confía en %1$s con una huella distinta de la introducida. No se conectó nada; decide en el aviso.</string>
-    <string name="island_trust_disagrees_banner">%1$s ya está registrado con una huella distinta de la introducida. No se estableció ninguna conexión.</string>
+    <string name="island_trust_changed_entered">La huella introducida para %1$s difiere de aquella en la que este dispositivo ya confía.</string>
     <string name="island_trust_not_an_address">No es una dirección de isla. Una isla es un host, con puerto si no es el 443: island.example:8443</string>
     <string name="island_trust_on_file">Guardada</string>
     <string name="island_trust_presented">Presentada ahora</string>
-    <string name="island_trust_entered">Introducida ahora</string>
+    <string name="island_trust_entered">Introducida</string>
     <string name="island_trust_via_ca">una autoridad de certificación</string>
     <string name="island_trust_accept">Confiar en la nueva huella</string>
     <string name="island_trust_later">Ahora no</string>
