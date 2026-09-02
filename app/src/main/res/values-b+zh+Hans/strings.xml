@@ -342,6 +342,9 @@
     <string name="sites_reload">刷新</string>
     <string name="sites_loading">正在打开…</string>
     <string name="sites_catalogue">你的岛屿上</string>
+    <string name="sites_pinned">置顶</string>
+    <string name="sites_recents">最近打开</string>
+    <string name="sites_share">分享地址</string>
     <string name="sites_empty_title">Pages inside the network</string>
     <string name="sites_empty_body">Type an address, for example blog.rcq. Pages are text and pictures only: no scripts, no outward links, nothing loaded from outside.</string>
     <string name="sites_error_address">An address looks like name.rcq or name.island.rcq</string>

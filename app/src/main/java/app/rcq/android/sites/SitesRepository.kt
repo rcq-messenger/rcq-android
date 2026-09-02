@@ -121,7 +121,7 @@ object SitesRepository {
         SitePins.init(ctx)
         val m = manifest(addr, fresh)
         val raw = file(addr, m, path, fresh)
-        val html = SiteSanitizer.render(SiteSanitizer.decodeDeclared(raw), path, m.files.keys) { p ->
+        val html = SiteSanitizer.render(SiteSanitizer.decodeDeclared(raw), path, m.files.keys, ::door) { p ->
             // A stylesheet or image that is absent or unreachable costs its own
             // element and not the page. A hash MISMATCH is different and is
             // rethrown: that is the island serving bytes the owner did not
@@ -143,6 +143,33 @@ object SitesRepository {
             title = m.title,
         )
     }
+
+    /**
+     * The `href` a link inside a page gets when it stays inside the network,
+     * and null — no `href`, dead text — for everything else.
+     *
+     * The WebView runs no scripts, so a tap on an anchor is the only thing a
+     * page can say to our chrome, and an anchor without an `href` says
+     * nothing. These two private schemes are that channel: the reader's
+     * `shouldOverrideUrlLoading` swallows every navigation and acts on these
+     * two alone, so the frame still loads nothing and goes nowhere. A page of
+     * the same bundle opens that page; a `.rcq` address, bare or with a
+     * scheme, opens that site. An outward link is exactly as dead as before
+     * (founder, 02.09: the web outside is not decided, and is not opened).
+     */
+    private fun door(page: String?, external: String?): String? = when {
+        page != null -> DOOR_PAGE + page
+        external != null -> SiteAddress.linkOf(external)?.let { l ->
+            DOOR_SITE + l.address + (l.page?.let { "/$it" } ?: "")
+        }
+        else -> null
+    }
+
+    /** A page of the bundle being read: `rcq-page:<path>`. */
+    const val DOOR_PAGE = "rcq-page:"
+
+    /** Another site: `rcq-site:<address>[/<page>]`, in the form [SiteAddress.linkOf] reads back. */
+    const val DOOR_SITE = "rcq-site:"
 
     /**
      * Fetch the manifest and check the owner's signature over it.
@@ -180,10 +207,16 @@ object SitesRepository {
             found
         }
 
+    /** One row of an island's catalogue. [featured] is the island putting a
+     *  site up top on the browser's start screen — the network's own page on
+     *  the flagship. Islands older than the field do not send it, and an
+     *  absent flag is false, not an error. */
+    data class Listed(val name: String, val title: String?, val featured: Boolean)
+
     /** The catalogue of an island: only the sites that asked to be in it. Best
      *  effort — an island that does not publish one is not an error, it is an
      *  island whose sites are found by being told their names. */
-    suspend fun catalogue(host: String): List<Pair<String, String?>> = withContext(Dispatchers.IO) {
+    suspend fun catalogue(host: String): List<Listed> = withContext(Dispatchers.IO) {
         val url = (SiteAddress.originOf(host) + "/sites").toHttpUrlOrNull()
             ?: return@withContext emptyList()
         runCatching {
@@ -192,7 +225,11 @@ object SitesRepository {
             rows.mapNotNull { row ->
                 val o = row.asJsonObject
                 val name = o.get("name")?.asString ?: return@mapNotNull null
-                name to o.get("title")?.takeIf { !it.isJsonNull }?.asString
+                Listed(
+                    name = name,
+                    title = o.get("title")?.takeIf { !it.isJsonNull }?.asString,
+                    featured = o.get("featured")?.takeIf { it.isJsonPrimitive }?.asBoolean == true,
+                )
             }
         }.getOrDefault(emptyList())
     }

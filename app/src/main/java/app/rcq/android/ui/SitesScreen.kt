@@ -2,6 +2,7 @@ package app.rcq.android.ui
 
 import android.annotation.SuppressLint
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -34,7 +35,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -45,11 +48,13 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -68,7 +73,9 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.sites.SiteAddress
 import app.rcq.android.sites.SiteError
+import app.rcq.android.sites.SiteLink
 import app.rcq.android.sites.SitePins
+import app.rcq.android.sites.SiteRecents
 import app.rcq.android.sites.SitesRepository
 import kotlinx.coroutines.launch
 
@@ -86,11 +93,17 @@ import kotlinx.coroutines.launch
  *   network stack, and [shouldInterceptRequest] refuses every request as a
  *   second, independent line), no file or content access, no storage, and no
  *   navigation - a tapped link cannot leave, and cannot hand the URL to
- *   another app either, which is what an unguarded `intent://` does.
+ *   another app either, which is what an unguarded `intent://` does. The one
+ *   thing a tap can do is name a page of the same bundle or another `.rcq`
+ *   site, through the two private schemes [SitesRepository.door] writes,
+ *   and then it is THIS screen that opens it, the way it opens anything.
  * * `.rcq` is not DNS and never leaves this device as a name: the address is
  *   parsed here into island and site, and the request goes straight to that
  *   island - never through the reader's own, which would otherwise hold a
  *   journal of what its users read elsewhere.
+ *
+ * The start screen is three lists (founder, 02.09): what the island pins,
+ * what this device opened last, and the island's catalogue minus those two.
  */
 @Composable
 fun SitesScreen(
@@ -107,6 +120,19 @@ fun SitesScreen(
      * it has always been: the catalogue, and an empty address bar.
      */
     initialAddress: String? = null,
+    /** The page of that bundle a link with a path asked for; null is the
+     *  front page. */
+    initialPage: String? = null,
+    /**
+     * Share [display] as text (report #852). [at] is where the browser
+     * stands - the page open now, or null at the start screen - because the
+     * "Send to…" picker REPLACES this screen in the activity's `when` and
+     * everything remembered here goes with it: the caller re-seeds
+     * [initialAddress] and [initialPage] from it, so cancelling the picker
+     * brings back the page that was being shared and not whatever address
+     * the browser happened to be opened on.
+     */
+    onShare: (display: String, at: SiteOpen.Req?) -> Unit = { _, _ -> },
 ) {
     val c = RcqTheme.colors
     val ctx = LocalContext.current
@@ -149,8 +175,11 @@ fun SitesScreen(
     var page by remember { mutableStateOf<SitesRepository.SitePage?>(null) }
     var errorCode by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var catalogue by remember { mutableStateOf<List<Pair<String, String?>>>(emptyList()) }
-    val marks = remember { mutableStateMapOf<String, androidx.compose.ui.graphics.ImageBitmap?>() }
+    var catalogue by remember { mutableStateOf<List<SitesRepository.Listed>>(emptyList()) }
+    var recents by remember { mutableStateOf<List<SiteRecents.Entry>>(emptyList()) }
+    // Keyed `name@host` ([SiteAddress.pinKey]): a recent may be on another
+    // island, and its mark is that island's, not the same name's here.
+    val marks = remember { mutableStateMapOf<String, ImageBitmap?>() }
 
     // "My island" for a bare `name.rcq`, taken from this session's own host:
     // somebody's first site is reachable before they know what an island is.
@@ -161,17 +190,23 @@ fun SitesScreen(
     // straight back, and a slow page overwrites a faster one asked for later.
     var loadGen by remember { mutableStateOf(0) }
 
-    fun open(raw: String, path: String = "index.html", fresh: Boolean = false) {
-        val gen = ++loadGen
-        val parsed = SiteAddress.parse(raw, ownHost)
-        if (parsed == null) {
-            loading = false
-            errorCode = SiteError.Address.code
-            page = null
-            return
+    fun fetchMark(a: SiteAddress, fresh: Boolean = false) {
+        scope.launch {
+            val m = SitesRepository.mark(a, fresh)
+            marks[a.pinKey] = m?.let { bm ->
+                BitmapFactory.decodeByteArray(bm.bytes, 0, bm.bytes.size)?.asImageBitmap()
+            }
         }
+    }
+
+    // A site known by identity - a recent, a pinned row, a link - opens as
+    // an object; only what is TYPED goes through the parser. See
+    // [SiteAddress.of] for why the display of a recent may not parse back.
+    fun openAddr(parsed: SiteAddress, path: String = "index.html", fresh: Boolean = false) {
+        val gen = ++loadGen
         loading = true
         errorCode = null
+        typed = parsed.display
         scope.launch {
             try {
                 val got = SitesRepository.page(ctx, parsed, path, fresh)
@@ -179,14 +214,13 @@ fun SitesScreen(
                 page = got
                 addr = parsed
                 typed = parsed.display
+                // Now, not on the tap: a site that did not open is not one
+                // the reader was at.
+                SiteRecents.touch(parsed, got.title)
+                recents = SiteRecents.list()
                 // The mark of the site being read, fetched after the page so a
                 // slow icon never holds the page up.
-                scope.launch {
-                    val m = SitesRepository.mark(parsed, fresh)
-                    marks[parsed.name] = m?.let { bm ->
-                        BitmapFactory.decodeByteArray(bm.bytes, 0, bm.bytes.size)?.asImageBitmap()
-                    }
-                }
+                fetchMark(parsed, fresh)
             } catch (e: SiteError) {
                 if (gen != loadGen) return@launch
                 page = null
@@ -199,6 +233,28 @@ fun SitesScreen(
                 if (gen == loadGen) loading = false
             }
         }
+    }
+
+    fun open(raw: String, path: String = "index.html", fresh: Boolean = false) {
+        val parsed = SiteAddress.parse(raw, ownHost)
+        if (parsed == null) {
+            loadGen++
+            loading = false
+            errorCode = SiteError.Address.code
+            page = null
+            return
+        }
+        openAddr(parsed, path, fresh)
+    }
+
+    // The address as text, into the app's own "Send to…" picker: the person
+    // picks a chat or a contact and the address lands in its composer, to be
+    // sent as an ordinary message (report #852). The address alone, bare -
+    // `name.rcq` here, `name.island.rcq` elsewhere - which every client
+    // already turns into a link on the other end.
+    fun share(display: String) {
+        val here = addr?.let { a -> page?.let { SiteOpen.Req(a.display, it.path) } }
+        onShare(display, here)
     }
 
     // Back from a page or an address error returns to the catalogue, not out
@@ -236,18 +292,30 @@ fun SitesScreen(
     // Opened on an address somebody tapped: load it at once. Keyed on the
     // address so re-entering the browser on a different one loads that one,
     // and a recomposition on the same one does not re-fetch.
-    LaunchedEffect(initialAddress) {
-        if (!initialAddress.isNullOrBlank()) open(initialAddress)
+    LaunchedEffect(initialAddress, initialPage) {
+        if (!initialAddress.isNullOrBlank()) open(initialAddress, initialPage ?: "index.html")
     }
 
     // The catalogue of the reader's own island: what there is to look at at
-    // all, and only the sites that asked to be in it.
+    // all, and only the sites that asked to be in it. The recents come first
+    // and from disk, so the start screen is not blank while the island is
+    // asked.
     LaunchedEffect(ownHost) {
+        SiteRecents.init(ctx)
+        recents = SiteRecents.list()
         catalogue = SitesRepository.catalogue(ownHost)
-        for ((name, _) in catalogue) {
-            val a = SiteAddress.parse("$name.rcq", ownHost) ?: continue
+        // ⚠⚠ Marks are asked of THIS island only. A recent row on somebody
+        // else's island is drawn with its letter until it is opened: asking
+        // that island for the mark would tell it "this address still has me in
+        // its list" every time the reader merely opens the browser, and the
+        // promise here is that an island learns about a reader when the reader
+        // opens something on it.
+        val wanted = catalogue.map { SiteAddress.of(it.name, ownHost, ownHost) } +
+            recents.filter { it.host == ownHost }.map { SiteAddress.of(it.name, it.host, ownHost) }
+        for (a in wanted.distinctBy { it.pinKey }) {
+            if (a.pinKey in marks) continue
             val m = SitesRepository.mark(a)
-            marks[name] = m?.let { bm ->
+            marks[a.pinKey] = m?.let { bm ->
                 BitmapFactory.decodeByteArray(bm.bytes, 0, bm.bytes.size)?.asImageBitmap()
             }
         }
@@ -262,12 +330,15 @@ fun SitesScreen(
         // 02.09).
         //
         // Idle, the address is centred on the CAPSULE, not on the field left
-        // over between the chevron and the reload glyph: the two side slots
-        // are the same width, the right one as wide as whatever the left one
-        // holds, so the chevron and the mark push nothing to the right
-        // (founder, 02.09). Editing, it is an ordinary field, left-aligned.
-        val mark = if (page != null) addr?.let { marks[it.name] } else null
-        val sideSlot = if (mark != null) 24.dp + 6.dp + 18.dp else 24.dp
+        // over between the chevron and the glyphs: the two side slots are the
+        // same width, as wide as the wider of what they hold, so neither the
+        // chevron and the mark nor the reload and share glyphs push the
+        // address off centre (founder, 02.09). Editing, it is an ordinary
+        // field, left-aligned.
+        val mark = if (page != null) addr?.let { marks[it.pinKey] } else null
+        val leftNeed = if (mark != null) 24.dp + 6.dp + 18.dp else 24.dp
+        val rightNeed = if (page != null) 18.dp + 8.dp + 18.dp + 6.dp else 24.dp
+        val sideSlot = if (leftNeed > rightNeed) leftNeed else rightNeed
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -342,9 +413,14 @@ fun SitesScreen(
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
-            // The right slot mirrors the left one; the glyph sits at its far
-            // end so its distance from the capsule's edge is the chevron's.
-            Box(Modifier.width(sideSlot), contentAlignment = Alignment.CenterEnd) {
+            // The right slot mirrors the left one; the glyphs sit at its far
+            // end so the outer one's distance from the capsule's edge is the
+            // chevron's. Reload nearest the address, share at the edge.
+            Row(
+                Modifier.width(sideSlot),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (loading) {
                     CircularProgressIndicator(
                         color = c.textSecondary,
@@ -357,9 +433,18 @@ fun SitesScreen(
                         stringResource(R.string.sites_reload),
                         tint = c.textSecondary,
                         modifier = Modifier
+                            .size(18.dp)
+                            .clickable { addr?.let { openAddr(it, page!!.path, fresh = true) } },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        Icons.Filled.Share,
+                        stringResource(R.string.sites_share),
+                        tint = c.textSecondary,
+                        modifier = Modifier
                             .padding(end = 6.dp)
                             .size(18.dp)
-                            .clickable { addr?.let { open(it.display, page!!.path, fresh = true) } },
+                            .clickable { addr?.let { share(it.display) } },
                     )
                 }
             }
@@ -388,7 +473,7 @@ fun SitesScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(if (here) c.bgSecondary else c.bgPrimary)
-                            .clickable { addr?.let { open(it.display, p) } }
+                            .clickable { addr?.let { openAddr(it, p) } }
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
@@ -428,7 +513,7 @@ fun SitesScreen(
             }
         }
 
-        // ── the page, the catalogue, or what went wrong ──────────────────
+        // ── the page, the start screen, or what went wrong ───────────────
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 errorCode != null -> Text(
@@ -454,70 +539,169 @@ fun SitesScreen(
                         color = c.textSecondary,
                         fontSize = 12.sp,
                     )
-                    if (catalogue.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            stringResource(R.string.sites_catalogue).uppercase(),
-                            color = c.textSecondary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        catalogue.forEach { (name, title) ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { open("$name.rcq") }
-                                    .padding(vertical = 8.dp),
-                            ) {
-                                val bm = marks[name]
-                                if (bm != null) {
-                                    androidx.compose.foundation.Image(
-                                        bitmap = bm,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)),
-                                    )
-                                } else {
-                                    // Not a placeholder waiting for a picture:
-                                    // most sites will never have one, and a row
-                                    // that jumps when an icon lands is worse
-                                    // than a row that never had it.
-                                    Box(
-                                        Modifier
-                                            .size(26.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(c.bgSecondary),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            name.take(1).uppercase(),
-                                            color = c.textSecondary,
-                                            fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        "$name.rcq",
-                                        color = c.textPrimary,
-                                        fontSize = 14.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                    )
-                                    if (!title.isNullOrBlank()) {
-                                        Text(title, color = c.textSecondary, fontSize = 11.sp, maxLines = 1)
-                                    }
-                                }
-                            }
+                    // Three lists, in this order, each only when it has
+                    // something in it (founder, 02.09). A site shows once:
+                    // what is pinned is not repeated among the recents, and
+                    // neither is repeated in the catalogue.
+                    val pinned = catalogue.filter { it.featured }
+                        .map { SiteAddress.of(it.name, ownHost, ownHost) to it.title }
+                    val shown = pinned.map { it.first.pinKey }.toMutableSet()
+                    val recent = recents
+                        .map { SiteAddress.of(it.name, it.host, ownHost) to it }
+                        .filter { shown.add(it.first.pinKey) }
+                    val rest = catalogue
+                        .map { SiteAddress.of(it.name, ownHost, ownHost) to it.title }
+                        .filter { shown.add(it.first.pinKey) }
+                    if (pinned.isNotEmpty()) {
+                        SectionLabel(stringResource(R.string.sites_pinned))
+                        pinned.forEach { (a, title) ->
+                            SiteRow(a, title, marks[a.pinKey], onOpen = { openAddr(a) }, onShare = { share(a.display) })
+                        }
+                    }
+                    if (recent.isNotEmpty()) {
+                        SectionLabel(stringResource(R.string.sites_recents))
+                        recent.forEach { (a, e) ->
+                            SiteRow(
+                                a, e.title, marks[a.pinKey],
+                                onOpen = { openAddr(a) },
+                                onShare = { share(a.display) },
+                                onRemove = { SiteRecents.remove(e); recents = SiteRecents.list() },
+                            )
+                        }
+                    }
+                    if (rest.isNotEmpty()) {
+                        SectionLabel(stringResource(R.string.sites_catalogue))
+                        rest.forEach { (a, title) ->
+                            SiteRow(a, title, marks[a.pinKey], onOpen = { openAddr(a) }, onShare = { share(a.display) })
                         }
                     }
                 }
 
-                else -> LockedWebView(html = p!!.html)
+                else -> LockedWebView(
+                    html = p!!.html,
+                    // A page, not any file the manifest signs: a thumbnail
+                    // links its full-size photograph, and opening that decoded
+                    // its bytes as text and painted the rubble.
+                    onPage = { path -> if (isPagePath(path)) addr?.let { openAddr(it, path) } },
+                    // ⚠ A name with no island in it belongs to the island THIS
+                    // page came from, the way a bare name in a web page belongs
+                    // to the site's own zone. Resolved against the reader's
+                    // island instead, an author on the flagship writing
+                    // `e2ee.rcq` sent every reader on another island to
+                    // whoever holds that name over there.
+                    onSite = { link ->
+                        val here = addr
+                        val bare = SiteAddress.parse(link.address, here?.host ?: ownHost)
+                        val page = link.page?.takeIf { isPagePath(it) } ?: "index.html"
+                        if (here != null && bare != null && bare.host == here.host) {
+                            openAddr(SiteAddress.of(bare.name, here.host, ownHost), page)
+                        } else {
+                            open(link.address, page)
+                        }
+                    },
+                )
             }
         }
+    }
+}
+
+/** The small uppercase heading over each list of the start screen. */
+/**
+ * What may be opened as a page. The manifest signs pictures and stylesheets
+ * too, and neither is a page: decoded as text and parsed as HTML they paint a
+ * screen of rubble, with the address bar claiming the site is showing
+ * `photo.jpg`.
+ */
+private fun isPagePath(path: String): Boolean =
+    path.endsWith(".html", ignoreCase = true) || path.endsWith(".htm", ignoreCase = true)
+
+@Composable
+private fun SectionLabel(text: String) {
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text.uppercase(),
+        color = RcqTheme.colors.textSecondary,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+}
+
+/**
+ * One site in a list: its mark, its address, its title, and at the right a
+ * share glyph (report #852) and, on a recent, the cross that forgets it.
+ */
+@Composable
+private fun SiteRow(
+    a: SiteAddress,
+    title: String?,
+    mark: ImageBitmap?,
+    onOpen: () -> Unit,
+    onShare: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+) {
+    val c = RcqTheme.colors
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 8.dp),
+    ) {
+        if (mark != null) {
+            androidx.compose.foundation.Image(
+                bitmap = mark,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)),
+            )
+        } else {
+            // Not a placeholder waiting for a picture: most sites will never
+            // have one, and a row that jumps when an icon lands is worse than
+            // a row that never had it.
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(c.bgSecondary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    a.name.take(1).uppercase(),
+                    color = c.textSecondary,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                a.display,
+                color = c.textPrimary,
+                fontSize = 14.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            if (!title.isNullOrBlank()) {
+                Text(title, color = c.textSecondary, fontSize = 11.sp, maxLines = 1)
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Icon(
+            Icons.Filled.Share,
+            stringResource(R.string.sites_share),
+            tint = c.textSecondary,
+            modifier = Modifier.size(18.dp).clickable(onClick = onShare),
+        )
+        if (onRemove != null) {
+            Spacer(Modifier.width(14.dp))
+            Icon(
+                Icons.Filled.Close,
+                stringResource(R.string.common_remove),
+                tint = c.textSecondary,
+                modifier = Modifier.size(18.dp).clickable(onClick = onRemove),
+            )
+        }
+        Spacer(Modifier.width(4.dp))
     }
 }
 
@@ -572,13 +756,37 @@ private fun errorText(code: String): Int = when (code) {
  *   are cheap to keep.
  * * `loadDataWithBaseURL(null, …)` gives the document an opaque origin, and
  *   with no base URL a relative reference resolves to nowhere.
- * * `shouldOverrideUrlLoading` returns true from BOTH overloads. Without it a
- *   tapped `intent://` link is handed to the system and opens another app -
- *   the one hole in a locked WebView that is not about the web at all.
+ * * `shouldOverrideUrlLoading` returns true from BOTH overloads, for EVERY
+ *   URL. Without it a tapped `intent://` link is handed to the system and
+ *   opens another app - the one hole in a locked WebView that is not about
+ *   the web at all. Before returning, it reads the two private schemes the
+ *   sanitiser's door pass wrote ([SitesRepository.DOOR_PAGE],
+ *   [SitesRepository.DOOR_SITE]) and hands them to [onPage] and [onSite]:
+ *   the frame itself still goes nowhere, the screen above opens what was
+ *   named. Nothing else in a page has an `href` at all, so nothing else can
+ *   reach here.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun LockedWebView(html: String) {
+private fun LockedWebView(
+    html: String,
+    onPage: (String) -> Unit,
+    onSite: (SiteLink) -> Unit,
+) {
+    // The client is built once in the factory and outlives many
+    // recompositions; it must call the CURRENT lambdas, which close over the
+    // current address.
+    val page by rememberUpdatedState(onPage)
+    val site by rememberUpdatedState(onSite)
+    fun door(url: String?) {
+        url ?: return
+        when {
+            url.startsWith(SitesRepository.DOOR_PAGE) ->
+                page(Uri.decode(url.removePrefix(SitesRepository.DOOR_PAGE)))
+            url.startsWith(SitesRepository.DOOR_SITE) ->
+                SiteAddress.linkOf(Uri.decode(url.removePrefix(SitesRepository.DOOR_SITE)))?.let { site(it) }
+        }
+    }
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
@@ -599,10 +807,16 @@ private fun LockedWebView(html: String) {
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?,
-                    ): Boolean = true
+                    ): Boolean {
+                        door(request?.url?.toString())
+                        return true
+                    }
 
                     @Deprecated("Kept for API 23 and below, which still call it")
-                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = true
+                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                        door(url)
+                        return true
+                    }
 
                     override fun shouldInterceptRequest(
                         view: WebView?,

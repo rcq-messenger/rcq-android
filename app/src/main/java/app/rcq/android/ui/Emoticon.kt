@@ -66,11 +66,23 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import app.rcq.android.R
 import app.rcq.android.data.LocalStores
+import app.rcq.android.sites.SiteAddress
+import app.rcq.android.sites.SiteLink
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /**
  * The classic KOLOBOK emoticon set, bundled in `assets/emoticons/<name>.gif`
@@ -615,6 +627,10 @@ private fun AnnotatedString.Builder.appendWithMentions(
         val uin: Int,
         val display: String,
         val site: Boolean = false,
+        /** For a site hit: where the tap goes. The display stays what was
+         *  typed (`https://e2ee.rcq/en.html`); this is the address and the
+         *  page the reader is asked for. */
+        val link: SiteLink? = null,
     )
     val hits = ArrayList<Hit>()
     if (mentionNick != null) {
@@ -644,14 +660,23 @@ private fun AnnotatedString.Builder.appendWithMentions(
     if (linkify) {
         val urls = ArrayList<IntRange>()
         for (m in Emoticons.URL_RE.findAll(text)) {
-            hits.add(Hit(m.range, true, 0, m.value))
+            // A scheme in front of a `.rcq` host is somebody's habit from the
+            // web, not a web address: `https://e2ee.rcq/en.html` is the site
+            // `e2ee.rcq` at its page `en.html`, and it opens in the reader.
+            // Until this the URL pass won whenever the scheme was typed and
+            // the tap went to the system browser (founder, sharing his own
+            // site, 02.09). The host decides; `https://blog.rcq.app/x` is
+            // still the web.
+            val site = SiteAddress.linkOf(m.value)
+            hits.add(Hit(m.range, site == null, 0, m.value, site = site != null, link = site))
             urls.add(m.range)
         }
         // `.rcq` addresses in what the URLs left over — the web's two-pass
         // order, so the `blog.rcq` inside `https://blog.rcq.app/x` stays part
         // of somebody else's URL and is never taken for a site here.
         for (r in SiteLinks.find(text, urls)) {
-            hits.add(Hit(r, false, 0, text.substring(r), site = true))
+            val a = text.substring(r)
+            hits.add(Hit(r, false, 0, a, site = true, link = SiteLink(a, null)))
         }
     }
     if (hits.isEmpty()) { append(text); return }
@@ -664,10 +689,11 @@ private fun AnnotatedString.Builder.appendWithMentions(
             // Drawn like a link because it is one, but it never leaves the
             // app: the address is parked for RcqApp, which opens the `.rcq`
             // browser over whatever is on screen with it already loading.
+            val link = h.link ?: SiteLink(h.display, null)
             withLink(
                 LinkAnnotation.Clickable(
                     tag = "s${h.display}",
-                    linkInteractionListener = { SiteOpen.request(h.display) },
+                    linkInteractionListener = { SiteOpen.request(link.address, link.page) },
                 ),
             ) {
                 withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(h.display) }
@@ -702,6 +728,94 @@ private fun AnnotatedString.Builder.appendWithMentions(
  *  [SafeAnimatedGif] approach, which spun up live decoders churning a fresh
  *  bitmap every frame and OOM-crashed low-RAM devices (the "crashes when using
  *  smileys" report on Redmi Note 7 / Android 10). */
+/**
+ * How tall the keyboard was, the last time it was up.
+ *
+ * The smiley panel stands where the keyboard stood, so it should be the size
+ * of the thing it replaces: a fixed 200dp card left a strip of chat above it
+ * on a tall phone and covered half the screen on a short one (#843). The
+ * height cannot be read while the panel is open, because by then the keyboard
+ * is down and the inset is zero, so it is remembered when the keyboard is up
+ * and kept across launches - the first panel of a fresh install is the only
+ * one that has to guess.
+ */
+/**
+ * A tap on the conversation closes the smiley panel; a scroll does not (#843).
+ *
+ * The first version closed it on the first pointer DOWN, which is also the
+ * first event of a drag, so the panel disappeared the moment somebody scrolled
+ * up to re-read a line before answering. A keyboard does not behave that way
+ * and neither should the thing standing in its place. Down, then: an up before
+ * the finger travels further than the touch slop is a tap and closes it;
+ * anything longer is a scroll and is none of our business.
+ *
+ * ⚠ Lives here rather than in ChatScreen because that file's register map sits
+ * at the ART verifier's limit.
+ */
+internal fun Modifier.closePanelOnTap(enabled: Boolean, onTap: () -> Unit): Modifier =
+    if (!enabled) this else this.pointerInput(enabled) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var moved = false
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                if (!change.pressed) {
+                    if (!moved) onTap()
+                    break
+                }
+            }
+        }
+    }
+
+internal object KeyboardHeight {
+
+    private const val PREFS = "rcq_ui"
+    private const val KEY = "ime_height_px"
+
+    /** A first guess for a phone that has not shown its keyboard to us yet. */
+    private const val FALLBACK_DP = 280
+
+    private var px: Int = 0
+
+    fun remember(context: Context, height: Int) {
+        // A keyboard is never this short; what is, is a floating one or the
+        // gesture bar on its way in, and taking that for the height would
+        // leave a panel two fingers tall.
+        if (height < 180 || height == px) return
+        px = height
+        runCatching {
+            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putInt(KEY, height).apply()
+        }
+    }
+
+    fun load(context: Context) {
+        if (px > 0) return
+        px = runCatching {
+            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY, 0)
+        }.getOrDefault(0)
+    }
+
+    @Composable
+    fun asDp(): Dp {
+        val context = LocalContext.current
+        val density = LocalDensity.current
+        // Watch the keyboard while this composable lives: the panel's own
+        // height for next time is written here, and nothing else in the chat
+        // has to know about it.
+        val ime = WindowInsets.ime.getBottom(density)
+        LaunchedEffect(ime) {
+            KeyboardHeight.load(context)
+            if (ime > 0) KeyboardHeight.remember(context, ime)
+        }
+        KeyboardHeight.load(context)
+        return if (px > 0) with(density) { px.toDp() } else FALLBACK_DP.dp
+    }
+}
+
 @Composable
 internal fun EmoticonPanel(onPick: (String) -> Unit) {
     val c = RcqTheme.colors
@@ -729,12 +843,23 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
         .background(fill)
         .border(0.5.dp, Color.White.copy(alpha = 0.08f), cardShape)
 
+    // The panel stands where the keyboard stood, so it is the size of the
+    // keyboard (#843); the handle above the grid stretches it to most of the
+    // screen for somebody picking through a long set, and puts it back.
+    val keyboard = KeyboardHeight.asDp()
+    val tall = (LocalConfiguration.current.screenHeightDp * 0.72f).dp
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val height by animateDpAsState(
+        targetValue = if (expanded) maxOf(tall, keyboard) else keyboard,
+        label = "emoticon-panel-height",
+    )
+
     if (panel.isEmpty()) {
         // Empty by default: a centered CTA inviting the user to choose their own
         // panel set (and, in the same window, their quick reactions).
         Column(
             modifier = card
-                .height(200.dp)
+                .height(keyboard)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -753,11 +878,32 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
         return
     }
 
-    Column(card) {
+    Column(card.height(height)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // The handle: drag it up for the whole screen, down to put the
+            // panel back to the keyboard's height. A tap does the same, since
+            // a 4dp bar is a small thing to catch.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(24.dp)
+                    .draggable(
+                        orientation = Orientation.Vertical,
+                        state = rememberDraggableState { delta -> if (delta < -6f) expanded = true else if (delta > 6f) expanded = false },
+                    )
+                    .clickable { expanded = !expanded },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 36.dp, height = 4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(c.textSecondary.copy(alpha = 0.35f)),
+                )
+            }
             TextButton(onClick = { showPicker = true }) {
                 Text(stringResource(R.string.emoji_edit), color = c.accent, fontSize = 13.sp)
             }
@@ -766,7 +912,7 @@ internal fun EmoticonPanel(onPick: (String) -> Unit) {
             columns = GridCells.Adaptive(minSize = 46.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(168.dp)
+                .weight(1f)
                 .padding(horizontal = 6.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),

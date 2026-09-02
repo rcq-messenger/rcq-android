@@ -361,6 +361,9 @@
     <string name="sites_reload">Обновить</string>
     <string name="sites_loading">Открываю…</string>
     <string name="sites_catalogue">На вашем острове</string>
+    <string name="sites_pinned">Закреплённые</string>
+    <string name="sites_recents">Недавние</string>
+    <string name="sites_share">Поделиться адресом</string>
     <string name="sites_empty_title">Страницы внутри сети</string>
     <string name="sites_empty_body">Введите адрес, например blog.rcq. Страницы это только текст и картинки: без скриптов, без ссылок наружу, ничего не грузится извне.</string>
     <string name="sites_error_address">Адрес выглядит так: имя.rcq или имя.остров.rcq</string>
