@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import app.rcq.android.MainActivity
 import app.rcq.android.R
+import app.rcq.android.net.islandTrust
 import com.google.gson.JsonParser
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -106,6 +107,12 @@ class PushSocketService : Service() {
             .pingInterval(50, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .proxy(proxy)
+            // The push host is CA-only today, but the socket dials whatever
+            // the signed config names, and this service starts headless, so
+            // it initialises the trust store itself rather than trusting
+            // MainActivity to have run first.
+            .apply { app.rcq.android.net.IslandTrust.init(this@PushSocketService) }
+            .islandTrust()
             .build()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -266,6 +273,14 @@ class PushSocketService : Service() {
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (stale()) return
             Log.w(TAG, "socket failed: ${t.javaClass.simpleName}: ${t.message}")
+            // A certificate this device refuses is not a network failure; the
+            // backoff would only repeat the same handshake. Session kicks this
+            // service (reconnectNow) once the person has decided.
+            if (app.rcq.android.net.IslandTrust.isChangedRefusal(t)) {
+                Log.w(TAG, "trust refused — waiting for the person, not the backoff")
+                socket = null
+                return
+            }
             scheduleReconnect()
         }
 

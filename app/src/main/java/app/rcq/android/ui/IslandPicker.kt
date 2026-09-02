@@ -82,6 +82,10 @@ internal fun IslandPickerSheet(
     }
     var manual by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(current.ifBlank { RcqApi.DEFAULT_HOST }) }
+    // An address error (design §3): a `#fp` fragment that is not a
+    // fingerprint, or one on a host that is never pinned, or one the store
+    // disagrees with. Said under the field; Use does nothing until it is fixed.
+    var addressError by remember { mutableStateOf<String?>(null) }
 
     RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.island_pick_title)) {
         if (manual || islands.isEmpty()) {
@@ -94,10 +98,13 @@ internal fun IslandPickerSheet(
                 ) {
                     if (draft.isEmpty()) Text(stringResource(R.string.island_host_hint), color = c.textSecondary, fontSize = 14.sp)
                     BasicTextField(
-                        value = draft, onValueChange = { draft = it }, singleLine = true,
+                        value = draft, onValueChange = { draft = it; addressError = null }, singleLine = true,
                         textStyle = TextStyle(color = c.textPrimary, fontSize = 14.sp),
                         cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth(),
                     )
+                }
+                addressError?.let {
+                    Text(it, color = androidx.compose.ui.graphics.Color(0xFFE5484D), fontSize = 12.sp)
                 }
                 Text(stringResource(R.string.island_manual_help), color = c.textSecondary, fontSize = 11.sp)
                 Text(
@@ -111,7 +118,20 @@ internal fun IslandPickerSheet(
             }
             SheetGap(16)
             CapsuleButton(stringResource(R.string.island_use), modifier = Modifier.fillMaxWidth()) {
-                onPick(draft.trim())
+                // The fragment is taken on file here, before the first
+                // connection, and what is handed on is the bare host:port.
+                when (val e = app.rcq.android.net.IslandTrust.adopt(draft)) {
+                    is app.rcq.android.net.IslandTrust.Entry.Ok -> onPick(e.hostPort)
+                    is app.rcq.android.net.IslandTrust.Entry.Empty -> onPick("")
+                    is app.rcq.android.net.IslandTrust.Entry.Malformed ->
+                        addressError = ctx.getString(R.string.csrv_unreachable)
+                    is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint ->
+                        addressError = ctx.getString(R.string.island_trust_not_fingerprint)
+                    is app.rcq.android.net.IslandTrust.Entry.CaOnly ->
+                        addressError = ctx.getString(R.string.island_trust_ca_only, e.host)
+                    is app.rcq.android.net.IslandTrust.Entry.Disagrees ->
+                        addressError = ctx.getString(R.string.island_trust_disagrees, e.changed.hostPort)
+                }
             }
         } else {
             IslandCarousel(current = current, islands = islands, onPick = onPick)

@@ -107,8 +107,29 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
                     error = null
                     scope.launch {
                         val words = RecoveryPhrase.parse(phrase)
+                        // The island's `#fp` fragment is judged here, before
+                        // anything is dialled (design §3), so its error is
+                        // its own and not mistaken for a bad phrase below.
+                        var addressError: String? = null
+                        val srv = when (val e = app.rcq.android.net.IslandTrust.adopt(server)) {
+                            is app.rcq.android.net.IslandTrust.Entry.Ok -> e.hostPort
+                            is app.rcq.android.net.IslandTrust.Entry.Empty -> null
+                            is app.rcq.android.net.IslandTrust.Entry.Malformed -> {
+                                addressError = context.getString(R.string.csrv_unreachable); null
+                            }
+                            is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint -> {
+                                addressError = context.getString(R.string.island_trust_not_fingerprint); null
+                            }
+                            is app.rcq.android.net.IslandTrust.Entry.CaOnly -> {
+                                addressError = context.getString(R.string.island_trust_ca_only, e.host); null
+                            }
+                            is app.rcq.android.net.IslandTrust.Entry.Disagrees -> {
+                                addressError = context.getString(R.string.island_trust_disagrees, e.changed.hostPort); null
+                            }
+                        }
+                        if (addressError != null) { error = addressError; busy = false; return@launch }
                         val res = runCatching {
-                            session.recoverAccount(words, server.trim().ifBlank { null })
+                            session.recoverAccount(words, srv)
                         }
                         busy = false
                         res.onSuccess { onRestored(it) }

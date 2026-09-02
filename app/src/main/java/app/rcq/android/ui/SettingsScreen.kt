@@ -858,6 +858,12 @@ private fun SettingsRoot(
                         )
                     },
                 ) { }
+                // How this island is trusted (design §5.3): through a
+                // certificate authority, or by the fingerprint pinned on this
+                // device, shown so it can be compared and copied as an
+                // address to hand to somebody. Nothing before the first
+                // handshake has written a record.
+                IslandTrustRow(host = islandHost)
                 if (islandRules != null) {
                     Divider()
                     SettingsRow(Icons.Filled.Gavel, stringResource(R.string.island_rules_title)) {
@@ -2257,8 +2263,13 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
         }
         scope.launch {
             val host = session.currentServer
-            directOk = withContext(Dispatchers.IO) { transport.probeDirect(host) }
-            routeOk = withContext(Dispatchers.IO) { transport.probeCurrentRoute(host) }
+            // A trust refusal reads as "not reachable" here on purpose: the
+            // island answered, but not in a way this device will talk to, and
+            // the banner on the main screen is where that is explained.
+            directOk = withContext(Dispatchers.IO) { transport.probeDirect(host) } ==
+                app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+            routeOk = withContext(Dispatchers.IO) { transport.probeCurrentRoute(host) } ==
+                app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
             running = false
         }
     }
@@ -3381,14 +3392,25 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
     var confirm by remember { mutableStateOf(false) }
     var resetting by remember { mutableStateOf(false) }
 
-    // Bare host the user typed (scheme/path stripped); blank → default.
-    fun normalized(s: String): String = s.trim()
-        .removePrefix("https://").removePrefix("http://").removePrefix("wss://").removePrefix("ws://")
-        .substringBefore('/').trim()
-        .ifBlank { RcqApi.DEFAULT_HOST }
+    // Bare host[:port] the user typed (scheme, path and the `#fp` fragment
+    // stripped, the fragment FIRST — see IslandTrust.splitAddress); blank →
+    // default. The fragment itself is pinned by Session.normalizeHost when
+    // the switch actually runs, never here while typing.
+    fun normalized(s: String): String =
+        app.rcq.android.net.IslandTrust.splitAddress(s)?.hostPort ?: RcqApi.DEFAULT_HOST
 
     val target = normalized(draft)
-    val isDirty = target != current
+    // A fragment that is not a fingerprint, or one on a host that is never
+    // pinned, or one the store disagrees with, is an address error: said
+    // under the field and nothing is dialled (design §3).
+    val addressError: String? = when (val e = app.rcq.android.net.IslandTrust.inspect(draft, commit = false)) {
+        is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint -> stringResource(R.string.island_trust_not_fingerprint)
+        is app.rcq.android.net.IslandTrust.Entry.CaOnly -> stringResource(R.string.island_trust_ca_only, e.host)
+        is app.rcq.android.net.IslandTrust.Entry.Disagrees -> stringResource(R.string.island_trust_disagrees, e.changed.hostPort)
+        is app.rcq.android.net.IslandTrust.Entry.Malformed -> stringResource(R.string.csrv_unreachable)
+        else -> null
+    }
+    val isDirty = target != current && addressError == null
     val onCustom = current != RcqApi.DEFAULT_HOST
 
     fun applySwitch(input: String?, inviteCode: String?) {
@@ -3425,6 +3447,7 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
             }
 
             Field(stringResource(R.string.csrv_host), draft) { draft = it }
+            addressError?.let { Text(it, color = Color(0xFFE5484D), fontSize = 12.sp) }
 
             // Invite token — required only for closed servers
             // (REGISTRATION_POLICY=invite). Leave blank for open self-hosts.
@@ -4304,6 +4327,51 @@ private fun SettingsRow(
             )
         }
         if (chevron) Icon(Icons.Filled.ChevronRight, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** The island row's companion: how [host] is trusted on this device. A CA
+ *  island (the flagship by rule, or any island whose chain the platform took)
+ *  gets one line; a pinned island gets its fingerprint in display form and a
+ *  copy of `host:port#fp`, the address `install.sh` prints for the operator
+ *  to hand out. Draws nothing while no record exists yet. */
+@Composable
+private fun IslandTrustRow(host: String) {
+    val c = RcqTheme.colors
+    val context = LocalContext.current
+    val records by app.rcq.android.net.IslandTrust.records.collectAsState()
+    val rec = records[app.rcq.android.net.IslandTrust.keyOf(host)]
+    val viaCa = app.rcq.android.net.IslandTrust.isCaOnly(host) || rec?.mode == app.rcq.android.net.IslandTrust.Mode.CA
+    val fp = rec?.fp?.takeIf { rec.mode == app.rcq.android.net.IslandTrust.Mode.PINNED }
+    if (!viaCa && fp == null) return
+    Divider()
+    if (viaCa || fp == null) {
+        SettingsRow(Icons.Filled.Lock, stringResource(R.string.island_trust_settings_ca), chevron = false) { }
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(Icons.Filled.Fingerprint, null, tint = c.accent, modifier = Modifier.size(20.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.island_trust_settings_pinned), color = c.textPrimary, fontSize = 16.sp)
+            Text(
+                app.rcq.android.net.IslandTrust.displayFingerprint(fp),
+                color = c.textSecondary, fontSize = 13.sp, lineHeight = 18.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        val copyLabel = stringResource(R.string.island_trust_copy)
+        Icon(
+            Icons.Filled.ContentCopy, copyLabel, tint = c.accent,
+            modifier = Modifier.size(20.dp).clickable {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("island", "$host#$fp"))
+                Toast.makeText(context, context.getString(R.string.island_trust_copied), Toast.LENGTH_SHORT).show()
+            },
+        )
     }
 }
 

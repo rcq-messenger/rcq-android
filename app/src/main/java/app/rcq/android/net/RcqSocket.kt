@@ -33,7 +33,16 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         // socket passes the gate (OkHttp runs the handshake through interceptors).
         .addInterceptor(AccessTokenInterceptor)
         .addInterceptor(UserAgentInterceptor)
+        // A fingerprint island (design §7.1): the same trust rule as RcqApi.
+        .islandTrust()
         .build()
+
+    /** `host[:port]` this socket dials, for the trust store. */
+    private val islandHostPort: String =
+        runCatching {
+            val u = java.net.URI(baseWsUrl)
+            if (u.port > 0) "${u.host}:${u.port}" else u.host
+        }.getOrNull() ?: baseWsUrl
 
     private var ws: WebSocket? = null
     private var shouldStayConnected = false
@@ -113,6 +122,16 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private fun open() {
         ws?.cancel()
         val gen = ++generation
+        // The island presented a certificate this device does not trust and
+        // the person has not decided yet: nothing is dialled, not on the
+        // backoff, not on a network change, not from the watchdog. Session
+        // rebuilds the socket once the record changes (design §5.5).
+        if (IslandTrust.isRefused(islandHostPort)) {
+            android.util.Log.w("RCQsocket", "$islandHostPort is refused until the person decides — not dialling")
+            believedConnected = false
+            onState(false)
+            return
+        }
         val request = Request.Builder().url("$baseWsUrl/ws/$uin?token=$token").build()
         ws = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -162,6 +181,14 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
                 if (gen != generation) return
                 believedConnected = false
                 onState(false)
+                // A trust refusal is not a network failure: redialling it is
+                // the same handshake against the same certificate, and the
+                // banner is what changes it. open() keeps the door shut until
+                // the record moves.
+                if (IslandTrust.isChangedRefusal(t)) {
+                    android.util.Log.w("RCQsocket", "trust refused for $islandHostPort — reconnects stop until the person decides")
+                    return
+                }
                 scheduleReconnect()
             }
 

@@ -1275,4 +1275,22 @@
     <string name="last_seen_long_ago">uzun zaman önce</string>
     <string name="settings_economy_title">Tasarruf modu (RCQ Lite)</string>
     <string name="settings_economy_desc">RCQ Lite budur: ayrı bir uygulama değil, buradaki bir anahtar. Hareketli avatarları ve duvar kağıtlarını tek seferde kapatır, eski veya yavaş telefonlar için.</string>
+    <!-- Island trust: an island trusted by its certificate fingerprint rather than a CA (island-fingerprint-design.md §5) -->
+    <string name="island_trust_first_use">%1$s ile ilk bağlantı. Parmak izi:\n%2$s\nBu adaya güvenmeden önce işletmecinin yayımladığıyla karşılaştırın.</string>
+    <string name="island_trust_changed">%1$s, bu cihazın güvendiğinden farklı bir sertifika sundu. Biri bağlantıyı dinliyor olabilir ya da işletmeci sertifikayı değiştirmiş olabilir. Güvenmeden önce yeni parmak izini işletmecinin yayımladığıyla karşılaştırın.</string>
+    <string name="island_trust_changed_typed">%1$s, girdiğinizden farklı bir parmak izi sundu.</string>
+    <string name="island_trust_changed_short">%1$s, bu cihazın güvenmediği bir sertifika sundu. Ana ekrandaki uyarıda karar verin.</string>
+    <string name="island_trust_disagrees">Bu cihaz %1$s adasına zaten girilenden farklı bir parmak iziyle güveniyor. Hiçbir şey bağlanmadı; ana ekrandaki uyarıda karar verin.</string>
+    <string name="island_trust_on_file">Kayıtlı</string>
+    <string name="island_trust_presented">Şimdi sunulan</string>
+    <string name="island_trust_entered">Şimdi girilen</string>
+    <string name="island_trust_via_ca">bir sertifika otoritesi</string>
+    <string name="island_trust_accept">Yeni parmak izine güven</string>
+    <string name="island_trust_later">Şimdi değil</string>
+    <string name="island_trust_settings_ca">Sertifika otoritesi üzerinden güveniliyor</string>
+    <string name="island_trust_settings_pinned">Parmak iziyle güveniliyor</string>
+    <string name="island_trust_copy">Adresi parmak iziyle kopyala</string>
+    <string name="island_trust_copied">Adres kopyalandı</string>
+    <string name="island_trust_not_fingerprint">Bu bir parmak izi değil. # işaretinden sonra adanın SHA-256 parmak izi gelir: 64 onaltılık karakter.</string>
+    <string name="island_trust_ca_only">%1$s sertifika otoritesi üzerinden güvenilir, parmak izi almaz.</string>
 </resources>

@@ -36,6 +36,9 @@ object CrossIslandSender {
         // islands unaffected). proxiedClient inherits this via newBuilder().
         .addInterceptor(AccessTokenInterceptor)
         .addInterceptor(UserAgentInterceptor)
+        // A foreign island trusted by fingerprint (design §6), inherited by
+        // proxiedClient the same way.
+        .islandTrust()
         .build()
     @Volatile private var proxiedClient: OkHttpClient? = null
 

@@ -84,6 +84,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -345,6 +349,28 @@ internal fun HomeScreen(
     val viaBackup by session.receivingViaBackup.collectAsState()
     val routeVerified by session.routeVerified.collectAsState()
     val bypassManual by session.bypassManual.collectAsState()
+    // Island trust (design §5): a host refused because its certificate
+    // changed is a banner at the top of the list; a first-use pin is said
+    // once, in a snackbar, and marked noticed when it goes. Both are read off
+    // the trust layer's own state, so nothing here has to remember to ask.
+    val trustChanged by app.rcq.android.net.IslandTrust.changed.collectAsState()
+    val trustHidden by app.rcq.android.net.IslandTrust.hidden.collectAsState()
+    val trustFirstUse by app.rcq.android.net.IslandTrust.firstUse.collectAsState()
+    val trustNotice = remember { SnackbarHostState() }
+    val pendingFirstUse = trustFirstUse.firstOrNull()
+    LaunchedEffect(pendingFirstUse?.key) {
+        val n = pendingFirstUse ?: return@LaunchedEffect
+        trustNotice.showSnackbar(
+            message = context.getString(
+                R.string.island_trust_first_use, n.hostPort,
+                app.rcq.android.net.IslandTrust.displayFingerprint(n.fp),
+            ),
+            actionLabel = context.getString(R.string.common_ok),
+            duration = SnackbarDuration.Indefinite,
+        )
+        // Dismissed or acknowledged: either way it was seen, never again.
+        app.rcq.android.net.IslandTrust.noticed(n.key)
+    }
     // Push reachability nudge: a killed/swiped app only receives messages via a
     // UnifiedPush distributor (ntfy). With none installed the user silently gets
     // nothing while closed ("приложение перестало работать после закрытия").
@@ -467,6 +493,13 @@ internal fun HomeScreen(
     var draggingSection by remember { mutableStateOf<String?>(null) }
     var dragDy by remember { mutableStateOf(0f) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // A trust banner that arrives while the list sits at the top is inserted
+    // ABOVE the first visible row, and LazyColumn keeps that row where it was,
+    // so the one message that explains why the island is offline would open
+    // just out of view. Bring the list up to it when a host joins the set.
+    LaunchedEffect(trustChanged.keys) {
+        if (trustChanged.isNotEmpty()) runCatching { listState.animateScrollToItem(0) }
+    }
 
     /// Every local edit goes through here: it patches the cached tree, repaints
     /// at the speed of the tap, and pushes to the island behind the paint.
@@ -895,6 +928,11 @@ internal fun HomeScreen(
             }
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
+                // Above everything else: an island refused at the trust layer
+                // is offline until one of these is answered.
+                for ((k, ch) in trustChanged) if (k !in trustHidden) {
+                    item(key = "island-trust-$k") { IslandTrustBanner(ch) }
+                }
                 if (fsiLost) {
                     item(key = "fsi-lost") {
                         FullScreenIntentBanner(
@@ -1295,6 +1333,18 @@ internal fun HomeScreen(
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
                     onClearThread = { clearGroupTarget = it }),
                 onDismiss = { previewGroup = null },
+            )
+        }
+        // The first-use notice (design §5.1): non-blocking, dismissible, once
+        // per host. Not a modal: onboarding must not stop on a dialog most
+        // people cannot evaluate; the careful person types `host#fp` instead.
+        SnackbarHost(trustNotice, Modifier.align(Alignment.BottomCenter)) { data ->
+            Snackbar(
+                snackbarData = data,
+                actionOnNewLine = true,
+                containerColor = c.bgSecondary,
+                contentColor = c.textPrimary,
+                actionColor = c.accent,
             )
         }
     }
@@ -2370,6 +2420,58 @@ private fun CiPendingRow(
     }
 }
 
+/// An island presented a certificate this device does not trust (design §5.2).
+/// Red, in the banner slot with the two below it; the island stays refused and
+/// offline until one of the two buttons is pressed. "Not now" only folds the
+/// banner away: the next refused handshake brings it back.
+@Composable
+private fun IslandTrustBanner(ch: app.rcq.android.net.IslandTrust.Changed) {
+    val c = RcqTheme.colors
+    val body = when {
+        ch.typedNew -> stringResource(R.string.island_trust_disagrees, ch.hostPort)
+        ch.typed -> stringResource(R.string.island_trust_changed_typed, ch.hostPort)
+        else -> stringResource(R.string.island_trust_changed, ch.hostPort)
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary.copy(alpha = LocalHomeVeil.current)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Lock, null, tint = c.statusBusy, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(ch.hostPort, color = c.statusBusy, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(body, color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+        Spacer(Modifier.height(8.dp))
+        IslandTrustFingerprint(
+            label = stringResource(R.string.island_trust_on_file),
+            value = ch.old?.let { app.rcq.android.net.IslandTrust.displayFingerprint(it) }
+                ?: stringResource(R.string.island_trust_via_ca),
+        )
+        Spacer(Modifier.height(6.dp))
+        IslandTrustFingerprint(
+            label = stringResource(if (ch.typedNew) R.string.island_trust_entered else R.string.island_trust_presented),
+            value = app.rcq.android.net.IslandTrust.displayFingerprint(ch.new),
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { app.rcq.android.net.IslandTrust.later(ch.key) }) {
+                Text(stringResource(R.string.island_trust_later), color = c.textSecondary)
+            }
+            TextButton(onClick = { app.rcq.android.net.IslandTrust.accept(ch.key) }) {
+                Text(stringResource(R.string.island_trust_accept), color = c.accent)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IslandTrustFingerprint(label: String, value: String) {
+    val c = RcqTheme.colors
+    Text(label, color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    Text(value, color = c.textPrimary, fontSize = 13.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace)
+}
+
 /// Shown once, after an update that took the full-screen-intent grant with it.
 /// Same shape as the push nudge so it reads as the same kind of message.
 @Composable
@@ -3258,7 +3360,29 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
                     Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
                 TextButton(enabled = !checking, onClick = {
-                    val h = host.ifBlank { null }
+                    // The `#fp` fragment is judged BEFORE anything is dialled
+                    // (design §3): not a fingerprint, or on a host that is
+                    // never pinned, is an address error here; a fragment the
+                    // store disagrees with raises the banner on the main
+                    // screen and stops here too. What goes on to the gate
+                    // and the registration is the bare host:port, with the
+                    // typed pin already on file.
+                    val h = when (val e = app.rcq.android.net.IslandTrust.adopt(host)) {
+                        is app.rcq.android.net.IslandTrust.Entry.Ok -> e.hostPort
+                        is app.rcq.android.net.IslandTrust.Entry.Empty -> null
+                        is app.rcq.android.net.IslandTrust.Entry.Malformed -> {
+                            err = ctx.getString(R.string.csrv_unreachable); return@TextButton
+                        }
+                        is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint -> {
+                            err = ctx.getString(R.string.island_trust_not_fingerprint); return@TextButton
+                        }
+                        is app.rcq.android.net.IslandTrust.Entry.CaOnly -> {
+                            err = ctx.getString(R.string.island_trust_ca_only, e.host); return@TextButton
+                        }
+                        is app.rcq.android.net.IslandTrust.Entry.Disagrees -> {
+                            err = ctx.getString(R.string.island_trust_disagrees, e.changed.hostPort); return@TextButton
+                        }
+                    }
                     if (h != null && token.isNotBlank()) {
                         // Redeem the access token for this host FIRST (stores the
                         // durable token so the registration call passes the gate),

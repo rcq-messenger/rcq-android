@@ -44,6 +44,9 @@ object Multihome {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
+        // Backup homes and peers' extra homes may be fingerprint islands
+        // (design §6); the proxied twin inherits this via newBuilder().
+        .islandTrust()
         .build()
     @Volatile private var proxiedClient: OkHttpClient? = null
 
