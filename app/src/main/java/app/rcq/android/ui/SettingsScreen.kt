@@ -693,7 +693,7 @@ private fun SettingsRoot(
                 Column(Modifier.weight(1f)) {
                     Text(session.nickname, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("#$uin", color = c.textMono, fontSize = 13.sp)
+                        Text("$uin", color = c.textMono, fontSize = 13.sp)
                         Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
                             modifier = Modifier.size(15.dp).clickable { copyUin() })
                     }
@@ -1362,7 +1362,7 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("#$ownUin", color = c.textMono, fontSize = 13.sp)
+                        Text("$ownUin", color = c.textMono, fontSize = 13.sp)
                         Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
                             modifier = Modifier.size(15.dp).clickable { copyText("UIN", "$ownUin") })
                         Icon(Icons.Filled.Share, stringResource(R.string.qr_share), tint = c.textSecondary,
@@ -3080,7 +3080,7 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
                         StatusIcon(ct.presence, size = 26.dp)
                         Column(Modifier.weight(1f)) {
                             Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
-                            Text("#${ct.uin}", color = c.textMono, fontSize = 12.sp)
+                            Text("${ct.uin}", color = c.textMono, fontSize = 12.sp)
                         }
                         TextButton(onClick = { scope.launch { runCatching { session.toggleBlock(ct.uin) } } }) {
                             Text(stringResource(R.string.blocked_unblock), color = c.accent)

@@ -1111,7 +1111,7 @@
     <string name="myreports_delete_error">Listeden kaldırılamadı. Tekrar deneyin.</string>
     <string name="myreports_remove_title">Listeden kaldırılsın mı?</string>
     <string name="myreports_remove_body">Listenden kaybolur. Bildirimin kendisi bizde kalır ve Şöhret Salonu için saymaya devam eder.</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">Düzenle</string>
     <string name="myreports_edited">düzenlendi</string>
     <string name="myreports_edit_locked">Bu bildirime zaten cevap verilmiş, artık metni değişmiyor.</string>

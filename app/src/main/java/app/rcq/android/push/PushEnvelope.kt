@@ -94,7 +94,7 @@ internal object PushEnvelope {
         val preview = if (dec.senderUin == me) null else preview(ctx, dec.envelope)
         return Opened(
             senderUin = dec.senderUin,
-            senderName = nameFor(ctx, accountId, dec.senderUin, host) ?: "#${dec.senderUin}",
+            senderName = nameFor(ctx, accountId, dec.senderUin, host) ?: "${dec.senderUin}",
             preview = preview,
             mentionsMe = preview != null && mentionsMe(preview, me, store.nickname),
             quarantined = quarantined,

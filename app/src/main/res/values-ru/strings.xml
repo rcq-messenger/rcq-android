@@ -1146,7 +1146,7 @@
     <string name="myreports_delete_error">Не удалось убрать. Попробуйте ещё раз.</string>
     <string name="myreports_remove_title">Убрать из списка?</string>
     <string name="myreports_remove_body">Обращение пропадёт из вашего списка. Само оно остаётся у нас и продолжает считаться в зале славы.</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">Изменить</string>
     <string name="myreports_edited">изменено</string>
     <string name="myreports_edit_locked">На это обращение уже ответили, поэтому текст больше не меняется.</string>

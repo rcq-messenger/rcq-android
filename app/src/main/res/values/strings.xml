@@ -1154,7 +1154,7 @@
     <string name="myreports_delete_error">Could not remove it. Try again.</string>
     <string name="myreports_remove_title">Remove from list?</string>
     <string name="myreports_remove_body">It disappears from your list. The report itself stays with us and still counts toward the Hall of Fame.</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">Edit</string>
     <string name="myreports_edited">edited</string>
     <string name="myreports_edit_locked">This report already has an answer, so its text is fixed now.</string>

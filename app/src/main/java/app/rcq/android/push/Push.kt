@@ -1252,7 +1252,7 @@ object Push {
             ?: acctId
                 ?.let { PushEnvelope.nameFor(ctx, it, fromUin, host = null) }
                 ?.takeIf { it.isNotBlank() }
-            ?: "#$fromUin"
+            ?: "$fromUin"
         ring(ctx, callId, fromUin, name, str("media") ?: "video", sdp)
     }
 

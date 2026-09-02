@@ -1161,7 +1161,7 @@ private fun RcqApp(session: Session) {
                 } else {
                     val ci = req.host?.takeIf { it != session.currentServer }
                     ContactAddDialog2(
-                        address = if (ci != null) "${req.uin}@$ci" else "#${req.uin}",
+                        address = if (ci != null) "${req.uin}@$ci" else "${req.uin}",
                         onConfirm = {
                             ContactAddLink.pending.value = null
                             scope.launch {

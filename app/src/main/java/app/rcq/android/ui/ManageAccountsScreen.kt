@@ -182,7 +182,7 @@ internal fun ManageAccountsScreen(
                                 color = c.textSecondary, fontSize = 12.sp,
                             )
                         }
-                        uin?.let { Text("#$it", color = c.textMono, fontSize = 12.sp) }
+                        uin?.let { Text("$it", color = c.textMono, fontSize = 12.sp) }
                     }
                     val index = sorted.indexOfFirst { it.id == account.id }
                     // The active row used to end in a tick. It sat in the column

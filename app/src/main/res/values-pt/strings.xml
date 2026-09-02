@@ -1111,7 +1111,7 @@
     <string name="myreports_delete_error">Não deu para tirar da lista. Tente de novo.</string>
     <string name="myreports_remove_title">Tirar da lista?</string>
     <string name="myreports_remove_body">Ele some da sua lista. O relato continua conosco e segue contando para o Hall da Fama.</string>
-    <string name="myreports_number">#%1$d</string>
+    <string name="myreports_number">%1$d</string>
     <string name="myreports_edit">Editar</string>
     <string name="myreports_edited">editado</string>
     <string name="myreports_edit_locked">Este relato já tem resposta, então o texto não muda mais.</string>

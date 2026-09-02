@@ -3828,7 +3828,7 @@ class Session(context: Context) {
         members = g.members.map {
             GroupMember(
                 uin = it.uin,
-                nickname = it.nickname ?: "#${it.uin}",
+                nickname = it.nickname ?: "${it.uin}",
                 role = it.role ?: "member",
                 status = it.status,
                 identityKey = it.identity_key ?: "",
@@ -4724,7 +4724,7 @@ class Session(context: Context) {
         val uins = LocalStores.blocked.value + _contacts.value.filter { it.blocked }.map { it.uin }
         return uins.toSet().map { uin ->
             byUin[uin]?.copy(blocked = true)
-                ?: Contact(uin = uin, nickname = "#$uin", identityKey = "", signingKey = null, blocked = true)
+                ?: Contact(uin = uin, nickname = "$uin", identityKey = "", signingKey = null, blocked = true)
         }.sortedBy { it.nickname.lowercase() }
     }
 
@@ -7840,7 +7840,7 @@ class Session(context: Context) {
                     // still arm if we ever do talk to them.
                     if (was != env.on && !isQuarantinedStranger(dec.senderUin)) {
                         val who = _contacts.value.firstOrNull { it.uin == dec.senderUin }?.nickname
-                            ?: "#${dec.senderUin}"
+                            ?: "${dec.senderUin}"
                         val text = appCtx.getString(
                             if (env.on) app.rcq.android.R.string.secscreen_peer_on
                             else app.rcq.android.R.string.secscreen_peer_off,
@@ -7867,7 +7867,7 @@ class Session(context: Context) {
                 is Envelope.ScreenshotTaken -> {
                     // Peer took a screenshot in a secure chat — post a notice
                     // with their name (resolved + localized on our side).
-                    val name = _contacts.value.firstOrNull { it.uin == dec.senderUin }?.nickname ?: "#${dec.senderUin}"
+                    val name = _contacts.value.firstOrNull { it.uin == dec.senderUin }?.nickname ?: "${dec.senderUin}"
                     store(ChatMessage(env.id, dec.senderUin, fromMe = false, body = appCtx.getString(app.rcq.android.R.string.secscreen_peer_screenshot, name), sentAt = now, kind = "system"))
                 }
                 is Envelope.Poll -> Unit       // polls are group-only; ignore in 1:1
@@ -8468,7 +8468,7 @@ class Session(context: Context) {
         note: String? = null,
     ): Boolean {
         val me = store.uin ?: return false
-        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: "#$me"
+        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: "$me"
         return runCatching {
             CrossIslandSender.deliverContactRequest(
                 host, uin, identityKeyB64,
@@ -8615,7 +8615,7 @@ class Session(context: Context) {
     ) = withContext(Dispatchers.IO) {
         if (targets.isEmpty()) return@withContext
         val me = store.uin ?: return@withContext
-        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: "#$me"
+        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: "$me"
         // Only claim a picture we can actually hand over. If the sealed blob
         // can't be recovered, the envelope goes out naming no picture rather
         // than naming one the recipient's island will 404.
@@ -9336,13 +9336,13 @@ class Session(context: Context) {
 
     private suspend fun refreshPending() {
         _pending.value = api.pending().map {
-            PendingRequest(it.id, it.from_uin, it.nickname ?: "#${it.from_uin}")
+            PendingRequest(it.id, it.from_uin, it.nickname ?: "${it.from_uin}")
         }
     }
 
     private suspend fun refreshOutgoing() {
         _outgoing.value = api.outgoing().map {
-            OutgoingRequest(it.to_uin, it.nickname ?: "#${it.to_uin}", it.state ?: "pending")
+            OutgoingRequest(it.to_uin, it.nickname ?: "${it.to_uin}", it.state ?: "pending")
         }
     }
 
@@ -9367,7 +9367,7 @@ class Session(context: Context) {
             ?: _contacts.value.firstOrNull { it.uin == uin }
         return app.rcq.android.data.LocalStores.aliasFor(uin, host ?: c?.host)
             ?: c?.nickname
-            ?: "#$uin"
+            ?: "$uin"
     }
 
     /** The name this person CHOSE, never the one I gave them.
@@ -9382,7 +9382,7 @@ class Session(context: Context) {
     fun contactWireName(uin: Int, host: String? = null): String {
         val c = _contacts.value.firstOrNull { it.uin == uin && (host == null || it.host == host) }
             ?: _contacts.value.firstOrNull { it.uin == uin }
-        return c?.nickname ?: "#$uin"
+        return c?.nickname ?: "$uin"
     }
 
     /** Append a call-summary line to the 1:1 thread (kind="call"), so a
@@ -10161,10 +10161,10 @@ class Session(context: Context) {
         val gid = msg.groupId
         if (gid != null) {
             val sender = _contacts.value.firstOrNull { it.uin == msg.senderUin }?.nickname
-                ?: msg.senderUin?.let { "#$it" }
+                ?: msg.senderUin?.let { "$it" }
             _banner.value = InAppBanner(thread, groupName(gid), sender, msg.body, msg.kind, null, gid)
         } else {
-            val name = _contacts.value.firstOrNull { it.uin == msg.peerUin }?.nickname ?: "#${msg.peerUin}"
+            val name = _contacts.value.firstOrNull { it.uin == msg.peerUin }?.nickname ?: "${msg.peerUin}"
             _banner.value = InAppBanner(thread, name, null, msg.body, msg.kind, msg.peerUin, null)
         }
     }

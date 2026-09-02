@@ -81,7 +81,7 @@ internal fun DecoyThreadPicker(
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(name, color = c.textPrimary, fontSize = 14.sp)
-                    Text("#$uin", color = c.textSecondary, fontSize = 12.sp)
+                    Text("$uin", color = c.textSecondary, fontSize = 12.sp)
                 }
             }
         }
