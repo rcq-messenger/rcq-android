@@ -6,6 +6,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -85,6 +86,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun SitesScreen(
     session: Session,
+    /**
+     * Leave the browser. Called from the catalogue only: with a page or an
+     * address error showing, Back - the chevron and the system gesture alike -
+     * returns to the catalogue first.
+     */
     onBack: () -> Unit,
     /**
      * An address to open straight away, e.g. the one tapped in a message.
@@ -113,9 +119,16 @@ fun SitesScreen(
     // somebody's first site is reachable before they know what an island is.
     val ownHost = remember { session.islandHost() }
 
+    // Only the latest request may touch the screen. Without this a reload
+    // that lands after Back has already cleared the page brings the page
+    // straight back, and a slow page overwrites a faster one asked for later.
+    var loadGen by remember { mutableStateOf(0) }
+
     fun open(raw: String, path: String = "index.html", fresh: Boolean = false) {
+        val gen = ++loadGen
         val parsed = SiteAddress.parse(raw, ownHost)
         if (parsed == null) {
+            loading = false
             errorCode = SiteError.Address.code
             page = null
             return
@@ -125,6 +138,7 @@ fun SitesScreen(
         scope.launch {
             try {
                 val got = SitesRepository.page(ctx, parsed, path, fresh)
+                if (gen != loadGen) return@launch
                 page = got
                 addr = parsed
                 typed = parsed.display
@@ -137,16 +151,39 @@ fun SitesScreen(
                     }
                 }
             } catch (e: SiteError) {
+                if (gen != loadGen) return@launch
                 page = null
                 errorCode = e.code
             } catch (e: Exception) {
+                if (gen != loadGen) return@launch
                 page = null
                 errorCode = SiteError.Offline.code
             } finally {
-                loading = false
+                if (gen == loadGen) loading = false
             }
         }
     }
+
+    // Back from a page or an address error returns to the catalogue, not out
+    // of the browser: the reader came in to look around, and one wrong
+    // address must not throw them back into the chat (founder, 02.09). Only
+    // the catalogue itself hands Back to the caller.
+    //
+    // ⚠ This handler is composed INSIDE the activity's, so it is consulted
+    // first while enabled; at the catalogue it is disabled and the activity's
+    // entry closes the browser as before. The chevron in the bar goes through
+    // the same closure as the system gesture, so the two cannot drift apart.
+    val onCatalogue = page == null && errorCode == null
+    fun toCatalogue() {
+        loadGen++
+        loading = false
+        page = null
+        addr = null
+        errorCode = null
+        typed = ""
+    }
+    BackHandler(enabled = !onCatalogue) { toCatalogue() }
+    val back: () -> Unit = { if (onCatalogue) onBack() else toCatalogue() }
 
     // Opened on an address somebody tapped: load it at once. Keyed on the
     // address so re-entering the browser on a different one loads that one,
@@ -170,85 +207,86 @@ fun SitesScreen(
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         // ── the address bar ──────────────────────────────────────────────
+        //
+        // One capsule across the full width, and the chevron lives inside it
+        // at the left edge: before the site's mark on a page, before the hint
+        // at the catalogue. Not a field with a button beside it (founder,
+        // 02.09).
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+                .height(40.dp)
+                .clip(CircleShape)
+                .background(c.bgSecondary)
+                .padding(start = 6.dp, end = 12.dp),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
                 stringResource(R.string.common_back),
                 tint = c.accent,
-                modifier = Modifier.size(26.dp).clickable(onClick = onBack),
+                modifier = Modifier.size(24.dp).clickable(onClick = back),
             )
-            Spacer(Modifier.width(8.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(40.dp)
-                    .clip(CircleShape)
-                    .background(c.bgSecondary)
-                    .padding(horizontal = 12.dp),
-            ) {
-                val mark = addr?.let { marks[it.name] }
-                if (page != null && mark != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = mark,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                }
-                androidx.compose.foundation.text.BasicTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        color = c.textPrimary,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
-                    keyboardOptions = KeyboardOptions(
-                        imeAction = ImeAction.Go,
-                        autoCorrect = false,
-                        capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None,
-                    ),
-                    // Go opens it. There is no button beside the field: that
-                    // would be a second way to do what the keyboard already
-                    // does (founder, 01.09).
-                    keyboardActions = KeyboardActions(onGo = { keyboard?.hide(); open(typed) }),
-                    decorationBox = { inner ->
-                        if (typed.isEmpty()) {
-                            Text(
-                                stringResource(R.string.sites_address_hint),
-                                color = c.textSecondary,
-                                fontSize = 14.sp,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
-                        inner()
-                    },
-                    modifier = Modifier.weight(1f),
+            Spacer(Modifier.width(6.dp))
+            val mark = addr?.let { marks[it.name] }
+            if (page != null && mark != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = mark,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
                 )
-                if (page != null) {
-                    Spacer(Modifier.width(8.dp))
-                    if (loading) {
-                        CircularProgressIndicator(
+                Spacer(Modifier.width(8.dp))
+            }
+            androidx.compose.foundation.text.BasicTextField(
+                value = typed,
+                onValueChange = { typed = it },
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(
+                    color = c.textPrimary,
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Monospace,
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Go,
+                    autoCorrect = false,
+                    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None,
+                ),
+                // Go opens it. There is no button beside the field: that
+                // would be a second way to do what the keyboard already
+                // does (founder, 01.09).
+                keyboardActions = KeyboardActions(onGo = { keyboard?.hide(); open(typed) }),
+                decorationBox = { inner ->
+                    if (typed.isEmpty()) {
+                        Text(
+                            stringResource(R.string.sites_address_hint),
                             color = c.textSecondary,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(15.dp),
-                        )
-                    } else {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            stringResource(R.string.sites_reload),
-                            tint = c.textSecondary,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clickable { addr?.let { open(it.display, page!!.path, fresh = true) } },
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace,
                         )
                     }
+                    inner()
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (page != null) {
+                Spacer(Modifier.width(8.dp))
+                if (loading) {
+                    CircularProgressIndicator(
+                        color = c.textSecondary,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(15.dp),
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        stringResource(R.string.sites_reload),
+                        tint = c.textSecondary,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { addr?.let { open(it.display, page!!.path, fresh = true) } },
+                    )
                 }
             }
         }
