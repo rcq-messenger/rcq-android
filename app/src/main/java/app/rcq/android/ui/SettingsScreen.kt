@@ -3405,7 +3405,14 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
     // under the field and nothing is dialled (design §3).
     val entry = app.rcq.android.net.IslandTrust.inspect(draft, commit = false)
     val addressError: String? = islandAddressError(context, entry)
-    val isDirty = target != current && addressError == null
+    // ⚠ A disagreement is not one of the errors that disable Save. The field
+    // says to decide at the notice, and with `commit = false` above there was
+    // no notice to decide at and no way to raise one from here: Save was
+    // disabled, so the submit that raises it (the other five forms all call
+    // adopt) could never run. Pressing Save on a disagreement raises the
+    // banner below instead of switching.
+    val disagrees = entry is app.rcq.android.net.IslandTrust.Entry.Disagrees
+    val isDirty = target != current && (addressError == null || disagrees)
     val onCustom = current != RcqApi.DEFAULT_HOST
 
     fun applySwitch(input: String?, inviteCode: String?) {
@@ -3424,12 +3431,22 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.pv_custom_server), onBack, trailing = {
-            TextButton(enabled = isDirty && !switching, onClick = { confirm = true }) {
+            TextButton(
+                enabled = isDirty && !switching,
+                onClick = {
+                    // The submit, where the other forms commit too: the
+                    // disagreement becomes the banner and nothing is dialled.
+                    if (disagrees) app.rcq.android.net.IslandTrust.adopt(draft) else confirm = true
+                },
+            ) {
                 Text(stringResource(R.string.common_save), color = if (isDirty && !switching) c.accent else c.textSecondary)
             }
         })
 
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            // The notice the address error points at, on the screen that
+            // raises it rather than one Back away.
+            IslandTrustNotices()
             Text(
                 stringResource(R.string.csrv_intro),
                 color = c.textSecondary, fontSize = 14.sp,
@@ -3637,6 +3654,9 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // The field below takes `host:8443#fp` too, and a fragment the
+            // store disagrees with is decided here rather than one Back away.
+            IslandTrustNotices()
             Text(stringResource(R.string.backup_island_body), color = c.textSecondary, fontSize = 14.sp)
 
             // One toggle for normal users: the island comes from the catalogue.

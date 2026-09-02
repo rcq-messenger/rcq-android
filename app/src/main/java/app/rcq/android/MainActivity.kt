@@ -1405,8 +1405,13 @@ private fun Failed(message: String, onRetry: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.padding(32.dp),
+        modifier = Modifier.verticalScroll(rememberScrollState()).padding(32.dp),
     ) {
+        // ⚠ When the failure IS a refused certificate, "Try again" repeats the
+        // same refusal for ever: the only thing that can change the answer is
+        // the decision, and until now it was on a screen this person has not
+        // reached yet. Scrollable because the notice carries two fingerprints.
+        app.rcq.android.ui.IslandTrustNotices()
         Text(stringResource(R.string.boot_connect_failed_title), color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(message, color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
         CapsuleButton(stringResource(R.string.boot_connect_retry), onClick = onRetry)

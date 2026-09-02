@@ -149,6 +149,11 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
             }
         }
 
+        // An island refused at the trust layer, decided here: the picker above
+        // takes `host:8443#fp`, and before this the accept button of §5.2 only
+        // ever existed on a main screen that does not exist yet.
+        IslandTrustNotices()
+
         HorizontalPager(state = pager, modifier = Modifier.weight(1f).fillMaxWidth()) { idx ->
             PageContent(pages[idx])
         }

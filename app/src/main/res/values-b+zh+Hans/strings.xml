@@ -1277,8 +1277,10 @@
     <string name="island_trust_first_use">首次连接 %1$s。它的指纹是:\n%2$s\n在依赖这个岛之前,请与运营者公布的指纹核对。</string>
     <string name="island_trust_changed">%1$s 出示的证书与此设备信任的不同。可能有人在截取连接,也可能是运营者更换了证书。信任之前,请将新指纹与运营者公布的核对。</string>
     <string name="island_trust_changed_typed">%1$s 出示的指纹与你输入的不同。</string>
-    <string name="island_trust_changed_short">%1$s 出示了此设备不信任的证书。请在主屏幕的提示中决定。</string>
-    <string name="island_trust_disagrees">此设备已用另一个指纹信任 %1$s,与输入的不同。没有建立任何连接;请在主屏幕的提示中决定。</string>
+    <string name="island_trust_changed_short">%1$s 出示了此设备不信任的证书。请在提示中决定。</string>
+    <string name="island_trust_disagrees">此设备已用另一个指纹信任 %1$s,与输入的不同。没有建立任何连接;请在提示中决定。</string>
+    <string name="island_trust_disagrees_banner">%1$s 已用另一个指纹记录在此,与输入的不同。未建立任何连接。</string>
+    <string name="island_trust_not_an_address">这不是岛的地址。地址是主机名,端口不是 443 时还要写上:island.example:8443</string>
     <string name="island_trust_on_file">已记录</string>
     <string name="island_trust_presented">现在出示</string>
     <string name="island_trust_entered">现在输入</string>

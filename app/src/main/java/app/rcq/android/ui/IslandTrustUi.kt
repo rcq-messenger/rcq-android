@@ -1,6 +1,33 @@
 package app.rcq.android.ui
 
 import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.rcq.android.R
 import app.rcq.android.net.IslandTrust
 
@@ -17,8 +44,85 @@ import app.rcq.android.net.IslandTrust
  */
 fun islandAddressError(ctx: Context, entry: IslandTrust.Entry): String? = when (entry) {
     is IslandTrust.Entry.Ok, is IslandTrust.Entry.Empty -> null
-    is IslandTrust.Entry.Malformed -> ctx.getString(R.string.csrv_unreachable)
+    is IslandTrust.Entry.Malformed -> ctx.getString(R.string.island_trust_not_an_address)
     is IslandTrust.Entry.NotAFingerprint -> ctx.getString(R.string.island_trust_not_fingerprint)
     is IslandTrust.Entry.CaOnly -> ctx.getString(R.string.island_trust_ca_only, entry.host)
     is IslandTrust.Entry.Disagrees -> ctx.getString(R.string.island_trust_disagrees, entry.changed.hostPort)
+}
+
+/**
+ * Every island refused right now, drawn where the person is standing.
+ *
+ * ⚠ The banner used to exist on the main screen alone, and the accept button
+ * of §5.2 was therefore unreachable on every path that has no main screen
+ * under it: first-run onboarding, restore, and the failed-to-register screen.
+ * A person who typed the operator's `host:8443#fp` on first run against an
+ * island whose certificate had since been rotated got "decide at the notice"
+ * and nothing to decide at, with "Try again" repeating the same refusal for
+ * ever. The settings forms are the same story one screen away from Home.
+ */
+@Composable
+fun IslandTrustNotices(modifier: Modifier = Modifier) {
+    val changed by IslandTrust.changed.collectAsState()
+    val hidden by IslandTrust.hidden.collectAsState()
+    val visible = changed.filterKeys { it !in hidden }
+    if (visible.isEmpty()) return
+    Column(modifier.fillMaxWidth()) {
+        for ((_, ch) in visible) IslandTrustBanner(ch)
+    }
+}
+
+/// An island presented a certificate this device does not trust (design §5.2).
+/// Red, in the banner slot with the two below it; the island stays refused and
+/// offline until one of the two buttons is pressed. "Not now" only folds the
+/// banner away: the next refused handshake brings it back.
+@Composable
+internal fun IslandTrustBanner(ch: IslandTrust.Changed) {
+    val c = RcqTheme.colors
+    val body = when {
+        // Not the form's sentence: this IS the notice it points at, and being
+        // sent to look for it from inside it is no help.
+        ch.typedNew -> stringResource(R.string.island_trust_disagrees_banner, ch.hostPort)
+        ch.typed -> stringResource(R.string.island_trust_changed_typed, ch.hostPort)
+        else -> stringResource(R.string.island_trust_changed, ch.hostPort)
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary.copy(alpha = LocalHomeVeil.current)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Lock, null, tint = c.statusBusy, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(ch.hostPort, color = c.statusBusy, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(body, color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+        Spacer(Modifier.height(8.dp))
+        IslandTrustFingerprint(
+            label = stringResource(R.string.island_trust_on_file),
+            value = ch.old?.let { IslandTrust.displayFingerprint(it) }
+                ?: stringResource(R.string.island_trust_via_ca),
+        )
+        Spacer(Modifier.height(6.dp))
+        IslandTrustFingerprint(
+            label = stringResource(if (ch.typedNew) R.string.island_trust_entered else R.string.island_trust_presented),
+            value = IslandTrust.displayFingerprint(ch.new),
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { IslandTrust.later(ch.key) }) {
+                Text(stringResource(R.string.island_trust_later), color = c.textSecondary)
+            }
+            TextButton(onClick = { IslandTrust.accept(ch.key) }) {
+                Text(stringResource(R.string.island_trust_accept), color = c.accent)
+            }
+        }
+    }
+}
+
+/** A fingerprint reads as a grid only in a fixed-width font (design §2). */
+@Composable
+internal fun IslandTrustFingerprint(label: String, value: String) {
+    val c = RcqTheme.colors
+    Text(label, color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    Text(value, color = c.textPrimary, fontSize = 13.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace)
 }

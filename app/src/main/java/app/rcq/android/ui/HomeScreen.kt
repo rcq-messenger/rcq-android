@@ -2420,57 +2420,9 @@ private fun CiPendingRow(
     }
 }
 
-/// An island presented a certificate this device does not trust (design §5.2).
-/// Red, in the banner slot with the two below it; the island stays refused and
-/// offline until one of the two buttons is pressed. "Not now" only folds the
-/// banner away: the next refused handshake brings it back.
-@Composable
-private fun IslandTrustBanner(ch: app.rcq.android.net.IslandTrust.Changed) {
-    val c = RcqTheme.colors
-    val body = when {
-        ch.typedNew -> stringResource(R.string.island_trust_disagrees, ch.hostPort)
-        ch.typed -> stringResource(R.string.island_trust_changed_typed, ch.hostPort)
-        else -> stringResource(R.string.island_trust_changed, ch.hostPort)
-    }
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary.copy(alpha = LocalHomeVeil.current)).padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Lock, null, tint = c.statusBusy, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(ch.hostPort, color = c.statusBusy, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(body, color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
-        Spacer(Modifier.height(8.dp))
-        IslandTrustFingerprint(
-            label = stringResource(R.string.island_trust_on_file),
-            value = ch.old?.let { app.rcq.android.net.IslandTrust.displayFingerprint(it) }
-                ?: stringResource(R.string.island_trust_via_ca),
-        )
-        Spacer(Modifier.height(6.dp))
-        IslandTrustFingerprint(
-            label = stringResource(if (ch.typedNew) R.string.island_trust_entered else R.string.island_trust_presented),
-            value = app.rcq.android.net.IslandTrust.displayFingerprint(ch.new),
-        )
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { app.rcq.android.net.IslandTrust.later(ch.key) }) {
-                Text(stringResource(R.string.island_trust_later), color = c.textSecondary)
-            }
-            TextButton(onClick = { app.rcq.android.net.IslandTrust.accept(ch.key) }) {
-                Text(stringResource(R.string.island_trust_accept), color = c.accent)
-            }
-        }
-    }
-}
-
-@Composable
-private fun IslandTrustFingerprint(label: String, value: String) {
-    val c = RcqTheme.colors
-    Text(label, color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-    Text(value, color = c.textPrimary, fontSize = 13.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace)
-}
+/// The §5.2 banner and its fingerprint rows moved to IslandTrustUi.kt: the
+/// list here is no longer the only surface that draws them (onboarding,
+/// restore and the settings forms take island addresses too).
 
 /// Shown once, after an update that took the full-screen-intent grant with it.
 /// Same shape as the push nudge so it reads as the same kind of message.

@@ -1283,8 +1283,10 @@
     <string name="island_trust_first_use">Перше підключення до %1$s. Його відбиток:\n%2$s\nЗвірте його з тим, що опублікував оператор, перш ніж покладатися на цей острів.</string>
     <string name="island_trust_changed">%1$s пред\'явив не той сертифікат, якому довіряє цей пристрій. Можливо, з\'єднання перехоплюють, або оператор змінив сертифікат. Звірте новий відбиток з тим, що опублікував оператор, перш ніж йому довіряти.</string>
     <string name="island_trust_changed_typed">%1$s пред\'явив не той відбиток, який ви ввели.</string>
-    <string name="island_trust_changed_short">%1$s пред\'явив сертифікат, якому цей пристрій не довіряє. Вирішіть у сповіщенні на головному екрані.</string>
-    <string name="island_trust_disagrees">Цей пристрій уже довіряє %1$s з іншим відбитком, не тим, що введено. Нічого не підключено; вирішіть у сповіщенні на головному екрані.</string>
+    <string name="island_trust_changed_short">%1$s пред\'явив сертифікат, якому цей пристрій не довіряє. Вирішіть у сповіщенні.</string>
+    <string name="island_trust_disagrees">Цей пристрій уже довіряє %1$s з іншим відбитком, не тим, що введено. Нічого не підключено; вирішіть у сповіщенні.</string>
+    <string name="island_trust_disagrees_banner">%1$s уже записаний тут з іншим відбитком, не з тим, що введено. З\'єднання не встановлювалося.</string>
+    <string name="island_trust_not_an_address">Це не адреса острова. Адреса — це хост і порт, якщо він не 443: island.example:8443</string>
     <string name="island_trust_on_file">На пристрої</string>
     <string name="island_trust_presented">Пред\'явлено зараз</string>
     <string name="island_trust_entered">Введено зараз</string>
