@@ -10,14 +10,19 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.FocusInteraction
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,9 +49,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -103,6 +112,34 @@ fun SitesScreen(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val view = LocalView.current
+
+    // Editing turns the centred address into an ordinary left-aligned field.
+    // It is a state of its own, not "the field has focus": a touch or a
+    // focus on the field starts it, and so does typing; Go, Back and the
+    // keyboard going away end it.
+    var editing by remember { mutableStateOf(false) }
+    val addressFocus = remember { MutableInteractionSource() }
+    LaunchedEffect(addressFocus) {
+        addressFocus.interactions.collect {
+            if (it is FocusInteraction.Focus || it is PressInteraction.Press) editing = true
+        }
+    }
+
+    // At rest the field also lets go of its focus, or the cursor handle from
+    // the last tap stays hanging under the centred address.
+    //
+    // ⚠ Only in touch mode. After a hardware key the device is out of it, and
+    // there the View system answers clearFocus() by re-focusing the root,
+    // which hands Compose's focus to the first focusable node on the screen -
+    // the chevron - and the release of the very Enter that opened the page
+    // then clicks it: the page went away, and from the catalogue the browser
+    // closed. Seen with adb's keyevent, which is a hardware key like any
+    // other. Out of touch mode the field keeps its focus, as it always did.
+    fun restFocus() {
+        if (view.isInTouchMode) focusManager.clearFocus()
+    }
 
     // Seeded, not left blank and filled in on success: an address that fails
     // to load must still be readable in the bar, so the reader can see what
@@ -181,9 +218,20 @@ fun SitesScreen(
         addr = null
         errorCode = null
         typed = ""
+        editing = false
+        keyboard?.hide()
+        restFocus()
     }
     BackHandler(enabled = !onCatalogue) { toCatalogue() }
     val back: () -> Unit = { if (onCatalogue) onBack() else toCatalogue() }
+
+    // The keyboard going away ends the editing. Android leaves the field
+    // focused when Back dismisses the keyboard, and a bar left-aligned with a
+    // cursor in it and nothing to type on is not an address bar at rest.
+    KeyboardGoneEffect {
+        editing = false
+        restFocus()
+    }
 
     // Opened on an address somebody tapped: load it at once. Keyed on the
     // address so re-entering the browser on a different one loads that one,
@@ -212,6 +260,14 @@ fun SitesScreen(
         // at the left edge: before the site's mark on a page, before the hint
         // at the catalogue. Not a field with a button beside it (founder,
         // 02.09).
+        //
+        // Idle, the address is centred on the CAPSULE, not on the field left
+        // over between the chevron and the reload glyph: the two side slots
+        // are the same width, the right one as wide as whatever the left one
+        // holds, so the chevron and the mark push nothing to the right
+        // (founder, 02.09). Editing, it is an ordinary field, left-aligned.
+        val mark = if (page != null) addr?.let { marks[it.name] } else null
+        val sideSlot = if (mark != null) 24.dp + 6.dp + 18.dp else 24.dp
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -220,34 +276,39 @@ fun SitesScreen(
                 .height(40.dp)
                 .clip(CircleShape)
                 .background(c.bgSecondary)
-                .padding(start = 6.dp, end = 12.dp),
+                .padding(horizontal = 6.dp),
         ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                stringResource(R.string.common_back),
-                tint = c.accent,
-                modifier = Modifier.size(24.dp).clickable(onClick = back),
-            )
-            Spacer(Modifier.width(6.dp))
-            val mark = addr?.let { marks[it.name] }
-            if (page != null && mark != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = mark,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
+            Row(Modifier.width(sideSlot), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    stringResource(R.string.common_back),
+                    tint = c.accent,
+                    modifier = Modifier.size(24.dp).clickable(onClick = back),
                 )
-                Spacer(Modifier.width(8.dp))
+                if (mark != null) {
+                    Spacer(Modifier.width(6.dp))
+                    androidx.compose.foundation.Image(
+                        bitmap = mark,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
+                    )
+                }
             }
+            Spacer(Modifier.width(8.dp))
             androidx.compose.foundation.text.BasicTextField(
                 value = typed,
-                onValueChange = { typed = it },
+                onValueChange = { typed = it; editing = true },
                 singleLine = true,
+                interactionSource = addressFocus,
                 textStyle = androidx.compose.ui.text.TextStyle(
                     color = c.textPrimary,
                     fontSize = 14.sp,
                     fontFamily = FontFamily.Monospace,
+                    textAlign = if (editing) TextAlign.Start else TextAlign.Center,
                 ),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
+                // Out of touch mode the field stays focused at rest (see
+                // restFocus), so the cursor is what says it is being edited.
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(if (editing) c.accent else Color.Transparent),
                 keyboardOptions = KeyboardOptions(
                     imeAction = ImeAction.Go,
                     autoCorrect = false,
@@ -256,34 +317,47 @@ fun SitesScreen(
                 // Go opens it. There is no button beside the field: that
                 // would be a second way to do what the keyboard already
                 // does (founder, 01.09).
-                keyboardActions = KeyboardActions(onGo = { keyboard?.hide(); open(typed) }),
+                keyboardActions = KeyboardActions(onGo = {
+                    keyboard?.hide()
+                    editing = false
+                    restFocus()
+                    open(typed)
+                }),
                 decorationBox = { inner ->
-                    if (typed.isEmpty()) {
-                        Text(
-                            stringResource(R.string.sites_address_hint),
-                            color = c.textSecondary,
-                            fontSize = 14.sp,
-                            fontFamily = FontFamily.Monospace,
-                        )
+                    Box(
+                        Modifier.fillMaxWidth(),
+                        contentAlignment = if (editing) Alignment.CenterStart else Alignment.Center,
+                    ) {
+                        if (typed.isEmpty()) {
+                            Text(
+                                stringResource(R.string.sites_address_hint),
+                                color = c.textSecondary,
+                                fontSize = 14.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        inner()
                     }
-                    inner()
                 },
                 modifier = Modifier.weight(1f),
             )
-            if (page != null) {
-                Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(8.dp))
+            // The right slot mirrors the left one; the glyph sits at its far
+            // end so its distance from the capsule's edge is the chevron's.
+            Box(Modifier.width(sideSlot), contentAlignment = Alignment.CenterEnd) {
                 if (loading) {
                     CircularProgressIndicator(
                         color = c.textSecondary,
                         strokeWidth = 2.dp,
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.padding(end = 6.dp).size(15.dp),
                     )
-                } else {
+                } else if (page != null) {
                     Icon(
                         Icons.Filled.Refresh,
                         stringResource(R.string.sites_reload),
                         tint = c.textSecondary,
                         modifier = Modifier
+                            .padding(end = 6.dp)
                             .size(18.dp)
                             .clickable { addr?.let { open(it.display, page!!.path, fresh = true) } },
                     )
@@ -443,6 +517,33 @@ fun SitesScreen(
 
                 else -> LockedWebView(html = p!!.html)
             }
+        }
+    }
+}
+
+/**
+ * Calls [onGone] when the soft keyboard has been dismissed: Back on the
+ * keyboard, or its own hide key. Android keeps the field focused through
+ * that, so without this the bar would stay in its editing shape with nothing
+ * to type on.
+ *
+ * ⚠ Fires only on the visible-to-hidden edge. At the moment focus lands the
+ * keyboard is still on its way in and the inset reads 0, so acting on "hidden"
+ * alone would end the editing before it began. Isolated in its own composable
+ * so the per-frame IME inset recomposes this and not the whole screen, the way
+ * ChatScreen's KeyboardScrollEffect does it.
+ */
+@Composable
+private fun KeyboardGoneEffect(onGone: () -> Unit) {
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    var wasVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) {
+            wasVisible = true
+        } else if (wasVisible) {
+            wasVisible = false
+            onGone()
         }
     }
 }
