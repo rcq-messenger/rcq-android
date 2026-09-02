@@ -387,6 +387,17 @@ object IslandTrust {
     /** True while the island is refused and waiting on the person. */
     fun isRefused(hostPort: String): Boolean = _changed.value.containsKey(keyOf(hostPort))
 
+    /** True while ANY port of [hostPort]'s host is refused. The blocked-route
+     *  memos ([RcqApi] and [CrossIslandSender] both keep one) are keyed on the
+     *  bare host, so a guard against them has to ask the same question or a
+     *  refused island on `:8443` would still force the tunnel on through the
+     *  memo for `:443`. */
+    fun isHostRefused(hostPort: String): Boolean {
+        val h = splitAddress(hostPort)?.host ?: return false
+        val bare = bare(h)
+        return _changed.value.values.any { bare(it.host) == bare }
+    }
+
     /** The live rule: [decide] over the store, persisted, with the `changed`
      *  and first-use state kept for the UI. Throws on REFUSE. */
     fun evaluate(host: String, port: Int, leafDer: ByteArray, caValid: Boolean) {
