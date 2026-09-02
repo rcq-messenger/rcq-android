@@ -42,6 +42,14 @@ class RcqApp : Application() {
         // Per-host access-token store for closed (masquerade) islands — seed the
         // in-memory map so the OkHttp interceptor can stamp X-RCQ-Auth.
         app.rcq.android.net.AccessTokenStore.init(this)
+        // ⚠ The island pin store, BEFORE anything below can build a client:
+        // Push.enforceUserDisabled two lines down already dials every account's
+        // island, and on a device whose distributor is ntfy nothing else in the
+        // process ever loads it. Judged against an empty store, an island
+        // trusted through Let's Encrypt for months reads as unknown and an
+        // on-path certificate for it is taken as a first use — with the
+        // account's bearer token in the request that follows.
+        app.rcq.android.net.IslandTrust.init(this)
         app.rcq.android.push.Push.ensureChannels(this)
         // If this device distributes its own pushes, make sure the socket is up.
         // The service is START_STICKY, but a force-stop (or a background start

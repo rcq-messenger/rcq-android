@@ -340,10 +340,10 @@ object IslandTrust {
     /** First-use pins nobody has been told about yet, oldest first. */
     val firstUse: StateFlow<List<FirstUse>> = _firstUse.asStateFlow()
 
-    /** Idempotent. [android.app.Activity]s and services that dial an island
-     *  call it with what they have; the builder extension cannot, so a record
-     *  taken before the first init lives in memory until one lands and is
-     *  merged into the file then. */
+    /** Idempotent, and called from [app.rcq.android.RcqApp.onCreate] — the one
+     *  entry point every process start runs, headless ones included — so no
+     *  handshake can be judged before the store is on the table. [evaluate]
+     *  fails closed if one somehow is. */
     fun init(ctx: Context) {
         if (prefs != null) return
         val p = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -353,9 +353,15 @@ object IslandTrust {
         }.getOrNull() ?: emptyMap()
         synchronized(lock) {
             prefs = p
-            val hadUnsaved = pins.isNotEmpty()
-            for ((k, v) in loaded) if (k !in pins) pins[k] = v
-            if (hadUnsaved) persistLocked()
+            // ⚠ The FILE wins a collision, not the in-memory record. Anything
+            // written before the store was loaded was judged against an empty
+            // map, so for a host that has a record on file it can only be a
+            // first-use pin taken over the operator's real fingerprint —
+            // merging it the other way round persisted that pin over the
+            // genuine one and made the downgrade permanent.
+            val unsaved = pins.keys.any { it !in loaded }
+            for ((k, v) in loaded) pins[k] = v
+            if (unsaved) persistLocked()
             publishLocked()
         }
     }
@@ -385,9 +391,21 @@ object IslandTrust {
      *  and first-use state kept for the UI. Throws on REFUSE. */
     fun evaluate(host: String, port: Int, leafDer: ByteArray, caValid: Boolean) {
         val fp = sha256Hex(leafDer)
+        val caOnly = isCaOnly(host)
         val decision = synchronized(lock) {
+            // ⚠ Refuse rather than judge an island against a store that has not
+            // been read yet: every record would come back null, so a host with
+            // a `pinned` or `ca` record on file would be taken as a FIRST USE
+            // and whatever is on the wire pinned in its place — the silent
+            // downgrade the `ca` write exists to prevent. Not an
+            // [IslandTrustRefused]: nothing changed, the client simply cannot
+            // tell yet, so this stays an ordinary TLS failure and raises no
+            // banner. A CA-only host consults no record and keeps working.
+            if (prefs == null && !caOnly) {
+                throw CertificateException("island pin store not loaded for ${hostPort(host, port)}")
+            }
             val before = HashMap(pins)
-            val d = decide(host, port, fp, caValid, isCaOnly(host), pins)
+            val d = decide(host, port, fp, caValid, caOnly, pins)
             if (pins != before) { persistLocked(); publishLocked() }
             d
         }
