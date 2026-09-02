@@ -433,6 +433,8 @@ private fun RcqApp(session: Session) {
     // The address the browser opens on, when it was opened by tapping one in
     // a message rather than from the overflow menu (null = the catalogue).
     var sitesAddress by remember { mutableStateOf<String?>(null) }
+    // The page of that site a link with a path asked for; null is the front.
+    var sitesPage by remember { mutableStateOf<String?>(null) }
     var showRestore by remember { mutableStateOf(false) }
     var showOutgoing by remember { mutableStateOf(false) }
 
@@ -483,7 +485,7 @@ private fun RcqApp(session: Session) {
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         chatTarget = null; groupInfoId = null; peerInfoUin = null
-        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; sitesAddress = null; showRestore = false; showOutgoing = false
+        showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; sitesAddress = null; sitesPage = null; showRestore = false; showOutgoing = false
     }
 
     // #655: the island said the active account no longer exists (burned from
@@ -565,12 +567,13 @@ private fun RcqApp(session: Session) {
     // the same shape a share handoff and a notification tap already use.
     val sitePending by app.rcq.android.ui.SiteOpen.pending.collectAsState()
     LaunchedEffect(sitePending, state, locked) {
-        val raw = sitePending ?: return@LaunchedEffect
+        val req = sitePending ?: return@LaunchedEffect
         // Waits, rather than being dropped, if the PIN lock came up between
         // the tap and here.
         if (state !is UiState.Registered || locked) return@LaunchedEffect
         app.rcq.android.ui.SiteOpen.pending.value = null
-        sitesAddress = raw
+        sitesAddress = req.address
+        sitesPage = req.page
         showSites = true
     }
     LaunchedEffect(state, locked, notifOpen) {
@@ -612,6 +615,7 @@ private fun RcqApp(session: Session) {
             showRadio = false
             showSites = false
             sitesAddress = null
+            sitesPage = null
             showProfile = false
             showManageAccounts = false
             showOutgoing = false
@@ -668,7 +672,7 @@ private fun RcqApp(session: Session) {
                 // browser's catalogue: with a page or an address error open,
                 // SitesScreen's own BackHandler (composed inside this one, so
                 // consulted first) takes Back and returns to the catalogue.
-                showSites -> { showSites = false; sitesAddress = null }
+                showSites -> { showSites = false; sitesAddress = null; sitesPage = null }
                 // peerInfo first to match the render precedence (a profile
                 // opened from group-info sits on top of it).
                 peerInfoUin != null -> peerInfoUin = null
@@ -769,6 +773,11 @@ private fun RcqApp(session: Session) {
                     // chat, which sends them the way the paperclip does.
                     shareReq.text?.let { app.rcq.android.ui.seedDraft(picked, it) }
                     if (shareReq.uris.isNotEmpty()) ShareIntake.deliver.value = shareReq
+                    // The browser outranks a chat in the `when` below, and
+                    // the share of a site's address starts from the browser:
+                    // left up, the chat just picked would be drawn under it
+                    // and the tap would seem to do nothing.
+                    showSites = false; sitesAddress = null; sitesPage = null
                     chatTarget = picked
                 },
                 onCancel = { ShareIntake.pending.value = null },
@@ -794,8 +803,19 @@ private fun RcqApp(session: Session) {
             // first, in SitesScreen's own handler.
             s is UiState.Registered && showSites -> app.rcq.android.ui.SitesScreen(
                 session,
-                onBack = { showSites = false; sitesAddress = null },
+                onBack = { showSites = false; sitesAddress = null; sitesPage = null },
                 initialAddress = sitesAddress,
+                initialPage = sitesPage,
+                // The picker draws INSTEAD of the browser (see the branch
+                // above), so the browser is re-created when it closes: it is
+                // re-seeded with where it stood, and a cancelled share lands
+                // back on the same page - or the start screen, not on the
+                // address the browser was first opened with.
+                onShare = { text, at ->
+                    sitesAddress = at?.address
+                    sitesPage = at?.page
+                    ShareIntake.pending.value = ShareIntake.Req(text = text, uris = emptyList())
+                },
             )
             // peerInfo is checked BEFORE groupInfo so that opening a member's
             // profile FROM the group-info screen (which leaves groupInfoId set)
@@ -910,7 +930,7 @@ private fun RcqApp(session: Session) {
                     onOpenAudioRooms = { showAudioRooms = true },
                     onOpenNearby = { showNearby = true },
                     onOpenRadio = { showRadio = true },
-                    onOpenSites = { sitesAddress = null; showSites = true },
+                    onOpenSites = { sitesAddress = null; sitesPage = null; showSites = true },
                     onOpenRandom = { showRandom = true },
                     onSwitchAccount = ::switchAccount,
                     onAddAccount = ::addAccount,

@@ -162,6 +162,7 @@ import app.rcq.android.net.BrokerRelayStore
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.input.KeyboardCapitalization
 
 /** Sub-screens inside Settings (kept self-contained, no nav graph). */
 private enum class SettingsRoute { ROOT, HOW_IT_WORKS, PROFILE, APPEARANCE, PRIVACY, NETWORK, NOTIFICATIONS, BLOCKED, CUSTOM_SERVER, SOUNDS, LANGUAGE, APP_ICON, CHAT_BG, HOME_BG, PIN_CODES, DIAGNOSTICS, RECOVERY_PHRASE, BACKUP, UIN_SHOP, MY_UINS, LINKED_DEVICES, BACKUP_ISLAND, MY_REPORTS }
@@ -1007,6 +1008,7 @@ private fun SettingsRoot(
                         onValueChange = { bugText = it.take(session.bugReportTextLimit) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = false,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                         minLines = 3,
                         placeholder = stringResource(R.string.bug_report_placeholder),
                     )

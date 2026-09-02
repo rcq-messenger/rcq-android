@@ -70,6 +70,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 
 /** A tap-row for a sheet that brings its own body: [RcqAskSheet] lays out its
  *  actions and appends a cancel by itself, [RcqSheet] leaves both to the caller.
@@ -779,6 +781,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 value = pinText, onValueChange = { pinText = it },
                 placeholder = stringResource(R.string.gi_pin_placeholder),
                 singleLine = false,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
             SheetGap()

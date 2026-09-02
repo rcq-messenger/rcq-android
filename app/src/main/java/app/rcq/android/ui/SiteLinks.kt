@@ -77,9 +77,13 @@ object SiteLinks {
  * method-size limit.
  */
 object SiteOpen {
-    val pending = MutableStateFlow<String?>(null)
+    /** The address, and the page of the bundle a link with a path asked for
+     *  (null is the front page). */
+    data class Req(val address: String, val page: String? = null)
 
-    fun request(address: String) {
-        pending.value = address
+    val pending = MutableStateFlow<Req?>(null)
+
+    fun request(address: String, page: String? = null) {
+        pending.value = Req(address, page)
     }
 }

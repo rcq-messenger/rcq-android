@@ -797,16 +797,42 @@ object LocalStores {
      *  It does not add a new rendering path. It TURNS OFF the heavy ones that
      *  already have switches - animated avatars and both wallpapers - so the
      *  person with a five-year-old phone does not have to find three settings
-     *  and know which of them cost battery. Turning it off restores nothing by
-     *  itself: the individual switches are still there and still theirs, which
-     *  is why this writes them rather than shadowing them.
+     *  and know which of them cost battery.
+     *
+     *  ⚠ It also PUTS THEM BACK. The first version wrote the lowered values and
+     *  remembered nothing, so a wallpaper somebody had chosen was gone for good
+     *  the moment they tried the mode out (#845): a switch that cannot be
+     *  undone is a switch nobody dares to touch. What was lowered is written
+     *  down at the moment of lowering and restored when the mode goes off.
+     *
+     *  ⚠ Restored only where the setting is STILL where the mode left it. A
+     *  person who picks a wallpaper while the mode is on has said something
+     *  newer than what we saved, and turning the mode off must not talk over
+     *  them.
      */
     fun setEconomyMode(on: Boolean) {
+        val was = economyMode()
         prefs.edit().putBoolean(K_ECONOMY, on).apply()
         if (on) {
+            if (!was) {
+                prefs.edit()
+                    .putBoolean(K_ECO_HAD_ANIM, animateAvatarsOn())
+                    .putString(K_ECO_HAD_CHAT_BG, _chatBackground.value)
+                    .putString(K_ECO_HAD_HOME_BG, _homeBackground.value)
+                    .apply()
+            }
             setAnimateAvatars(false)
             setChatBackground("")
             setHomeBackground("")
+        } else if (was) {
+            if (!animateAvatarsOn() && prefs.getBoolean(K_ECO_HAD_ANIM, true)) setAnimateAvatars(true)
+            val chat = prefs.getString(K_ECO_HAD_CHAT_BG, "").orEmpty()
+            if (_chatBackground.value.isEmpty() && chat.isNotEmpty()) setChatBackground(chat)
+            val home = prefs.getString(K_ECO_HAD_HOME_BG, "").orEmpty()
+            if (_homeBackground.value.isEmpty() && home.isNotEmpty()) setHomeBackground(home)
+            prefs.edit()
+                .remove(K_ECO_HAD_ANIM).remove(K_ECO_HAD_CHAT_BG).remove(K_ECO_HAD_HOME_BG)
+                .apply()
         }
     }
 
@@ -1481,6 +1507,12 @@ object LocalStores {
     private const val K_UNREAD = "unread"
     private const val K_GSKEYS = "gskeys"
     private const val K_ECONOMY = "economy_mode"
+
+    /** What the economy mode lowered, so it can be put back (#845). Written
+     *  when the mode goes on, read and cleared when it goes off. */
+    private const val K_ECO_HAD_ANIM = "economy_had_anim_avatars"
+    private const val K_ECO_HAD_CHAT_BG = "economy_had_chat_bg"
+    private const val K_ECO_HAD_HOME_BG = "economy_had_home_bg"
     private const val K_PKEYS = "pkeys"      // peer uin -> their profile key
     private const val K_MY_PKEY = "mypkey"   // my own, handed to contacts
     private const val K_REACT_INBOX = "reaction_inbox"

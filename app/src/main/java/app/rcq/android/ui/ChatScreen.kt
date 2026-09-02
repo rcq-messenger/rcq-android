@@ -587,15 +587,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         initialFirstVisibleItemIndex = initialListPos.first,
         initialFirstVisibleItemScrollOffset = initialListPos.second,
     )
-    // Close the emoticon panel the moment the list starts moving (iOS closes
-    // it on any interaction with the chat content). Keyed on the panel so a
-    // closed panel costs nothing: no flow is collecting, and nothing here
-    // reads scroll state during composition (a raw isScrollInProgress read in
-    // the body would recompose the whole screen on every scroll start/stop).
-    LaunchedEffect(showEmoji) {
-        if (!showEmoji) return@LaunchedEffect
-        snapshotFlow { listState.isScrollInProgress }.filter { it }.collect { showEmoji = false }
-    }
+    // ⚠ The panel used to close the moment the list moved. It stands where the
+    // keyboard stands and takes the keyboard's room, so the conversation above
+    // it is meant to be read and scrolled with the panel open - and a keyboard
+    // does not shut itself when you scroll (#843). It closes by its own button,
+    // by Back, or by the tap outside it below.
 
     // Share / save media to device (report #6 — Android couldn't share/download
     // a photo/video; iOS already could). Save uses scoped MediaStore on API 29+
@@ -1646,18 +1642,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 // (#741's two exits stay two). Conditional on purpose: with
                 // the panel closed the modifier does not exist at all, so
                 // normal message taps pay nothing.
-                .then(
-                    if (showEmoji) {
-                        Modifier.pointerInput(showEmoji) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                showEmoji = false
-                            }
-                        }
-                    } else {
-                        Modifier
-                    },
-                ),
+                .closePanelOnTap(showEmoji) { showEmoji = false },
         ) {
         // (The wallpaper used to be drawn HERE, clipped to this Box; L2.9
         // moved it to the full-screen layer behind the whole Column, so the
@@ -3981,6 +3966,7 @@ private fun MediaPreviewDialog(pending: PendingSend, onCancel: () -> Unit, onSen
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = stringResource(R.string.chat_caption_hint),
                 singleLine = false,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             )
             Spacer(Modifier.height(8.dp))
             Text(

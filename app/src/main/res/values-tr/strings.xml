@@ -342,6 +342,9 @@
     <string name="sites_reload">Yenile</string>
     <string name="sites_loading">Açılıyor…</string>
     <string name="sites_catalogue">Adanızda</string>
+    <string name="sites_pinned">Sabitlenenler</string>
+    <string name="sites_recents">Son açılanlar</string>
+    <string name="sites_share">Adresi paylaş</string>
     <string name="sites_empty_title">Pages inside the network</string>
     <string name="sites_empty_body">Type an address, for example blog.rcq. Pages are text and pictures only: no scripts, no outward links, nothing loaded from outside.</string>
     <string name="sites_error_address">An address looks like name.rcq or name.island.rcq</string>

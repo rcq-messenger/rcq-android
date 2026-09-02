@@ -96,6 +96,83 @@ data class SiteAddress(
         }
 
         /**
+         * The address for a site known by its identity rather than by a string
+         * somebody typed: a recent, a pin, a catalogue row. On the reader's own
+         * island it is the bare `name.rcq`; elsewhere the island's label goes
+         * back in, so the same site shows the same way it would be shared.
+         *
+         * ⚠ The result is opened as an OBJECT, never by re-parsing [display]:
+         * an island reached by a literal host with dots in it
+         * (`island.example.org`) has no spelling that [parse] accepts, since
+         * the address is split on dots first. The display is for the eye.
+         */
+        fun of(name: String, host: String, ownHost: String): SiteAddress = SiteAddress(
+            name = name,
+            host = host,
+            display = if (host == ownHost) "$name$SUFFIX" else "$name.${labelOf(host)}$SUFFIX",
+        )
+
+        /** The reverse of [islandHostFromLabel], as far as it goes. */
+        internal fun labelOf(host: String): String = when {
+            host == "api.rcq.app" -> "flagship"
+            host.endsWith(".rcq.app") -> host.removeSuffix(".rcq.app")
+            else -> host
+        }
+
+        /**
+         * What a URL says when its host is a `.rcq` name.
+         *
+         * `https://e2ee.rcq/en.html` typed into a chat, or written into a
+         * link inside a site, is the address `e2ee.rcq` with the page
+         * `en.html`: the scheme is somebody's habit from the web and means
+         * nothing here, since `.rcq` is not DNS and the request never goes
+         * to a resolver. The rule is the host and nothing else: a URL whose
+         * host ends in `.rcq` (case-insensitively) is a site address, and the
+         * first path segment, if there is one, is the page of the bundle to
+         * open. `https://blog.rcq.app/x` has a host ending in `.app` and is
+         * left to the web.
+         *
+         * Returns the host as written (cleaned the way [parse] cleans it, so
+         * the caller resolves it against the reader's own island) or null when
+         * the string is not a site link at all. Null is decided with [parse],
+         * the same gate the address bar uses, so a link is never offered that
+         * the reader then refuses. `javascript:`, `data:`, `mailto:` and a
+         * protocol-relative `//host` all fall out here, either because the
+         * host never ends in `.rcq` or because what is left in front of it is
+         * not a legal name.
+         */
+        fun linkOf(raw: String): SiteLink? {
+            var s = raw.trim(::isJsWhitespace)
+            // A sentence's full stop or comma after a pasted URL is not part
+            // of it; the address bar never sees these, a chat does.
+            s = s.trimEnd { it in ".,;:!?" }
+            val lower = s.lowercase()
+            for (scheme in SCHEMES) {
+                if (lower.startsWith(scheme)) { s = s.substring(scheme.length); break }
+            }
+            if (s.isEmpty() || s[0] == '/') return null
+            val cut = s.indexOfFirst { it == '/' || it == '?' || it == '#' }
+            val host = if (cut < 0) s else s.substring(0, cut)
+            if (!host.lowercase().endsWith(SUFFIX)) return null
+            val addr = parse(host, DETECT_HOST) ?: return null
+            var page: String? = null
+            if (cut >= 0 && s[cut] == '/') {
+                val rest = s.substring(cut + 1)
+                val end = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }
+                page = (if (end < 0) rest else rest.substring(0, end)).takeIf { it.isNotEmpty() }
+            }
+            return SiteLink(addr.display, page)
+        }
+
+        private val SCHEMES = listOf("https://", "http://", "rcq://")
+
+        /** A host that cannot exist, for the one question [linkOf] asks of
+         *  [parse]: is this an address at all. The answer never depends on the
+         *  reader's own island; where a bare `name.rcq` points is decided
+         *  where the link is opened. */
+        private const val DETECT_HOST = "detect.invalid"
+
+        /**
          * The island label → host mapping. An unknown label is treated as a
          * hostname so an operator can hand out an address before any client has
          * heard of their island.
@@ -144,3 +221,9 @@ data class SiteAddress(
         }
     }
 }
+
+/**
+ * A site named by a link: the address as it would be typed into the bar, and
+ * the page of the bundle the path asked for (null is the front page).
+ */
+data class SiteLink(val address: String, val page: String?)

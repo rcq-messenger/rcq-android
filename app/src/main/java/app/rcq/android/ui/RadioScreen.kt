@@ -59,6 +59,7 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.model.RadioMessage
 import app.rcq.android.nearby.RadioPeer
+import androidx.compose.ui.text.input.KeyboardCapitalization
 
 /**
  * Radio — the offline BLE + Wi-Fi-Direct local mesh screen. Discovery list
@@ -300,6 +301,7 @@ private fun RadioChatView(session: Session, onLeave: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 placeholder = stringResource(R.string.radio_message_hint),
                 singleLine = false,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             )
             Icon(
                 Icons.Filled.Mic, stringResource(R.string.radio_ptt),

@@ -141,6 +141,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 
 /** The chat list, already sliced into its sections and sorted.
  *
@@ -3470,6 +3472,7 @@ private fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: ()
                 // A reason is prose, so the field grows with it (the old field
                 // simply started two lines tall).
                 singleLine = false,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

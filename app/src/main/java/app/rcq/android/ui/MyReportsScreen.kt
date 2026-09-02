@@ -52,6 +52,8 @@ import kotlinx.coroutines.launch
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.net.RcqApi
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 
 /**
  * The reports this account has filed, and whatever was written back.
@@ -410,6 +412,7 @@ private fun ReportCard(
                 onValueChange = onEditDraft,
                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 singleLine = false,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 minLines = 3,
                 enabled = !savingEdit,
                 // Only near the ceiling. A counter over every draft is noise;
@@ -491,6 +494,7 @@ private fun ReportCard(
                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
                 placeholder = stringResource(R.string.myreports_reply_placeholder),
                 singleLine = false,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 minLines = 3,
                 enabled = !sending,
             )

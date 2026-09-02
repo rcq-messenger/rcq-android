@@ -45,7 +45,11 @@ import androidx.compose.ui.text.withStyle
  * resolves through the app-wide `LocalUriHandler`, which MainActivity points at
  * [InAppBrowser]: a Custom Tab over the app for the web, and ACTION_VIEW for
  * rcq:// and the rcq.app deep-link paths so an invite in a news post still
- * lands in the app's own join flow instead of a web view.
+ * lands in the app's own join flow instead of a web view. A URL whose host is
+ * a `.rcq` name (`https://e2ee.rcq/en.html`) is not a web address at all and
+ * [InAppBrowser] turns it back into the app's own site reader
+ * ([app.rcq.android.sites.SiteAddress.linkOf]); the hit here stays a URL, the
+ * decision is made where it is opened.
  */
 object TextLinks {
 

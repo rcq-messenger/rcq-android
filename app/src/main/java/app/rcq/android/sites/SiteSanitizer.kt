@@ -182,6 +182,16 @@ internal object SiteSanitizer {
         html: String,
         pagePath: String,
         files: Set<String>,
+        /**
+         * The reader's own `href` for an anchor the passes below marked, or
+         * null to leave it dead: called with the bundle path of an internal
+         * link, or the verbatim target of an outward one, never both. Runs
+         * AFTER the allow-list walk, so what it writes is the one `href` in
+         * the document and the only thing a tap can say. The default writes
+         * nothing, which is the output the conformance corpus pins: no
+         * `href=` anywhere.
+         */
+        door: ((page: String?, external: String?) -> String?)? = null,
         read: suspend (String) -> ByteArray?,
     ): String {
         val doc = Html(html).parse()
@@ -204,6 +214,7 @@ internal object SiteSanitizer {
         inlineImages(doc.roots, pagePath, files, read)
         markLinks(doc.roots, pagePath, files)
         walk(doc.roots)
+        if (door != null) openDoors(doc.roots, door)
         return serialize(doc)
     }
 
@@ -311,6 +322,24 @@ internal object SiteSanitizer {
                 }
             }
             markLinks(el.children, pagePath, files)
+        }
+    }
+
+    /**
+     * ⚠ After the walk, never before it: the walk drops every `href`, which
+     * is what makes the marks the only thing an anchor carries out of the
+     * page. Here the reader writes its own from those marks — from OUR
+     * `data-rcq-page`, scrubbed of the author's ([scrubMarks]) — so a page
+     * cannot choose where a tap goes any more than it could before.
+     */
+    private fun openDoors(nodes: MutableList<SiteNode>, door: (String?, String?) -> String?) {
+        for (node in nodes) {
+            val el = node as? SiteNode.Element ?: continue
+            if (el.tag == "a") {
+                val href = door(el.attr("data-rcq-page"), el.attr("data-rcq-external"))
+                if (href != null) el.setAttr("href", href)
+            }
+            openDoors(el.children, door)
         }
     }
 
