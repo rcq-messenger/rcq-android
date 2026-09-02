@@ -3403,13 +3403,8 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
     // A fragment that is not a fingerprint, or one on a host that is never
     // pinned, or one the store disagrees with, is an address error: said
     // under the field and nothing is dialled (design §3).
-    val addressError: String? = when (val e = app.rcq.android.net.IslandTrust.inspect(draft, commit = false)) {
-        is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint -> stringResource(R.string.island_trust_not_fingerprint)
-        is app.rcq.android.net.IslandTrust.Entry.CaOnly -> stringResource(R.string.island_trust_ca_only, e.host)
-        is app.rcq.android.net.IslandTrust.Entry.Disagrees -> stringResource(R.string.island_trust_disagrees, e.changed.hostPort)
-        is app.rcq.android.net.IslandTrust.Entry.Malformed -> stringResource(R.string.csrv_unreachable)
-        else -> null
-    }
+    val entry = app.rcq.android.net.IslandTrust.inspect(draft, commit = false)
+    val addressError: String? = islandAddressError(context, entry)
     val isDirty = target != current && addressError == null
     val onCustom = current != RcqApi.DEFAULT_HOST
 
@@ -3726,7 +3721,7 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                     }
                 }
 
-                Field(stringResource(R.string.backup_island_host_hint), host) { host = it }
+                Field(stringResource(R.string.backup_island_host_hint), host) { host = it; error = null }
                 // The same picker onboarding uses, so "which islands are there"
                 // is answered in one place and looks the same in both. Typing a
                 // host stays exactly where it was: a self-hoster's island is
@@ -3744,9 +3739,20 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                 )
                 Button(
                     onClick = {
+                        // The `#fp` fragment is judged here, before anything is
+                        // dialled, the way the picker and the other forms do:
+                        // a fragment against a null record is pinned as typed,
+                        // one the store disagrees with raises the banner and
+                        // stops, and what goes on is the bare host:port with
+                        // its port intact (design §3).
+                        val entry = app.rcq.android.net.IslandTrust.adopt(host)
+                        val addressError = islandAddressError(context, entry)
+                        if (addressError != null) { error = addressError; return@Button }
+                        val target = (entry as? app.rcq.android.net.IslandTrust.Entry.Ok)?.hostPort
+                            ?: return@Button
                         busy = true; error = null
                         scope.launch {
-                            runCatching { session.addBackupIsland(host) }
+                            runCatching { session.addBackupIsland(target) }
                                 .onSuccess { host = "" }
                                 .onFailure { error = errorText(it) }
                             busy = false

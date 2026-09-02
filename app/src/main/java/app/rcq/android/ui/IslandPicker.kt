@@ -123,14 +123,7 @@ internal fun IslandPickerSheet(
                 when (val e = app.rcq.android.net.IslandTrust.adopt(draft)) {
                     is app.rcq.android.net.IslandTrust.Entry.Ok -> onPick(e.hostPort)
                     is app.rcq.android.net.IslandTrust.Entry.Empty -> onPick("")
-                    is app.rcq.android.net.IslandTrust.Entry.Malformed ->
-                        addressError = ctx.getString(R.string.csrv_unreachable)
-                    is app.rcq.android.net.IslandTrust.Entry.NotAFingerprint ->
-                        addressError = ctx.getString(R.string.island_trust_not_fingerprint)
-                    is app.rcq.android.net.IslandTrust.Entry.CaOnly ->
-                        addressError = ctx.getString(R.string.island_trust_ca_only, e.host)
-                    is app.rcq.android.net.IslandTrust.Entry.Disagrees ->
-                        addressError = ctx.getString(R.string.island_trust_disagrees, e.changed.hostPort)
+                    else -> addressError = islandAddressError(ctx, e)
                 }
             }
         } else {
