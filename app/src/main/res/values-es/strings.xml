@@ -1277,10 +1277,12 @@
     <string name="settings_economy_desc">Esto ES RCQ Lite: no una app aparte, sino un interruptor aquí. Desactiva de una vez los avatares animados y los fondos, para un teléfono antiguo o lento.</string>
     <!-- Island trust: an island trusted by its certificate fingerprint rather than a CA (island-fingerprint-design.md §5) -->
     <string name="island_trust_first_use">Primera conexión a %1$s. Su huella es:\n%2$s\nCompárala con la que publicó el operador antes de confiar en esta isla.</string>
-    <string name="island_trust_changed">%1$s presentó un certificado distinto del que este dispositivo confía. Puede que alguien esté interceptando la conexión, o que el operador haya cambiado el certificado. Compara la nueva huella con la que publicó el operador antes de confiar en ella.</string>
+    <string name="island_trust_changed">%1$s presentó un certificado distinto de aquel en el que este dispositivo confía. Puede que alguien esté interceptando la conexión, o que el operador haya cambiado el certificado. Compara la nueva huella con la que publicó el operador antes de confiar en ella.</string>
     <string name="island_trust_changed_typed">%1$s presentó una huella distinta de la que introdujiste.</string>
-    <string name="island_trust_changed_short">%1$s presentó un certificado en el que este dispositivo no confía. Decide en el aviso de la pantalla principal.</string>
-    <string name="island_trust_disagrees">Este dispositivo ya confía en %1$s con una huella distinta de la introducida. No se conectó nada; decide en el aviso de la pantalla principal.</string>
+    <string name="island_trust_changed_short">%1$s presentó un certificado en el que este dispositivo no confía. Decide en el aviso.</string>
+    <string name="island_trust_disagrees">Este dispositivo ya confía en %1$s con una huella distinta de la introducida. No se conectó nada; decide en el aviso.</string>
+    <string name="island_trust_disagrees_banner">%1$s ya está registrado con una huella distinta de la introducida. No se estableció ninguna conexión.</string>
+    <string name="island_trust_not_an_address">No es una dirección de isla. Una isla es un host, con puerto si no es el 443: island.example:8443</string>
     <string name="island_trust_on_file">Guardada</string>
     <string name="island_trust_presented">Presentada ahora</string>
     <string name="island_trust_entered">Introducida ahora</string>
@@ -1292,5 +1294,5 @@
     <string name="island_trust_copy">Copiar dirección con huella</string>
     <string name="island_trust_copied">Dirección copiada</string>
     <string name="island_trust_not_fingerprint">Eso no es una huella. Tras # va la huella SHA-256 de la isla: 64 caracteres hexadecimales.</string>
-    <string name="island_trust_ca_only">%1$s se confía por autoridad de certificación y no lleva huella.</string>
+    <string name="island_trust_ca_only">Se confía en %1$s a través de una autoridad de certificación, y no lleva huella.</string>
 </resources>

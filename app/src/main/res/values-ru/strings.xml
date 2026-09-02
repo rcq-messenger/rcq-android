@@ -1327,8 +1327,10 @@
     <string name="island_trust_first_use">Первое подключение к %1$s. Его отпечаток:\n%2$s\nСверьте его с тем, что опубликовал оператор, прежде чем полагаться на этот остров.</string>
     <string name="island_trust_changed">%1$s предъявил не тот сертификат, которому доверяет это устройство. Возможно, соединение перехватывают, или оператор сменил сертификат. Сверьте новый отпечаток с тем, что опубликовал оператор, прежде чем ему доверять.</string>
     <string name="island_trust_changed_typed">%1$s предъявил не тот отпечаток, который вы ввели.</string>
-    <string name="island_trust_changed_short">%1$s предъявил сертификат, которому это устройство не доверяет. Решите в уведомлении на главном экране.</string>
-    <string name="island_trust_disagrees">Это устройство уже доверяет %1$s с другим отпечатком, не тем, что введён. Ничего не подключено; решите в уведомлении на главном экране.</string>
+    <string name="island_trust_changed_short">%1$s предъявил сертификат, которому это устройство не доверяет. Решите в уведомлении.</string>
+    <string name="island_trust_disagrees">Это устройство уже доверяет %1$s с другим отпечатком, не тем, что введён. Ничего не подключено; решите в уведомлении.</string>
+    <string name="island_trust_disagrees_banner">%1$s уже записан здесь с другим отпечатком, не с тем, что введён. Соединение не устанавливалось.</string>
+    <string name="island_trust_not_an_address">Это не адрес острова. Адрес — это хост и порт, если он не 443: island.example:8443</string>
     <string name="island_trust_on_file">На устройстве</string>
     <string name="island_trust_presented">Предъявлен сейчас</string>
     <string name="island_trust_entered">Введён сейчас</string>

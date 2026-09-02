@@ -1332,8 +1332,10 @@
     <string name="island_trust_first_use">First connection to %1$s. Its fingerprint is\n%2$s\nCompare it with what the operator published before you rely on this island.</string>
     <string name="island_trust_changed">%1$s presented a different certificate than the one this device trusts. Someone may be intercepting the connection, or the operator replaced the certificate. Compare the new fingerprint with what the operator published before trusting it.</string>
     <string name="island_trust_changed_typed">%1$s presented a different fingerprint than the one you entered.</string>
-    <string name="island_trust_changed_short">%1$s presented a certificate this device does not trust. Decide at the notice on the main screen.</string>
-    <string name="island_trust_disagrees">This device already trusts %1$s with a different fingerprint than the one entered. Nothing was connected; decide at the notice on the main screen.</string>
+    <string name="island_trust_changed_short">%1$s presented a certificate this device does not trust. Decide at the notice.</string>
+    <string name="island_trust_disagrees">This device already trusts %1$s with a different fingerprint than the one entered. Nothing was connected; decide at the notice.</string>
+    <string name="island_trust_disagrees_banner">%1$s is already on file with a different fingerprint than the one entered. Nothing was dialled.</string>
+    <string name="island_trust_not_an_address">Not an island address. An island is a host, with a port if it is not 443: island.example:8443</string>
     <string name="island_trust_on_file">On file</string>
     <string name="island_trust_presented">Presented now</string>
     <string name="island_trust_entered">Entered now</string>

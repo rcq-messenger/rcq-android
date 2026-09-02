@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,7 +72,17 @@ fun RestoreScreen(session: Session, onBack: () -> Unit, onRestored: (Int) -> Uni
             Text(stringResource(R.string.restore_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
 
-        Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(
+            Modifier.fillMaxSize()
+                // The trust notice below carries two fingerprints, four lines
+                // each, and this screen has a 24-word field on it.
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // Restore is reachable straight from onboarding, where there is no
+            // main screen to carry the §5.2 banner and its accept button.
+            IslandTrustNotices()
             Text(stringResource(R.string.restore_hint), color = c.textSecondary, fontSize = 14.sp)
 
             RcqField(
