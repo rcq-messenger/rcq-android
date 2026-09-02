@@ -92,6 +92,25 @@ class IslandTrustTest {
         assertEquals(fpA, a.fp)
     }
 
+    /** ⚠ The store key has to be the name the socket dials. OkHttp turns
+     *  `остров.рф` into `xn--…` before the trust manager ever sees it, so a
+     *  key written in Unicode is a key no handshake looks up: the typed pin
+     *  was bypassed and the connection took a first-use pin instead. */
+    @Test fun anInternationalisedHostIsKeyedInPunycode() {
+        val a = IslandTrust.splitAddress("https://остров.рф:8443/#$fpA")!!
+        assertEquals("xn--b1axaheg.xn--p1ai", a.host)
+        assertEquals(8443, a.port)
+        assertEquals("xn--b1axaheg.xn--p1ai:8443", a.key)
+        assertEquals(fpA, a.fp)
+        // Both ways in agree: what the form pins and what the handshake asks
+        // for are the same string.
+        assertEquals(a.key, IslandTrust.key("остров.рф", 8443))
+        assertEquals(a.key, IslandTrust.key("xn--b1axaheg.xn--p1ai", 8443))
+        assertEquals("xn--b1axaheg.xn--p1ai:443", IslandTrust.keyOf("ОСТРОВ.РФ"))
+        // An ASCII host is untouched by the extra step.
+        assertEquals("island.example:8443", IslandTrust.splitAddress("island.example:8443")!!.key)
+    }
+
     @Test fun ipv6KeepsItsBrackets() {
         val a = IslandTrust.splitAddress("[::1]:8443#$fpA")!!
         assertEquals("[::1]", a.host)
