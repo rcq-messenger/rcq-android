@@ -6144,13 +6144,46 @@ class Session(context: Context) {
      *  half-landed. Sequential so a burst of stuck sends doesn't fan out at once. */
     private fun retryFailedSends() {
         scope.launch {
-            val failed = _messages.value.values.flatten()
+            // Group rows too. This pass read only `_messages`, so a failed
+            // GROUP send was the one thing a reconnect did not recover - it
+            // waited for the 30s timer below, which has always read both.
+            val failed = (_messages.value.values.flatten() + _groupMessages.value.values.flatten())
                 .filter { it.fromMe && it.state == DeliveryState.FAILED }
-            for (m in failed) runCatching { resend(m) }
+            val wait = resendFailedPass(failed)
             // Whatever is STILL failed after this pass (or failed while we
             // were resending) keeps a timer on it - see armFailedRetryTimer.
-            armFailedRetryTimer()
+            armFailedRetryTimer(wait)
         }
+    }
+
+    /** One auto-retry pass over FAILED rows, paced by the island's own answer.
+     *
+     *  ⚠ A 429 is NOT a transient network failure, and the naive `for (m in
+     *  failed) resend(m)` treated it as one. A room with slowmode passes
+     *  exactly one message per window, so resending N red rows back to back
+     *  guarantees N-1 refusals and the pass repeats while any row stays red.
+     *  Measured on the flagship 03.09: three 429s one second apart from a
+     *  single phone in RCQ Beta (slowmode 5s, 2255 members). So the pass stops
+     *  at the first 429 and reports the wait the island asked for.
+     *
+     *  ⚠ And it stays QUIET. [sendRefusal] exists to explain a send the PERSON
+     *  just made; a toast fired by a background retry names a room rule to
+     *  somebody who is not typing. Only the 429 is consumed here - anything
+     *  else (the newcomer age floor, say) is still true and still theirs to
+     *  read.
+     *
+     *  @return seconds before the next pass is worth trying, or null for the
+     *          caller's own cadence. */
+    private suspend fun resendFailedPass(rows: List<ChatMessage>): Int? {
+        for (m in rows) {
+            runCatching { resend(m) }
+            val r = RcqApi.refusalOf(lastSendRefusal)
+            if (r.status == 429) {
+                takeSendRefusal()
+                return (r.retryAfter ?: 1).coerceIn(1, 300)
+            }
+        }
+        return null
     }
 
     /** Timer companion to [retryFailedSends] (#814). The reconnect hook above
@@ -6164,19 +6197,24 @@ class Session(context: Context) {
      *  and the next failure arms a fresh one. */
     private var failedRetryJob: Job? = null
 
-    private fun armFailedRetryTimer() {
+    private fun armFailedRetryTimer(firstDelaySec: Int? = null) {
         if (failedRetryJob?.isActive == true) return
         val anyFailed = _messages.value.values.flatten().any { it.fromMe && it.state == DeliveryState.FAILED } ||
             _groupMessages.value.values.flatten().any { it.fromMe && it.state == DeliveryState.FAILED }
         if (!anyFailed) return
         failedRetryJob = scope.launch {
+            // [firstDelaySec] is the island's own `retry_after` when the pass
+            // that armed us was refused: retrying a paced room at 30s when it
+            // asked for 5 is slow, and at 30s when it asked for 300 is rude.
+            var next = (firstDelaySec ?: 30).coerceAtLeast(1) * 1000L
             while (isActive) {
-                delay(30_000)
+                delay(next)
+                next = 30_000L
                 val failed = (_messages.value.values.flatten() + _groupMessages.value.values.flatten())
                     .filter { it.fromMe && it.state == DeliveryState.FAILED }
                 if (failed.isEmpty()) return@launch
                 if (!connected.value) continue
-                for (m in failed) runCatching { resend(m) }
+                resendFailedPass(failed)?.let { next = it.coerceAtLeast(1) * 1000L }
             }
         }
     }
