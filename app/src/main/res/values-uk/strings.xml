@@ -1304,4 +1304,26 @@
     <string name="island_trust_copied">Адресу скопійовано</string>
     <string name="island_trust_not_fingerprint">Це не відбиток. Після # іде відбиток SHA-256 острова: 64 шістнадцяткові символи.</string>
     <string name="island_trust_ca_only">%1$s довіряється через центр сертифікації, відбиток йому не потрібен.</string>
+    <string name="uin_pay_pick">Чим платите? Реєструватися ніде: ви надсилаєте точну суму, і саме вона впізнає платіж.</string>
+    <string name="uin_pay_send">Надішліть рівно цю суму в %1$s.</string>
+    <string name="uin_pay_amount">Сума</string>
+    <string name="uin_pay_address">Адреса</string>
+    <string name="uin_pay_copy">Копіювати</string>
+    <string name="uin_pay_copied">Скопійовано</string>
+    <string name="uin_pay_show_qr">Показати QR</string>
+    <string name="uin_pay_hide_qr">Сховати QR</string>
+    <string name="uin_pay_waiting">Чекаємо переказ · %1$s</string>
+    <string name="uin_pay_expired">Рахунок минув. Уже надісланий переказ усе одно зарахується.</string>
+    <string name="uin_pay_exact">Надішліть суму точно як написано. Саме вона відрізняє ваш платіж від усіх інших.</string>
+    <string name="uin_pay_received">Платіж отримано. Забираємо номер…</string>
+    <string name="uin_pay_error_taken">Цей номер саме зараз купує хтось інший.</string>
+    <string name="uin_pay_error_busy">Забагато покупок одночасно. Спробуйте за кілька хвилин.</string>
+    <string name="uin_pay_error_unreachable">Не вдається зв’язатися з оплатою. Спробуйте ще раз за хвилину.</string>
+    <string name="uin_pay_error_generic">Не вдалося почати оплату. Спробуйте ще раз.</string>
+    <string name="uin_shop_cta_buy">Купити за %1$s</string>
+    <string name="uin_shop_cta_resume">Продовжити оплату</string>
+    <string name="sites_error_unsigned_hint">Так буває, коли вміст змінюють дорогою. Спробуйте увімкнути або вимкнути релеї в налаштуваннях мережі, або іншу мережу.</string>
+    <string name="sites_error_tampered_hint">Файл змінився дорогою до вас. Спробуйте увімкнути або вимкнути релеї в налаштуваннях мережі, або іншу мережу.</string>
+    <string name="uin_shop_error_taken_paid">Номер устигли забрати, поки йшов платіж. Двічі нічого не списалося: напишіть у підтримку, розберемося.</string>
+    <string name="uin_shop_status_for_sale">Продається</string>
 </resources>

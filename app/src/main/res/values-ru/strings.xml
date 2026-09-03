@@ -1347,4 +1347,26 @@
     <string name="island_trust_copied">Адрес скопирован</string>
     <string name="island_trust_not_fingerprint">Это не отпечаток. После # идёт отпечаток SHA-256 острова: 64 шестнадцатеричных символа.</string>
     <string name="island_trust_ca_only">%1$s доверяется через удостоверяющий центр, отпечаток ему не нужен.</string>
+    <string name="uin_pay_pick">Чем платите? Регистрироваться негде: вы отправляете точную сумму, и именно она опознаёт платёж.</string>
+    <string name="uin_pay_send">Отправьте ровно эту сумму в %1$s.</string>
+    <string name="uin_pay_amount">Сумма</string>
+    <string name="uin_pay_address">Адрес</string>
+    <string name="uin_pay_copy">Копировать</string>
+    <string name="uin_pay_copied">Скопировано</string>
+    <string name="uin_pay_show_qr">Показать QR</string>
+    <string name="uin_pay_hide_qr">Скрыть QR</string>
+    <string name="uin_pay_waiting">Ждём перевод · %1$s</string>
+    <string name="uin_pay_expired">Счёт истёк. Уже отправленный перевод всё равно засчитается.</string>
+    <string name="uin_pay_exact">Отправьте сумму точно как написано. Именно она отличает ваш платёж от всех остальных.</string>
+    <string name="uin_pay_received">Платёж получен. Забираем номер…</string>
+    <string name="uin_pay_error_taken">Этот номер прямо сейчас покупает кто-то другой.</string>
+    <string name="uin_pay_error_busy">Слишком много покупок одновременно. Попробуйте через несколько минут.</string>
+    <string name="uin_pay_error_unreachable">Не получается связаться с оплатой. Попробуйте ещё раз через минуту.</string>
+    <string name="uin_pay_error_generic">Не удалось начать оплату. Попробуйте ещё раз.</string>
+    <string name="uin_shop_cta_buy">Купить за %1$s</string>
+    <string name="uin_shop_cta_resume">Продолжить оплату</string>
+    <string name="sites_error_unsigned_hint">Так бывает, когда содержимое меняют по дороге. Попробуйте включить или выключить релеи в настройках сети, или другую сеть.</string>
+    <string name="sites_error_tampered_hint">Файл изменился по дороге к вам. Попробуйте включить или выключить релеи в настройках сети, или другую сеть.</string>
+    <string name="uin_shop_error_taken_paid">Номер успели забрать, пока шёл платёж. Дважды ничего не списалось: напишите в поддержку, разберёмся.</string>
+    <string name="uin_shop_status_for_sale">Продаётся</string>
 </resources>

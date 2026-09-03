@@ -1300,4 +1300,26 @@
     <string name="island_trust_copied">Adres kopyalandı</string>
     <string name="island_trust_not_fingerprint">Bu bir parmak izi değil. # işaretinden sonra adanın SHA-256 parmak izi gelir: 64 onaltılık karakter.</string>
     <string name="island_trust_ca_only">%1$s sertifika otoritesi üzerinden güvenilir, parmak izi almaz.</string>
+    <string name="uin_pay_pick">Neyle ödüyorsun? Kaydolacak bir yer yok: tam bir tutar gönderiyorsun ve ödemeyi tanıtan şey o tutar.</string>
+    <string name="uin_pay_send">Tam olarak bu tutarı %1$s ile gönder.</string>
+    <string name="uin_pay_amount">Tutar</string>
+    <string name="uin_pay_address">Adres</string>
+    <string name="uin_pay_copy">Kopyala</string>
+    <string name="uin_pay_copied">Kopyalandı</string>
+    <string name="uin_pay_show_qr">QR göster</string>
+    <string name="uin_pay_hide_qr">QR gizle</string>
+    <string name="uin_pay_waiting">Transfer bekleniyor · %1$s</string>
+    <string name="uin_pay_expired">Bu fatura doldu. Zaten gönderilmiş bir transfer yine de sayılır.</string>
+    <string name="uin_pay_exact">Tutarı yazıldığı gibi tam gönder. Ödemeni herkesinkinden ayıran şey bu.</string>
+    <string name="uin_pay_received">Ödeme alındı. Numara alınıyor…</string>
+    <string name="uin_pay_error_taken">O numarayı şu anda başka biri alıyor.</string>
+    <string name="uin_pay_error_busy">Aynı anda çok fazla numara alınıyor. Birkaç dakika sonra dene.</string>
+    <string name="uin_pay_error_unreachable">Ödeme servisine ulaşılamıyor. Birazdan tekrar dene.</string>
+    <string name="uin_pay_error_generic">Ödeme başlatılamadı. Tekrar dene.</string>
+    <string name="uin_shop_cta_buy">%1$s karşılığında al</string>
+    <string name="uin_shop_cta_resume">Ödemeyi tamamla</string>
+    <string name="sites_error_unsigned_hint">Bu, yolda içeriği değiştiren bir şey olduğunda olur. Ağ ayarlarından röleleri açıp kapatmayı ya da başka bir ağı dene.</string>
+    <string name="sites_error_tampered_hint">Dosya sana gelirken değişmiş. Ağ ayarlarından röleleri açıp kapatmayı ya da başka bir ağı dene.</string>
+    <string name="uin_shop_error_taken_paid">Ödeme yoldayken o numarayı biri aldı. İki kez tahsilat olmadı: destek ekibine yaz, çözelim.</string>
+    <string name="uin_shop_status_for_sale">Satılık</string>
 </resources>

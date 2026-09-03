@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -44,6 +45,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.rcq.android.R
+import app.rcq.android.data.UinInvoices
+import app.rcq.android.net.TillApi
 import app.rcq.android.Session
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.delay
@@ -87,11 +90,31 @@ fun UinShopScreen(
     val tooManyMsg = stringResource(R.string.uin_shop_error_too_many)
     val reservedMsg = stringResource(R.string.uin_shop_error_reserved)
     val genericMsg = stringResource(R.string.uin_shop_error_generic)
+    val takenPaidMsg = stringResource(R.string.uin_shop_error_taken_paid)
+
+    // The number being paid for right now, if the checkout sheet is open.
+    var checkout by remember { mutableStateOf<Int?>(null) }
+    var redeeming by remember { mutableStateOf(false) }
+    // ⚠ Guards the one thing here that money depends on: a voucher is redeemed
+    // ONCE. The till keeps handing it back on every poll, so the guard has to
+    // outlive recomposition.
+    val redeemed = remember { mutableStateOf(mutableSetOf<String>()) }
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) { UinInvoices.init(ctx) }
 
     val isValidLength = typed.length in 3..9
     // The quote is only meaningful while it still matches what's typed.
     val displayedQuote = quote?.takeIf { it.uin.toString() == typed }
     val isAvailable = displayedQuote?.available == true
+    // ⚠⚠ A paid number is recognised by `acquire`, NOT by `available`. The
+    // island keeps `available` false for scarce stock on purpose, because three
+    // released clients read that one field and would otherwise offer, for
+    // nothing, exactly the numbers that are for sale.
+    val forSale = isValidLength && displayedQuote?.acquire == "purchase" &&
+        (displayedQuote.price_cents ?: 0) > 0
+    // An invoice this device already opened for the number in the field. It is
+    // holding that number, which is precisely why the quote says unavailable.
+    val resumable = if (isValidLength) typed.toIntOrNull()?.let { UinInvoices.forUin(it) } else null
     val canBuy = isValidLength && isAvailable && !buying
 
     // Debounced availability lookup. LaunchedEffect cancels the prior coroutine
@@ -119,6 +142,59 @@ fun UinShopScreen(
         var f = raw.filter { it.isDigit() }.take(9)
         f = f.dropWhile { it == '0' }
         typed = f
+    }
+
+    /**
+     * Turn a voucher into a number.
+     *
+     * ⚠ Called from two places that both mean "somebody has paid": the open
+     * checkout, and the sweep below that finds a payment made before the app
+     * was last closed. Both go through here so the once-only guard lives in one
+     * place.
+     */
+    fun redeem(target: Int, voucher: String, invoiceId: String) {
+        if (!redeemed.value.add(invoiceId)) return
+        redeeming = true
+        error = null
+        scope.launch {
+            val r = runCatching { session.redeemUin(target, voucher) }
+            redeeming = false
+            checkout = null
+            r.onSuccess {
+                UinInvoices.forget(invoiceId)
+                held = target
+            }.onFailure { e ->
+                val body = e.message.orEmpty()
+                // ⚠ `voucher_spent` is not a failure to paint red: it means the
+                // number is already in the collection, which is what the buyer
+                // wanted. Anything else keeps the invoice so a retry is still
+                // possible.
+                if (body.contains("voucher_spent")) {
+                    UinInvoices.forget(invoiceId)
+                    held = target
+                } else {
+                    redeemed.value.remove(invoiceId)
+                    error = if (body.contains("taken")) takenPaidMsg else genericMsg
+                }
+            }
+        }
+    }
+
+    // ⚠⚠ A payment that landed while nobody was looking. This is the whole
+    // reason invoices are written to disk: somebody pays, closes the app before
+    // the confirmation, and comes back - without this sweep their money bought
+    // a voucher sitting in a till nobody asks. Runs once per open, quietly, and
+    // only ever finishes what was already paid for.
+    LaunchedEffect(Unit) {
+        UinInvoices.init(ctx)
+        for (open in UinInvoices.all()) {
+            val inv = runCatching { TillApi.invoice(open.id) }.getOrNull() ?: continue
+            when {
+                inv.status == "paid" && !inv.voucher.isNullOrBlank() ->
+                    redeem(inv.uin, inv.voucher, inv.id)
+                inv.status == "expired" -> UinInvoices.forget(inv.id)
+            }
+        }
     }
 
     fun runPurchase() {
@@ -296,6 +372,33 @@ fun UinShopScreen(
                     CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                     Text(stringResource(R.string.uin_shop_buy_processing), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
+                redeeming -> CapsuleLabel(c) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.uin_shop_buy_processing), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+                // Somebody who closed the app mid-payment. Offered before the
+                // buy, because the number reads as unavailable to them — our
+                // own invoice is what is holding it.
+                resumable != null -> Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.accent)
+                        .clickable { checkout = typed.toIntOrNull() }.padding(vertical = 17.dp),
+                    Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.uin_shop_cta_resume),
+                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                forSale -> Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.accent)
+                        .clickable { checkout = typed.toIntOrNull() }.padding(vertical = 17.dp),
+                    Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.uin_shop_cta_buy, priceDisplay(displayedQuote!!.price_cents!!)),
+                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 canBuy && displayedQuote?.price_cents != null -> Box(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.accent)
                         .clickable { showConfirm = true }.padding(vertical = 17.dp),
@@ -316,6 +419,16 @@ fun UinShopScreen(
                 )
             }
         }
+    }
+
+    checkout?.let { target ->
+        UinCheckoutSheet(
+            uin = target,
+            priceDisplay = displayedQuote?.price_cents?.let { priceDisplay(it) } ?: "",
+            resumeId = UinInvoices.forUin(target)?.id,
+            onPaid = { voucher, invoiceId -> redeem(target, voucher, invoiceId) },
+            onDismiss = { checkout = null },
+        )
     }
 
     if (showConfirm) {
@@ -356,6 +469,13 @@ private fun StatusLine(c: RcqColors, typed: String, isValidLength: Boolean, chec
             CircularProgressIndicator(color = c.textSecondary, strokeWidth = 2.dp, modifier = Modifier.size(13.dp))
             StatusText(stringResource(R.string.uin_shop_status_checking), c.textSecondary)
         }
+        // ⚠ A number that is FOR SALE reads as unavailable in `available` —
+        // the island keeps that field false for scarce stock so older clients
+        // do not offer it for free. Saying "Unavailable" in red above a live
+        // "Buy for $199" button is the screen contradicting itself, so the
+        // status keys off `acquire` the same way the button does.
+        quote != null && quote.acquire == "purchase" && (quote.price_cents ?: 0) > 0 ->
+            StatusText(stringResource(R.string.uin_shop_status_for_sale), c.accent)
         quote != null -> if (quote.available) {
             StatusText(stringResource(R.string.uin_shop_status_available), c.accent)
         } else {

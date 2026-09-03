@@ -1300,4 +1300,26 @@
     <string name="island_trust_copied">Dirección copiada</string>
     <string name="island_trust_not_fingerprint">Eso no es una huella. Tras # va la huella SHA-256 de la isla: 64 caracteres hexadecimales.</string>
     <string name="island_trust_ca_only">Se confía en %1$s a través de una autoridad de certificación, y no lleva huella.</string>
+    <string name="uin_pay_pick">¿Con qué pagas? No hay que registrarse: envías un importe exacto, y ese importe es lo que identifica el pago.</string>
+    <string name="uin_pay_send">Envía exactamente este importe en %1$s.</string>
+    <string name="uin_pay_amount">Importe</string>
+    <string name="uin_pay_address">Dirección</string>
+    <string name="uin_pay_copy">Copiar</string>
+    <string name="uin_pay_copied">Copiado</string>
+    <string name="uin_pay_show_qr">Mostrar QR</string>
+    <string name="uin_pay_hide_qr">Ocultar QR</string>
+    <string name="uin_pay_waiting">Esperando la transferencia · %1$s</string>
+    <string name="uin_pay_expired">Esta factura venció. Una transferencia ya enviada sigue contando.</string>
+    <string name="uin_pay_exact">Envía el importe exactamente como está escrito. Es lo que distingue tu pago del de los demás.</string>
+    <string name="uin_pay_received">Pago recibido. Tomando el número…</string>
+    <string name="uin_pay_error_taken">Otra persona está comprando ese número ahora mismo.</string>
+    <string name="uin_pay_error_busy">Se están comprando demasiados números a la vez. Inténtalo en unos minutos.</string>
+    <string name="uin_pay_error_unreachable">No se puede contactar con el servicio de pago. Inténtalo en un momento.</string>
+    <string name="uin_pay_error_generic">No se pudo iniciar el pago. Inténtalo de nuevo.</string>
+    <string name="uin_shop_cta_buy">Comprar por %1$s</string>
+    <string name="uin_shop_cta_resume">Terminar de pagar</string>
+    <string name="sites_error_unsigned_hint">Pasa cuando algo en el camino altera el contenido. Prueba a activar o desactivar los relés en ajustes de red, u otra red.</string>
+    <string name="sites_error_tampered_hint">El archivo cambió de camino hacia ti. Prueba a activar o desactivar los relés en ajustes de red, u otra red.</string>
+    <string name="uin_shop_error_taken_paid">Alguien tomó ese número mientras iba el pago. No se cobró dos veces: escribe a soporte y lo resolvemos.</string>
+    <string name="uin_shop_status_for_sale">En venta</string>
 </resources>
