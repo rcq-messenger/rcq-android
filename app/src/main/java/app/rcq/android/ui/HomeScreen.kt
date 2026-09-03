@@ -2819,13 +2819,32 @@ private fun AddContactDialog(
     // `skipPartiallyExpanded` is separately unwanted here: the half-open opening
     // position IS the #524 decision, not an accident of the anchor.
     //
-    // ⏭ What this sheet still does NOT do is move for the keyboard, because a
-    // ModalBottomSheet is its own SOFT_INPUT_ADJUST_NOTHING window (Sheets.kt
-    // explains the mechanism). The one change that would be safe on its own is
-    // `contentWindowInsets = rcqSheetInsets`, which only shrinks the height the
-    // content resolves against and so keeps `fillMaxHeight`/`weight` bounded and
-    // keeps the partial anchor. Left undone deliberately: it changes a surface
-    // governed by a founder decision and nobody has looked at it on a device.
+    // ⏭ THE KEYBOARD IS STILL WRONG HERE (#867), and this is what an evening on
+    // a device actually established, so the next attempt does not start over.
+    //
+    // Both reported symptoms REPRODUCE on API 35, every time:
+    //   * dragged to the top, opening the keyboard drops the sheet back to the
+    //     half anchor (top edge measured at y=0 before, y=520 after);
+    //   * ONE back press hides the keyboard AND dismisses the sheet, so you
+    //     cannot put the keyboard away and keep looking at your results.
+    //
+    // ⚠⚠ What did NOT work, so nobody spends another evening on it:
+    //   * `LaunchedEffect(imeUp) { sheetState.expand() }` plus a
+    //     `BackHandler(enabled = imeUp)`, with `imeUp` read as
+    //     `WindowInsets.ime.getBottom(density) > 0`. Placed BESIDE the sheet it
+    //     is obviously wrong (the keyboard belongs to the sheet's own window),
+    //     but placed INSIDE the sheet content it still reads zero: neither the
+    //     expand nor the back handler ever fired, verified by both symptoms
+    //     surviving unchanged. `contentWindowInsets = rcqSheetInsets` alongside
+    //     made no visible difference either.
+    //   * So the next thing to try is a different source of truth for "the
+    //     keyboard is up" in a sheet window — Material3's own
+    //     `WindowInsets.isImeVisible`, or the inset read before this sheet
+    //     consumes it — not another arrangement of the same reads.
+    //
+    // The reverted attempt is not in the tree on purpose: half-working code on
+    // a surface this fragile is worse than none. `skipPartiallyExpanded` is
+    // still not the answer, because the half-open opening position IS #524.
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
