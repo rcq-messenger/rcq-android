@@ -63,7 +63,7 @@
     <string name="outgoing_title">已发送的请求</string>
     <string name="outgoing_empty">你没有发送过任何请求。</string>
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
-    <string name="add_ci_number_clash">你在另一个岛上已经有一个号码为 #%1$d 的联系人。会话目前仅按号码归档，第二个 #%1$d 会和它共用同一段聊天记录。未添加。</string>
+    <string name="add_ci_number_clash">你在另一个岛上已经有一个号码为 %1$d 的联系人。会话目前仅按号码归档，第二个 %1$d 会和它共用同一段聊天记录。未添加。</string>
     <string name="share_to_title">发送到…</string>
     <string name="share_to_search">搜索聊天</string>
     <string name="share_to_empty">还没有可以发送的聊天。</string>
@@ -94,7 +94,7 @@
     <string name="manage_accounts_switch">切换</string>
     <string name="manage_accounts_move_up">上移</string>
     <string name="manage_accounts_move_down">下移</string>
-    <string name="restore_already_here">这台设备上已经有这个号码（#%1$d）。不能再添加第二份副本：一个号码在服务器上只有一套密钥，两份副本会看不到彼此的群组消息。请从主屏幕切换到你已有的那个账号。</string>
+    <string name="restore_already_here">这台设备上已经有这个号码（%1$d）。不能再添加第二份副本：一个号码在服务器上只有一套密钥，两份副本会看不到彼此的群组消息。请从主屏幕切换到你已有的那个账号。</string>
     <string name="manage_accounts_delete_title">删除 %1$s？</string>
     <string name="manage_accounts_delete_body">从这台设备上移除这个账号和它的消息。账号仍留在服务器上，之后可以再次添加。</string>
     <!-- Home: misc -->
@@ -150,9 +150,9 @@
     <string name="settings_row_linked_devices">已连接设备</string>
     <string name="settings_row_backup_island">备用岛</string>
     <string name="backup_island_body">这是自动备份，不是第二个登录：你不会切换过去，也不会在那里登录。只要主岛正常工作，每一条收到的消息也会往备用岛上放一份。如果主岛被封锁或者宕机，应用会自己继续从备用岛接收。你在备用岛上的号码可能是另一个（各个岛独立编号），你的主号码不会变。</string>
-    <string name="backup_island_row_uin">这个岛上的信箱：#%1$d</string>
+    <string name="backup_island_row_uin">这个岛上的信箱：%1$d</string>
     <string name="home_via_backup">你的岛没有响应。消息正在通过备用岛送达。要从那里发送，请在设置里把它设为主岛。</string>
-    <string name="backup_island_row_uin_diff">这个岛上的信箱：#%1$d（各个岛独立编号，你的 #%2$d 在这里已被占用）</string>
+    <string name="backup_island_row_uin_diff">这个岛上的信箱：%1$d（各个岛独立编号，你的 %2$d 在这里已被占用）</string>
     <string name="backup_island_auto_title">在另一个岛上保留备份</string>
     <string name="backup_island_auto_sub">从公共目录里自动挑选岛</string>
     <string name="backup_island_auto_busy">正在挑选岛…</string>
@@ -574,7 +574,7 @@
     <string name="cs_history_cleared">聊天记录已清除</string>
     <string name="cs_move_title">迁移到新的 UIN？</string>
     <string name="cs_move_body">你会获得一个新分配的 UIN。这台设备上的联系人、群组、密钥和聊天记录都会保留。</string>
-    <string name="cs_moved_toast">已迁移到 #%1$d</string>
+    <string name="cs_moved_toast">已迁移到 %1$d</string>
     <string name="cs_move_failed">迁移失败。请稍后重试。</string>
     <string name="cs_burn_cta">销毁</string>
     <string name="cs_burn_title">销毁账号？</string>
@@ -926,7 +926,7 @@
     <string name="relay_import_ok">中继已添加</string>
     <string name="relay_shared_section">收到的中继</string>
     <string name="relay_shared_empty">还没有收到中继。联系人可以在聊天里发给你，或者在上面粘贴链接。</string>
-    <string name="relay_shared_from">来自 #%1$d</string>
+    <string name="relay_shared_from">来自 %1$d</string>
     <string name="relay_shared_imported">已导入</string>
     <string name="relay_shared_remove">移除</string>
     <string name="group_invite_loading">群组</string>

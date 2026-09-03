@@ -63,7 +63,7 @@
     <string name="outgoing_title">Solicitações enviadas</string>
     <string name="outgoing_empty">Você não enviou nenhuma solicitação.</string>
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
-    <string name="add_ci_number_clash">Você já tem um contato com o número #%1$d em outra ilha. A conversa continua sendo guardada só pelo número, então um segundo #%1$d dividiria esse histórico. Não foi adicionado.</string>
+    <string name="add_ci_number_clash">Você já tem um contato com o número %1$d em outra ilha. A conversa continua sendo guardada só pelo número, então um segundo %1$d dividiria esse histórico. Não foi adicionado.</string>
     <string name="share_to_title">Enviar para…</string>
     <string name="share_to_search">Buscar conversas</string>
     <string name="share_to_empty">Nenhuma conversa para enviar ainda.</string>
@@ -94,7 +94,7 @@
     <string name="manage_accounts_switch">Trocar</string>
     <string name="manage_accounts_move_up">Mover para cima</string>
     <string name="manage_accounts_move_down">Mover para baixo</string>
-    <string name="restore_already_here">Você já tem este número neste aparelho (#%1$d). Não dá para adicionar uma segunda cópia: um número guarda um só conjunto de chaves no servidor, então duas cópias parariam de ver as mensagens de grupo uma da outra. Troque para a conta que você já tem, na tela principal.</string>
+    <string name="restore_already_here">Você já tem este número neste aparelho (%1$d). Não dá para adicionar uma segunda cópia: um número guarda um só conjunto de chaves no servidor, então duas cópias parariam de ver as mensagens de grupo uma da outra. Troque para a conta que você já tem, na tela principal.</string>
     <string name="manage_accounts_delete_title">Apagar %1$s?</string>
     <string name="manage_accounts_delete_body">Remove esta conta e as mensagens dela deste aparelho. A conta continua no servidor e pode ser adicionada de novo depois.</string>
     <!-- Home: misc -->
@@ -150,9 +150,9 @@
     <string name="settings_row_linked_devices">Dispositivos conectados</string>
     <string name="settings_row_backup_island">Ilha de backup</string>
     <string name="backup_island_body">Backup automático, não um segundo login: você nunca troca nem entra por lá. Enquanto sua ilha principal funciona, uma cópia de cada mensagem que chega também cai na de backup. Se a principal for bloqueada ou sair do ar, o app continua recebendo pela de backup sozinho. Seu número numa ilha de backup pode ser outro (cada ilha numera por conta própria); seu número principal nunca muda.</string>
-    <string name="backup_island_row_uin">caixa nesta ilha: #%1$d</string>
+    <string name="backup_island_row_uin">caixa nesta ilha: %1$d</string>
     <string name="home_via_backup">Sua ilha não está respondendo. As mensagens estão chegando pela ilha de backup; para enviar de lá, torne ela a principal nas Configurações.</string>
-    <string name="backup_island_row_uin_diff">caixa nesta ilha: #%1$d (cada ilha numera por conta própria e seu #%2$d já estava ocupado aqui)</string>
+    <string name="backup_island_row_uin_diff">caixa nesta ilha: %1$d (cada ilha numera por conta própria e seu %2$d já estava ocupado aqui)</string>
     <string name="backup_island_auto_title">Manter um backup em outra ilha</string>
     <string name="backup_island_auto_sub">A ilha é escolhida automaticamente no catálogo público</string>
     <string name="backup_island_auto_busy">Escolhendo uma ilha…</string>
@@ -574,7 +574,7 @@
     <string name="cs_history_cleared">Histórico limpo</string>
     <string name="cs_move_title">Mudar para um UIN novo?</string>
     <string name="cs_move_body">Você recebe um UIN recém-alocado. Seus contatos, grupos, chaves e histórico de conversas neste aparelho são todos mantidos.</string>
-    <string name="cs_moved_toast">Mudou para #%1$d</string>
+    <string name="cs_moved_toast">Mudou para %1$d</string>
     <string name="cs_move_failed">A migração falhou. Tente mais tarde.</string>
     <string name="cs_burn_cta">Queimar</string>
     <string name="cs_burn_title">Queimar conta?</string>
@@ -926,7 +926,7 @@
     <string name="relay_import_ok">Relay adicionado</string>
     <string name="relay_shared_section">Relays compartilhados</string>
     <string name="relay_shared_empty">Nenhum relay compartilhado. Um contato pode te mandar um na conversa, ou cole um link acima.</string>
-    <string name="relay_shared_from">de #%1$d</string>
+    <string name="relay_shared_from">de %1$d</string>
     <string name="relay_shared_imported">importado</string>
     <string name="relay_shared_remove">Remover</string>
     <string name="group_invite_loading">Grupo</string>
