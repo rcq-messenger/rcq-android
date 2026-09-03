@@ -188,7 +188,7 @@ fun UinShopScreen(
     LaunchedEffect(Unit) {
         UinInvoices.init(ctx)
         for (open in UinInvoices.all()) {
-            val inv = runCatching { TillApi.invoice(open.id) }.getOrNull() ?: continue
+            val inv = runCatching { TillApi.invoice(open.id, open.checkoutUrl) }.getOrNull() ?: continue
             when {
                 inv.status == "paid" && !inv.voucher.isNullOrBlank() ->
                     redeem(inv.uin, inv.voucher, inv.id)
@@ -425,6 +425,9 @@ fun UinShopScreen(
         UinCheckoutSheet(
             uin = target,
             priceDisplay = displayedQuote?.price_cents?.let { priceDisplay(it) } ?: "",
+            // Straight from the quote for THIS number on THIS island, never a
+            // default. See the note on the parameter.
+            checkoutUrl = displayedQuote?.checkout_url,
             resumeId = UinInvoices.forUin(target)?.id,
             onPaid = { voucher, invoiceId -> redeem(target, voucher, invoiceId) },
             onDismiss = { checkout = null },

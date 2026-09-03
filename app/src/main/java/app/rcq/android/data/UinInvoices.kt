@@ -32,7 +32,18 @@ object UinInvoices {
     private val gson = Gson()
     private var prefs: SharedPreferences? = null
 
-    data class Open(val id: String = "", val uin: Int = 0, val chain: String = "", val at: Long = 0)
+    /** ⚠⚠ [checkoutUrl] is WHICH till issued it. An invoice id only exists at
+     *  the till that made it, so a sweep that asks a different one gets a
+     *  confident "no such invoice" for a payment really in flight — and the
+     *  voucher somebody paid for is never collected. Null on rows written
+     *  before islands could name their own till; those were all ours. */
+    data class Open(
+        val id: String = "",
+        val uin: Int = 0,
+        val chain: String = "",
+        val at: Long = 0,
+        val checkoutUrl: String? = null,
+    )
 
     fun init(ctx: Context) {
         if (prefs == null) {
@@ -49,8 +60,8 @@ object UinInvoices {
 
     /** Newest first, capped. Called the moment an invoice exists, before the
      *  address is even shown. */
-    fun remember(id: String, uin: Int, chain: String) {
-        val next = (listOf(Open(id, uin, chain, System.currentTimeMillis())) +
+    fun remember(id: String, uin: Int, chain: String, checkoutUrl: String? = null) {
+        val next = (listOf(Open(id, uin, chain, System.currentTimeMillis(), checkoutUrl)) +
             all().filter { it.id != id }).take(MAX)
         prefs?.edit()?.putString(KEY, gson.toJson(next))?.apply()
     }

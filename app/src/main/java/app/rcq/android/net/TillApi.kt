@@ -35,7 +35,17 @@ import java.util.concurrent.TimeUnit
  */
 object TillApi {
 
-    private const val BASE = "https://console-api.rcq.app"
+    /** The checkout compiled in, used only when an island does not name its own.
+     *
+     *  ⚠⚠ It serves ONE island — ours. Paying it for a number on somebody
+     *  else's island puts real money where the number is not, and there is no
+     *  way back. So every call below takes the address from the island's quote
+     *  (`checkout_url`) when there is one, and this is the fallback for islands
+     *  too old to send the field, which can only be ours. */
+    private const val BUILT_IN = "https://console-api.rcq.app"
+
+    private fun base(checkoutUrl: String?): String =
+        checkoutUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: BUILT_IN
     private val JSON = "application/json; charset=utf-8".toMediaType()
     private val gson = Gson()
 
@@ -99,8 +109,8 @@ object TillApi {
         }
     }
 
-    suspend fun prices(): Prices = withContext(Dispatchers.IO) {
-        call(Request.Builder().url("$BASE/v1/uin/prices").get().build())
+    suspend fun prices(checkoutUrl: String? = null): Prices = withContext(Dispatchers.IO) {
+        call(Request.Builder().url("${base(checkoutUrl)}/v1/uin/prices").get().build())
     }
 
     /**
@@ -110,12 +120,17 @@ object TillApi {
      * payment from every other one: every open invoice gets its own tail. A
      * rounded amount is a payment nobody can attribute.
      */
-    suspend fun createInvoice(uin: Int, chain: String): Invoice = withContext(Dispatchers.IO) {
-        val body = gson.toJson(mapOf("uin" to uin, "chain" to chain)).toRequestBody(JSON)
-        call(Request.Builder().url("$BASE/v1/uin/invoice").post(body).build())
-    }
+    suspend fun createInvoice(uin: Int, chain: String, checkoutUrl: String? = null): Invoice =
+        withContext(Dispatchers.IO) {
+            val body = gson.toJson(mapOf("uin" to uin, "chain" to chain)).toRequestBody(JSON)
+            call(Request.Builder().url("${base(checkoutUrl)}/v1/uin/invoice").post(body).build())
+        }
 
-    suspend fun invoice(id: String): Invoice = withContext(Dispatchers.IO) {
-        call(Request.Builder().url("$BASE/v1/uin/invoice/$id").get().build())
-    }
+    /** ⚠ Takes the same address the invoice was created against. An invoice id
+     *  only exists at the till that issued it, so asking a different one
+     *  answers a confident "no such invoice" for a payment really in flight. */
+    suspend fun invoice(id: String, checkoutUrl: String? = null): Invoice =
+        withContext(Dispatchers.IO) {
+            call(Request.Builder().url("${base(checkoutUrl)}/v1/uin/invoice/$id").get().build())
+        }
 }
