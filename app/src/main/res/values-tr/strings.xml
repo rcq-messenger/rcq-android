@@ -490,6 +490,7 @@
     <string name="uin_shop_confirm_title_priced">%1$s UIN\'i %2$s karşılığında alınsın mı?</string>
     <string name="uin_shop_confirm_body">Numara koleksiyonuna katılır. Şimdiki gibi cevap vermeyi sürdürürsün ve istediğin zaman üzerine geçebilirsin.</string>
     <string name="uin_shop_confirm_cta">Al</string>
+    <string name="uin_shop_error_reserved">Kısa ve desenli numaralar dağıtılmıyor, satılıyor. chat.rcq.app adresindeki pazarda.</string>
     <string name="uin_shop_error_taken">Biri önce kaptı. Başka bir UIN dene.</string>
     <string name="uin_shop_error_generic">Satın alma başarısız. Tekrar dene.</string>
     <string name="uin_shop_held_title">%1$s numarası senin</string>
@@ -577,7 +578,7 @@
     <string name="cs_move_failed">Taşıma başarısız. Sonra tekrar dene.</string>
     <string name="cs_burn_cta">Yak</string>
     <string name="cs_burn_title">Hesap yakılsın mı?</string>
-    <string name="cs_burn_body">Bu, hesabını ve bütün yerel verini siler. Geri alınamaz.</string>
+    <string name="cs_burn_body">Bu, hesabını ve bütün yerel verini siler. Şu anda kullandığın numara havuza geri döner, satın aldığın numaralar hesapla birlikte yok olur ve kurduğun gruplar içindeki herkes için kaybolur. Geri alınamaz.</string>
     <string name="cs_about_version">Sürüm %1$s</string>
     <string name="cs_about_features">Açık kaynak.</string>
     <string name="cs_about_source">GitHub\'da kaynak kodu</string>

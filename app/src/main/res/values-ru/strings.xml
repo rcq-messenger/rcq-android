@@ -599,7 +599,7 @@
     <string name="cs_move_failed">Не удалось сменить. Попробуйте позже.</string>
     <string name="cs_burn_cta">Сжечь</string>
     <string name="cs_burn_title">Сжечь аккаунт?</string>
-    <string name="cs_burn_body">Это удалит ваш аккаунт и все локальные данные. Отменить нельзя.</string>
+    <string name="cs_burn_body">Это удаляет ваш аккаунт и все локальные данные. Номер, под которым вы отвечаете, вернётся в общий пул, купленные номера исчезнут вместе с аккаунтом, а группы, которые вы создали, пропадут у всех участников. Отменить нельзя.</string>
     <string name="cs_about_version">Версия %1$s</string>
     <string name="cs_about_features">Открытый код.</string>
     <string name="cs_about_source">Исходный код на GitHub</string>
@@ -1198,7 +1198,7 @@
     <string name="ci_name_hint">Остаётся только на этом устройстве. Собеседник об этом не узнает.</string>
     <string name="ci_clear_name">Убрать</string>
     <string name="uin_shop_error_too_many">У вас уже столько номеров, сколько может держать один аккаунт. Освободите один, чтобы взять новый.</string>
-    <string name="uin_shop_error_reserved">Короткие и красивые номера не выдаются. Попробуйте другой.</string>
+    <string name="uin_shop_error_reserved">Короткие номера и номера с рисунком не раздают, а продают. Они на маркете: chat.rcq.app.</string>
     <string name="my_uins_held_count">%1$d из %2$d</string>
     <string name="settings_row_backup">Копия переписки в файл</string>
     <string name="backup_intro">Сохраняет историю этого устройства в файл, зашифрованный вашей фразой восстановления. Файл ваш: храните его там, где храните всё остальное. К нам он не уходит, и прочитать его мы не можем.</string>

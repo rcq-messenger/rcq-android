@@ -490,6 +490,7 @@
     <string name="uin_shop_confirm_title_priced">购买 UIN %1$s，价格 %2$s？</string>
     <string name="uin_shop_confirm_body">号码会加入你的号码集合。你仍以现在的号码对外回应，随时可以迁移过去。</string>
     <string name="uin_shop_confirm_cta">购买</string>
+    <string name="uin_shop_error_reserved">短号码和有规律的号码不是发放的，而是出售的。它们在 chat.rcq.app 的市场里。</string>
     <string name="uin_shop_error_taken">有人抢先了。换一个 UIN 试试。</string>
     <string name="uin_shop_error_generic">购买失败。请重试。</string>
     <string name="uin_shop_held_title">号码 %1$s 已归你所有</string>
@@ -577,7 +578,7 @@
     <string name="cs_move_failed">迁移失败。请稍后重试。</string>
     <string name="cs_burn_cta">销毁</string>
     <string name="cs_burn_title">销毁账号？</string>
-    <string name="cs_burn_body">这会删除你的账号和所有本地数据。无法撤销。</string>
+    <string name="cs_burn_body">这会删除你的账号和所有本地数据。你当前使用的号码会回到公共池，任何人都可以领取；你买下的号码会随账号一起销毁；你创建的群组会对其中所有人消失。此操作无法撤销。</string>
     <string name="cs_about_version">版本 %1$s</string>
     <string name="cs_about_features">开源。</string>
     <string name="cs_about_source">在 GitHub 上查看源代码</string>

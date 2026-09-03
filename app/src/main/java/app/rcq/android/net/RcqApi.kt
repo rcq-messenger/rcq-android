@@ -234,7 +234,15 @@ class RcqApi(
         val signature: String? = null,
     )
 
-    data class RegisterResponse(val uin: Int, val token: String)
+    /** `moved_from` is filled by POST /auth/refresh ONLY, and only when the
+     *  number we asked about is one this account has left: the person moved
+     *  (bought a shorter number, took a free one) on another device and this
+     *  install is still asking under the old name. ⚠⚠ Without it the island
+     *  answered `identity_not_found`, and [Session.probeBurnedAccount] reads
+     *  that as "burned from another device" and WIPES the local copy - so a
+     *  phone in a drawer deleted the chats of a live account because its owner
+     *  changed number on their laptop. Null everywhere else. */
+    data class RegisterResponse(val uin: Int, val token: String, val moved_from: Int? = null)
 
     // Account recovery (seed-phrase): prove possession of the signing key to
     // rebind a fresh device to the same UIN. Reuses RegisterResponse {uin,token}.

@@ -5414,6 +5414,17 @@ class Session(context: Context) {
             }
             return
         }
+        // ⚠⚠ Alive AND somewhere else: the account moved off #me while this
+        // install was not the one in hand. Adopting only the token would leave
+        // this phone acting as the new number while every local store still
+        // says the old one — worse than the wipe it replaces, because it is
+        // silent. Take the whole move, the same way a migration made on this
+        // device is taken.
+        if (fresh.moved_from == me && fresh.uin != me) {
+            android.util.Log.i("RCQburn", "#$me moved to #" + fresh.uin + " elsewhere - following it")
+            applyMigration(fresh.uin, fresh.token)
+            return
+        }
         // Alive after all — the token had merely rotted. Adopt + redial.
         store.updateToken(fresh.token)
         api.setToken(fresh.token)
