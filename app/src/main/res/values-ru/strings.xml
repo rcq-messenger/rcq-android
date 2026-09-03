@@ -1369,4 +1369,7 @@
     <string name="sites_error_tampered_hint">Файл изменился по дороге к вам. Попробуйте включить или выключить релеи в настройках сети, или другую сеть.</string>
     <string name="uin_shop_error_taken_paid">Номер успели забрать, пока шёл платёж. Дважды ничего не списалось: напишите в поддержку, разберёмся.</string>
     <string name="uin_shop_status_for_sale">Продаётся</string>
+    <string name="chat_location_confirm_title">Отправить геопозицию?</string>
+    <string name="chat_location_confirm_body">Ваши текущие координаты уйдут сообщением. Забрать их обратно после доставки нельзя.</string>
+    <string name="chat_location_confirm_send">Отправить геопозицию</string>
 </resources>

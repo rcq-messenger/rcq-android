@@ -1003,6 +1003,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         if (ok) doShareLocation() else locPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
+    // ⚠⚠ ASKS FIRST, and asks before the position is read.
+    //
+    // "Геопозиция отправляется в чат без подтверждения, можно случайно выдать
+    // своё местоположение, промахнувшись в меню" (#876). One tap in a list
+    // where the row above it attaches a file, and the system prompt only
+    // appears the FIRST time: after that a miss put real coordinates in
+    // somebody else's hands with nothing in between. It is the one item in
+    // that menu that deleting the message does not undo, because the other
+    // person has already read where you are.
+    var confirmLocation by remember { mutableStateOf(false) }
+
     // ── calls ─────────────────────────────────────────────────────────
     var pendingCallMedia by remember { mutableStateOf<app.rcq.android.call.CallController.Media?>(null) }
     val callPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
@@ -2455,7 +2466,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 albumPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             },
             onPickFile = { attachMenu = false; filePicker.launch(arrayOf("*/*")) },
-            onShareLocation = { attachMenu = false; shareLocation() },
+            onShareLocation = { attachMenu = false; confirmLocation = true },
             onShareGroup = { attachMenu = false; showGroupPicker = true },
         )
     }
@@ -2594,6 +2605,21 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onClose = { showAllMedia = false },
             onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = viewerMediaOf(m, it) } },
             onOpenVideo = { m -> openVideo(m) { fullscreenVideo = viewerVideoOf(m, it) } },
+        )
+    }
+    if (confirmLocation) {
+        // The one item in the attach menu that deleting the message does not
+        // undo. See where `confirmLocation` is declared.
+        RcqAskSheet(
+            onDismiss = { confirmLocation = false },
+            title = stringResource(R.string.chat_location_confirm_title),
+            body = stringResource(R.string.chat_location_confirm_body),
+            actions = listOf(
+                SheetAction(stringResource(R.string.chat_location_confirm_send)) {
+                    confirmLocation = false
+                    shareLocation()
+                },
+            ),
         )
     }
     if (confirmClearThread) {

@@ -1322,4 +1322,7 @@
     <string name="sites_error_tampered_hint">El archivo cambió de camino hacia ti. Prueba a activar o desactivar los relés en ajustes de red, u otra red.</string>
     <string name="uin_shop_error_taken_paid">Alguien tomó ese número mientras iba el pago. No se cobró dos veces: escribe a soporte y lo resolvemos.</string>
     <string name="uin_shop_status_for_sale">En venta</string>
+    <string name="chat_location_confirm_title">¿Enviar tu ubicación?</string>
+    <string name="chat_location_confirm_body">Tus coordenadas actuales se enviarán como mensaje. No hay forma de retirarlas una vez que lleguen.</string>
+    <string name="chat_location_confirm_send">Enviar ubicación</string>
 </resources>
