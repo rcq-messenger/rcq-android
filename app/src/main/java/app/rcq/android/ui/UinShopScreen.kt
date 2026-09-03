@@ -125,10 +125,16 @@ fun UinShopScreen(
         val parsed = typed.toIntOrNull() ?: return
         buying = true
         scope.launch {
-            // ⚠ switch = true. Collections closed 2026-09-01: a number you take
-            // is a number you move onto, so there is no "held" outcome to land
-            // in any more (the island refuses switch=false outright).
-            when (val r = session.purchaseUin(parsed, switch = true)) {
+            // ⚠⚠ switch = FALSE, and this line has a price on it. It was
+            // flipped to true on 2026-09-01, when collections were closed and
+            // the island refused switch=false outright. Collections reopened on
+            // 03.09 and this client was not changed, so "take" still meant
+            // "move onto it" - and moving means the number you were answering
+            // as is given up. That is how the founder lost #911: he took an
+            // ordinary seven-digit number and a three-digit one went back on
+            // the shelf a second later. Taking a number and BECOMING it are two
+            // deliberate steps again, and the Held branch below is the first.
+            when (val r = session.purchaseUin(parsed, switch = false)) {
                 is Session.PurchaseResult.Held -> {
                     buying = false
                     held = parsed
