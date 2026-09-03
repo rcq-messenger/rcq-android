@@ -148,6 +148,13 @@ private fun CopyRow(label: String, value: String, mono: Boolean = true) {
 fun UinCheckoutSheet(
     uin: Int,
     priceDisplay: String,
+    /** The till of the island selling this number, from its own quote.
+     *
+     *  ⚠⚠ Passed in rather than assumed, because a till serves ONE island.
+     *  Paying the built-in address for a number on somebody else's island
+     *  sends real money where the number is not, and nothing undoes it. Null
+     *  only for an island too old to name one, which can only be ours. */
+    checkoutUrl: String?,
     resumeId: String?,
     onPaid: (voucher: String, invoiceId: String) -> Unit,
     onDismiss: () -> Unit,
@@ -177,7 +184,7 @@ fun UinCheckoutSheet(
     // Pick up where a previous visit left off, or ask what we can be paid in.
     LaunchedEffect(resumeId) {
         if (resumeId != null) {
-            runCatching { TillApi.invoice(resumeId) }
+            runCatching { TillApi.invoice(resumeId, checkoutUrl) }
                 .onSuccess { inv ->
                     invoice = inv
                     if (inv.status == "paid" && !inv.voucher.isNullOrBlank() && !handed.value) {
@@ -187,7 +194,7 @@ fun UinCheckoutSheet(
                 }
                 .onFailure { error = unreachable }
         } else {
-            runCatching { TillApi.prices() }
+            runCatching { TillApi.prices(checkoutUrl) }
                 .onSuccess { chains = it.chains }
                 .onFailure { error = unreachable }
         }
@@ -203,7 +210,7 @@ fun UinCheckoutSheet(
             // (TRON), and the till's own watcher runs once a minute, so
             // anything faster is asking a question that cannot have changed.
             delay(6000)
-            val fresh = runCatching { TillApi.invoice(id) }.getOrNull() ?: continue
+            val fresh = runCatching { TillApi.invoice(id, checkoutUrl) }.getOrNull() ?: continue
             invoice = fresh
             if (fresh.status == "paid" && !fresh.voucher.isNullOrBlank() && !handed.value) {
                 handed.value = true
@@ -317,14 +324,14 @@ fun UinCheckoutSheet(
                                 .clickable(enabled = !busy) {
                                     busy = true; error = null
                                     scope.launch {
-                                        runCatching { TillApi.createInvoice(uin, ch.id) }
+                                        runCatching { TillApi.createInvoice(uin, ch.id, checkoutUrl) }
                                             .onSuccess { inv ->
                                                 // ⚠⚠ Written down BEFORE anything
                                                 // else can fail. An invoice this
                                                 // device cannot find again is
                                                 // money that cannot be accounted
                                                 // for.
-                                                UinInvoices.remember(inv.id, inv.uin, inv.chain)
+                                                UinInvoices.remember(inv.id, inv.uin, inv.chain, checkoutUrl)
                                                 invoice = inv
                                             }
                                             .onFailure { e ->

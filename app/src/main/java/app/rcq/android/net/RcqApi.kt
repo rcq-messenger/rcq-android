@@ -1415,6 +1415,13 @@ class RcqApi(
         val price_cents: Int? = null,
         val price_display: String? = null,
         val reason: String? = null,
+        /** WHERE to pay when [acquire] is "purchase" — the island's OWN till.
+         *
+         *  ⚠⚠ Use it, never [TillApi]'s built-in address. A till serves one
+         *  island: paying the wrong one puts real money where the number is
+         *  not, and there is no way back. Null only for an island too old to
+         *  name one, which can only be ours. */
+        val checkout_url: String? = null,
         /** How this number would be obtained: "free" (ordinary space, take it
          *  with /uin/purchase), "purchase" (scarce stock, only a paid voucher
          *  through /uin/redeem opens it), "closed" (not sold here at all).
@@ -1443,7 +1450,17 @@ class RcqApi(
 
     /** POST /uin/quote — does this UIN exist + what would it cost. */
     suspend fun uinQuote(uin: Int): QuoteResponse = withContext(Dispatchers.IO) {
-        post("/uin/quote", "{\"uin\":$uin}", authed = true, QuoteResponse::class.java)
+        // ⚠⚠ The declaration, not a version number. "I will pay at whatever
+        // address you hand back in `checkout_url`." A till serves ONE island
+        // and this app had a single one compiled in, so an island that is not
+        // that one only offers a scarce number to a client that promises this
+        // — otherwise its customer would pay somebody else's checkout for a
+        // number that never arrives. Saying it is what makes buying from a
+        // self-hosted island possible at all.
+        post(
+            "/uin/quote", "{\"uin\":$uin}", authed = true, QuoteResponse::class.java,
+            headers = mapOf("X-RCQ-Checkout" to "island"),
+        )
     }
 
     /** Superset of [MigrateResponse]: `new_uin`/`token` are filled exactly when
@@ -2064,11 +2081,18 @@ private class SealingBody(
 
     // ── plumbing ─────────────────────────────────────────────────────
 
-    private fun <T> post(path: String, json: String, authed: Boolean, type: Class<T>): T {
+    private fun <T> post(
+        path: String,
+        json: String,
+        authed: Boolean,
+        type: Class<T>,
+        headers: Map<String, String> = emptyMap(),
+    ): T {
         val builder = Request.Builder()
             .url("$baseUrl$path")
             .post(json.toRequestBody(JSON))
         if (authed) token?.let { builder.header("Authorization", "Bearer $it") }
+        headers.forEach { (k, v) -> builder.header(k, v) }
         return execute(builder.build(), type)
     }
 
