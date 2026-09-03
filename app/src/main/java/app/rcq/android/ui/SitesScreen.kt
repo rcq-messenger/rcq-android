@@ -516,13 +516,36 @@ fun SitesScreen(
         // ── the page, the start screen, or what went wrong ───────────────
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                errorCode != null -> Text(
-                    stringResource(errorText(errorCode!!)),
-                    color = c.textSecondary,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                )
+                errorCode != null -> Column(
+                    Modifier.fillMaxWidth().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        stringResource(errorText(errorCode!!)),
+                        color = c.textSecondary,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    // ⚠ The two integrity refusals need a second sentence, and
+                    // the reason is not politeness. "The signature does not
+                    // match. Nothing was shown." reads as "the app is broken",
+                    // when in fact the app just did the one job it exists for:
+                    // something on the way altered the bytes. Without a next
+                    // step the person clears the cache, reinstalls, and files a
+                    // report about a feature that is working. Both of these
+                    // point at the transport, which they can actually change.
+                    errorHint(errorCode!!)?.let { hint ->
+                        Text(
+                            stringResource(hint),
+                            color = c.textSecondary.copy(alpha = 0.75f),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
 
                 page == null -> Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -730,6 +753,14 @@ private fun KeyboardGoneEffect(onGone: () -> Unit) {
             onGone()
         }
     }
+}
+
+/** What to try, for the two refusals a person can do something about. Null for
+ *  the rest: "there is no such site" needs no advice. */
+private fun errorHint(code: String): Int? = when (code) {
+    "unsigned" -> R.string.sites_error_unsigned_hint
+    "tampered" -> R.string.sites_error_tampered_hint
+    else -> null
 }
 
 /** The island's answer, in the reader's language. */
