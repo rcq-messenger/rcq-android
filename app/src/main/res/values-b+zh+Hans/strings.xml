@@ -1320,4 +1320,7 @@
     <string name="sites_error_tampered_hint">文件在送达你之前被改动过。请在网络设置中打开或关闭中继，或换一个网络试试。</string>
     <string name="uin_shop_error_taken_paid">付款在路上时，这个号码被别人拿走了。没有重复扣款：联系客服，我们会处理。</string>
     <string name="uin_shop_status_for_sale">可购买</string>
+    <string name="chat_location_confirm_title">发送你的位置？</string>
+    <string name="chat_location_confirm_body">你当前的坐标将作为消息发送出去。一旦送达就无法收回。</string>
+    <string name="chat_location_confirm_send">发送位置</string>
 </resources>

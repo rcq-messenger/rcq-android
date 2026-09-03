@@ -1322,4 +1322,7 @@
     <string name="sites_error_tampered_hint">Dosya sana gelirken değişmiş. Ağ ayarlarından röleleri açıp kapatmayı ya da başka bir ağı dene.</string>
     <string name="uin_shop_error_taken_paid">Ödeme yoldayken o numarayı biri aldı. İki kez tahsilat olmadı: destek ekibine yaz, çözelim.</string>
     <string name="uin_shop_status_for_sale">Satılık</string>
+    <string name="chat_location_confirm_title">Konumunuz gönderilsin mi?</string>
+    <string name="chat_location_confirm_body">Mevcut koordinatlarınız mesaj olarak gidecek. Ulaştıktan sonra geri alınamaz.</string>
+    <string name="chat_location_confirm_send">Konumu gönder</string>
 </resources>

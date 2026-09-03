@@ -1326,4 +1326,7 @@
     <string name="sites_error_tampered_hint">Файл змінився дорогою до вас. Спробуйте увімкнути або вимкнути релеї в налаштуваннях мережі, або іншу мережу.</string>
     <string name="uin_shop_error_taken_paid">Номер устигли забрати, поки йшов платіж. Двічі нічого не списалося: напишіть у підтримку, розберемося.</string>
     <string name="uin_shop_status_for_sale">Продається</string>
+    <string name="chat_location_confirm_title">Надіслати геопозицію?</string>
+    <string name="chat_location_confirm_body">Ваші поточні координати підуть повідомленням. Забрати їх назад після доставки не можна.</string>
+    <string name="chat_location_confirm_send">Надіслати геопозицію</string>
 </resources>
