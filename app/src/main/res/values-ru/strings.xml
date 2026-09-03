@@ -73,7 +73,7 @@
     <string name="outgoing_empty">Вы не отправляли заявок.</string>
 
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
-    <string name="add_ci_number_clash">У вас уже есть контакт с номером #%1$d на другом острове. Переписка пока хранится по одному номеру, и второй #%1$d попал бы в ту же историю. Не добавлен.</string>
+    <string name="add_ci_number_clash">У вас уже есть контакт с номером %1$d на другом острове. Переписка пока хранится по одному номеру, и второй %1$d попал бы в ту же историю. Не добавлен.</string>
     <string name="share_to_title">Отправить в…</string>
     <string name="share_to_search">Поиск по чатам</string>
     <string name="share_to_empty">Пока некому отправить.</string>
@@ -105,7 +105,7 @@
     <string name="manage_accounts_switch">Перейти</string>
     <string name="manage_accounts_move_up">Выше</string>
     <string name="manage_accounts_move_down">Ниже</string>
-    <string name="restore_already_here">Этот номер уже есть на устройстве (#%1$d). Вторую копию добавить нельзя: у номера один набор ключей на сервере, и две копии перестали бы видеть групповые сообщения друг друга. Переключитесь на уже имеющийся аккаунт с главного экрана.</string>
+    <string name="restore_already_here">Этот номер уже есть на устройстве (%1$d). Вторую копию добавить нельзя: у номера один набор ключей на сервере, и две копии перестали бы видеть групповые сообщения друг друга. Переключитесь на уже имеющийся аккаунт с главного экрана.</string>
     <string name="manage_accounts_delete_title">Удалить %1$s?</string>
     <string name="manage_accounts_delete_body">Убирает этот аккаунт и его сообщения с этого устройства. Аккаунт остаётся на сервере, его можно добавить снова позже.</string>
 
@@ -163,9 +163,9 @@
     <string name="settings_row_linked_devices">Подключённые устройства</string>
     <string name="settings_row_backup_island">Запасной остров</string>
     <string name="backup_island_body">Это автоматический резерв, а не второй вход: вы никуда не переключаетесь и не входите. Пока основной остров работает, копия каждого входящего сообщения кладётся и на резервный. Если основной заблокируют или он упадёт, приложение само продолжит получать с резервного. Номер на резервном острове может оказаться другим (острова нумеруют независимо), а ваш основной номер не меняется.</string>
-    <string name="backup_island_row_uin">почтовый ящик на этом острове: #%1$d</string>
+    <string name="backup_island_row_uin">почтовый ящик на этом острове: %1$d</string>
     <string name="home_via_backup">Ваш остров не отвечает. Сообщения приходят через резервный остров; чтобы и отправлять с него, сделайте его основным в настройках.</string>
-    <string name="backup_island_row_uin_diff">почтовый ящик на этом острове: #%1$d (острова нумеруют независимо, ваш #%2$d здесь занят)</string>
+    <string name="backup_island_row_uin_diff">почтовый ящик на этом острове: %1$d (острова нумеруют независимо, ваш %2$d здесь занят)</string>
     <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
     <string name="backup_island_auto_sub">Остров подбирается автоматически из публичного каталога</string>
     <string name="backup_island_auto_busy">Подбираем остров…</string>
@@ -595,7 +595,7 @@
     <string name="cs_history_cleared">История очищена</string>
     <string name="cs_move_title">Сменить UIN?</string>
     <string name="cs_move_body">Вы получите новый UIN. Контакты, группы, ключи и локальная история чатов на этом устройстве сохранятся.</string>
-    <string name="cs_moved_toast">Новый UIN: #%1$d</string>
+    <string name="cs_moved_toast">Новый UIN: %1$d</string>
     <string name="cs_move_failed">Не удалось сменить. Попробуйте позже.</string>
     <string name="cs_burn_cta">Сжечь</string>
     <string name="cs_burn_title">Сжечь аккаунт?</string>
@@ -959,7 +959,7 @@
     <string name="relay_import_ok">Релей добавлен</string>
     <string name="relay_shared_section">Полученные релеи</string>
     <string name="relay_shared_empty">Полученных релеев нет. Контакт может прислать релей в чате, или вставьте ссылку выше.</string>
-    <string name="relay_shared_from">от #%1$d</string>
+    <string name="relay_shared_from">от %1$d</string>
     <string name="relay_shared_imported">импортирован</string>
     <string name="relay_shared_remove">Удалить</string>
     <string name="group_invite_loading">Группа</string>

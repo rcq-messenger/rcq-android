@@ -33,8 +33,18 @@ import androidx.compose.ui.unit.sp
  */
 object Mentions {
 
-    /** How many rows the picker will ever show. */
-    private const val LIMIT = 8
+    /** How many rows the picker will ever show.
+     *
+     * ⚠ Eight until 2026-09-03, and eight is a cap you hit by accident in a
+     * room of any size: "не слишком ли короткий список при обращении через
+     * собаку? всего лишь 8 строк" (#868, vss). It was never about fitting the
+     * screen - the list has been a `LazyColumn` capped at 220dp all along, so
+     * it already scrolls and always did.
+     *
+     * Not a hundred, though, and that is the other half of his question: this
+     * is a suggestion you narrow by typing, not a directory you scroll. Past
+     * two or three screens nobody reads on, they type another letter. */
+    private const val LIMIT = 25
 
     /**
      * The `@token` the caret is standing in, as (index of the `@`, the letters

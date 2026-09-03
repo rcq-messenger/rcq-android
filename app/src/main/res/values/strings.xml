@@ -74,7 +74,7 @@
     <string name="outgoing_empty">You haven\'t sent any requests.</string>
 
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
-    <string name="add_ci_number_clash">You already have a contact numbered #%1$d on another island. A conversation is still filed by number alone, so a second #%1$d would share that history. Not added.</string>
+    <string name="add_ci_number_clash">You already have a contact numbered %1$d on another island. A conversation is still filed by number alone, so a second %1$d would share that history. Not added.</string>
     <string name="share_to_title">Send to…</string>
     <string name="share_to_search">Search chats</string>
     <string name="share_to_empty">No chats to send to yet.</string>
@@ -106,7 +106,7 @@
     <string name="manage_accounts_switch">Switch</string>
     <string name="manage_accounts_move_up">Move up</string>
     <string name="manage_accounts_move_down">Move down</string>
-    <string name="restore_already_here">You already have this number on this device (#%1$d). A second copy cannot be added: a number holds one set of keys on the server, so two copies would stop seeing each other’s group messages. Switch to the account you already have from the main screen.</string>
+    <string name="restore_already_here">You already have this number on this device (%1$d). A second copy cannot be added: a number holds one set of keys on the server, so two copies would stop seeing each other’s group messages. Switch to the account you already have from the main screen.</string>
     <string name="manage_accounts_delete_title">Delete %1$s?</string>
     <string name="manage_accounts_delete_body">Removes this account and its messages from this device. The account stays on the server and can be added again later.</string>
 
@@ -164,9 +164,9 @@
     <string name="settings_row_linked_devices">Linked devices</string>
     <string name="settings_row_backup_island">Standby island</string>
     <string name="backup_island_body">Automatic backup, not a second login: you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
-    <string name="backup_island_row_uin">mailbox on this island: #%1$d</string>
+    <string name="backup_island_row_uin">mailbox on this island: %1$d</string>
     <string name="home_via_backup">Your island is not answering. Messages are arriving through your backup island; to send from there, make it the main one in Settings.</string>
-    <string name="backup_island_row_uin_diff">mailbox on this island: #%1$d (islands number independently and your #%2$d was taken here)</string>
+    <string name="backup_island_row_uin_diff">mailbox on this island: %1$d (islands number independently and your %2$d was taken here)</string>
     <string name="backup_island_auto_title">Keep a backup on another island</string>
     <string name="backup_island_auto_sub">The island is picked automatically from the public catalogue</string>
     <string name="backup_island_auto_busy">Picking an island…</string>
@@ -599,7 +599,7 @@
     <string name="cs_history_cleared">History cleared</string>
     <string name="cs_move_title">Move to a new UIN?</string>
     <string name="cs_move_body">You get a freshly-allocated UIN. Your contacts, groups, keys and chat history on this device are all kept.</string>
-    <string name="cs_moved_toast">Moved to #%1$d</string>
+    <string name="cs_moved_toast">Moved to %1$d</string>
     <string name="cs_move_failed">Migration failed. Try again later.</string>
     <string name="cs_burn_cta">Burn</string>
     <string name="cs_burn_title">Burn account?</string>
@@ -963,7 +963,7 @@
     <string name="relay_import_ok">Relay added</string>
     <string name="relay_shared_section">Shared relays</string>
     <string name="relay_shared_empty">No shared relays. A contact can send you one in chat, or paste a link above.</string>
-    <string name="relay_shared_from">from #%1$d</string>
+    <string name="relay_shared_from">from %1$d</string>
     <string name="relay_shared_imported">imported</string>
     <string name="relay_shared_remove">Remove</string>
     <string name="group_invite_loading">Group</string>

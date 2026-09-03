@@ -63,7 +63,7 @@
     <string name="outgoing_title">Надіслані запити</string>
     <string name="outgoing_empty">Ти не надсилав запитів.</string>
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
-    <string name="add_ci_number_clash">У тебе вже є контакт з номером #%1$d на іншому острові. Розмова зберігається лише за номером, тож другий #%1$d ділив би з ним ту саму історію. Не додано.</string>
+    <string name="add_ci_number_clash">У тебе вже є контакт з номером %1$d на іншому острові. Розмова зберігається лише за номером, тож другий %1$d ділив би з ним ту саму історію. Не додано.</string>
     <string name="share_to_title">Надіслати…</string>
     <string name="share_to_search">Пошук чатів</string>
     <string name="share_to_empty">Поки немає чатів, куди надіслати.</string>
@@ -94,7 +94,7 @@
     <string name="manage_accounts_switch">Перемкнути</string>
     <string name="manage_accounts_move_up">Вище</string>
     <string name="manage_accounts_move_down">Нижче</string>
-    <string name="restore_already_here">Цей номер уже є на цьому пристрої (#%1$d). Другу копію додати не можна: на сервері номер тримає один набір ключів, тож дві копії перестали б бачити групові повідомлення одна одної. Перемкнися на акаунт, який у тебе вже є, з головного екрана.</string>
+    <string name="restore_already_here">Цей номер уже є на цьому пристрої (%1$d). Другу копію додати не можна: на сервері номер тримає один набір ключів, тож дві копії перестали б бачити групові повідомлення одна одної. Перемкнися на акаунт, який у тебе вже є, з головного екрана.</string>
     <string name="manage_accounts_delete_title">Видалити %1$s?</string>
     <string name="manage_accounts_delete_body">Прибирає цей акаунт і його повідомлення з цього пристрою. Сам акаунт лишається на сервері, і його можна додати знову.</string>
     <!-- Home: misc -->
@@ -150,9 +150,9 @@
     <string name="settings_row_linked_devices">Підключені пристрої</string>
     <string name="settings_row_backup_island">Резервний острів</string>
     <string name="backup_island_body">Це автоматичний резерв, а не другий вхід: ти ніколи туди не перемикаєшся і не входиш. Поки твій головний острів працює, копія кожного вхідного повідомлення лягає ще й на резервний. Якщо головний острів заблокують або він впаде, застосунок сам далі прийматиме з резервного. Номер на резервному острові може бути іншим (острови нумерують незалежно), а твій головний номер не змінюється ніколи.</string>
-    <string name="backup_island_row_uin">скринька на цьому острові: #%1$d</string>
+    <string name="backup_island_row_uin">скринька на цьому острові: %1$d</string>
     <string name="home_via_backup">Твій острів не відповідає. Повідомлення приходять через резервний острів; щоб писати звідти, зроби його головним у налаштуваннях.</string>
-    <string name="backup_island_row_uin_diff">скринька на цьому острові: #%1$d (острови нумерують незалежно, а твій #%2$d тут уже зайнятий)</string>
+    <string name="backup_island_row_uin_diff">скринька на цьому острові: %1$d (острови нумерують незалежно, а твій %2$d тут уже зайнятий)</string>
     <string name="backup_island_auto_title">Тримати резерв на іншому острові</string>
     <string name="backup_island_auto_sub">Острів обирається автоматично з публічного каталогу</string>
     <string name="backup_island_auto_busy">Обираємо острів…</string>
@@ -574,7 +574,7 @@
     <string name="cs_history_cleared">Історію очищено</string>
     <string name="cs_move_title">Перейти на новий UIN?</string>
     <string name="cs_move_body">Ти отримаєш щойно виданий UIN. Контакти, групи, ключі і історія чатів на цьому пристрої лишаються.</string>
-    <string name="cs_moved_toast">Перейшов на #%1$d</string>
+    <string name="cs_moved_toast">Перейшов на %1$d</string>
     <string name="cs_move_failed">Переїзд не вдався. Спробуй пізніше.</string>
     <string name="cs_burn_cta">Спалити</string>
     <string name="cs_burn_title">Спалити акаунт?</string>
@@ -926,7 +926,7 @@
     <string name="relay_import_ok">Релей додано</string>
     <string name="relay_shared_section">Отримані релеї</string>
     <string name="relay_shared_empty">Отриманих релеїв немає. Контакт може надіслати релей у чаті, або встав посилання вище.</string>
-    <string name="relay_shared_from">від #%1$d</string>
+    <string name="relay_shared_from">від %1$d</string>
     <string name="relay_shared_imported">додано</string>
     <string name="relay_shared_remove">Прибрати</string>
     <string name="group_invite_loading">Група</string>
