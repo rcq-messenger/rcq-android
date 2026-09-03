@@ -490,6 +490,7 @@
     <string name="uin_shop_confirm_title_priced">Comprar o UIN %1$s por %2$s?</string>
     <string name="uin_shop_confirm_body">O número entra na sua coleção. Você continua respondendo como agora e pode passar a usá-lo quando quiser.</string>
     <string name="uin_shop_confirm_cta">Comprar</string>
+    <string name="uin_shop_error_reserved">Números curtos e com padrão não são dados, são vendidos. Estão no mercado em chat.rcq.app.</string>
     <string name="uin_shop_error_taken">Alguém pegou primeiro. Tente outro UIN.</string>
     <string name="uin_shop_error_generic">A compra falhou. Tente de novo.</string>
     <string name="uin_shop_held_title">O número %1$s é seu</string>
@@ -577,7 +578,7 @@
     <string name="cs_move_failed">A migração falhou. Tente mais tarde.</string>
     <string name="cs_burn_cta">Queimar</string>
     <string name="cs_burn_title">Queimar conta?</string>
-    <string name="cs_burn_body">Isto apaga sua conta e todos os dados locais. Não pode ser desfeito.</string>
+    <string name="cs_burn_body">Isto apaga sua conta e todos os dados locais. O número com que você responde volta para o fundo comum, os números que você comprou são destruídos junto com a conta, e os grupos que você criou somem para todo mundo neles. Não pode ser desfeito.</string>
     <string name="cs_about_version">Versão %1$s</string>
     <string name="cs_about_features">Código aberto.</string>
     <string name="cs_about_source">Código-fonte no GitHub</string>

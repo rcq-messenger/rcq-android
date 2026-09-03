@@ -603,7 +603,7 @@
     <string name="cs_move_failed">Migration failed. Try again later.</string>
     <string name="cs_burn_cta">Burn</string>
     <string name="cs_burn_title">Burn account?</string>
-    <string name="cs_burn_body">This deletes your account and all local data. It cannot be undone.</string>
+    <string name="cs_burn_body">This deletes your account and all local data. The number you answer as goes back into the pool for anybody to take, numbers you bought are destroyed with the account, and groups you own disappear for everyone in them. It cannot be undone.</string>
     <string name="cs_about_version">Version %1$s</string>
     <string name="cs_about_features">Open source.</string>
     <string name="cs_about_source">Source code on GitHub</string>
@@ -1204,7 +1204,7 @@
     <string name="ci_name_hint">Stays on this device only. The other person is never told.</string>
     <string name="ci_clear_name">Clear</string>
     <string name="uin_shop_error_too_many">You are holding as many numbers as one account may. Let one go before taking another.</string>
-    <string name="uin_shop_error_reserved">Short and patterned numbers are not given out. Try another one.</string>
+    <string name="uin_shop_error_reserved">Short and patterned numbers are sold, not given out. They are on the market at chat.rcq.app.</string>
     <string name="my_uins_held_count">%1$d of %2$d</string>
     <string name="settings_row_backup">Chat history file</string>
     <string name="backup_intro">Save this device\'s history to a file, encrypted with your recovery phrase. The file is yours: keep it wherever you keep things. Nothing is uploaded to us, and we cannot read it.</string>

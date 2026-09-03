@@ -490,6 +490,7 @@
     <string name="uin_shop_confirm_title_priced">Купити UIN %1$s за %2$s?</string>
     <string name="uin_shop_confirm_body">Номер потрапляє в твою колекцію. Ти й далі відповідаєш так само, як зараз, і можеш перейти на нього коли завгодно.</string>
     <string name="uin_shop_confirm_cta">Купити</string>
+    <string name="uin_shop_error_reserved">Короткі номери та номери з малюнком не роздають, а продають. Вони на маркеті: chat.rcq.app.</string>
     <string name="uin_shop_error_taken">Хтось забрав його першим. Спробуй інший UIN.</string>
     <string name="uin_shop_error_generic">Покупка не вдалася. Спробуй ще раз.</string>
     <string name="uin_shop_held_title">Номер %1$s твій</string>
@@ -577,7 +578,7 @@
     <string name="cs_move_failed">Переїзд не вдався. Спробуй пізніше.</string>
     <string name="cs_burn_cta">Спалити</string>
     <string name="cs_burn_title">Спалити акаунт?</string>
-    <string name="cs_burn_body">Це видаляє твій акаунт і всі локальні дані. Скасувати неможливо.</string>
+    <string name="cs_burn_body">Це видаляє твій акаунт і всі локальні дані. Номер, під яким ти відповідаєш, повернеться до спільного пулу, куплені номери зникнуть разом з акаунтом, а групи, які ти створив, пропадуть в усіх учасників. Скасувати неможливо.</string>
     <string name="cs_about_version">Версія %1$s</string>
     <string name="cs_about_features">Відкритий код.</string>
     <string name="cs_about_source">Вихідний код на GitHub</string>
