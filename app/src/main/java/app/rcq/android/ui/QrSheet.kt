@@ -48,8 +48,13 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
-/** Generate a black-on-white QR bitmap for [content]. */
-private fun qrBitmap(content: String, size: Int = 512): Bitmap? = runCatching {
+/** Generate a black-on-white QR bitmap for [content].
+ *
+ *  `internal` since 0.166: the UIN checkout draws a payment code with it too,
+ *  behind a "show QR" tap rather than always on screen (the person is usually
+ *  paying from the same phone, and a code they cannot scan is a picture in the
+ *  way of the address they need to copy). One generator, one set of hints. */
+internal fun qrBitmap(content: String, size: Int = 512): Bitmap? = runCatching {
     val hints = mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M, EncodeHintType.MARGIN to 1)
     val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
     val w = matrix.width

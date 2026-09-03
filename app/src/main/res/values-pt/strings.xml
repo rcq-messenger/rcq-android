@@ -1300,4 +1300,26 @@
     <string name="island_trust_copied">Endereço copiado</string>
     <string name="island_trust_not_fingerprint">Isso não é uma impressão digital. Depois de # vem a impressão SHA-256 da ilha: 64 caracteres hexadecimais.</string>
     <string name="island_trust_ca_only">%1$s é confiável por autoridade certificadora e não leva impressão digital.</string>
+    <string name="uin_pay_pick">Com o que você vai pagar? Não há cadastro: você envia um valor exato, e esse valor é o que identifica o pagamento.</string>
+    <string name="uin_pay_send">Envie exatamente este valor em %1$s.</string>
+    <string name="uin_pay_amount">Valor</string>
+    <string name="uin_pay_address">Endereço</string>
+    <string name="uin_pay_copy">Copiar</string>
+    <string name="uin_pay_copied">Copiado</string>
+    <string name="uin_pay_show_qr">Mostrar QR</string>
+    <string name="uin_pay_hide_qr">Ocultar QR</string>
+    <string name="uin_pay_waiting">Aguardando a transferência · %1$s</string>
+    <string name="uin_pay_expired">Esta cobrança expirou. Uma transferência já enviada ainda conta.</string>
+    <string name="uin_pay_exact">Envie o valor exatamente como está escrito. É o que distingue o seu pagamento do dos outros.</string>
+    <string name="uin_pay_received">Pagamento recebido. Pegando o número…</string>
+    <string name="uin_pay_error_taken">Outra pessoa está comprando esse número agora.</string>
+    <string name="uin_pay_error_busy">Muitos números sendo comprados ao mesmo tempo. Tente em alguns minutos.</string>
+    <string name="uin_pay_error_unreachable">Não dá para falar com o serviço de pagamento. Tente daqui a pouco.</string>
+    <string name="uin_pay_error_generic">Não foi possível iniciar o pagamento. Tente de novo.</string>
+    <string name="uin_shop_cta_buy">Comprar por %1$s</string>
+    <string name="uin_shop_cta_resume">Concluir o pagamento</string>
+    <string name="sites_error_unsigned_hint">Isso acontece quando algo no caminho altera o conteúdo. Tente ligar ou desligar os relés nas configurações de rede, ou outra rede.</string>
+    <string name="sites_error_tampered_hint">O arquivo mudou no caminho até você. Tente ligar ou desligar os relés nas configurações de rede, ou outra rede.</string>
+    <string name="uin_shop_error_taken_paid">Alguém pegou esse número enquanto o pagamento estava a caminho. Nada foi cobrado duas vezes: escreva para o suporte e resolvemos.</string>
+    <string name="uin_shop_status_for_sale">À venda</string>
 </resources>

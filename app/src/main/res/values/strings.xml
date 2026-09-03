@@ -1352,4 +1352,26 @@
     <string name="island_trust_copied">Address copied</string>
     <string name="island_trust_not_fingerprint">Not a fingerprint. After # comes the island\'s SHA-256 fingerprint: 64 hex characters.</string>
     <string name="island_trust_ca_only">%1$s is trusted through a certificate authority and takes no fingerprint.</string>
+    <string name="uin_pay_pick">What are you paying with? Nothing to sign up for: you send an exact amount, and that amount is what identifies the payment.</string>
+    <string name="uin_pay_send">Send exactly this amount in %1$s.</string>
+    <string name="uin_pay_amount">Amount</string>
+    <string name="uin_pay_address">Address</string>
+    <string name="uin_pay_copy">Copy</string>
+    <string name="uin_pay_copied">Copied</string>
+    <string name="uin_pay_show_qr">Show QR</string>
+    <string name="uin_pay_hide_qr">Hide QR</string>
+    <string name="uin_pay_waiting">Waiting for the transfer · %1$s</string>
+    <string name="uin_pay_expired">This invoice has expired. A payment already sent still counts.</string>
+    <string name="uin_pay_exact">Send the amount exactly as written. It is what tells your payment from everyone else’s.</string>
+    <string name="uin_pay_received">Payment received. Taking the number…</string>
+    <string name="uin_pay_error_taken">Someone else is buying that number right now.</string>
+    <string name="uin_pay_error_busy">Too many numbers are being bought at once. Try again in a few minutes.</string>
+    <string name="uin_pay_error_unreachable">Cannot reach the payment service. Try again in a moment.</string>
+    <string name="uin_pay_error_generic">Could not start the payment. Try again.</string>
+    <string name="uin_shop_cta_buy">Buy for %1$s</string>
+    <string name="uin_shop_cta_resume">Finish paying</string>
+    <string name="sites_error_unsigned_hint">This happens when something on the way alters the content. Try turning relays on or off in network settings, or another network.</string>
+    <string name="sites_error_tampered_hint">The file changed on its way to you. Try turning relays on or off in network settings, or another network.</string>
+    <string name="uin_shop_error_taken_paid">Someone took that number while the payment was on its way. Nothing was spent twice: write to support and we will sort it out.</string>
+    <string name="uin_shop_status_for_sale">For sale</string>
 </resources>

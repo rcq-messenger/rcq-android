@@ -1415,7 +1415,31 @@ class RcqApi(
         val price_cents: Int? = null,
         val price_display: String? = null,
         val reason: String? = null,
+        /** How this number would be obtained: "free" (ordinary space, take it
+         *  with /uin/purchase), "purchase" (scarce stock, only a paid voucher
+         *  through /uin/redeem opens it), "closed" (not sold here at all).
+         *
+         *  ⚠⚠ Read THIS, not `available`, to decide whether to offer a buy.
+         *  `available` stays FALSE for scarce stock on purpose: three released
+         *  clients read that one field and would otherwise offer, for nothing,
+         *  exactly the numbers that are for sale. Absent on an island older
+         *  than 2026-09-03, where "free" is the right assumption. */
+        val acquire: String? = null,
     )
+
+    /** POST /uin/redeem — turn a paid voucher into a number.
+     *
+     *  The voucher comes from the till, which watched the payment land and
+     *  signed a document naming the number. The island checks that signature
+     *  and nothing else about the money. ⚠ Redeemable exactly once, by nonce,
+     *  so retrying after a dropped connection is safe right until the first one
+     *  lands — after which it answers `voucher_spent` and the number is already
+     *  in the collection. */
+    suspend fun uinRedeem(uin: Int, voucher: String, switch: Boolean = false): PurchaseResponse =
+        withContext(Dispatchers.IO) {
+            post("/uin/redeem", gson.toJson(mapOf("uin" to uin, "voucher" to voucher, "switch" to switch)),
+                 authed = true, PurchaseResponse::class.java)
+        }
 
     /** POST /uin/quote — does this UIN exist + what would it cost. */
     suspend fun uinQuote(uin: Int): QuoteResponse = withContext(Dispatchers.IO) {

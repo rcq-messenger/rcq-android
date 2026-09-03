@@ -1298,4 +1298,26 @@
     <string name="island_trust_copied">地址已复制</string>
     <string name="island_trust_not_fingerprint">这不是指纹。# 之后应是岛的 SHA-256 指纹:64 个十六进制字符。</string>
     <string name="island_trust_ca_only">%1$s 通过证书颁发机构信任,不需要指纹。</string>
+    <string name="uin_pay_pick">用什么付款？无需注册：你发送一个精确金额，这个金额就是这笔付款的身份。</string>
+    <string name="uin_pay_send">请用 %1$s 发送恰好这个金额。</string>
+    <string name="uin_pay_amount">金额</string>
+    <string name="uin_pay_address">地址</string>
+    <string name="uin_pay_copy">复制</string>
+    <string name="uin_pay_copied">已复制</string>
+    <string name="uin_pay_show_qr">显示二维码</string>
+    <string name="uin_pay_hide_qr">隐藏二维码</string>
+    <string name="uin_pay_waiting">等待转账 · %1$s</string>
+    <string name="uin_pay_expired">这张账单已过期。已经发出的转账仍然算数。</string>
+    <string name="uin_pay_exact">请完全按照所写发送金额。正是它把你的付款与别人的区分开。</string>
+    <string name="uin_pay_received">已收到付款。正在领取号码…</string>
+    <string name="uin_pay_error_taken">这个号码正被别人购买。</string>
+    <string name="uin_pay_error_busy">同时购买的号码太多了。请几分钟后再试。</string>
+    <string name="uin_pay_error_unreachable">联系不上付款服务。请稍后再试。</string>
+    <string name="uin_pay_error_generic">无法开始付款。请重试。</string>
+    <string name="uin_shop_cta_buy">以 %1$s 购买</string>
+    <string name="uin_shop_cta_resume">继续付款</string>
+    <string name="sites_error_unsigned_hint">当内容在传输途中被改动时会出现这种情况。请在网络设置中打开或关闭中继，或换一个网络试试。</string>
+    <string name="sites_error_tampered_hint">文件在送达你之前被改动过。请在网络设置中打开或关闭中继，或换一个网络试试。</string>
+    <string name="uin_shop_error_taken_paid">付款在路上时，这个号码被别人拿走了。没有重复扣款：联系客服，我们会处理。</string>
+    <string name="uin_shop_status_for_sale">可购买</string>
 </resources>

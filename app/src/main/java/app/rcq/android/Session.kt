@@ -2979,6 +2979,11 @@ class Session(context: Context) {
         runCatching {
             app.rcq.android.net.IslandTrust.wipeAll(appCtx)
             app.rcq.android.sites.SitePins.wipeAll(appCtx)
+            // ⚠ And the open invoices. Each row is "this phone was buying
+            // number N at this minute" — a payment intent, in its own prefs
+            // file, which a wipe that erased everything around it would have
+            // left sitting on disk.
+            app.rcq.android.data.UinInvoices.wipeAll(appCtx)
         }
         // The install id lived in its own prefs file that nothing above touches,
         // and the island keeps it next to the uin. Left alone, the number this
@@ -5673,6 +5678,14 @@ class Session(context: Context) {
 
     /** Live availability + price preview for a candidate UIN (POST /uin/quote). */
     suspend fun quoteUin(uin: Int): RcqApi.QuoteResponse = api.uinQuote(uin)
+
+    /** Turn a paid voucher into a number (POST /uin/redeem).
+     *
+     *  ⚠ `switch = false` and no other value is offered: taking a number and
+     *  becoming it are two deliberate steps, and this screen does not reboot a
+     *  session. Becoming it is [activateUIN], which does. */
+    suspend fun redeemUin(uin: Int, voucher: String): RcqApi.PurchaseResponse =
+        api.uinRedeem(uin, voucher, switch = false)
 
     /** Swap uin+token locally (keys/nickname/server stay) and reboot the
      *  session under the new UIN. **Local chat history is PRESERVED** — it's
