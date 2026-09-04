@@ -1329,4 +1329,16 @@
     <string name="chat_location_confirm_title">Надіслати геопозицію?</string>
     <string name="chat_location_confirm_body">Ваші поточні координати підуть повідомленням. Видалити його потім можна, але якщо встигли прочитати, це вже не скасувати.</string>
     <string name="chat_location_confirm_send">Надіслати геопозицію</string>
+    <string name="my_uins_sell">Продати</string>
+    <string name="my_uins_unlist">Зняти з продажу</string>
+    <string name="my_uins_on_sale">на продажу, %1$s</string>
+    <string name="my_uins_sell_title">Продаж %1$s</string>
+    <string name="my_uins_sell_price">Ваша ціна, у доларах</string>
+    <string name="my_uins_sell_wallet">Ваша адреса USDT (TRC-20)</string>
+    <string name="my_uins_sell_note">Покупець платить вам напряму. Острів грошей не тримає і не поверне їх, якщо адреса хибна.</string>
+    <string name="my_uins_sell_cta">Виставити</string>
+    <string name="uin_shop_status_resale">продає #%1$s</string>
+    <string name="uin_shop_from_people">Від людей</string>
+    <string name="uin_shop_show_others">Показати інші</string>
+    <string name="uin_shop_being_paid">хтось платить</string>
 </resources>

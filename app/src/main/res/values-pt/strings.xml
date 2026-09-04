@@ -1325,4 +1325,16 @@
     <string name="chat_location_confirm_title">Enviar a sua localização?</string>
     <string name="chat_location_confirm_body">As suas coordenadas atuais serão enviadas como mensagem. Pode apagá-la depois, mas não desfazer a leitura.</string>
     <string name="chat_location_confirm_send">Enviar localização</string>
+    <string name="my_uins_sell">Vender</string>
+    <string name="my_uins_unlist">Retirar da venda</string>
+    <string name="my_uins_on_sale">à venda, %1$s</string>
+    <string name="my_uins_sell_title">Vender %1$s</string>
+    <string name="my_uins_sell_price">O seu preço, em dólares</string>
+    <string name="my_uins_sell_wallet">O seu endereço USDT (TRC-20)</string>
+    <string name="my_uins_sell_note">O comprador paga-lhe diretamente. A ilha não guarda o dinheiro nem o recupera se o endereço estiver errado.</string>
+    <string name="my_uins_sell_cta">Pôr à venda</string>
+    <string name="uin_shop_status_resale">vendido por #%1$s</string>
+    <string name="uin_shop_from_people">De pessoas</string>
+    <string name="uin_shop_show_others">Ver outros</string>
+    <string name="uin_shop_being_paid">alguém está a pagar</string>
 </resources>

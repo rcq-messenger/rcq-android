@@ -68,6 +68,11 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
     var activating by remember { mutableStateOf<Int?>(null) }
     var confirmRelease by remember { mutableStateOf<Int?>(null) }
     var releasing by remember { mutableStateOf<Int?>(null) }
+    /// The number whose sale sheet is open, and what is typed into it.
+    var sellTarget by remember { mutableStateOf<Int?>(null) }
+    var sellPrice by remember { mutableStateOf("") }
+    var sellWallet by remember { mutableStateOf("") }
+    var selling by remember { mutableStateOf(false) }
     val genericMsg = stringResource(R.string.uin_shop_error_generic)
 
     suspend fun reload() {
@@ -89,6 +94,31 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
             releasing = null
             // Reload rather than dropping the row locally: the server is the
             // one that knows whether the release actually happened.
+            reload()
+        }
+    }
+
+    fun unlist(uin: Int) {
+        scope.launch {
+            runCatching { session.unlistUin(uin) }
+                .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+            reload()
+        }
+    }
+
+    fun putOnSale() {
+        val target = sellTarget ?: return
+        // ⚠ Cents, rounded once here rather than left to float arithmetic
+        // downstream: this figure is what somebody is charged.
+        val cents = (sellPrice.replace(',', '.').toDoubleOrNull() ?: 0.0).let { Math.round(it * 100).toInt() }
+        val wallet = sellWallet.trim()
+        if (cents <= 0 || wallet.isEmpty()) return
+        selling = true
+        scope.launch {
+            runCatching { session.listUin(target, cents, wallet) }
+                .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+            selling = false
+            sellTarget = null
             reload()
         }
     }
@@ -186,8 +216,11 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
                         c, item,
                         busy = activating == item.uin || releasing == item.uin,
                         enabled = activating == null && releasing == null,
+                        listing = data?.listed?.firstOrNull { it.uin == item.uin },
                         onTap = { confirm = item.uin },
                         onRelease = { confirmRelease = item.uin },
+                        onSell = { sellTarget = item.uin; sellPrice = ""; sellWallet = "" },
+                        onUnlist = { unlist(item.uin) },
                     )
                 }
             }
@@ -229,6 +262,48 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
         )
     }
 
+    // Putting your own number on sale. Two fields and one warning, and the
+    // warning is the important part: the buyer pays that address directly and
+    // nothing here can undo a payment sent to the wrong one.
+    sellTarget?.let { target ->
+        RcqSheet(onDismiss = { if (!selling) sellTarget = null },
+                 title = stringResource(R.string.my_uins_sell_title, target.toString())) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
+                Text(stringResource(R.string.my_uins_sell_price), color = c.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                RcqField(
+                    value = sellPrice,
+                    onValueChange = { v -> sellPrice = v.filter { it.isDigit() || it == '.' || it == ',' } },
+                    placeholder = "250",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(14.dp))
+                Text(stringResource(R.string.my_uins_sell_wallet), color = c.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                RcqField(
+                    value = sellWallet,
+                    onValueChange = { sellWallet = it.trim() },
+                    placeholder = "T...",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.my_uins_sell_note),
+                    color = c.textSecondary, fontSize = 11.sp, lineHeight = 15.sp,
+                )
+                Spacer(Modifier.height(18.dp))
+                CapsuleButton(
+                    label = stringResource(R.string.my_uins_sell_cta),
+                    enabled = !selling && sellPrice.isNotBlank() && sellWallet.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { putOnSale() }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+
     confirmRelease?.let { target ->
         RcqAskSheet(
             onDismiss = { confirmRelease = null },
@@ -254,8 +329,12 @@ private fun HeldRow(
     item: RcqApi.OwnedUinItem,
     busy: Boolean,
     enabled: Boolean,
+    /** What this number is on sale for, when it is. Null means it is not. */
+    listing: RcqApi.UinListingItem?,
     onTap: () -> Unit,
     onRelease: () -> Unit,
+    onSell: () -> Unit,
+    onUnlist: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
@@ -266,8 +345,10 @@ private fun HeldRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(item.uin.toString(), color = c.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Medium)
             Text(
-                pluralStringResource(R.plurals.uin_digits, item.length, item.length),
-                color = c.textSecondary,
+                if (listing != null)
+                    stringResource(R.string.my_uins_on_sale, listing.price_display)
+                else pluralStringResource(R.plurals.uin_digits, item.length, item.length),
+                color = if (listing != null) c.accent else c.textSecondary,
                 fontSize = 11.sp,
             )
         }
@@ -279,6 +360,20 @@ private fun HeldRow(
             // and there was no way to get rid of one. Deliberately a plain
             // secondary label, not a red destructive button — this is tidying
             // up, and the confirm dialog carries the warning.
+            // Selling is a third thing you can do with a number you hold. A
+            // number already on the market offers the way back off it instead,
+            // because putting it up twice is not a thing you can want.
+            Text(
+                stringResource(
+                    if (listing != null) R.string.my_uins_unlist else R.string.my_uins_sell
+                ),
+                color = c.textSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .clickable(enabled = enabled, onClick = if (listing != null) onUnlist else onSell)
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+            )
+            Spacer(Modifier.width(2.dp))
             Text(
                 stringResource(R.string.my_uins_release),
                 color = c.textSecondary,

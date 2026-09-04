@@ -1323,4 +1323,16 @@
     <string name="chat_location_confirm_title">发送你的位置？</string>
     <string name="chat_location_confirm_body">你当前的坐标将作为消息发送出去。之后可以删除，但对方看过就无法收回。</string>
     <string name="chat_location_confirm_send">发送位置</string>
+    <string name="my_uins_sell">出售</string>
+    <string name="my_uins_unlist">取消出售</string>
+    <string name="my_uins_on_sale">出售中，%1$s</string>
+    <string name="my_uins_sell_title">出售 %1$s</string>
+    <string name="my_uins_sell_price">你的价格，美元</string>
+    <string name="my_uins_sell_wallet">你的 USDT (TRC-20) 地址</string>
+    <string name="my_uins_sell_note">买家直接付款给你。岛屿不保管这笔钱，地址填错也无法追回。</string>
+    <string name="my_uins_sell_cta">上架出售</string>
+    <string name="uin_shop_status_resale">#%1$s 出售</string>
+    <string name="uin_shop_from_people">来自他人</string>
+    <string name="uin_shop_show_others">看看其他</string>
+    <string name="uin_shop_being_paid">有人正在付款</string>
 </resources>

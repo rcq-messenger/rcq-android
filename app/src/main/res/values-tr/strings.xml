@@ -1325,4 +1325,16 @@
     <string name="chat_location_confirm_title">Konumunuz gönderilsin mi?</string>
     <string name="chat_location_confirm_body">Mevcut koordinatlarınız mesaj olarak gidecek. Sonra silebilirsiniz, ama okunduysa geri alınmaz.</string>
     <string name="chat_location_confirm_send">Konumu gönder</string>
+    <string name="my_uins_sell">Sat</string>
+    <string name="my_uins_unlist">Satıştan kaldır</string>
+    <string name="my_uins_on_sale">satışta, %1$s</string>
+    <string name="my_uins_sell_title">%1$s satışı</string>
+    <string name="my_uins_sell_price">Fiyatınız, dolar</string>
+    <string name="my_uins_sell_wallet">USDT (TRC-20) adresiniz</string>
+    <string name="my_uins_sell_note">Alıcı doğrudan size öder. Ada parayı tutmaz ve adres yanlışsa geri getiremez.</string>
+    <string name="my_uins_sell_cta">Satışa çıkar</string>
+    <string name="uin_shop_status_resale">#%1$s satıyor</string>
+    <string name="uin_shop_from_people">Kişilerden</string>
+    <string name="uin_shop_show_others">Başkalarını göster</string>
+    <string name="uin_shop_being_paid">biri ödüyor</string>
 </resources>
