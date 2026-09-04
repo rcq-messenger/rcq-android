@@ -10315,7 +10315,25 @@ class Session(context: Context) {
         _messages.value.keys.firstOrNull { peer -> _messages.value[peer]?.any { it.id == targetId } == true }
             ?.let { peer -> addPeerReaction(peer, targetId, reactorUin, asset); return }
         _groupMessages.value.keys.firstOrNull { gid -> _groupMessages.value[gid]?.any { it.id == targetId } == true }
-            ?.let { gid -> addGroupReaction(gid, targetId, reactorUin, asset) }
+            ?.let { gid -> addGroupReaction(gid, targetId, reactorUin, asset); return }
+
+        // ⚠⚠ AND OTHERWISE STRAIGHT TO DISK, instead of dropping it.
+        //
+        // Both lookups above search what is LOADED. A thread nobody has opened
+        // this run is not in either map, and a big room only keeps its newest
+        // page in memory, so a reaction on anything older found nothing and
+        // was thrown away — permanently, because nothing ever asked again.
+        // That is #877/#878: the same message showing a reaction on the
+        // desktop and none on the phone, "и бывает наоборот", depending on
+        // which client happened to have it loaded when the reaction arrived.
+        //
+        // The row is keyed by message id, so it can be updated without knowing
+        // the conversation, and the next load of that thread reads it back.
+        // A null means the message genuinely is not on this device, and there
+        // is nothing to attach a reaction to.
+        val stored = db.reactionsOf(targetId) ?: return
+        val merged = if (asset == null) stored - reactorUin else stored + (reactorUin to asset)
+        if (merged != stored) db.updateReactions(targetId, merged)
     }
 
     private fun addPeerReaction(peer: Int, targetId: String, reactorUin: Int, asset: String?) {

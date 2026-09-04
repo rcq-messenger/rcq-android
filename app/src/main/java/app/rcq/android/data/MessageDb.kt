@@ -261,6 +261,19 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         }
     }
 
+    /** The reactions stored against [id], or null when no such message is on
+     *  this device.
+     *
+     *  ⚠ The distinction matters: an empty map means "this message is here and
+     *  nobody has reacted", null means "this message is not here at all". The
+     *  first can still be updated; the second would silently create nothing. */
+    fun reactionsOf(id: String): Map<Int, String>? {
+        db.query("messages", arrayOf("reactions"), "id = ?", arrayOf(id), null, null, null, "1").use { c ->
+            if (!c.moveToFirst()) return null
+            return reactionsFromJson(c.getString(0))
+        }
+    }
+
     fun updateReactions(id: String, reactions: Map<Int, String>) {
         db.update("messages", ContentValues().apply { put("reactions", reactionsToJson(reactions)) }, "id = ?", arrayOf(id))
     }
