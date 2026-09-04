@@ -1389,4 +1389,6 @@
     <string name="uin_shop_from_people">From people</string>
     <string name="uin_shop_show_others">Show others</string>
     <string name="uin_shop_being_paid">someone is paying</string>
+    <string name="my_uins_sell_echo">Buyers will pay %1$s</string>
+    <string name="my_uins_sell_bad_address">That is not a TRON address. It should start with T and be 34 characters.</string>
 </resources>

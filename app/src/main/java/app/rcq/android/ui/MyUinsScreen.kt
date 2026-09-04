@@ -56,6 +56,25 @@ import kotlinx.coroutines.launch
  * must not strand people on the wrong number, and a self-hoster can hand a
  * member a second number by hand (POST /admin/uin/grant).
  */
+/** The most an island will take for one number, mirroring `price_cents`'s own
+ *  bound on the server. One number, so the field and any message about it can
+ *  never drift apart. */
+private const val MAX_PRICE_USD = 100_000.0
+
+/** A TRON address, by shape. ⚠ Not a checksum: this catches the mistakes people
+ *  actually make — an Ethereum address pasted from the wrong wallet (0x…), a
+ *  TON one (UQ…/EQ…), a truncated paste — and those are the ones that cost a
+ *  seller their number and their payment at once. The island only checks the
+ *  string is non-empty, and nothing downstream can undo a payment sent
+ *  somewhere the seller cannot reach. */
+/** Dollars, the way money is written. Local to this file: the shop's own
+ *  formatter is private to its own, and one number formatted two ways is how a
+ *  screen ends up disagreeing with itself. */
+private fun usdText(dollars: Double): String =
+    if (dollars % 1.0 == 0.0) "$" + dollars.toLong() else String.format("$%.2f", dollars)
+
+private val TRON_ADDRESS = Regex("^T[1-9A-HJ-NP-Za-km-z]{33}$")
+
 @Composable
 fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Unit) {
     val c = RcqTheme.colors
@@ -100,9 +119,17 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
 
     fun unlist(uin: Int) {
         scope.launch {
+            // ⚠⚠ The message has to survive the reload. `reload()` clears
+            // `error` as its second statement, and it used to be called right
+            // after the failure set one — same coroutine, no suspension in
+            // between — so every refusal on this path was wiped before a frame
+            // could draw it and the sheet closed as though it had worked. The
+            // reason is kept and put back.
+            var failure: String? = null
             runCatching { session.unlistUin(uin) }
-                .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+                .onFailure { failure = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
             reload()
+            failure?.let { error = it }
         }
     }
 
@@ -110,16 +137,21 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
         val target = sellTarget ?: return
         // ⚠ Cents, rounded once here rather than left to float arithmetic
         // downstream: this figure is what somebody is charged.
-        val cents = (sellPrice.replace(',', '.').toDoubleOrNull() ?: 0.0).let { Math.round(it * 100).toInt() }
+        val cents = (sellPrice.toDoubleOrNull() ?: 0.0).let { Math.round(it * 100).toInt() }
         val wallet = sellWallet.trim()
         if (cents <= 0 || wallet.isEmpty()) return
         selling = true
         scope.launch {
+            var failure: String? = null
             runCatching { session.listUin(target, cents, wallet) }
-                .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+                .onFailure { failure = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
             selling = false
-            sellTarget = null
+            // ⚠ The sheet stays open on a refusal. Closing it discarded what
+            // the person typed and said nothing, so the only way to learn the
+            // listing had not happened was to notice the row had not changed.
+            if (failure == null) sellTarget = null
             reload()
+            failure?.let { error = it }
         }
     }
 
@@ -273,7 +305,31 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
                 Spacer(Modifier.height(6.dp))
                 RcqField(
                     value = sellPrice,
-                    onValueChange = { v -> sellPrice = v.filter { it.isDigit() || it == '.' || it == ',' } },
+                    // ⚠ Capped at what the island will actually accept
+                    // ($100,000, `price_cents` le=100_000_00). Without it a
+                    // mistyped or mis-focused figure sails through the form and
+                    // comes back as a bare 422 nobody can act on — and a stray
+                    // paste into the wrong field is the commonest way there.
+                    // ⚠⚠ NO COMMA. It is ambiguous about money and the
+                    // ambiguity is expensive: "1,500" is fifteen hundred to one
+                    // person and one and a half to another, and this field
+                    // decides what a stranger pays. Guessing a locale would put
+                    // a $1,500 number on sale for $1.50, so it is not accepted
+                    // at all — digits and at most one dot, which reads the same
+                    // everywhere.
+                    onValueChange = { v ->
+                        var seenDot = false
+                        val cleaned = buildString {
+                            for (ch in v) {
+                                if (ch.isDigit()) append(ch)
+                                else if (ch == '.' && !seenDot) { seenDot = true; append(ch) }
+                            }
+                        }
+                        val asNumber = cleaned.toDoubleOrNull()
+                        if (cleaned.isEmpty() || (asNumber != null && asNumber <= MAX_PRICE_USD)) {
+                            sellPrice = cleaned
+                        }
+                    },
                     placeholder = "250",
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -294,9 +350,27 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
                     color = c.textSecondary, fontSize = 11.sp, lineHeight = 15.sp,
                 )
                 Spacer(Modifier.height(18.dp))
+                // ⚠ The parsed figure, read back before it is committed. The
+                // field takes text and the sale cannot be undone, so the last
+                // thing a seller sees is the number a stranger will pay.
+                val parsed = sellPrice.toDoubleOrNull()
+                if (parsed != null && parsed > 0) {
+                    Text(
+                        stringResource(R.string.my_uins_sell_echo, usdText(parsed)),
+                        color = c.textPrimary, fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                if (sellWallet.isNotEmpty() && !TRON_ADDRESS.matches(sellWallet)) {
+                    Text(
+                        stringResource(R.string.my_uins_sell_bad_address),
+                        color = c.statusBusy, fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 CapsuleButton(
                     label = stringResource(R.string.my_uins_sell_cta),
-                    enabled = !selling && sellPrice.isNotBlank() && sellWallet.isNotBlank(),
+                    enabled = !selling && (parsed ?: 0.0) > 0 && TRON_ADDRESS.matches(sellWallet),
                     modifier = Modifier.fillMaxWidth(),
                 ) { putOnSale() }
                 Spacer(Modifier.height(8.dp))
