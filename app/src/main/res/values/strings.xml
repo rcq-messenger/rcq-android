@@ -1375,6 +1375,6 @@
     <string name="uin_shop_error_taken_paid">Someone took that number while the payment was on its way. Nothing was spent twice: write to support and we will sort it out.</string>
     <string name="uin_shop_status_for_sale">For sale</string>
     <string name="chat_location_confirm_title">Send your location?</string>
-    <string name="chat_location_confirm_body">Your current coordinates will be sent as a message. There is no way to take them back once they arrive.</string>
+    <string name="chat_location_confirm_body">Your current coordinates will be sent as a message. You can delete it afterwards, but not unsee it.</string>
     <string name="chat_location_confirm_send">Send location</string>
 </resources>
