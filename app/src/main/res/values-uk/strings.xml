@@ -1341,4 +1341,6 @@
     <string name="uin_shop_from_people">Від людей</string>
     <string name="uin_shop_show_others">Показати інші</string>
     <string name="uin_shop_being_paid">хтось платить</string>
+    <string name="my_uins_sell_echo">Покупець заплатить %1$s</string>
+    <string name="my_uins_sell_bad_address">Це не адреса TRON. Вона починається з T і має 34 символи.</string>
 </resources>

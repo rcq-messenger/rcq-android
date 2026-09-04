@@ -1335,4 +1335,6 @@
     <string name="uin_shop_from_people">来自他人</string>
     <string name="uin_shop_show_others">看看其他</string>
     <string name="uin_shop_being_paid">有人正在付款</string>
+    <string name="my_uins_sell_echo">买家将支付 %1$s</string>
+    <string name="my_uins_sell_bad_address">这不是 TRON 地址。它以 T 开头，共 34 个字符。</string>
 </resources>

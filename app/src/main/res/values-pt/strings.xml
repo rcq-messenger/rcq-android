@@ -1337,4 +1337,6 @@
     <string name="uin_shop_from_people">De pessoas</string>
     <string name="uin_shop_show_others">Ver outros</string>
     <string name="uin_shop_being_paid">alguém está a pagar</string>
+    <string name="my_uins_sell_echo">Os compradores vão pagar %1$s</string>
+    <string name="my_uins_sell_bad_address">Esse não é um endereço TRON. Começa por T e tem 34 caracteres.</string>
 </resources>

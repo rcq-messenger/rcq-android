@@ -305,8 +305,17 @@ fun UinShopScreen(
             // what a five-digit number costs from the ISLAND ($49.99) while the
             // seller is asking $120, and the button below already showed the
             // seller's figure. One screen, one price.
-            val cents = displayedQuote?.price_cents
-                ?: if (isValidLength) PRICE_CENTS_BY_LENGTH[typed.length] else null
+            // ⚠⚠ And NOT over a number that costs nothing. The island returns
+            // a real `price_cents` for ordinary space too — it is the ladder
+            // figure, not a charge — so preferring the quote unconditionally
+            // put "$1.99" over a number the very next screen hands over free.
+            // The web page settled this the same way months ago.
+            val cents = when {
+                displayedQuote?.acquire == "free" -> null
+                displayedQuote?.price_cents != null -> displayedQuote.price_cents
+                isValidLength -> PRICE_CENTS_BY_LENGTH[typed.length]
+                else -> null
+            }
             Box(Modifier.fillMaxWidth().height(48.dp), Alignment.Center) {
                 if (cents != null) {
                     Text(
@@ -503,7 +512,10 @@ fun UinShopScreen(
             priceDisplay = displayedQuote?.price_cents?.let { priceDisplay(it) } ?: "",
             // Straight from the quote for THIS number on THIS island, never a
             // default. See the note on the parameter.
-            checkoutUrl = displayedQuote?.checkout_url,
+            // ⚠⚠ The invoice's OWN till wins when there is one: an invoice id
+            // exists only at the till that issued it, so resuming against any
+            // other is told "no such invoice" about a payment really in flight.
+            checkoutUrl = UinInvoices.forUin(target)?.checkoutUrl ?: displayedQuote?.checkout_url,
             resumeId = UinInvoices.forUin(target)?.id,
             onPaid = { voucher, invoiceId -> redeem(target, voucher, invoiceId) },
             onDismiss = { checkout = null },

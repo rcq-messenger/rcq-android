@@ -1337,4 +1337,6 @@
     <string name="uin_shop_from_people">Kişilerden</string>
     <string name="uin_shop_show_others">Başkalarını göster</string>
     <string name="uin_shop_being_paid">biri ödüyor</string>
+    <string name="my_uins_sell_echo">Alıcılar %1$s ödeyecek</string>
+    <string name="my_uins_sell_bad_address">Bu bir TRON adresi değil. T ile başlar ve 34 karakterdir.</string>
 </resources>
