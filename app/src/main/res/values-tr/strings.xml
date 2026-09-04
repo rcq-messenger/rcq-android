@@ -484,6 +484,7 @@
     <string name="uin_shop_info_migrate_title">Numara almak kim olduğunu değiştirmez</string>
     <string name="uin_shop_info_migrate_body">Numara koleksiyonuna katılır, sen de şimdiki gibi cevap vermeyi sürdürürsün. Üzerine geçmek, UIN\'lerim altında ayrı bir adım ve geri alınabilir: bıraktığın numara da senin kalır, kimse alamaz.</string>
     <string name="uin_shop_info_current">Şimdiki UIN\'in · %1$s</string>
+    <string name="uin_shop_buy_short">Satın al</string>
     <string name="uin_shop_buy_cta">%1$s karşılığında al</string>
     <string name="uin_shop_buy_processing">İşleniyor…</string>
     <string name="uin_shop_confirm_title">Satın almayı onayla</string>
@@ -1326,7 +1327,7 @@
     <string name="chat_location_confirm_body">Mevcut koordinatlarınız mesaj olarak gidecek. Sonra silebilirsiniz, ama okunduysa geri alınmaz.</string>
     <string name="chat_location_confirm_send">Konumu gönder</string>
     <string name="my_uins_sell">Sat</string>
-    <string name="my_uins_unlist">Satıştan kaldır</string>
+    <string name="my_uins_unlist">Kaldır</string>
     <string name="my_uins_on_sale">satışta, %1$s</string>
     <string name="my_uins_sell_title">%1$s satışı</string>
     <string name="my_uins_sell_price">Fiyatınız, dolar</string>

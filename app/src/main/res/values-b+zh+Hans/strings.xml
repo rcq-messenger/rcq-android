@@ -484,6 +484,7 @@
     <string name="uin_shop_info_migrate_title">拿到一个号码不会改变你是谁</string>
     <string name="uin_shop_info_migrate_body">号码会加入你的号码集合，你仍然以现在的号码对外回应。迁移到它是“我的 UIN”里的单独一步，而且可以撤回：你离开的号码同样归你所有，别人无法占用。</string>
     <string name="uin_shop_info_current">你当前的 UIN · %1$s</string>
+    <string name="uin_shop_buy_short">购买</string>
     <string name="uin_shop_buy_cta">以 %1$s 购买</string>
     <string name="uin_shop_buy_processing">处理中…</string>
     <string name="uin_shop_confirm_title">确认购买</string>
@@ -1324,7 +1325,7 @@
     <string name="chat_location_confirm_body">你当前的坐标将作为消息发送出去。之后可以删除，但对方看过就无法收回。</string>
     <string name="chat_location_confirm_send">发送位置</string>
     <string name="my_uins_sell">出售</string>
-    <string name="my_uins_unlist">取消出售</string>
+    <string name="my_uins_unlist">下架</string>
     <string name="my_uins_on_sale">出售中，%1$s</string>
     <string name="my_uins_sell_title">出售 %1$s</string>
     <string name="my_uins_sell_price">你的价格，美元</string>
