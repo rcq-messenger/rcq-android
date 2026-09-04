@@ -1377,4 +1377,16 @@
     <string name="chat_location_confirm_title">Send your location?</string>
     <string name="chat_location_confirm_body">Your current coordinates will be sent as a message. You can delete it afterwards, but not unsee it.</string>
     <string name="chat_location_confirm_send">Send location</string>
+    <string name="my_uins_sell">Sell</string>
+    <string name="my_uins_unlist">Take off sale</string>
+    <string name="my_uins_on_sale">on sale, %1$s</string>
+    <string name="my_uins_sell_title">Sell %1$s</string>
+    <string name="my_uins_sell_price">Your price, in dollars</string>
+    <string name="my_uins_sell_wallet">Your USDT (TRC-20) address</string>
+    <string name="my_uins_sell_note">The buyer pays you directly. This island never holds the money and cannot get it back if the address is wrong.</string>
+    <string name="my_uins_sell_cta">Put on sale</string>
+    <string name="uin_shop_status_resale">sold by #%1$s</string>
+    <string name="uin_shop_from_people">From people</string>
+    <string name="uin_shop_show_others">Show others</string>
+    <string name="uin_shop_being_paid">someone is paying</string>
 </resources>

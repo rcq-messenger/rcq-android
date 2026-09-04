@@ -5592,6 +5592,19 @@ class Session(context: Context) {
      *  is re-read from the server afterwards either way. */
     suspend fun releaseUin(uin: Int) = api.releaseUin(uin)
 
+    /** What people are selling right now. Empty rather than an error on an
+     *  island that does not do resale, because an empty market is not a
+     *  failure worth a red banner. */
+    suspend fun uinListings(count: Int = 12): List<RcqApi.UinListingItem> =
+        runCatching { api.uinListings(count) }.getOrDefault(emptyList())
+
+    /** Put one of your numbers up for sale. Throws so the screen can tell
+     *  `being_paid` from anything else and say something useful. */
+    suspend fun listUin(uin: Int, priceCents: Int, address: String) =
+        api.listUin(uin, priceCents, mapOf("tron" to address))
+
+    suspend fun unlistUin(uin: Int) = api.unlistUin(uin)
+
     /** Answer as [uin], a number already in this account's collection. The
      *  number in use goes into the collection in its place, so this is
      *  reversible. Same migration handling as a purchase-with-switch. */

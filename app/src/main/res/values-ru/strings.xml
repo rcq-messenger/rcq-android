@@ -1372,4 +1372,16 @@
     <string name="chat_location_confirm_title">Отправить геопозицию?</string>
     <string name="chat_location_confirm_body">Ваши текущие координаты уйдут сообщением. Удалить его потом можно, но если успели прочитать, это уже не отменить.</string>
     <string name="chat_location_confirm_send">Отправить геопозицию</string>
+    <string name="my_uins_sell">Продать</string>
+    <string name="my_uins_unlist">Снять с продажи</string>
+    <string name="my_uins_on_sale">на продаже, %1$s</string>
+    <string name="my_uins_sell_title">Продажа %1$s</string>
+    <string name="my_uins_sell_price">Ваша цена, в долларах</string>
+    <string name="my_uins_sell_wallet">Ваш адрес USDT (TRC-20)</string>
+    <string name="my_uins_sell_note">Покупатель платит вам напрямую. Остров денег не держит и не вернёт их, если адрес неверный.</string>
+    <string name="my_uins_sell_cta">Выставить</string>
+    <string name="uin_shop_status_resale">продаёт #%1$s</string>
+    <string name="uin_shop_from_people">От людей</string>
+    <string name="uin_shop_show_others">Показать другие</string>
+    <string name="uin_shop_being_paid">кто-то платит</string>
 </resources>

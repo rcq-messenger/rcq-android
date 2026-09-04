@@ -81,6 +81,18 @@ fun UinShopScreen(
     var checking by remember { mutableStateOf(false) }
     var buying by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
+    /// What other people are selling. A window with a refresh, not a
+    /// catalogue: the number somebody actually wants is found by typing it,
+    /// where the quote names the seller and the price.
+    var listings by remember { mutableStateOf<List<RcqApi.UinListingItem>>(emptyList()) }
+    var loadingListings by remember { mutableStateOf(false) }
+
+    suspend fun loadListings() {
+        loadingListings = true
+        listings = session.uinListings(12)
+        loadingListings = false
+    }
+    LaunchedEffect(Unit) { loadListings() }
     // Set once the number is in the collection: the "it is yours, move onto it
     // now or later?" step.
     var held by remember { mutableStateOf<Int?>(null) }
@@ -110,8 +122,13 @@ fun UinShopScreen(
     // island keeps `available` false for scarce stock on purpose, because three
     // released clients read that one field and would otherwise offer, for
     // nothing, exactly the numbers that are for sale.
-    val forSale = isValidLength && displayedQuote?.acquire == "purchase" &&
+    // A number the island sells, and one a PERSON sells. Both end in a payment
+    // and a voucher, so the button is the same; what differs is whose money it
+    // becomes and whether a name is shown beside the price.
+    val forSale = isValidLength &&
+        (displayedQuote?.acquire == "purchase" || displayedQuote?.acquire == "resale") &&
         (displayedQuote.price_cents ?: 0) > 0
+    val sellerUin = displayedQuote?.takeIf { it.acquire == "resale" }?.seller_uin
     // An invoice this device already opened for the number in the field. It is
     // holding that number, which is precisely why the quote says unavailable.
     val resumable = if (isValidLength) typed.toIntOrNull()?.let { UinInvoices.forUin(it) } else null
@@ -282,9 +299,14 @@ fun UinShopScreen(
                 StatusLine(c, typed, isValidLength, checking, displayedQuote)
             }
 
-            // Price line (client-side preview by length; the quote is authority
-            // for availability only).
-            val cents = if (isValidLength) PRICE_CENTS_BY_LENGTH[typed.length] else null
+            // Price line. ⚠⚠ THE QUOTE WINS when there is one, and the local
+            // ladder is only the preview shown before the island has answered.
+            // With a resale on screen the two disagree openly: the ladder says
+            // what a five-digit number costs from the ISLAND ($49.99) while the
+            // seller is asking $120, and the button below already showed the
+            // seller's figure. One screen, one price.
+            val cents = displayedQuote?.price_cents
+                ?: if (isValidLength) PRICE_CENTS_BY_LENGTH[typed.length] else null
             Box(Modifier.fillMaxWidth().height(48.dp), Alignment.Center) {
                 if (cents != null) {
                     Text(
@@ -336,6 +358,60 @@ fun UinShopScreen(
                     color = c.textSecondary,
                     fontSize = 12.sp,
                 )
+            }
+
+            // FROM PEOPLE. Only drawn when there is something in it: an empty
+            // heading over nothing reads as broken, and a market with no
+            // sellers yet is simply a market with no sellers yet.
+            if (listings.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.uin_shop_from_people).uppercase(),
+                            color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            stringResource(R.string.uin_shop_show_others),
+                            color = if (loadingListings) c.textSecondary else c.accent,
+                            fontSize = 12.sp,
+                            modifier = Modifier.clickable(enabled = !loadingListings) {
+                                scope.launch { loadListings() }
+                            },
+                        )
+                    }
+                    listings.forEach { l ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                .background(c.bgSecondary)
+                                .clickable(enabled = !l.held) { typed = l.uin.toString() }
+                                .padding(vertical = 13.dp, horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(l.uin.toString(), color = c.textPrimary, fontSize = 17.sp,
+                                     fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(R.string.uin_shop_status_resale, l.seller_uin.toString()),
+                                    color = c.textSecondary, fontSize = 11.sp,
+                                )
+                            }
+                            // A listing somebody is paying for says so instead of
+                            // vanishing: a row that disappeared would read as
+                            // "the number is gone", and it is not.
+                            Text(
+                                if (l.held) stringResource(R.string.uin_shop_being_paid) else l.price_display,
+                                color = if (l.held) c.textSecondary else c.accent,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
             }
 
             // The collection is a screen away, and this is where somebody who
@@ -477,6 +553,15 @@ private fun StatusLine(c: RcqColors, typed: String, isValidLength: Boolean, chec
         // do not offer it for free. Saying "Unavailable" in red above a live
         // "Buy for $199" button is the screen contradicting itself, so the
         // status keys off `acquire` the same way the button does.
+        // The same trap, one step further: a number a PERSON is selling also
+        // reads as unavailable, and saying so above a live buy button is the
+        // screen contradicting itself twice over. Naming the seller is more
+        // useful than either word.
+        quote != null && quote.acquire == "resale" && (quote.price_cents ?: 0) > 0 ->
+            StatusText(
+                stringResource(R.string.uin_shop_status_resale, (quote.seller_uin ?: 0).toString()),
+                c.accent,
+            )
         quote != null && quote.acquire == "purchase" && (quote.price_cents ?: 0) > 0 ->
             StatusText(stringResource(R.string.uin_shop_status_for_sale), c.accent)
         quote != null -> if (quote.available) {

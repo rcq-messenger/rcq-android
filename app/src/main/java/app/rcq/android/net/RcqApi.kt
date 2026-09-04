@@ -1432,6 +1432,9 @@ class RcqApi(
          *  exactly the numbers that are for sale. Absent on an island older
          *  than 2026-09-03, where "free" is the right assumption. */
         val acquire: String? = null,
+        /** Whose number it is when [acquire] is "resale". A person, not the
+         *  island: the price is theirs and so is the money. */
+        val seller_uin: Int? = null,
     )
 
     /** POST /uin/redeem — turn a paid voucher into a number.
@@ -1488,12 +1491,28 @@ class RcqApi(
     /** One number held in the collection. `acquired_at` is an ISO-8601 stamp. */
     data class OwnedUinItem(val uin: Int = 0, val length: Int = 0, val acquired_at: String? = null)
 
+    /** One number somebody is selling, and what they are asking. */
+    data class UinListingItem(
+        val uin: Int = 0,
+        val seller_uin: Int = 0,
+        val price_cents: Int = 0,
+        val price_display: String = "",
+        /** Somebody is paying for it right now, so the buy button is spent.
+         *  Short by design: a listing blocked for hours by a payment that never
+         *  arrives is a listing nobody can buy. */
+        val held: Boolean = false,
+    )
+
     data class MyUinsResponse(
         val active: Int = 0,
         val owned: List<OwnedUinItem> = emptyList(),
         // How many one account may hold on THIS island. Defaults to 10 so a
         // server that predates the field still gives a sane number to show.
         val max_owned: Int = 10,
+        /** What THIS account is selling. The market window hides your own
+         *  listings on purpose, so this is where you see them and the price you
+         *  asked. Empty on an island that does not do resale. */
+        val listed: List<UinListingItem> = emptyList(),
     )
 
     /** GET /uin/mine — the number this account answers as, plus everything it
@@ -1512,6 +1531,32 @@ class RcqApi(
      *  goes back in the pool and somebody else may take it.
      *
      *  404 = not held by this account, 400 = it is the number you answer as. */
+    /** GET /uin/listings — a handful of what people are selling, refreshable.
+     *
+     *  Deliberately a window and not a catalogue: the number somebody actually
+     *  wants is found by typing it, where the quote names the seller and the
+     *  price. Your own listings are never in it. */
+    suspend fun uinListings(count: Int = 12): List<UinListingItem> = withContext(Dispatchers.IO) {
+        get("/uin/listings?count=$count", authed = true, Array<UinListingItem>::class.java).toList()
+    }
+
+    /** POST /uin/listings — put a number you hold up for sale, or re-price it.
+     *
+     *  ⚠ [payout] is where the buyer pays YOU, by chain. The island never holds
+     *  the money: it goes straight from their wallet to that address, and
+     *  nothing can undo a payment sent to the wrong one. */
+    suspend fun listUin(uin: Int, priceCents: Int, payout: Map<String, String>): UinListingItem =
+        withContext(Dispatchers.IO) {
+            val body = gson.toJson(mapOf("uin" to uin, "price_cents" to priceCents, "payout" to payout))
+            post("/uin/listings", body, authed = true, UinListingItem::class.java)
+        }
+
+    /** DELETE /uin/listings/{uin} — off the market. Refused while somebody is
+     *  paying for it (409 `being_paid`). */
+    suspend fun unlistUin(uin: Int) = withContext(Dispatchers.IO) {
+        deleteNoContent("/uin/listings/$uin", authed = true)
+    }
+
     suspend fun releaseUin(uin: Int) = withContext(Dispatchers.IO) {
         sendNoResult("DELETE", "/uin/mine/$uin", null, authed = true)
     }
