@@ -547,6 +547,15 @@ fun SitesScreen(
                     }
                 }
 
+                // ⚠ Nothing, rather than the catalogue, while a page is on its
+                // way. The body used to key off `page == null` alone, so
+                // opening a link showed the list of sites for as long as the
+                // fetch took and then replaced it — a start screen flashing up
+                // in front of somebody who asked for a specific page and never
+                // asked for it (#881). Blank for a moment is honest; the
+                // address bar already shows the spinner.
+                loading && page == null -> Box(Modifier.fillMaxSize())
+
                 page == null -> Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -709,21 +718,25 @@ private fun SiteRow(
             }
         }
         Spacer(Modifier.width(10.dp))
-        Icon(
-            Icons.Filled.Share,
-            stringResource(R.string.sites_share),
-            tint = c.textSecondary,
-            modifier = Modifier.size(18.dp).clickable(onClick = onShare),
-        )
+        // ⚠ Remove FIRST, share last, so share sits in the same place on every
+        // row. With share first it stepped left on the one row that also has a
+        // remove, and a glyph that moves depending on its neighbours is a glyph
+        // you have to look for (#879).
         if (onRemove != null) {
-            Spacer(Modifier.width(14.dp))
             Icon(
                 Icons.Filled.Close,
                 stringResource(R.string.common_remove),
                 tint = c.textSecondary,
                 modifier = Modifier.size(18.dp).clickable(onClick = onRemove),
             )
+            Spacer(Modifier.width(14.dp))
         }
+        Icon(
+            Icons.Filled.Share,
+            stringResource(R.string.sites_share),
+            tint = c.textSecondary,
+            modifier = Modifier.size(18.dp).clickable(onClick = onShare),
+        )
         Spacer(Modifier.width(4.dp))
     }
 }
