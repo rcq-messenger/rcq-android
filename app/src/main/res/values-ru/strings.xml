@@ -502,6 +502,7 @@
     <string name="uin_shop_info_migrate_title">Взять номер это не сменить себя</string>
     <string name="uin_shop_info_migrate_body">Номер попадает в вашу коллекцию, а отвечаете вы по-прежнему как сейчас. Перейти на него это отдельное действие на экране «Мои UIN\'ы», и оно обратимо: номер, с которого вы уходите, тоже остаётся вашим, занять его никто не сможет.</string>
     <string name="uin_shop_info_current">Ваш сейчас · %1$s</string>
+    <string name="uin_shop_buy_short">Купить</string>
     <string name="uin_shop_buy_cta">Купить за %1$s</string>
     <string name="uin_shop_buy_processing">Покупаем…</string>
     <string name="uin_shop_confirm_title">Подтвердить покупку</string>
@@ -1373,7 +1374,7 @@
     <string name="chat_location_confirm_body">Ваши текущие координаты уйдут сообщением. Удалить его потом можно, но если успели прочитать, это уже не отменить.</string>
     <string name="chat_location_confirm_send">Отправить геопозицию</string>
     <string name="my_uins_sell">Продать</string>
-    <string name="my_uins_unlist">Снять с продажи</string>
+    <string name="my_uins_unlist">Снять</string>
     <string name="my_uins_on_sale">на продаже, %1$s</string>
     <string name="my_uins_sell_title">Продажа %1$s</string>
     <string name="my_uins_sell_price">Ваша цена, в долларах</string>

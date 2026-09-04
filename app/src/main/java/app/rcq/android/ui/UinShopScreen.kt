@@ -480,7 +480,7 @@ fun UinShopScreen(
                     Alignment.Center,
                 ) {
                     Text(
-                        stringResource(R.string.uin_shop_cta_buy, priceDisplay(displayedQuote!!.price_cents!!)),
+                        stringResource(R.string.uin_shop_buy_short),
                         color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -490,7 +490,7 @@ fun UinShopScreen(
                     Alignment.Center,
                 ) {
                     Text(
-                        stringResource(R.string.uin_shop_buy_cta, priceDisplay(displayedQuote.price_cents!!)),
+                        stringResource(R.string.uin_shop_buy_short),
                         color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                     )
                 }

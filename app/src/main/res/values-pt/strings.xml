@@ -484,6 +484,7 @@
     <string name="uin_shop_info_migrate_title">Pegar um número não muda quem você é</string>
     <string name="uin_shop_info_migrate_body">O número entra na sua coleção e você continua respondendo como agora. Passar a usá-lo é um passo separado, em Meus UINs, e dá para voltar atrás: o número que você deixa continua seu, então ninguém mais pode pegar.</string>
     <string name="uin_shop_info_current">Seu UIN de agora · %1$s</string>
+    <string name="uin_shop_buy_short">Comprar</string>
     <string name="uin_shop_buy_cta">Comprar por %1$s</string>
     <string name="uin_shop_buy_processing">Processando…</string>
     <string name="uin_shop_confirm_title">Confirmar a compra</string>
@@ -1326,7 +1327,7 @@
     <string name="chat_location_confirm_body">As suas coordenadas atuais serão enviadas como mensagem. Pode apagá-la depois, mas não desfazer a leitura.</string>
     <string name="chat_location_confirm_send">Enviar localização</string>
     <string name="my_uins_sell">Vender</string>
-    <string name="my_uins_unlist">Retirar da venda</string>
+    <string name="my_uins_unlist">Retirar</string>
     <string name="my_uins_on_sale">à venda, %1$s</string>
     <string name="my_uins_sell_title">Vender %1$s</string>
     <string name="my_uins_sell_price">O seu preço, em dólares</string>

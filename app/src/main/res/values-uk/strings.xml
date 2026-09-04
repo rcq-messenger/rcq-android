@@ -484,6 +484,7 @@
     <string name="uin_shop_info_migrate_title">Узяти номер не означає стати кимось іншим</string>
     <string name="uin_shop_info_migrate_body">Номер потрапляє в твою колекцію, а відповідаєш ти й далі так само, як зараз. Перехід на нього це окремий крок у розділі «Твої UIN», і його можна скасувати: номер, який ти лишаєш, теж лишається твоїм, тож ніхто інший його не візьме.</string>
     <string name="uin_shop_info_current">Твій нинішній UIN · %1$s</string>
+    <string name="uin_shop_buy_short">Купити</string>
     <string name="uin_shop_buy_cta">Узяти за %1$s</string>
     <string name="uin_shop_buy_processing">Обробка…</string>
     <string name="uin_shop_confirm_title">Підтвердь покупку</string>
@@ -1330,7 +1331,7 @@
     <string name="chat_location_confirm_body">Ваші поточні координати підуть повідомленням. Видалити його потім можна, але якщо встигли прочитати, це вже не скасувати.</string>
     <string name="chat_location_confirm_send">Надіслати геопозицію</string>
     <string name="my_uins_sell">Продати</string>
-    <string name="my_uins_unlist">Зняти з продажу</string>
+    <string name="my_uins_unlist">Зняти</string>
     <string name="my_uins_on_sale">на продажу, %1$s</string>
     <string name="my_uins_sell_title">Продаж %1$s</string>
     <string name="my_uins_sell_price">Ваша ціна, у доларах</string>

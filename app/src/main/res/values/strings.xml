@@ -506,6 +506,7 @@
     <string name="uin_shop_info_migrate_title">Taking a number does not change who you are</string>
     <string name="uin_shop_info_migrate_body">The number joins your collection and you keep answering as you do now. Moving onto it is a separate step on My UINs, and it is reversible: the number you leave stays yours too, so nobody else can take it.</string>
     <string name="uin_shop_info_current">Your current UIN · %1$s</string>
+    <string name="uin_shop_buy_short">Buy</string>
     <string name="uin_shop_buy_cta">Buy for %1$s</string>
     <string name="uin_shop_buy_processing">Processing…</string>
     <string name="uin_shop_confirm_title">Confirm purchase</string>
@@ -1378,7 +1379,7 @@
     <string name="chat_location_confirm_body">Your current coordinates will be sent as a message. You can delete it afterwards, but not unsee it.</string>
     <string name="chat_location_confirm_send">Send location</string>
     <string name="my_uins_sell">Sell</string>
-    <string name="my_uins_unlist">Take off sale</string>
+    <string name="my_uins_unlist">Unlist</string>
     <string name="my_uins_on_sale">on sale, %1$s</string>
     <string name="my_uins_sell_title">Sell %1$s</string>
     <string name="my_uins_sell_price">Your price, in dollars</string>
