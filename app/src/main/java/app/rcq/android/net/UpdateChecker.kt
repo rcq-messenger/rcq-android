@@ -206,6 +206,17 @@ object UpdateChecker {
                     val url = abiUrl ?: obj.get("url")?.asString ?: return@use null
                     // mirror_base + the primary URL's filename = the same APK on
                     // the GitHub release (byte-identical), used as a fallback host.
+                    //
+                    // ⚠⚠ ONLY ADVERTISE `mirror_base` IN THE MANIFEST IF THAT
+                    // RELEASE ACTUALLY CARRIES THE APKs AS GITHUB ASSETS. We
+                    // publish releases without assets, so every mirror URL was
+                    // answering 404, and because the loop below alternates hosts
+                    // per attempt that quietly spent HALF of the eight attempts
+                    // (plus their backoff) on a host that could never serve.
+                    // The field was dropped from the served manifest on
+                    // 2026-09-05; a client reading a manifest without it simply
+                    // uses the primary host for every attempt, which is what it
+                    // was already doing on the attempts that worked.
                     val mirror = obj.get("mirror_base")?.asString?.let { it + url.substringAfterLast('/') }
                     // Release notes in the reader's language.
                     //
