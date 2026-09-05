@@ -1293,8 +1293,9 @@
     <string name="island_trust_via_ca">证书颁发机构</string>
     <string name="island_trust_accept">信任新指纹</string>
     <string name="island_trust_later">暂不</string>
-    <string name="island_trust_settings_ca">通过证书颁发机构信任</string>
+    <string name="island_trust_settings_ca">按证书信任</string>
     <string name="island_trust_settings_pinned">按指纹信任</string>
+    <string name="island_trust_settings_footer">本设备是如何决定信任这座岛的。没有证书颁发机构的岛，改为按其自身证书的指纹来验证。</string>
     <string name="island_trust_copy">复制带指纹的地址</string>
     <string name="island_trust_copied">地址已复制</string>
     <string name="island_trust_not_fingerprint">这不是指纹。# 之后应是岛的 SHA-256 指纹:64 个十六进制字符。</string>

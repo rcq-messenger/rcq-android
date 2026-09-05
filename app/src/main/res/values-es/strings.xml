@@ -1295,8 +1295,9 @@
     <string name="island_trust_via_ca">una autoridad de certificación</string>
     <string name="island_trust_accept">Confiar en la nueva huella</string>
     <string name="island_trust_later">Ahora no</string>
-    <string name="island_trust_settings_ca">Confianza por autoridad de certificación</string>
+    <string name="island_trust_settings_ca">De confianza por certificado</string>
     <string name="island_trust_settings_pinned">Confianza por huella</string>
+    <string name="island_trust_settings_footer">Cómo este dispositivo decidió confiar en esta isla. Una isla sin autoridad de certificación se verifica por la huella de su propio certificado.</string>
     <string name="island_trust_copy">Copiar dirección con huella</string>
     <string name="island_trust_copied">Dirección copiada</string>
     <string name="island_trust_not_fingerprint">Eso no es una huella. Tras # va la huella SHA-256 de la isla: 64 caracteres hexadecimales.</string>

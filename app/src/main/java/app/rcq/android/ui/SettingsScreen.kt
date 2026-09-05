@@ -865,6 +865,13 @@ private fun SettingsRoot(
                 // address to hand to somebody. Nothing before the first
                 // handshake has written a record.
                 IslandTrustRow(host = islandHost)
+                // ⚠ The sentence sits on the SECTION, not inside the row: the
+                // row draws nothing until a handshake has written a record,
+                // and a description that disappears with the thing it
+                // describes explains nothing. The line reports a decision
+                // nobody made by hand, so without this it is vocabulary
+                // rather than an answer (founder, 05.09).
+                SectionFooter(stringResource(R.string.island_trust_settings_footer))
                 if (islandRules != null) {
                     Divider()
                     SettingsRow(Icons.Filled.Gavel, stringResource(R.string.island_rules_title)) {

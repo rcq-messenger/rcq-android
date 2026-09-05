@@ -1299,8 +1299,9 @@
     <string name="island_trust_via_ca">центр сертифікації</string>
     <string name="island_trust_accept">Довіряти новому відбитку</string>
     <string name="island_trust_later">Не зараз</string>
-    <string name="island_trust_settings_ca">Довіра через центр сертифікації</string>
+    <string name="island_trust_settings_ca">Довіра за сертифікатом</string>
     <string name="island_trust_settings_pinned">Довіра за відбитком</string>
+    <string name="island_trust_settings_footer">Як цей пристрій вирішив довіряти острову. Острів без центру сертифікації перевіряється за відбитком його власного сертифіката.</string>
     <string name="island_trust_copy">Скопіювати адресу з відбитком</string>
     <string name="island_trust_copied">Адресу скопійовано</string>
     <string name="island_trust_not_fingerprint">Це не відбиток. Після # іде відбиток SHA-256 острова: 64 шістнадцяткові символи.</string>
