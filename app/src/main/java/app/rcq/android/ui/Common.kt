@@ -1,6 +1,10 @@
 package app.rcq.android.ui
 
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -521,13 +525,93 @@ internal fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
 @Composable
 internal fun BadgeMark(kind: String?, size: androidx.compose.ui.unit.Dp = 13.dp) {
     if (kind.isNullOrEmpty()) return
-    val tint = when (kind) {
-        "official" -> Color(0xFF3B9EE8)
-        "tester" -> Color(0xFFE0A21B)
-        "special" -> Color(0xFFE05068)
-        else -> RcqTheme.colors.textSecondary
+    // Tapping the mark explains it: a sheet with the seal large over a glow
+    // that breathes in its own colour, the kind, and one sentence on what it
+    // was given for (founder, 05.09). The tap stays on the seal itself; the
+    // row around it keeps its own.
+    var info by remember { mutableStateOf(false) }
+    Icon(
+        Icons.Filled.Verified, badgeLabel(kind), tint = badgeTint(kind),
+        modifier = Modifier.size(size).clickable { info = true },
+    )
+    if (info) BadgeInfoSheet(kind) { info = false }
+}
+
+internal fun badgeTintOf(kind: String, fallback: Color): Color = when (kind) {
+    "official" -> Color(0xFF3B9EE8)
+    "tester" -> Color(0xFFE0A21B)
+    "special" -> Color(0xFFE05068)
+    else -> fallback
+}
+
+@Composable
+private fun badgeTint(kind: String): Color = badgeTintOf(kind, RcqTheme.colors.textSecondary)
+
+@Composable
+internal fun badgeLabel(kind: String): String = when (kind) {
+    "official" -> stringResource(R.string.badge_official)
+    "tester" -> stringResource(R.string.badge_tester)
+    "special" -> stringResource(R.string.badge_special)
+    else -> kind
+}
+
+@Composable
+private fun badgeDescription(kind: String): String = when (kind) {
+    "official" -> stringResource(R.string.badge_desc_official)
+    "tester" -> stringResource(R.string.badge_desc_tester)
+    "special" -> stringResource(R.string.badge_desc_special)
+    else -> stringResource(R.string.badge_desc_unknown)
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun BadgeInfoSheet(kind: String, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    val tint = badgeTint(kind)
+    val breath = androidx.compose.animation.core.rememberInfiniteTransition(label = "badge-glow")
+    val scale by breath.animateFloat(
+        initialValue = 0.88f, targetValue = 1.12f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(2600, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "scale",
+    )
+    val glowAlpha by breath.animateFloat(
+        initialValue = 0.45f, targetValue = 0.9f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(2600, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "alpha",
+    )
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.bgPrimary,
+        dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle(color = c.divider) },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 32.dp).padding(top = 20.dp, bottom = 44.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Box(Modifier.size(150.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(132.dp).graphicsLayer { scaleX = scale; scaleY = scale; alpha = glowAlpha }
+                        .background(
+                            androidx.compose.ui.graphics.Brush.radialGradient(listOf(tint.copy(alpha = 0.45f), tint.copy(alpha = 0f))),
+                            CircleShape,
+                        ),
+                )
+                Icon(Icons.Filled.Verified, null, tint = tint, modifier = Modifier.size(64.dp))
+            }
+            Text(badgeLabel(kind), color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                badgeDescription(kind), color = c.textSecondary, fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 20.sp,
+            )
+        }
     }
-    Icon(Icons.Filled.Verified, kind, tint = tint, modifier = Modifier.size(size))
 }
 
 @Composable
