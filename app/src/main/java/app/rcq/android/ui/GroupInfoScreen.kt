@@ -263,7 +263,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         }
                     }
                 }
-                Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(group.name, color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    BadgeMark(group.badge, size = 17.dp)
+                }
                 // Founder item 27: the group's own screen was the last place
                 // still printing the raw count, so a 12480-member room read
                 // "12.5K members" in the chat list and "12480 members" here two
@@ -517,7 +520,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                             host = session.groupHost(group.id),
                         )
                         Column(Modifier.weight(1f)) {
-                            Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(m.nickname + if (m.uin == ownUin) stringResource(R.string.gi_you) else "", color = c.textPrimary, fontSize = 15.sp)
+                                BadgeMark(m.badge)
+                            }
                             Text("${m.uin}", color = c.textMono, fontSize = 12.sp)
                         }
                         if (m.uin == group.ownerUin) {

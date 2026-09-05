@@ -2213,6 +2213,7 @@ private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(group.name, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BadgeMark(group.badge)
                 if (group.ownerUin == ownUin) Icon(Icons.Filled.Star, "Owner", tint = c.accent, modifier = Modifier.size(12.dp))
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
             }
@@ -2289,6 +2290,7 @@ private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onCl
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                BadgeMark(contact.badge)
                 GenderIcon(contact.gender)
                 if (contact.blocked) Icon(Icons.Outlined.Block, null, tint = c.statusBusy, modifier = Modifier.size(11.dp))
                 if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
@@ -2674,7 +2676,10 @@ private fun SearchOverlay(contacts: List<Contact>, onClose: () -> Unit, onSelect
                 ) {
                     StatusIcon(ct.presence, size = 26.dp)
                     Column {
-                        Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
+                            BadgeMark(ct.badge)
+                        }
                         Text("${ct.uin}", color = c.textMono, fontSize = 12.sp)
                     }
                 }

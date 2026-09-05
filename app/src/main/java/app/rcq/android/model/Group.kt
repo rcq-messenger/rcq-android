@@ -4,6 +4,7 @@ package app.rcq.android.model
 data class GroupMember(
     val uin: Int,
     val nickname: String,
+    val badge: String? = null,
     val role: String,            // owner | admin | member
     val status: String? = null,  // live presence
     val identityKey: String,     // base64 raw X25519 public — we encrypt to this
@@ -51,6 +52,8 @@ data class GroupMember(
 data class RcqGroup(
     val id: Int,
     val name: String,
+    /** The island's mark on the room: null or a kind ("official", ...). */
+    val badge: String? = null,
     val description: String? = null,
     val ownerUin: Int,
     val postPolicy: String = "all",   // "all" | "owner_only"

@@ -3815,6 +3815,7 @@ class Session(context: Context) {
     private fun mapGroupRaw(g: RcqApi.GroupOut): RcqGroup = RcqGroup(
         id = g.id,
         name = g.name ?: "Group ${g.id}",
+        badge = g.badge,
         description = g.description,
         ownerUin = g.owner_uin,
         postPolicy = g.post_policy ?: "all",
@@ -3834,6 +3835,7 @@ class Session(context: Context) {
             GroupMember(
                 uin = it.uin,
                 nickname = it.nickname ?: "${it.uin}",
+                badge = it.badge,
                 role = it.role ?: "member",
                 status = it.status,
                 identityKey = it.identity_key ?: "",
@@ -9130,6 +9132,7 @@ class Session(context: Context) {
             Contact(
                 uin = it.uin,
                 nickname = it.nickname ?: "${it.uin}",
+                badge = it.badge,
                 identityKey = it.identity_key ?: "",
                 signingKey = it.signing_key,
                 status = it.status,

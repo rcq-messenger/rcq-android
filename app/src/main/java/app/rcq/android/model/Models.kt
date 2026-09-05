@@ -4,6 +4,8 @@ package app.rcq.android.model
 data class Contact(
     val uin: Int,
     val nickname: String,
+    /** The island's mark: null or a kind ("official", "tester", ...). */
+    val badge: String? = null,
     val identityKey: String,        // base64 raw X25519 public
     val signingKey: String?,        // base64 raw Ed25519 public
     val status: String? = null,     // online|away|dnd|offline
