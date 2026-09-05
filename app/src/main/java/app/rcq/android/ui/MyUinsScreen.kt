@@ -459,7 +459,8 @@ private fun HeldRow(
                 color = c.textSecondary,
                 fontSize = 13.sp,
                 modifier = Modifier
-                    .clickable(enabled = enabled, onClick = if (listing != null) onUnlist else onSell)
+                    // Nothing is sold inside the Play build: Use/Release stay, Sell does not.
+                    .clickable(enabled = enabled && (listing != null || !app.rcq.android.BuildConfig.PLAY_STORE), onClick = if (listing != null) onUnlist else onSell)
                     .padding(horizontal = 6.dp, vertical = 8.dp),
             )
             Spacer(Modifier.width(2.dp))

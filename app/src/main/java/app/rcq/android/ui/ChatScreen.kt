@@ -1100,7 +1100,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     ?.let { app.rcq.android.data.LocalStores.markMentionSeen(groupId, it) }
             }
             session.closeThread()
-            if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, false)
+            if (!isGroup && !isSelf && peer != null) { session.sendTyping(peer, false); lastTypingSent = false; lastTypingAt = 0L }
         }
     }
     // A message can land while the chat is already open — re-clear so the
@@ -1742,7 +1742,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         // and the whole row was torn down and rebuilt per photo
                         // (audit, 05.09). The album id is the same for all of
                         // them from the first to the last.
-                        is ChatRow.Album -> "alb-${row.id}"
+                        // ...and on the row's ORDINAL within the album: one
+                        // album becomes several rows when a message lands
+                        // between its photos, and two rows with one key is a
+                        // LazyColumn crash. The first photo's id is not stable
+                        // either (photos arrive out of order).
+                        is ChatRow.Album -> "alb-${row.id}-${row.ordinal}"
                         is ChatRow.DateLabel -> "date-${row.key}"
                         ChatRow.Unread -> "unread-divider"
                     }
@@ -2185,7 +2190,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // parked note on disk for the moment it took the effect
                     // above to notice — long enough for it to be read back.
                     ChatDrafts.replyByThread.remove(threadKey)
-                    if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, false)
+                    if (!isGroup && !isSelf && peer != null) { session.sendTyping(peer, false); lastTypingSent = false; lastTypingAt = 0L }
                     scope.launch {
                         runCatching {
                             if (isGroup) session.sendGroupText(groupId!!, body, reply)
@@ -3199,12 +3204,14 @@ private fun MessageLongPressOverlay(
         // vss: "У кого «всех»? Надо один пункт просто Удалить."
         var reportMsg by remember { mutableStateOf<ChatMessage?>(null) }
         reportMsg?.let { rm ->
-            val who = group?.memberName(rm.senderUin ?: 0) ?: "${rm.senderUin}"
+            val target = if (group != null) rm.senderUin ?: 0 else (rm.senderUin ?: rm.peerUin ?: 0)
+            val who = if (group != null) group.memberName(target) ?: "$target"
+                      else session.contactName(target)
             ReportDialog(
                 name = who,
                 onSubmit = { reason ->
                     val ctx = if (group != null) "group:${group.id}" else "message"
-                    scope.launch { session.report(rm.senderUin ?: 0, reason, ctx) }
+                    scope.launch { session.report(target, reason, ctx) }
                     reportMsg = null; onDismiss()
                 },
                 onDismiss = { reportMsg = null },
@@ -3413,7 +3420,10 @@ private fun MessageLongPressOverlay(
                     // Somebody else's message can be reported from where it was
                     // read (founder, 05.09: a report on every surface). The
                     // context tells the operator WHERE: the room, or a 1:1.
-                    if (!m.fromMe && !isSelf && (m.senderUin ?: 0) > 0) {
+                    // In a 1:1 the sender sits in `peerUin` (senderUin is a
+                    // room concept), so the gate reads whichever is set; the
+                    // dialog below resolves the same way.
+                    if (!m.fromMe && !isSelf && ((m.senderUin ?: m.peerUin) ?: 0) > 0) {
                         add(
                             MsgOverlayItem(stringResource(R.string.chat_report), Icons.Filled.Flag, danger = true) {
                                 reportMsg = m
@@ -3571,7 +3581,9 @@ private fun ChromeGrowthEffect(
         snapshotFlow { listState.layoutInfo.viewportEndOffset }.collect { h ->
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             val atBottom = itemCount > 0 && last >= itemCount - 1
-            if (prev > 0 && h != prev && atBottom) listState.scrollToItem(itemCount - 1)
+            // A user drag outranks this mutation and MutatorMutex throws;
+            // caught, or the collector dies for the rest of the thread.
+            if (prev > 0 && h != prev && atBottom) runCatching { listState.scrollToItem(itemCount - 1) }
             prev = h
         }
     }
@@ -4136,7 +4148,7 @@ private sealed interface ChatRow {
     @androidx.compose.runtime.Immutable
     data class Single(val m: ChatMessage, val showSender: Boolean = true, val replyMine: Boolean = false) : ChatRow
     @androidx.compose.runtime.Immutable
-    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true) : ChatRow
+    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true, val ordinal: Int = 0) : ChatRow
     /** A day separator between messages of different calendar dates (iOS parity). */
     data class DateLabel(val label: String, val key: Long) : ChatRow
     /** The "unread messages" marker, placed before the first unread message. */
@@ -4223,6 +4235,7 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
     // Track the previous content row's sender so a run of messages from the same
     // person shows the name only once (reset by any divider below).
     var runSender: Int? = Int.MIN_VALUE  // sentinel: first row always shows
+    val albumRuns = HashMap<String, Int>()  // rows already cut from each album, for a unique key
     var i = 0
     while (i < msgs.size) {
         val m = msgs[i]
@@ -4244,7 +4257,10 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
                     group.add(n); j++
                 } else break
             }
-            if (group.size >= 2) { out.add(ChatRow.Album(alb, group, showSender)); i = j; continue }
+            if (group.size >= 2) {
+                val n = albumRuns[alb] ?: 0; albumRuns[alb] = n + 1
+                out.add(ChatRow.Album(alb, group, showSender, n)); i = j; continue
+            }
         }
         val replyMine = m.replyToId?.let { mineById[it] } ?: false
         out.add(ChatRow.Single(m, showSender, replyMine)); i++

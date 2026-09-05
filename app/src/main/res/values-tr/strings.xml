@@ -1360,4 +1360,6 @@
     <string name="badge_desc_tester">Test kullanıcısı. RCQ alfa ve beta sürecine katıldı ve bozuk olanı bulmaya yardım etti.</string>
     <string name="badge_desc_special">RCQ alfa ve beta sürecindeki olağanüstü katkı için verilir.</string>
     <string name="badge_desc_unknown">Bu adanın verdiği bir işaret.</string>
+    <string name="home_discover_join_failed">Katılamadı, tekrar deneyin.</string>
+    <string name="cs_move_footer_play">Ada size yeni bir rastgele numara seçer. Kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur.</string>
 </resources>
