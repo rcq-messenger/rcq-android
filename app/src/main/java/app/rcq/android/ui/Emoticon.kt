@@ -75,6 +75,7 @@ import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationExceptio
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.core.animateDpAsState
@@ -799,6 +800,7 @@ internal object KeyboardHeight {
         }.getOrDefault(0)
     }
 
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
     @Composable
     fun asDp(): Dp {
         val context = LocalContext.current
@@ -806,7 +808,13 @@ internal object KeyboardHeight {
         // Watch the keyboard while this composable lives: the panel's own
         // height for next time is written here, and nothing else in the chat
         // has to know about it.
-        val ime = WindowInsets.ime.getBottom(density)
+        // ⚠ The TARGET height, not the running one. `WindowInsets.ime` passes
+        // through every frame of the keyboard's closing animation, and the
+        // last positive frame that got recorded was a random short one, so
+        // the panel opened at keyboard height and then shrank (audit, 05.09).
+        // imeAnimationTarget is the height the keyboard is heading for and
+        // never an intermediate frame.
+        val ime = WindowInsets.imeAnimationTarget.getBottom(density)
         LaunchedEffect(ime) {
             KeyboardHeight.load(context)
             if (ime > 0) KeyboardHeight.remember(context, ime)
