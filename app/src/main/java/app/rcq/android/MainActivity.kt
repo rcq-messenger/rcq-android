@@ -390,6 +390,10 @@ private sealed interface UiState {
 private fun RcqApp(session: Session) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Set once, by a FRESH registration: the phrase is shown before the home,
+    // so a reinstall does not silently end the account (founder, 05.09).
+    // Restore and re-register paths never set it: those people have the phrase.
+    var phraseNudge by remember { mutableStateOf(false) }
     var state by remember {
         mutableStateOf<UiState>(session.uin?.let { UiState.Registered(it) } ?: UiState.Onboarding)
     }
@@ -519,6 +523,7 @@ private fun RcqApp(session: Session) {
         scope.launch {
             state = try {
                 UiState.Registered(session.registerNewAccount("user-${(1000..9999).random()}", server, invite))
+                    .also { phraseNudge = true }
             } catch (e: Exception) {
                 UiState.Failed(e.message ?: "Registration failed")
             }
@@ -938,6 +943,7 @@ private fun RcqApp(session: Session) {
                     onManageAccounts = { showManageAccounts = true },
                 )
             }
+            s is UiState.Registered && phraseNudge -> app.rcq.android.ui.RecoveryPhraseScreen(session, onBack = { phraseNudge = false })
             s is UiState.Onboarding -> OnboardingScreen(onStart = ::register, onRestore = { showRestore = true })
             s is UiState.Registering -> Registering()
             s is UiState.Failed -> Failed(s.message, onRetry = { retryRegister() })
