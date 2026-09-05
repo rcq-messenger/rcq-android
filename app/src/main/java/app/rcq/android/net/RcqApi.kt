@@ -1020,6 +1020,28 @@ class RcqApi(
         get("/contacts", authed = true, Array<ContactRow>::class.java).toList()
     }
 
+    /** The roster with the island's validator. `etag` is what the last answer
+     *  carried; when the list has not changed the island answers 304 with no
+     *  body and `rows` is null, and the caller keeps what it already holds.
+     *  Every presence frame and every foreground re-reads the roster, and
+     *  most of those reads change nothing, so this is the most-repeated
+     *  request the app makes. */
+    data class ContactsAnswer(val rows: List<ContactRow>?, val etag: String?)
+
+    suspend fun contactsIfChanged(etag: String?): ContactsAnswer = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url("$baseUrl/contacts").get()
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        if (!etag.isNullOrEmpty()) builder.header("If-None-Match", etag)
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
+            if (resp.code == 304) return@withContext ContactsAnswer(null, etag)
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}: ${text.take(200)}")
+            val rows = gson.fromJson(text, Array<ContactRow>::class.java)
+                ?: throw IOException("empty/unparseable response")
+            ContactsAnswer(rows.toList(), resp.header("ETag"))
+        }
+    }
+
     data class PendingRow(
         val id: Int,
         val from_uin: Int,

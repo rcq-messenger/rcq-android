@@ -826,6 +826,11 @@ class Session(context: Context) {
     // of the disk-cached roster (which forces everyone offline), not something
     // that happened, and must stay silent. See refreshContacts() and #422.
     private var presenceBaselineLive = false
+    /** The island's validator for the roster and the rows it came with, so a
+     *  refresh that finds nothing changed (304) still has a list to fold.
+     *  Cleared with the presence baseline on an account switch. */
+    @Volatile private var rosterEtag: String? = null
+    @Volatile private var rosterServed: List<RcqApi.ContactRow>? = null
 
     // v=2 (libsignal Double Ratchet) OUTBOUND, i.e. forward secrecy on the 1:1
     // messages this phone SENDS. Off since May behind one unanswered question:
@@ -1392,7 +1397,7 @@ class Session(context: Context) {
         socket = newSocket()
         peerIdentityCache.clear()
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
         // a socket and a peer number that mean somebody else entirely on the
@@ -9133,7 +9138,16 @@ class Session(context: Context) {
         // account's vault (the mirror checks the pin before it starts).
         val fetchedFor = store.uin
         val ep = epochNow()
-        val fetched = api.contacts()
+        // Conditional read: the island answers 304 when the list it would
+        // serve is byte-for-byte what it served last time, and we fold the
+        // rows we kept from that answer. The hash covers presence too, so a
+        // status that moved while we were away comes back as a full body.
+        val answer = api.contactsIfChanged(rosterEtag)
+        val fetched = answer.rows ?: rosterServed ?: api.contacts()
+        if (answer.rows != null) {
+            rosterServed = answer.rows
+            rosterEtag = answer.etag
+        }
         // ⚠⚠ The pin above guarded ONLY the vault mirror. Everything between
         // here and the end of this function writes the roster somewhere else:
         // the live flow the screens render, and the plaintext cache on disk
