@@ -785,6 +785,7 @@
     <string name="gi_transfer_err_failed">无法转让群组。</string>
     <string name="gi_you">（你）</string>
     <string name="gi_delete">删除群组</string>
+    <string name="gi_report_group">举报此群组</string>
     <string name="gi_leave">退出群组</string>
     <string name="gi_delete_q">删除群组？</string>
     <string name="gi_leave_q">退出群组？</string>
