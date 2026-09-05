@@ -804,6 +804,7 @@
     <string name="ci_title">联系人信息</string>
     <string name="ci_message">发消息</string>
     <string name="ci_send_request">发送请求</string>
+    <string name="ci_number_too_short">不存在这样的号码：号码为 3 到 9 位。</string>
     <string name="ci_no_such_number">还没有人使用这个号码。</string>
     <string name="ci_request_failed">请求发送失败。</string>
     <string name="ci_contact_request">想添加你为联系人</string>

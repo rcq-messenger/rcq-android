@@ -804,6 +804,7 @@
     <string name="ci_title">Про контакт</string>
     <string name="ci_message">Написати</string>
     <string name="ci_send_request">Надіслати запит</string>
+    <string name="ci_number_too_short">Такого номера не буває: номери від 3 до 9 цифр.</string>
     <string name="ci_no_such_number">Цього номера ще ніхто не тримає.</string>
     <string name="ci_request_failed">Не вдалося надіслати запит.</string>
     <string name="ci_contact_request">Хоче додати вас</string>

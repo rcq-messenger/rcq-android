@@ -804,6 +804,7 @@
     <string name="ci_title">Info do contato</string>
     <string name="ci_message">Mensagem</string>
     <string name="ci_send_request">Enviar solicitação</string>
+    <string name="ci_number_too_short">Este número não pode existir: os números têm de 3 a 9 dígitos.</string>
     <string name="ci_no_such_number">Ninguém tem este número ainda.</string>
     <string name="ci_request_failed">Não foi possível enviar a solicitação.</string>
     <string name="ci_contact_request">Quer adicionar você</string>
