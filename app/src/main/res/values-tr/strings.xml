@@ -804,6 +804,7 @@
     <string name="ci_title">Kişi bilgisi</string>
     <string name="ci_message">Mesaj</string>
     <string name="ci_send_request">İstek gönder</string>
+    <string name="ci_number_too_short">Böyle bir numara olamaz: numaralar 3 ile 9 hane arasındadır.</string>
     <string name="ci_no_such_number">Bu numara henüz kimsede değil.</string>
     <string name="ci_request_failed">İstek gönderilemedi.</string>
     <string name="ci_contact_request">Sizi eklemek istiyor</string>

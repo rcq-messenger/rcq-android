@@ -834,6 +834,7 @@
     <string name="ci_title">Профиль контакта</string>
     <string name="ci_message">Написать</string>
     <string name="ci_send_request">Отправить запрос</string>
+    <string name="ci_number_too_short">Такого номера не бывает: номера от 3 до 9 цифр.</string>
     <string name="ci_no_such_number">Этот номер пока никем не занят.</string>
     <string name="ci_request_failed">Запрос отправить не удалось.</string>
     <string name="ci_contact_request">Хочет добавить вас</string>

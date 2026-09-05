@@ -235,7 +235,10 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 // to them: the island will refuse the request anyway, and the
                 // refusal used to be swallowed silently.
                 Text(
-                    stringResource(R.string.ci_no_such_number),
+                    stringResource(
+                        if (uin.toString().length < 3) R.string.ci_number_too_short
+                        else R.string.ci_no_such_number
+                    ),
                     color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )

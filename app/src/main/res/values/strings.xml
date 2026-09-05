@@ -838,6 +838,7 @@
     <string name="ci_title">Contact info</string>
     <string name="ci_message">Message</string>
     <string name="ci_send_request">Send request</string>
+    <string name="ci_number_too_short">This number is too short to exist: numbers are 3 to 9 digits.</string>
     <string name="ci_no_such_number">Nobody holds this number yet.</string>
     <string name="ci_request_failed">Could not send the request.</string>
     <string name="ci_contact_request">Wants to add you</string>
