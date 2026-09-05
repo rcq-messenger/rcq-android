@@ -588,6 +588,8 @@
     <string name="cs_burn_body">Esto elimina tu cuenta y todos los datos locales. El número con el que respondes vuelve al fondo común, los números que compraste se destruyen con la cuenta y los grupos que creaste desaparecen para todos sus miembros. No se puede deshacer.</string>
     <string name="cs_about_version">Versión %1$s</string>
     <string name="cs_about_features">Código abierto.</string>
+    <string name="cs_about_privacy">Política de privacidad</string>
+    <string name="cs_about_terms">Términos de uso</string>
     <string name="cs_about_source">Código fuente en GitHub</string>
     <!-- Settings: profile editor -->
     <string name="pe_title">Editar el perfil</string>
