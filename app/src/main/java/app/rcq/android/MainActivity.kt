@@ -744,7 +744,12 @@ private fun RcqApp(session: Session) {
             contentAlignment = Alignment.Center,
         ) {
         when {
-            s is UiState.Registered && phraseNudge -> app.rcq.android.ui.RecoveryPhraseScreen(session, onBack = { phraseNudge = false })
+            s is UiState.Registered && phraseNudge -> {
+                // The system back gesture must mean "seen it", not "leave the
+                // app": this screen is the root while the flag is set.
+                androidx.activity.compose.BackHandler { phraseNudge = false }
+                app.rcq.android.ui.RecoveryPhraseScreen(session, onBack = { phraseNudge = false })
+            }
             s is UiState.Registered && locked -> app.rcq.android.ui.PinLockScreen(
                 session,
                 onWiped = { resetNav(); state = UiState.Onboarding },
