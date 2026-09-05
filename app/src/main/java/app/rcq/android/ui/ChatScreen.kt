@@ -1431,7 +1431,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     isSelf -> stringResource(R.string.chat_saved_title)
                     else -> session.contactName(peer ?: 0)
                 }
-                Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(title, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    // The island's mark, in the header as well as in the list
+                    // (founder, 05.09): a room's or a person's.
+                    BadgeMark(if (isGroup) group?.badge else if (isSelf) null else peerContact?.badge)
+                }
                 val sub = when {
                     isGroup -> {
                         // The count, not the roster's size: the roster arrives a
