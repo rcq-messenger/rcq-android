@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -227,6 +228,7 @@ private fun MatchedChat(session: Session, matched: RandomState.Matched) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
     var added by remember(matched.peerUin) { mutableStateOf(false) }
+    var reportOpen by remember(matched.peerUin) { mutableStateOf(false) }
 
     // Live countdown to expiry.
     var remaining by remember(matched.expiresAtMs) { mutableStateOf(matched.expiresAtMs - System.currentTimeMillis()) }
@@ -273,8 +275,25 @@ private fun MatchedChat(session: Session, matched: RandomState.Matched) {
                     }
                 },
             )
+            Spacer(Modifier.width(10.dp))
+            // A stranger can be reported from the one screen that shows them
+            // (founder, 05.09: a report on every surface). The island knows who
+            // the pairing was; the reporter never learns the number.
+            Icon(
+                Icons.Filled.Flag,
+                stringResource(R.string.home_report),
+                tint = Color(0xFFE5484D),
+                modifier = Modifier.size(22.dp).clip(CircleShape).clickable { reportOpen = true },
+            )
             Spacer(Modifier.width(12.dp))
             Text(formatRemaining(remaining), color = if (remaining < 60_000) Color(0xFFE5484D) else c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (reportOpen) {
+            ReportDialog(
+                name = stringResource(R.string.random_stranger),
+                onSubmit = { reason -> scope.launch { session.report(matched.peerUin, reason, "random") }; reportOpen = false },
+                onDismiss = { reportOpen = false },
+            )
         }
 
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

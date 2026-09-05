@@ -99,6 +99,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -3196,6 +3197,19 @@ private fun MessageLongPressOverlay(
         // offering both "delete for everyone" and "delete for me" on your own
         // note only asks the user to decide something meaningless. Reported by
         // vss: "У кого «всех»? Надо один пункт просто Удалить."
+        var reportMsg by remember { mutableStateOf<ChatMessage?>(null) }
+        reportMsg?.let { rm ->
+            val who = group?.memberName(rm.senderUin ?: 0) ?: "${rm.senderUin}"
+            ReportDialog(
+                name = who,
+                onSubmit = { reason ->
+                    val ctx = if (group != null) "group:${group.id}" else "message"
+                    scope.launch { session.report(rm.senderUin ?: 0, reason, ctx) }
+                    reportMsg = null; onDismiss()
+                },
+                onDismiss = { reportMsg = null },
+            )
+        }
         val canDeleteAll = !isSelf && (m.fromMe || (group != null && group.moderator(ownUin)))
         // The old sheet fired no haptic; the overlay reads as a lift, and a
         // lift answers the finger (same LongPress tick SwipeToReply uses).
@@ -3393,6 +3407,16 @@ private fun MessageLongPressOverlay(
                         add(
                             MsgOverlayItem(stringResource(R.string.chat_delete_all), Icons.Filled.DeleteForever, danger = true) {
                                 scope.launch { runCatching { session.sendDeleteForEveryone(m) } }; onDismiss()
+                            },
+                        )
+                    }
+                    // Somebody else's message can be reported from where it was
+                    // read (founder, 05.09: a report on every surface). The
+                    // context tells the operator WHERE: the room, or a 1:1.
+                    if (!m.fromMe && !isSelf && (m.senderUin ?: 0) > 0) {
+                        add(
+                            MsgOverlayItem(stringResource(R.string.chat_report), Icons.Filled.Flag, danger = true) {
+                                reportMsg = m
                             },
                         )
                     }

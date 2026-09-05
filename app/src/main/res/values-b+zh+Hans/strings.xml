@@ -872,6 +872,7 @@
     <string name="chat_you">你</string>
     <string name="chat_a_photo">照片</string>
     <string name="chat_a_message">消息</string>
+    <string name="chat_report">举报</string>
     <string name="chat_reply">回复</string>
     <string name="chat_copy">复制</string>
     <string name="media_share">分享</string>

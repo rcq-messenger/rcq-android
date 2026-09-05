@@ -903,6 +903,7 @@
     <string name="chat_you">Вы</string>
     <string name="chat_a_photo">Фото</string>
     <string name="chat_a_message">Сообщение</string>
+    <string name="chat_report">Пожаловаться</string>
     <string name="chat_reply">Ответить</string>
     <string name="chat_copy">Копировать</string>
     <string name="media_share">Поделиться</string>

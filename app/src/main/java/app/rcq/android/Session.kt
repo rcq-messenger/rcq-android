@@ -3494,8 +3494,11 @@ class Session(context: Context) {
         runCatching { refreshContacts() }
     }
 
-    suspend fun report(uin: Int, reason: String) {
-        runCatching { api.report(uin, reason) }
+    /** `context` is the surface the report came from, as the admin queue
+     *  labels it: "contact", "message", "group:<id>", "site:<name>@<host>",
+     *  "random". A site or a room whose owner is unknown reports uin 0. */
+    suspend fun report(uin: Int, reason: String, context: String = "") {
+        runCatching { api.report(uin, reason, context) }
     }
 
     /** Fetch another user's profile card (GET /users/{uin}/info). The
