@@ -14,33 +14,33 @@
 
     <string name="onboard_welcome_kicker">RCQ</string>
     <string name="onboard_welcome_title">Welcome</string>
-    <string name="onboard_welcome_body">A serious privacy messenger with real end-to-end encryption by default and built-in relays that keep your address to yourself. No phone, no email, no ads.</string>
+    <string name="onboard_welcome_body">Private messaging with end-to-end encryption on by default. No phone number, no email, no ads.</string>
 
     <string name="onboard_anon_kicker">ANONYMOUS</string>
     <string name="onboard_anon_title">No phone, no email</string>
-    <string name="onboard_anon_body">Your identity is a numeric UIN and nothing else. The account isn\'t tied to you. Burn it and start over whenever you want.</string>
+    <string name="onboard_anon_body">Your identity is a number and nothing else. It is not tied to you, and you can burn it and start over at any time.</string>
 
-    <string name="onboard_mesh_kicker">OFFLINE MESH</string>
+    <string name="onboard_mesh_kicker">OFFLINE</string>
     <string name="onboard_mesh_title">Chat with no internet</string>
-    <string name="onboard_mesh_body">Normal messaging goes over the internet, like anywhere else. When there is no network at all, Radio Chat takes over: it finds people near you over Bluetooth and Wi-Fi Direct, and messages hop device to device with no servers involved.</string>
+    <string name="onboard_mesh_body">When there is no network, Radio Chat finds people nearby over Bluetooth and Wi-Fi Direct and passes messages device to device.</string>
 
     <string name="onboard_chat_kicker">CHAT</string>
-    <string name="onboard_chat_title">Sealed-sender chat</string>
-    <string name="onboard_chat_body">End-to-end encrypted on every message. The server doesn\'t see who\'s writing to whom: the sender\'s identity is sealed inside the envelope, not in the header.</string>
+    <string name="onboard_chat_title">The server cannot read along</string>
+    <string name="onboard_chat_body">Every message is encrypted end to end, and the sender is hidden inside the envelope. The server does not know who is writing to whom.</string>
 
     <string name="onboard_pin_kicker">SECURITY PIN</string>
     <string name="onboard_pin_title">Locked on your device</string>
-    <string name="onboard_pin_body">A PIN locks the app and encrypts your message history on-device, with optional fingerprint, plus decoy and wipe PINs for when you\'re forced to unlock.</string>
+    <string name="onboard_pin_body">A PIN locks the app and encrypts your history on the device. A decoy PIN and a wipe PIN are there for the moment someone makes you unlock.</string>
 
     <string name="onboard_status_kicker">STATUS</string>
     <string name="onboard_status_title">Pick your status</string>
     <string name="onboard_status_body">Online, Away, DND, Invisible, Offline. The classic five, and they actually mean something. Tap your status icon to switch.</string>
     <string name="onboard_federation_kicker">FEDERATION</string>
     <string name="onboard_federation_title">No single owner</string>
-    <string name="onboard_federation_body">RCQ isn\'t one company\'s server. Every server is an independent island, and anyone can run one. Your account lives on the island you pick, and you keep your number if you move.</string>
-    <string name="onboard_relay_kicker">RCQ RELAYS</string>
+    <string name="onboard_federation_body">RCQ is not one company\'s server. Anyone can run an island, your account lives on the one you choose, and your number moves with you.</string>
+    <string name="onboard_relay_kicker">PRIVACY</string>
     <string name="onboard_relay_title">The island does not see your address</string>
-    <string name="onboard_relay_body">Traffic goes through our relays instead of straight to the island: the island does not see your address, and the network between you and the island does not see that you are using RCQ. The relays are community-run. Where RCQ is blocked, this is also the only way through.</string>
+    <string name="onboard_relay_body">Traffic goes through community relays: the island never sees where you are, and your network never sees that you use RCQ. Where RCQ is blocked, this is also the way in.</string>
 
     <string name="onboard_server_label">Server</string>
     <string name="onboard_language">Language</string>

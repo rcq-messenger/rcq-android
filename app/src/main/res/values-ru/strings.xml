@@ -13,33 +13,33 @@
 
     <string name="onboard_welcome_kicker">RCQ</string>
     <string name="onboard_welcome_title">Добро пожаловать</string>
-    <string name="onboard_welcome_body">Серьёзный мессенджер с настоящим шифрованием по умолчанию и встроенными релеями, которые прячут ваш адрес. Без телефона, без почты, без рекламы.</string>
+    <string name="onboard_welcome_body">Приватная переписка со сквозным шифрованием по умолчанию. Без номера телефона, без почты, без рекламы.</string>
 
     <string name="onboard_anon_kicker">АНОНИМНО</string>
     <string name="onboard_anon_title">Без телефона и почты</string>
-    <string name="onboard_anon_body">Ваша личность: числовой UIN, и больше ничего. Аккаунт ничем не привязан к вам. В любой момент можно сжечь его и начать заново.</string>
+    <string name="onboard_anon_body">Ваша личность это номер, и больше ничего. Он не привязан к вам, его можно сжечь и начать заново в любой момент.</string>
 
-    <string name="onboard_mesh_kicker">ОФЛАЙН-СЕТЬ</string>
+    <string name="onboard_mesh_kicker">ОФЛАЙН</string>
     <string name="onboard_mesh_title">Общение без интернета</string>
-    <string name="onboard_mesh_body">Обычная переписка идёт через интернет, как везде. А если сети нет совсем, включается Радиочат: находит людей рядом по Bluetooth и Wi-Fi Direct, сообщения идут от устройства к устройству, без серверов.</string>
+    <string name="onboard_mesh_body">Когда сети нет, Радиочат находит людей рядом по Bluetooth и Wi-Fi Direct и передаёт сообщения от устройства к устройству.</string>
 
     <string name="onboard_chat_kicker">ЧАТ</string>
-    <string name="onboard_chat_title">Чат с sealed-sender</string>
-    <string name="onboard_chat_body">Сквозное шифрование на каждое сообщение. Сервер не видит, кто кому пишет: имя отправителя зашифровано внутри конверта, не в заголовке.</string>
+    <string name="onboard_chat_title">Сервер не читает переписку</string>
+    <string name="onboard_chat_body">Каждое сообщение зашифровано сквозным шифрованием, а отправитель спрятан внутри конверта. Сервер не знает, кто кому пишет.</string>
 
     <string name="onboard_pin_kicker">PIN-КОД</string>
     <string name="onboard_pin_title">Защита на устройстве</string>
-    <string name="onboard_pin_body">PIN блокирует приложение и шифрует историю переписки прямо на устройстве, с отпечатком по желанию, плюс запасной и стирающий PIN на случай принуждения.</string>
+    <string name="onboard_pin_body">PIN блокирует приложение и шифрует историю прямо на устройстве. Запасной и стирающий PIN на случай, если вас заставят разблокировать.</string>
 
     <string name="onboard_status_kicker">СТАТУС</string>
     <string name="onboard_status_title">Выберите статус</string>
     <string name="onboard_status_body">В сети, Отошёл, Не беспокоить, Невидимый, Не в сети. Те самые пять, и они правда работают. Тапните по статусу, чтобы сменить.</string>
     <string name="onboard_federation_kicker">ФЕДЕРАЦИЯ</string>
     <string name="onboard_federation_title">Без единого владельца</string>
-    <string name="onboard_federation_body">RCQ это не сервер одной компании. Каждый сервер это независимый остров, поднять его может любой. Ваш аккаунт живёт на выбранном острове, при переезде номер сохраняется.</string>
-    <string name="onboard_relay_kicker">РЕЛЕИ RCQ</string>
+    <string name="onboard_federation_body">RCQ это не сервер одной компании. Остров может поднять любой, ваш аккаунт живёт на выбранном, а номер переезжает с вами.</string>
+    <string name="onboard_relay_kicker">ПРИВАТНОСТЬ</string>
     <string name="onboard_relay_title">Остров не видит ваш адрес</string>
-    <string name="onboard_relay_body">Трафик идёт не прямо к острову, а через наши релеи: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Сеть релеев держит сообщество. Там, где RCQ заблокирован, это к тому же единственный путь.</string>
+    <string name="onboard_relay_body">Трафик идёт через релеи сообщества: остров не видит, откуда вы, а ваша сеть не видит, что вы пользуетесь RCQ. Там, где RCQ блокируют, это ещё и путь внутрь.</string>
 
     <string name="onboard_server_label">Сервер</string>
     <string name="onboard_language">Язык</string>
