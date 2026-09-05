@@ -185,7 +185,10 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     contact?.avatarMediaId?.takeIf { crossIslandHost == null }, contact?.avatarMediaKey,
                     presence, session, 80.dp, animated = true, crossIsland = crossIslandHost != null,
                 )
-                Text(nickname, color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(nickname, color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    BadgeMark(contact?.badge, size = 18.dp)
+                }
                 if (alias != null && theirNickname != alias) {
                     Text(
                         stringResource(R.string.ci_their_name, theirNickname),

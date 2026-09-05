@@ -513,6 +513,7 @@ class RcqApi(
     data class UserInfo(
         val uin: Int,
         val nickname: String?,
+        val badge: String? = null,
         val identity_key: String?,        // base64 raw X25519 public
         val signing_key: String?,         // base64 raw Ed25519 public
         val signal_identity_key: String? = null,  // base64 libsignal IdentityKey; null = v=1 only
@@ -921,6 +922,7 @@ class RcqApi(
     data class ContactRow(
         val uin: Int,
         val nickname: String?,
+        val badge: String? = null,
         val status: String?,
         val status_message: String? = null,
         val blocked: Boolean = false,
@@ -1092,6 +1094,7 @@ class RcqApi(
     data class GroupMemberOut(
         val uin: Int,
         val nickname: String?,
+        val badge: String? = null,
         val role: String?,
         val status: String?,
         val identity_key: String?,
@@ -1110,6 +1113,7 @@ class RcqApi(
     data class GroupOut(
         val id: Int,
         val name: String?,
+        val badge: String? = null,
         val description: String? = null,
         val owner_uin: Int = 0,
         val post_policy: String? = null,
@@ -1173,6 +1177,7 @@ class RcqApi(
     data class GroupPreviewOut(
         val id: Int,
         val name: String? = null,
+        val badge: String? = null,
         val description: String? = null,
         val member_count: Int = 0,
         val is_closed: Boolean = false,
@@ -1723,6 +1728,7 @@ class RcqApi(
     data class MeProfile(
         val uin: Int = 0,
         val nickname: String? = null,
+        val badge: String? = null,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
         val first_name: String? = null,

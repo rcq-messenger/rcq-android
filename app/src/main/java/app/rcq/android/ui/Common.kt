@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Female
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Male
@@ -509,6 +510,24 @@ internal fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
         )
     }
+}
+
+/**
+ * The island's mark beside a name: a small seal coloured by kind. The kinds
+ * are strings the island chooses; the ones this client knows get their colour
+ * and anything newer is drawn neutral, so a kind added on the island before
+ * the client learned it is still a mark rather than nothing.
+ */
+@Composable
+internal fun BadgeMark(kind: String?, size: androidx.compose.ui.unit.Dp = 13.dp) {
+    if (kind.isNullOrEmpty()) return
+    val tint = when (kind) {
+        "official" -> Color(0xFF3B9EE8)
+        "tester" -> Color(0xFFE0A21B)
+        "special" -> Color(0xFFE05068)
+        else -> RcqTheme.colors.textSecondary
+    }
+    Icon(Icons.Filled.Verified, kind, tint = tint, modifier = Modifier.size(size))
 }
 
 @Composable
