@@ -463,7 +463,7 @@
     <string name="bug_report_failed">Gönderilemedi. Bağlantını kontrol edip tekrar dene.</string>
     <string name="bug_report_too_long">Metin, bu adanın kabul ettiğinden uzun. Biraz kısalt, geçecek.</string>
     <string name="bug_report_sent">Teşekkürler. Bildirimin gönderildi.</string>
-    <string name="settings_row_move_uin">Yeni bir UIN\'e taşın</string>
+    <string name="settings_row_move_uin">Rastgele yeni bir UIN\'e geç</string>
     <string name="settings_row_burn">Hesabı yak</string>
     <!-- UIN shop -->
     <string name="settings_row_uin_shop">UIN mağazası</string>
@@ -568,13 +568,13 @@
     <string name="vis_contacts">Yalnızca kişiler</string>
     <string name="vis_nobody">Hiç kimse</string>
     <!-- Settings: account / history / about dialogs + footers -->
-    <string name="cs_move_footer">Yepyeni bir UIN al. Kişilerin, grupların, anahtarların ve sohbet geçmişin korunur.</string>
+    <string name="cs_move_footer">Yeni rastgele numarayı ada seçer. Kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur. Belirli bir numara seçmek için UIN mağazasını kullanın.</string>
     <string name="cs_burn_footer">Bu hesabı her yerden siler. Geri alınamaz.</string>
     <string name="cs_clear_title">Sohbet geçmişi temizlensin mi?</string>
     <string name="cs_clear_body">Bütün mesajları bu cihazdan siler. Hesabın ve kişilerin kalır.</string>
     <string name="cs_history_cleared">Geçmiş temizlendi</string>
-    <string name="cs_move_title">Yeni bir UIN\'e taşınılsın mı?</string>
-    <string name="cs_move_body">Yeni ayrılmış bir UIN alırsın. Bu cihazdaki kişilerin, grupların, anahtarların ve sohbet geçmişin korunur.</string>
+    <string name="cs_move_title">Rastgele yeni bir UIN\'e geçilsin mi?</string>
+    <string name="cs_move_body">Numarayı ada seçer; burada seçilemez. Bu cihazdaki kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur.</string>
     <string name="cs_moved_toast">%1$d numarasına taşınıldı</string>
     <string name="cs_move_failed">Taşıma başarısız. Sonra tekrar dene.</string>
     <string name="cs_burn_cta">Yak</string>
