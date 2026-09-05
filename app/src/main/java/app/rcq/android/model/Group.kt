@@ -114,6 +114,10 @@ data class RcqGroup(
 
     fun memberName(uin: Int): String =
         members.firstOrNull { it.uin == uin }?.nickname ?: "$uin"
+
+    /** The island's badge on a member, for the name over their bubble. */
+    fun memberBadge(uin: Int): String? =
+        members.firstOrNull { it.uin == uin }?.badge
 }
 
 /** Where a member sits in the roster: 0 the owner, 1 a moderator, 2 someone
