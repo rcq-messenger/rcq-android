@@ -1752,6 +1752,16 @@ object Push {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(pi)
+            // ⚠ The tone lives on the CHANNEL, so the system plays it and no
+            // in-app flag is consulted on the way: with every sound switched off
+            // a missed call still went "aou" (#890). setSilent is the only lever
+            // that reaches a channel sound per-notification.
+            //
+            // Gated on the master switch alone. A missed call is not a message,
+            // so "message sounds: off" deliberately does NOT silence it; someone
+            // who wants that turns the master off, and a separate call-sound
+            // setting is the founder's call (the same report asks for one).
+            .setSilent(!app.rcq.android.data.LocalStores.soundMasterOn())
             .build()
         runCatching {
             NotificationManagerCompat.from(ctx).notify("missed:$peerUin".hashCode(), notif)
