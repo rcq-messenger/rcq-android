@@ -6,6 +6,10 @@
     <!-- Onboarding (iOS OnboardingView parity) -->
     <string name="onboard_cta_next">下一步</string>
     <string name="onboard_cta_back">上一步</string>
+    <string name="onboard_terms_accept">我接受</string>
+    <string name="onboard_terms_terms">服务条款</string>
+    <string name="onboard_terms_and">和</string>
+    <string name="onboard_terms_privacy">隐私政策</string>
     <string name="onboard_cta_start">开始使用</string>
     <string name="onboard_cta_skip">跳过</string>
     <string name="onboard_welcome_kicker">RCQ</string>

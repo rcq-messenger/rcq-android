@@ -4,6 +4,10 @@
 
     <string name="onboard_cta_next">Дальше</string>
     <string name="onboard_cta_back">Назад</string>
+    <string name="onboard_terms_accept">Принимаю</string>
+    <string name="onboard_terms_terms">Условия использования</string>
+    <string name="onboard_terms_and">и</string>
+    <string name="onboard_terms_privacy">Политику конфиденциальности</string>
     <string name="onboard_cta_start">Начать</string>
     <string name="onboard_cta_skip">Пропустить</string>
 

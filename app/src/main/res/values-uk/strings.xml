@@ -6,6 +6,10 @@
     <!-- Onboarding (iOS OnboardingView parity) -->
     <string name="onboard_cta_next">Далі</string>
     <string name="onboard_cta_back">Назад</string>
+    <string name="onboard_terms_accept">Приймаю</string>
+    <string name="onboard_terms_terms">Умови використання</string>
+    <string name="onboard_terms_and">та</string>
+    <string name="onboard_terms_privacy">Політику конфіденційності</string>
     <string name="onboard_cta_start">Почати</string>
     <string name="onboard_cta_skip">Пропустити</string>
     <string name="onboard_welcome_kicker">RCQ</string>
