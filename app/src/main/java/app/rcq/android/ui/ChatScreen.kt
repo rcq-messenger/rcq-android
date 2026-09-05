@@ -1256,7 +1256,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // arrival and by the effect restarting, and the arrow's own delay
             // (below) is what actually keeps it from blinking.
             autoFollowing = true
-            listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
+            // ⚠ Own send lands at once. The row had already popped in at the
+            // bottom edge, cut off, and then animateScrollToItem slid it up a
+            // second time; with a long draft the list first dropped by the
+            // collapsed lines and then climbed back (audit, 05.09). Somebody
+            // else's message keeps the glide: it arrives while the reader is
+            // looking, and a jump there reads as a jolt.
+            if (last.fromMe) listState.scrollToItem(rows.lastIndex.coerceAtLeast(0))
+            else listState.animateScrollToItem(rows.lastIndex.coerceAtLeast(0))
             autoFollowing = false
         }
     }
@@ -1291,6 +1298,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // menu, swipe-to-reply, a tap on the field) closes the emoticon panel,
     // not only a focus change (audit, 05.09).
     KeyboardScrollEffect(listState, rows.size, onImeShown = { showEmoji = false })
+    // The same care for everything ELSE that changes the list's height: a
+    // reply chip, a draft wrapping to a second line, the mention list, the
+    // attachment strip. Only the IME re-pinned the list; the rest slid the
+    // newest message under the composer line by line (audit, 05.09).
+    ChromeGrowthEffect(listState, rows.size)
     // Back with the panel open used to leave the chat; the keyboard in the
     // same position would just have closed.
     BackHandler(enabled = showEmoji) { showEmoji = false }
@@ -3480,6 +3492,31 @@ private fun previewOfKind(m: ChatMessage, context: android.content.Context): Str
  *  latest message stays visible above the composer instead of being hidden as
  *  the chat area shrinks (report #29). Isolated in its own composable so reading
  *  the per-frame IME inset doesn't recompose the whole ChatScreen. */
+@Composable
+/**
+ * Keep the newest message in view when the list's own height changes for a
+ * reason other than the keyboard: the composer growing a line, the reply
+ * chip, the mention list, the attachment strip. A LazyColumn is anchored at
+ * its top, so a shorter viewport hides the bottom of the newest row and a
+ * taller one leaves a band under it. Only when the reader was at the bottom
+ * before the change; somebody reading history is left alone. Its own
+ * composable so the per-frame height reads recompose nothing but itself.
+ */
+private fun ChromeGrowthEffect(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    itemCount: Int,
+) {
+    LaunchedEffect(listState, itemCount) {
+        var prev = -1
+        snapshotFlow { listState.layoutInfo.viewportEndOffset }.collect { h ->
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val atBottom = itemCount > 0 && last >= itemCount - 1
+            if (prev > 0 && h != prev && atBottom) listState.scrollToItem(itemCount - 1)
+            prev = h
+        }
+    }
+}
+
 @Composable
 private fun KeyboardScrollEffect(
     listState: androidx.compose.foundation.lazy.LazyListState,
