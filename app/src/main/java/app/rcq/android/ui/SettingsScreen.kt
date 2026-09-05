@@ -1155,6 +1155,19 @@ private fun SettingsRoot(
                         uriHandler.openUri("https://github.com/rcq-messenger/rcq-android")
                     },
                 )
+                // The two documents a store wants reachable from inside the app,
+                // and the two a person should find without a search engine
+                // (founder, 05.09).
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(
+                        stringResource(R.string.cs_about_privacy), color = c.accent, fontSize = 12.sp,
+                        modifier = Modifier.clickable { uriHandler.openUri("https://rcq.app/privacy") },
+                    )
+                    Text(
+                        stringResource(R.string.cs_about_terms), color = c.accent, fontSize = 12.sp,
+                        modifier = Modifier.clickable { uriHandler.openUri("https://rcq.app/terms") },
+                    )
+                }
                 Divider()
                 val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
                 when {

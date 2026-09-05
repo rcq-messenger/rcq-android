@@ -588,6 +588,8 @@
     <string name="cs_burn_body">Bu, hesabını ve bütün yerel verini siler. Şu anda kullandığın numara havuza geri döner, satın aldığın numaralar hesapla birlikte yok olur ve kurduğun gruplar içindeki herkes için kaybolur. Geri alınamaz.</string>
     <string name="cs_about_version">Sürüm %1$s</string>
     <string name="cs_about_features">Açık kaynak.</string>
+    <string name="cs_about_privacy">Gizlilik Politikası</string>
+    <string name="cs_about_terms">Kullanım Koşulları</string>
     <string name="cs_about_source">GitHub\'da kaynak kodu</string>
     <!-- Settings: profile editor -->
     <string name="pe_title">Profili düzenle</string>
