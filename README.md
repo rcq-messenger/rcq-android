@@ -12,9 +12,10 @@ Censorship circumvention is built into the app rather than left to the user.
 - Reference server: <https://github.com/rcq-messenger/rcq-server-ref>
 - iOS client: <https://github.com/rcq-messenger/rcq-ios>
 
-**Status: open beta.** Published outside Google Play by sideloading; the app
-self-updates from a manifest, trying `dl.rcq.app/android/latest.json` first and
-`rcq.app/android/latest.json` after it. Messages, groups, calls and media are
+**Status: published.** Distributed by sideloading and through our own F-Droid
+repository, with a Google Play build on its way. The sideload build self-updates
+from a manifest, trying `dl.rcq.app/android/latest.json` first and
+`rcq.app/android/latest.json` after it; the Play build updates through Play. Messages, groups, calls and media are
 cross-platform with the iOS and web clients.
 
 ## What is in here
