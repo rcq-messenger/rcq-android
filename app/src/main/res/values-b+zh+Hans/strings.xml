@@ -1349,4 +1349,11 @@
     <string name="uin_shop_being_paid">有人正在付款</string>
     <string name="my_uins_sell_echo">买家将支付 %1$s</string>
     <string name="my_uins_sell_bad_address">这不是 TRON 地址。它以 T 开头，共 34 个字符。</string>
+    <string name="badge_official">官方</string>
+    <string name="badge_tester">测试者</string>
+    <string name="badge_special">特殊贡献</string>
+    <string name="badge_desc_official">官方账号，由岛屿确认：RCQ 团队或岛屿担保的来源。</string>
+    <string name="badge_desc_tester">测试者。参与了 RCQ 的 alpha 和 beta 测试，帮助发现问题。</string>
+    <string name="badge_desc_special">因在 RCQ alpha 和 beta 阶段的杰出贡献而授予。</string>
+    <string name="badge_desc_unknown">由本岛授予的标记。</string>
 </resources>

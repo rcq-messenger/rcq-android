@@ -1403,4 +1403,11 @@
     <string name="uin_shop_being_paid">someone is paying</string>
     <string name="my_uins_sell_echo">Buyers will pay %1$s</string>
     <string name="my_uins_sell_bad_address">That is not a TRON address. It should start with T and be 34 characters.</string>
+    <string name="badge_official">Official</string>
+    <string name="badge_tester">Tester</string>
+    <string name="badge_special">Special contribution</string>
+    <string name="badge_desc_official">Official account, confirmed by the island: the RCQ team or a source it vouches for.</string>
+    <string name="badge_desc_tester">Tester. Took part in the alpha and beta of RCQ and helped find what was broken.</string>
+    <string name="badge_desc_special">Given for an outstanding contribution during the alpha and beta of RCQ.</string>
+    <string name="badge_desc_unknown">A mark given by this island.</string>
 </resources>

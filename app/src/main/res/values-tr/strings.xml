@@ -1351,4 +1351,11 @@
     <string name="uin_shop_being_paid">biri ödüyor</string>
     <string name="my_uins_sell_echo">Alıcılar %1$s ödeyecek</string>
     <string name="my_uins_sell_bad_address">Bu bir TRON adresi değil. T ile başlar ve 34 karakterdir.</string>
+    <string name="badge_official">Resmi</string>
+    <string name="badge_tester">Test kullanıcısı</string>
+    <string name="badge_special">Özel katkı</string>
+    <string name="badge_desc_official">Resmi hesap, ada tarafından onaylanmış: RCQ ekibi veya adanın kefil olduğu bir kaynak.</string>
+    <string name="badge_desc_tester">Test kullanıcısı. RCQ alfa ve beta sürecine katıldı ve bozuk olanı bulmaya yardım etti.</string>
+    <string name="badge_desc_special">RCQ alfa ve beta sürecindeki olağanüstü katkı için verilir.</string>
+    <string name="badge_desc_unknown">Bu adanın verdiği bir işaret.</string>
 </resources>

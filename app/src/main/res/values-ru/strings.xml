@@ -1398,4 +1398,11 @@
     <string name="uin_shop_being_paid">кто-то платит</string>
     <string name="my_uins_sell_echo">Покупатель заплатит %1$s</string>
     <string name="my_uins_sell_bad_address">Это не адрес TRON. Он начинается с T и состоит из 34 символов.</string>
+    <string name="badge_official">Официальный</string>
+    <string name="badge_tester">Тестер</string>
+    <string name="badge_special">Особый вклад</string>
+    <string name="badge_desc_official">Официальный аккаунт, подтверждён островом: команда RCQ или источник, за который остров отвечает.</string>
+    <string name="badge_desc_tester">Тестер. Участвовал в альфа- и бета-тестировании RCQ и помогал находить, что сломано.</string>
+    <string name="badge_desc_special">Выдаётся за впечатляющий вклад на этапе альфа- и бета-тестирования RCQ.</string>
+    <string name="badge_desc_unknown">Знак, выданный этим островом.</string>
 </resources>

@@ -1351,4 +1351,11 @@
     <string name="uin_shop_being_paid">alguém está a pagar</string>
     <string name="my_uins_sell_echo">Os compradores vão pagar %1$s</string>
     <string name="my_uins_sell_bad_address">Esse não é um endereço TRON. Começa por T e tem 34 caracteres.</string>
+    <string name="badge_official">Oficial</string>
+    <string name="badge_tester">Testador</string>
+    <string name="badge_special">Contribuição especial</string>
+    <string name="badge_desc_official">Conta oficial, confirmada pela ilha: a equipe do RCQ ou uma fonte pela qual a ilha responde.</string>
+    <string name="badge_desc_tester">Testador. Participou do alfa e do beta do RCQ e ajudou a encontrar o que estava quebrado.</string>
+    <string name="badge_desc_special">Concedida por uma contribuição excepcional durante o alfa e o beta do RCQ.</string>
+    <string name="badge_desc_unknown">Uma marca concedida por esta ilha.</string>
 </resources>
