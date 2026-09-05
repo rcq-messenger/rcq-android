@@ -6681,7 +6681,12 @@ class Session(context: Context) {
             return
         }
         try {
-            val fanout = encryptFor(toUin, env)
+            // ⚠ Off the main thread. This is called from the composer's scope
+            // in the very frame the field clears, and a libsignal session
+            // (several for a peer with several devices) is tens of ms on a
+            // weak phone; the collapse, the append and the scroll all stalled
+            // on it (audit, 05.09). The store() before it stays where it was.
+            val fanout = withContext(Dispatchers.Default) { encryptFor(toUin, env) }
             // ⚠ A NOTE goes out as "carbon", not "message" (#599). It is
             // addressed to our own number, which is what puts it on our other
             // devices, and the island cannot tell it from a stranger's letter —

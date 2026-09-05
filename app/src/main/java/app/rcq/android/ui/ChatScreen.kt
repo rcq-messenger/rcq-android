@@ -1287,7 +1287,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         }
     }
     // Keep the latest message visible when the keyboard opens (report #29).
-    KeyboardScrollEffect(listState, rows.size)
+    // And swap, never stack: whatever brings the keyboard back (Reply from the
+    // menu, swipe-to-reply, a tap on the field) closes the emoticon panel,
+    // not only a focus change (audit, 05.09).
+    KeyboardScrollEffect(listState, rows.size, onImeShown = { showEmoji = false })
+    // Back with the panel open used to leave the chat; the keyboard in the
+    // same position would just have closed.
+    BackHandler(enabled = showEmoji) { showEmoji = false }
 
     // Jump to (and briefly flash) the message a reply quotes — iOS parity (#3).
     //
@@ -2842,6 +2848,12 @@ private fun Composer(
                 }
             }
             val canSend = draft.isNotBlank() && !recording
+            // ⚠ The button keeps its send node for a third of a second after a
+            // send. It used to swap to the microphone's gesture node in the
+            // very frame the field cleared, and a habitual second tap started
+            // a voice recording (audit, 05.09; iOS had the same).
+            var sendHold by remember { mutableStateOf(false) }
+            LaunchedEffect(sendHold) { if (sendHold) { kotlinx.coroutines.delay(350); sendHold = false } }
             val trailingBg = when {
                 recording && cancelArmed -> Color(0xFFE5484D)
                 canSend || recording -> c.accent
@@ -2850,8 +2862,10 @@ private fun Composer(
             Box(
                 Modifier.size(40.dp).clip(CircleShape).background(trailingBg)
                     .then(
-                        if (canSend) {
+                        if (canSend || sendHold) {
                             Modifier.clickable {
+                                if (sendHold || !canSend) return@clickable
+                                sendHold = true
                                 val body = draft.trim()
                                 // Room rule (#755): links switched off for this
                                 // sender. The guard sits HERE, at send-initiation,
@@ -3465,6 +3479,7 @@ private fun previewOfKind(m: ChatMessage, context: android.content.Context): Str
 private fun KeyboardScrollEffect(
     listState: androidx.compose.foundation.lazy.LazyListState,
     itemCount: Int,
+    onImeShown: () -> Unit = {},
 ) {
     val density = LocalDensity.current
     // Read the per-frame IME inset (this composable is isolated so only it
@@ -3476,6 +3491,7 @@ private fun KeyboardScrollEffect(
     // the composer while reading history doesn't yank you to the bottom.
     val followToBottom = remember { mutableStateOf(false) }
     LaunchedEffect(imeVisible) {
+        if (imeVisible) onImeShown()
         if (imeVisible && itemCount > 0) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             followToBottom.value = lastVisible >= itemCount - 2
@@ -4074,11 +4090,13 @@ private fun AnnotatedString.Builder.appendWithUrls(segment: String, accent: andr
 }
 
 /** Day bucket (year*1000 + day-of-year) for grouping messages into date sections. */
-private fun dayKeyOf(ts: Long): Long {
-    val c = java.util.Calendar.getInstance()
-    c.timeInMillis = ts
-    return c.get(java.util.Calendar.YEAR) * 1000L + c.get(java.util.Calendar.DAY_OF_YEAR)
-}
+// Arithmetic, not a Calendar: buildChatRows runs on every Session tick over the
+// whole thread, and a Calendar per message was the largest allocation in it
+// (audit, 05.09). Local midnight is what the divider means, so the offset for
+// this very instant is applied before the division; the key only has to be
+// stable and distinct per local day.
+private val dayKeyZone: java.util.TimeZone = java.util.TimeZone.getDefault()
+private fun dayKeyOf(ts: Long): Long = (ts + dayKeyZone.getOffset(ts)) / 86_400_000L
 
 /** Human date label for a divider (iOS DateDivider parity: "EEE, d MMM"). */
 private fun dayLabelOf(ts: Long): String =
