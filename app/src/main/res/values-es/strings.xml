@@ -872,6 +872,7 @@
     <string name="chat_you">Tú</string>
     <string name="chat_a_photo">Foto</string>
     <string name="chat_a_message">Mensaje</string>
+    <string name="chat_report">Denunciar</string>
     <string name="chat_reply">Responder</string>
     <string name="chat_copy">Copiar</string>
     <string name="media_share">Compartir</string>

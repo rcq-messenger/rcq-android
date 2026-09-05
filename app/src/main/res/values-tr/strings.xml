@@ -872,6 +872,7 @@
     <string name="chat_you">Sen</string>
     <string name="chat_a_photo">Fotoğraf</string>
     <string name="chat_a_message">Mesaj</string>
+    <string name="chat_report">Şikayet et</string>
     <string name="chat_reply">Yanıtla</string>
     <string name="chat_copy">Kopyala</string>
     <string name="media_share">Paylaş</string>

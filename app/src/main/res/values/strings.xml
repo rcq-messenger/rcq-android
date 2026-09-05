@@ -907,6 +907,7 @@
     <string name="chat_you">You</string>
     <string name="chat_a_photo">Photo</string>
     <string name="chat_a_message">Message</string>
+    <string name="chat_report">Report</string>
     <string name="chat_reply">Reply</string>
     <string name="chat_copy">Copy</string>
     <string name="media_share">Share</string>

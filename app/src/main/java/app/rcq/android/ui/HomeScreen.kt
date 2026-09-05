@@ -3529,7 +3529,7 @@ private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<C
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     var reason by remember { mutableStateOf("") }
     // A sheet, not a centred box: this is a form with a keyboard, and a dialog
