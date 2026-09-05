@@ -43,6 +43,23 @@ android {
         }
     }
 
+    // Two channels of the same app. `sideload` is what we have always shipped:
+    // APKs from dl.rcq.app and our F-Droid repo, with the in-app updater.
+    // `play` is the Google Play build: no self-updater (Play forbids an app
+    // that installs APKs), no "share the APK", and the number shop off, so
+    // nothing is sold inside the app there (founder, 05.09).
+    flavorDimensions += "channel"
+    productFlavors {
+        create("sideload") {
+            dimension = "channel"
+            isDefault = true
+            buildConfigField("boolean", "PLAY_STORE", "false")
+        }
+        create("play") {
+            dimension = "channel"
+            buildConfigField("boolean", "PLAY_STORE", "true")
+        }
+    }
     buildTypes {
         release {
             // R8/minify stays OFF for now: the app leans on reflection (Gson over

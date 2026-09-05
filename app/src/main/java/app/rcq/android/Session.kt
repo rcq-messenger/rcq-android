@@ -605,7 +605,7 @@ class Session(context: Context) {
      *  starts, and they drew the retired surface from the permissive default. */
     private val cachedCaps: RcqApi.ServerCapabilities? = capsCache(serverHost())
 
-    private val _uinShopEnabled = MutableStateFlow(cachedCaps?.uin_shop ?: true)
+    private val _uinShopEnabled = MutableStateFlow((cachedCaps?.uin_shop ?: true) && !app.rcq.android.BuildConfig.PLAY_STORE)
     val uinShopEnabled: StateFlow<Boolean> = _uinShopEnabled.asStateFlow()
 
     /** Hall of Fame opt-in surface. Flagship advertises hall_of_fame=true;
@@ -644,7 +644,8 @@ class Session(context: Context) {
      *  @param live this is the island's OWN answer, not the cached one. Only a
      *  live answer may say "no vault" out loud: see [vaultAvailable]. */
     private fun applyCaps(c: RcqApi.ServerCapabilities, live: Boolean = false) {
-        _uinShopEnabled.value = c.uin_shop
+        // Nothing is sold inside the Play build: the shop stays off whatever the island says.
+        _uinShopEnabled.value = c.uin_shop && !app.rcq.android.BuildConfig.PLAY_STORE
         _hallOfFameEnabled.value = c.hall_of_fame
         _nearbyEnabled.value = c.nearby
         _randomEnabled.value = c.random_chat
