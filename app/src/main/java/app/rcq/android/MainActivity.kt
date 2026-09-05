@@ -744,6 +744,7 @@ private fun RcqApp(session: Session) {
             contentAlignment = Alignment.Center,
         ) {
         when {
+            s is UiState.Registered && phraseNudge -> app.rcq.android.ui.RecoveryPhraseScreen(session, onBack = { phraseNudge = false })
             s is UiState.Registered && locked -> app.rcq.android.ui.PinLockScreen(
                 session,
                 onWiped = { resetNav(); state = UiState.Onboarding },
@@ -943,7 +944,6 @@ private fun RcqApp(session: Session) {
                     onManageAccounts = { showManageAccounts = true },
                 )
             }
-            s is UiState.Registered && phraseNudge -> app.rcq.android.ui.RecoveryPhraseScreen(session, onBack = { phraseNudge = false })
             s is UiState.Onboarding -> OnboardingScreen(onStart = ::register, onRestore = { showRestore = true })
             s is UiState.Registering -> Registering()
             s is UiState.Failed -> Failed(s.message, onRetry = { retryRegister() })
