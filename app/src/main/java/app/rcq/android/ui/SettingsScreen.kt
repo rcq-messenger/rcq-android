@@ -690,8 +690,15 @@ private fun SettingsRoot(
                 // still there, on the picture, so nothing about presence is lost.
                 val ownAv by session.ownAvatar.collectAsState()
                 PersonAvatar(ownAv?.first, ownAv?.second, ownStatus, session, 44.dp)
+                // The island's mark on the person looking (founder, 05.09),
+                // read with the own profile once per screen.
+                var ownBadge by remember { mutableStateOf<String?>(null) }
+                androidx.compose.runtime.LaunchedEffect(uin) { ownBadge = session.loadProfile()?.badge }
                 Column(Modifier.weight(1f)) {
-                    Text(session.nickname, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(session.nickname, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        BadgeMark(ownBadge, size = 15.dp)
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("$uin", color = c.textMono, fontSize = 13.sp)
                         Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
@@ -1254,8 +1261,10 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
         }
     }
 
+    var myBadge by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         session.loadProfile()?.let { p ->
+            myBadge = p.badge
             nickname = p.nickname ?: nickname
             statusMessage = p.status_message ?: ""
             firstName = p.first_name ?: ""
@@ -1351,11 +1360,9 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                         PersonAvatar(ownAvatar?.first, ownAvatar?.second, ownStatus, session, 56.dp, animated = true)
                         if (avatarBusy) CircularProgressIndicator(Modifier.size(22.dp), color = c.accent, strokeWidth = 2.dp)
                     }
-                    Text(
-                        stringResource(if (ownAvatar == null) R.string.pe_avatar_set else R.string.pe_avatar_change),
-                        color = c.accent, fontSize = 11.sp,
-                        modifier = Modifier.clickable(enabled = !avatarBusy) { avatarPicker.launch("image/*") },
-                    )
+                    // No "set a picture" caption: the picture itself is the
+                    // button, as on iOS (founder, 05.09). The remove link stays,
+                    // and only once there is a picture to remove.
                     if (ownAvatar != null) {
                         Text(
                             stringResource(R.string.pe_avatar_remove),
@@ -1367,16 +1374,14 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("$ownUin", color = c.textMono, fontSize = 13.sp)
-                        Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary,
-                            modifier = Modifier.size(15.dp).clickable { copyText("UIN", "$ownUin") })
-                        Icon(Icons.Filled.Share, stringResource(R.string.qr_share), tint = c.textSecondary,
-                            modifier = Modifier.size(15.dp).clickable {
-                                shareText(context.getString(R.string.qr_share_text, "$ownUin", session.contactLinks().second))
-                            })
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(nickname.ifBlank { "—" }, color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                        BadgeMark(myBadge, size = 16.dp)
                     }
+                    // Copy and share live on the Settings header and the QR
+                    // screen; here they crowded the number for nothing
+                    // (founder, 05.09: as on iOS).
+                    Text("$ownUin", color = c.textMono, fontSize = 13.sp)
                 }
             }
             // Backup-island addresses: copyable/shareable too (a self-hoster's
@@ -1404,18 +1409,6 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
-            // Profile views (own-profile only; tallied locally from sealed visit pings).
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.pe_views_title), color = c.textPrimary, fontSize = 15.sp)
-                    Text(stringResource(R.string.pe_views_desc), color = c.textSecondary, fontSize = 11.sp)
-                }
-                Text("$profileViews", color = c.accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            }
-
             Field(stringResource(R.string.pe_nickname), nickname) { nickname = it }
             Field(stringResource(R.string.pe_status_message), statusMessage) { statusMessage = it }
             Field(stringResource(R.string.pe_first_name), firstName) { firstName = it }
@@ -1437,6 +1430,19 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
             Field(stringResource(R.string.pe_interests), interests) { interests = it }
             SectionFooter(stringResource(R.string.pe_interests_hint))
             Field(stringResource(R.string.pe_website), homepage) { homepage = it }
+            // Profile views (own-profile only; tallied locally from sealed
+            // visit pings). Last, as on iOS: a count is not what the screen
+            // is for (founder, 05.09).
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bgSecondary).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.pe_views_title), color = c.textPrimary, fontSize = 15.sp)
+                    Text(stringResource(R.string.pe_views_desc), color = c.textSecondary, fontSize = 11.sp)
+                }
+                Text("$profileViews", color = c.accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
