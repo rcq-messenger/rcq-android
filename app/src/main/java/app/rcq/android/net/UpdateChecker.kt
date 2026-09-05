@@ -131,6 +131,7 @@ object UpdateChecker {
      *  system installer launches automatically when it finishes. The UI just
      *  observes [downloadState]. */
     fun startDownload(context: Context, update: Update) {
+        if (app.rcq.android.BuildConfig.PLAY_STORE) return
         if (downloadJob?.isActive == true) return
         val appCtx = context.applicationContext
         _downloadState.value = DownloadState.Active(-1f)
@@ -193,6 +194,8 @@ object UpdateChecker {
     /** The hosted update when it's newer than this build, else null. Tries each
      *  manifest host in turn (rcq.app, then the GitHub mirror). */
     suspend fun check(): Update? = withContext(Dispatchers.IO) {
+        // The Play build updates through Play. Nothing to check, nothing to install.
+        if (app.rcq.android.BuildConfig.PLAY_STORE) return@withContext null
         for (manifestUrl in MANIFEST_URLS) {
             val u = runCatching {
                 val req = Request.Builder().url(manifestUrl).build()
@@ -382,6 +385,7 @@ object UpdateChecker {
     }.getOrDefault(false)
 
     fun shareApk(context: Context): Boolean = runCatching {
+        if (app.rcq.android.BuildConfig.PLAY_STORE) return false
         val src = File(context.applicationInfo.sourceDir)
         val dir = File(context.cacheDir, "files").apply { mkdirs() }
         val out = File(dir, "RCQ-${BuildConfig.VERSION_NAME}.apk")

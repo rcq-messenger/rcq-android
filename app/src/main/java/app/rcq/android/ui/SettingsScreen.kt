@@ -771,7 +771,7 @@ private fun SettingsRoot(
                     app.rcq.android.net.UpdateChecker.shareInvite(context, uin)
                 }
                 Divider()
-                SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app), modifier = anchor(SettingsFind.SHARE_APK)) {
+                if (!app.rcq.android.BuildConfig.PLAY_STORE) SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app), modifier = anchor(SettingsFind.SHARE_APK)) {
                     app.rcq.android.net.UpdateChecker.shareApk(context)
                 }
                 // An island that runs no report desk gets neither entry: a
