@@ -369,6 +369,47 @@ fun UinShopScreen(
                 )
             }
 
+            // A payment already in flight. The invoice was always remembered
+            // and could always be resumed, but ONLY by typing that exact
+            // number again: somebody who closed the window and did not keep
+            // the link had no way back to it and waited out the hold (#898).
+            // Listed here, one tap away, for as long as the invoice is open.
+            val openInvoices = remember(typed, redeemed.value) {
+                app.rcq.android.data.UinInvoices.all().distinctBy { it.uin }
+            }
+            if (openInvoices.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    stringResource(R.string.uin_shop_open_payments),
+                    color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.height(6.dp))
+                openInvoices.forEach { inv ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
+                            .clickable {
+                                typed = inv.uin.toString()
+                                checkout = inv.uin
+                            }
+                            .padding(vertical = 13.dp, horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(inv.uin.toString(), color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                inv.chain.uppercase(),
+                                color = c.textSecondary, fontSize = 11.sp,
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.uin_shop_cta_resume),
+                            color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+
             // FROM PEOPLE. Only drawn when there is something in it: an empty
             // heading over nothing reads as broken, and a market with no
             // sellers yet is simply a market with no sellers yet.

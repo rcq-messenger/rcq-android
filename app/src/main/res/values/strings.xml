@@ -1372,6 +1372,7 @@
     <string name="uin_pay_error_unreachable">Cannot reach the payment service. Try again in a moment.</string>
     <string name="uin_pay_error_generic">Could not start the payment. Try again.</string>
     <string name="uin_shop_cta_buy">Buy for %1$s</string>
+    <string name="uin_shop_open_payments">PAYMENT IN PROGRESS</string>
     <string name="uin_shop_cta_resume">Finish paying</string>
     <string name="sites_error_unsigned_hint">This happens when something on the way alters the content. Try turning relays on or off in network settings, or another network.</string>
     <string name="sites_error_tampered_hint">The file changed on its way to you. Try turning relays on or off in network settings, or another network.</string>

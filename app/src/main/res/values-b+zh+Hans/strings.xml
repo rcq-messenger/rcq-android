@@ -1318,6 +1318,7 @@
     <string name="uin_pay_error_unreachable">联系不上付款服务。请稍后再试。</string>
     <string name="uin_pay_error_generic">无法开始付款。请重试。</string>
     <string name="uin_shop_cta_buy">以 %1$s 购买</string>
+    <string name="uin_shop_open_payments">正在支付</string>
     <string name="uin_shop_cta_resume">继续付款</string>
     <string name="sites_error_unsigned_hint">当内容在传输途中被改动时会出现这种情况。请在网络设置中打开或关闭中继，或换一个网络试试。</string>
     <string name="sites_error_tampered_hint">文件在送达你之前被改动过。请在网络设置中打开或关闭中继，或换一个网络试试。</string>

@@ -1367,6 +1367,7 @@
     <string name="uin_pay_error_unreachable">Не получается связаться с оплатой. Попробуйте ещё раз через минуту.</string>
     <string name="uin_pay_error_generic">Не удалось начать оплату. Попробуйте ещё раз.</string>
     <string name="uin_shop_cta_buy">Купить за %1$s</string>
+    <string name="uin_shop_open_payments">ОПЛАТА В ПРОЦЕССЕ</string>
     <string name="uin_shop_cta_resume">Продолжить оплату</string>
     <string name="sites_error_unsigned_hint">Так бывает, когда содержимое меняют по дороге. Попробуйте включить или выключить релеи в настройках сети, или другую сеть.</string>
     <string name="sites_error_tampered_hint">Файл изменился по дороге к вам. Попробуйте включить или выключить релеи в настройках сети, или другую сеть.</string>

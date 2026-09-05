@@ -1320,6 +1320,7 @@
     <string name="uin_pay_error_unreachable">Não dá para falar com o serviço de pagamento. Tente daqui a pouco.</string>
     <string name="uin_pay_error_generic">Não foi possível iniciar o pagamento. Tente de novo.</string>
     <string name="uin_shop_cta_buy">Comprar por %1$s</string>
+    <string name="uin_shop_open_payments">PAGAMENTO EM CURSO</string>
     <string name="uin_shop_cta_resume">Concluir o pagamento</string>
     <string name="sites_error_unsigned_hint">Isso acontece quando algo no caminho altera o conteúdo. Tente ligar ou desligar os relés nas configurações de rede, ou outra rede.</string>
     <string name="sites_error_tampered_hint">O arquivo mudou no caminho até você. Tente ligar ou desligar os relés nas configurações de rede, ou outra rede.</string>
