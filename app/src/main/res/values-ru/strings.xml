@@ -113,6 +113,8 @@
     <string name="home_create_group">Создать группу</string>
     <string name="home_accept">Принять</string>
     <string name="home_decline">Отклонить</string>
+    <string name="home_discover_title">Открытые группы</string>
+    <string name="home_discover_join">Вступить</string>
     <string name="home_empty_title">Пока нет контактов</string>
     <string name="home_empty_body">Добавьте друга по UIN или поделитесь своим QR кодом, чтобы начать.</string>
     <string name="home_connecting_title">Соединение с сервером</string>

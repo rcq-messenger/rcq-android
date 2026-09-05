@@ -1191,6 +1191,13 @@ class RcqApi(
         get("/groups/$id/preview", authed = true, GroupPreviewOut::class.java)
     }
 
+    /** Open rooms the caller is not in, biggest first: the carousel a new
+     *  account sees on an empty home instead of being dropped into one room
+     *  (founder, 05.09). */
+    suspend fun discoverGroups(limit: Int = 12): List<GroupPreviewOut> = withContext(Dispatchers.IO) {
+        get("/groups/discover?limit=$limit", authed = true, Array<GroupPreviewOut>::class.java).toList()
+    }
+
     /** Server-side group search (name substring / exact id), joinable groups
      *  the caller isn't already in. Powers the Add window's "find groups". */
     suspend fun searchGroups(q: String): List<GroupPreviewOut> = withContext(Dispatchers.IO) {

@@ -101,6 +101,8 @@
     <string name="home_create_group">创建群组</string>
     <string name="home_accept">接受</string>
     <string name="home_decline">拒绝</string>
+    <string name="home_discover_title">公开群组</string>
+    <string name="home_discover_join">加入</string>
     <string name="home_empty_title">还没有联系人</string>
     <string name="home_empty_body">通过 UIN 添加好友，或者分享你的 QR 码开始。</string>
     <string name="home_connecting_title">正在连接服务器</string>

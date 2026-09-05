@@ -101,6 +101,8 @@
     <string name="home_create_group">Crear un grupo</string>
     <string name="home_accept">Aceptar</string>
     <string name="home_decline">Rechazar</string>
+    <string name="home_discover_title">Grupos abiertos</string>
+    <string name="home_discover_join">Unirse</string>
     <string name="home_empty_title">Todavía no hay contactos</string>
     <string name="home_empty_body">Añade a alguien por su UIN, o comparte tu código QR para empezar.</string>
     <string name="home_connecting_title">Conectando con el servidor</string>
