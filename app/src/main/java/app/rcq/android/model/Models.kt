@@ -83,6 +83,7 @@ data class PollContent(
     }
 }
 
+@androidx.compose.runtime.Immutable
 data class ChatMessage(
     val id: String,
     val peerUin: Int,             // 1:1 peer; 0 for group messages

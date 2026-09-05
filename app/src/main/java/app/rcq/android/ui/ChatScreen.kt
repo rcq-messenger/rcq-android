@@ -1721,7 +1721,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 key = { row ->
                     when (row) {
                         is ChatRow.Single -> row.m.id
-                        is ChatRow.Album -> "alb-${row.items.first().id}"
+                        // Keyed on the BATCH, not on its first photo: as the
+                        // photos of an album arrived the first one could change
+                        // and the whole row was torn down and rebuilt per photo
+                        // (audit, 05.09). The album id is the same for all of
+                        // them from the first to the last.
+                        is ChatRow.Album -> "alb-${row.id}"
                         is ChatRow.DateLabel -> "date-${row.key}"
                         ChatRow.Unread -> "unread-divider"
                     }
@@ -4022,13 +4027,18 @@ private fun MediaPreviewDialog(pending: PendingSend, onCancel: () -> Unit, onSen
 
 /** A chat-list render unit: a normal single message, or a collapsed media
  *  album (2+ consecutive photo/video messages that shared an albumId at send). */
+// @Immutable on the row classes too: they are data classes over an
+// @Immutable message, and Compose skips an item whose row is equal to the one
+// it drew last time only if it can prove nothing inside can change.
 private sealed interface ChatRow {
     // showSender: first message of a consecutive run from the same sender in a
     // group (WA/TG style — the name appears once, not on every bubble). A date
     // or unread divider resets the run.
     // replyMine: this message quotes one of MY OWN messages, so the quote shows
     // "You" to ME — but the wire carries the real nick, so OTHERS see the nick.
+    @androidx.compose.runtime.Immutable
     data class Single(val m: ChatMessage, val showSender: Boolean = true, val replyMine: Boolean = false) : ChatRow
+    @androidx.compose.runtime.Immutable
     data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true) : ChatRow
     /** A day separator between messages of different calendar dates (iOS parity). */
     data class DateLabel(val label: String, val key: Long) : ChatRow
