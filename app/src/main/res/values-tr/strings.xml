@@ -6,6 +6,10 @@
     <!-- Onboarding (iOS OnboardingView parity) -->
     <string name="onboard_cta_next">İleri</string>
     <string name="onboard_cta_back">Geri</string>
+    <string name="onboard_terms_accept">Kabul ediyorum:</string>
+    <string name="onboard_terms_terms">Kullanım Koşulları</string>
+    <string name="onboard_terms_and">ve</string>
+    <string name="onboard_terms_privacy">Gizlilik Politikası</string>
     <string name="onboard_cta_start">Başla</string>
     <string name="onboard_cta_skip">Atla</string>
     <string name="onboard_welcome_kicker">RCQ</string>

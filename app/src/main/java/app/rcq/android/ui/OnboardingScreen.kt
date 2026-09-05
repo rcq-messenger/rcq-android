@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.text.withStyle
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -95,6 +96,7 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
     val activity = LocalContext.current as? Activity
     val currentLang by LanguageManager.current.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val pages = listOf(
         OnbPage(R.string.onboard_welcome_kicker, R.string.onboard_welcome_title, R.string.onboard_welcome_body, Hero.Logo),
@@ -106,6 +108,7 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
         OnbPage(R.string.onboard_relay_kicker, R.string.onboard_relay_title, R.string.onboard_relay_body, Hero.Sym(Icons.Filled.VpnLock), relayLink = true),
     )
     val pager = rememberPagerState(pageCount = { pages.size })
+    var acceptedTerms by remember { mutableStateOf(false) }
     val lastPage = pager.currentPage == pages.size - 1
 
     var server by remember { mutableStateOf(RcqApi.DEFAULT_HOST) }
@@ -165,8 +168,42 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
             }
         }
 
+        // The last page asks for one thing before an account exists:
+        // agreement to the terms and the privacy policy, with both a tap away
+        // (founder, 05.09). Nothing is created until the box is ticked.
+        if (lastPage) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 28.dp).padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Checkbox(
+                    checked = acceptedTerms,
+                    onCheckedChange = { acceptedTerms = it },
+                    colors = androidx.compose.material3.CheckboxDefaults.colors(checkedColor = c.accent),
+                )
+                val linkStyle = androidx.compose.ui.text.SpanStyle(color = c.accent, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+                val termsLabel = stringResource(R.string.onboard_terms_terms)
+                val privacyLabel = stringResource(R.string.onboard_terms_privacy)
+                val text = androidx.compose.ui.text.buildAnnotatedString {
+                    append(stringResource(R.string.onboard_terms_accept)); append(" ")
+                    pushStringAnnotation("url", "https://rcq.app/terms"); withStyle(linkStyle) { append(termsLabel) }; pop()
+                    append(" "); append(stringResource(R.string.onboard_terms_and)); append(" ")
+                    pushStringAnnotation("url", "https://rcq.app/privacy"); withStyle(linkStyle) { append(privacyLabel) }; pop()
+                }
+                androidx.compose.foundation.text.ClickableText(
+                    text = text,
+                    style = androidx.compose.ui.text.TextStyle(color = c.textSecondary, fontSize = 13.sp),
+                    onClick = { offset ->
+                        text.getStringAnnotations("url", offset, offset).firstOrNull()?.let { a ->
+                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(a.item))) }
+                        } ?: run { acceptedTerms = !acceptedTerms }
+                    },
+                )
+            }
+        }
         CapsuleButton(
             if (lastPage) stringResource(R.string.onboard_cta_start) else stringResource(R.string.onboard_cta_next),
+            enabled = !lastPage || acceptedTerms,
             onClick = {
                 if (lastPage) onStart(server)
                 else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }

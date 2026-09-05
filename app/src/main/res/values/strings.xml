@@ -5,6 +5,10 @@
     <!-- Onboarding (iOS OnboardingView parity) -->
     <string name="onboard_cta_next">Next</string>
     <string name="onboard_cta_back">Back</string>
+    <string name="onboard_terms_accept">I accept the</string>
+    <string name="onboard_terms_terms">Terms of Service</string>
+    <string name="onboard_terms_and">and</string>
+    <string name="onboard_terms_privacy">Privacy Policy</string>
     <string name="onboard_cta_start">Get started</string>
     <string name="onboard_cta_skip">Skip</string>
 
