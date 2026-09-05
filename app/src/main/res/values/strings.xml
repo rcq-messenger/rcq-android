@@ -484,7 +484,7 @@
     <string name="bug_report_failed">Could not send. Check the connection and try again.</string>
     <string name="bug_report_too_long">The text is longer than this island accepts. Shorten it a little and it will go through.</string>
     <string name="bug_report_sent">Thanks. Your report was sent.</string>
-    <string name="settings_row_move_uin">Move to a new UIN</string>
+    <string name="settings_row_move_uin">Move to a random new UIN</string>
     <string name="settings_row_burn">Burn account</string>
 
     <!-- UIN shop -->
@@ -593,13 +593,13 @@
     <string name="vis_nobody">Nobody</string>
 
     <!-- Settings: account / history / about dialogs + footers -->
-    <string name="cs_move_footer">Get a fresh UIN. Your contacts, groups, keys and chat history are all kept.</string>
+    <string name="cs_move_footer">The island picks a fresh random number for you. Contacts, groups, keys and chat history are all kept. To choose a specific number, use the UIN shop.</string>
     <string name="cs_burn_footer">Wipes this account everywhere. Irreversible.</string>
     <string name="cs_clear_title">Clear chat history?</string>
     <string name="cs_clear_body">Removes all messages from this device. Your account and contacts stay.</string>
     <string name="cs_history_cleared">History cleared</string>
-    <string name="cs_move_title">Move to a new UIN?</string>
-    <string name="cs_move_body">You get a freshly-allocated UIN. Your contacts, groups, keys and chat history on this device are all kept.</string>
+    <string name="cs_move_title">Move to a random new UIN?</string>
+    <string name="cs_move_body">The island picks the number; you cannot choose it here. Your contacts, groups, keys and chat history on this device are all kept.</string>
     <string name="cs_moved_toast">Moved to %1$d</string>
     <string name="cs_move_failed">Migration failed. Try again later.</string>
     <string name="cs_burn_cta">Burn</string>

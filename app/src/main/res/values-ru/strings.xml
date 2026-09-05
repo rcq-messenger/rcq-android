@@ -480,7 +480,7 @@
     <string name="bug_report_failed">Не удалось отправить. Проверьте связь и попробуйте ещё раз.</string>
     <string name="bug_report_too_long">Текст длиннее, чем принимает остров. Немного сократите, и он уйдёт.</string>
     <string name="bug_report_sent">Спасибо. Репорт отправлен.</string>
-    <string name="settings_row_move_uin">Сменить UIN</string>
+    <string name="settings_row_move_uin">Сменить UIN на случайный</string>
     <string name="settings_row_burn">Сжечь аккаунт</string>
 
     <!-- UIN shop -->
@@ -589,13 +589,13 @@
     <string name="vis_nobody">Никто</string>
 
     <!-- Settings: account / history / about -->
-    <string name="cs_move_footer">Новый UIN. Контакты, группы, ключи и история чатов сохраняются.</string>
+    <string name="cs_move_footer">Остров сам выберет новый случайный номер. Контакты, группы, ключи и история чатов сохранятся. Выбрать конкретный номер можно в магазине UIN.</string>
     <string name="cs_burn_footer">Стирает аккаунт везде. Необратимо.</string>
     <string name="cs_clear_title">Очистить историю чатов?</string>
     <string name="cs_clear_body">Удаляет все сообщения с этого устройства. Аккаунт и контакты остаются.</string>
     <string name="cs_history_cleared">История очищена</string>
-    <string name="cs_move_title">Сменить UIN?</string>
-    <string name="cs_move_body">Вы получите новый UIN. Контакты, группы, ключи и локальная история чатов на этом устройстве сохранятся.</string>
+    <string name="cs_move_title">Сменить UIN на случайный?</string>
+    <string name="cs_move_body">Номер выбирает остров, здесь его не выбрать. Контакты, группы, ключи и локальная история чатов на этом устройстве сохранятся.</string>
     <string name="cs_moved_toast">Новый UIN: %1$d</string>
     <string name="cs_move_failed">Не удалось сменить. Попробуйте позже.</string>
     <string name="cs_burn_cta">Сжечь</string>

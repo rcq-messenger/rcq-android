@@ -463,7 +463,7 @@
     <string name="bug_report_failed">Não foi possível enviar. Verifique a conexão e tente de novo.</string>
     <string name="bug_report_too_long">O texto é maior do que esta ilha aceita. Encurte um pouco e ele vai passar.</string>
     <string name="bug_report_sent">Obrigado. Seu relato foi enviado.</string>
-    <string name="settings_row_move_uin">Mudar para um UIN novo</string>
+    <string name="settings_row_move_uin">Mudar para um UIN novo aleatório</string>
     <string name="settings_row_burn">Queimar conta</string>
     <!-- UIN shop -->
     <string name="settings_row_uin_shop">Loja de UIN</string>
@@ -568,13 +568,13 @@
     <string name="vis_contacts">Contatos</string>
     <string name="vis_nobody">Ninguém</string>
     <!-- Settings: account / history / about dialogs + footers -->
-    <string name="cs_move_footer">Pegue um UIN novinho. Seus contatos, grupos, chaves e histórico de conversas são todos mantidos.</string>
+    <string name="cs_move_footer">A ilha escolhe um número novo aleatório. Contactos, grupos, chaves e histórico mantêm-se. Para escolher um número específico, use a loja de UIN.</string>
     <string name="cs_burn_footer">Apaga esta conta em todo lugar. Irreversível.</string>
     <string name="cs_clear_title">Limpar o histórico de conversas?</string>
     <string name="cs_clear_body">Remove todas as mensagens deste aparelho. Sua conta e seus contatos continuam.</string>
     <string name="cs_history_cleared">Histórico limpo</string>
-    <string name="cs_move_title">Mudar para um UIN novo?</string>
-    <string name="cs_move_body">Você recebe um UIN recém-alocado. Seus contatos, grupos, chaves e histórico de conversas neste aparelho são todos mantidos.</string>
+    <string name="cs_move_title">Mudar para um UIN novo aleatório?</string>
+    <string name="cs_move_body">O número é escolhido pela ilha; aqui não se escolhe. Contactos, grupos, chaves e histórico neste dispositivo mantêm-se.</string>
     <string name="cs_moved_toast">Mudou para %1$d</string>
     <string name="cs_move_failed">A migração falhou. Tente mais tarde.</string>
     <string name="cs_burn_cta">Queimar</string>

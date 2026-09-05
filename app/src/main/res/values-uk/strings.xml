@@ -463,7 +463,7 @@
     <string name="bug_report_failed">Не вдалося надіслати. Перевір зв\'язок і спробуй ще раз.</string>
     <string name="bug_report_too_long">Текст довший, ніж приймає цей острів. Скороти трохи, і воно пройде.</string>
     <string name="bug_report_sent">Дякуємо. Твоє звернення надіслано.</string>
-    <string name="settings_row_move_uin">Перейти на новий UIN</string>
+    <string name="settings_row_move_uin">Змінити UIN на випадковий</string>
     <string name="settings_row_burn">Спалити акаунт</string>
     <!-- UIN shop -->
     <string name="settings_row_uin_shop">Магазин UIN</string>
@@ -568,13 +568,13 @@
     <string name="vis_contacts">Контакти</string>
     <string name="vis_nobody">Ніхто</string>
     <!-- Settings: account / history / about dialogs + footers -->
-    <string name="cs_move_footer">Отримай свіжий UIN. Контакти, групи, ключі і історія чатів лишаються.</string>
+    <string name="cs_move_footer">Острів сам обере новий випадковий номер. Контакти, групи, ключі та історія чатів збережуться. Обрати конкретний номер можна в магазині UIN.</string>
     <string name="cs_burn_footer">Стирає цей акаунт усюди. Незворотно.</string>
     <string name="cs_clear_title">Очистити історію чатів?</string>
     <string name="cs_clear_body">Прибирає всі повідомлення з цього пристрою. Акаунт і контакти лишаються.</string>
     <string name="cs_history_cleared">Історію очищено</string>
-    <string name="cs_move_title">Перейти на новий UIN?</string>
-    <string name="cs_move_body">Ти отримаєш щойно виданий UIN. Контакти, групи, ключі і історія чатів на цьому пристрої лишаються.</string>
+    <string name="cs_move_title">Змінити UIN на випадковий?</string>
+    <string name="cs_move_body">Номер обирає острів, тут його не обрати. Контакти, групи, ключі та локальна історія чатів на цьому пристрої збережуться.</string>
     <string name="cs_moved_toast">Перейшов на %1$d</string>
     <string name="cs_move_failed">Переїзд не вдався. Спробуй пізніше.</string>
     <string name="cs_burn_cta">Спалити</string>

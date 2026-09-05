@@ -463,7 +463,7 @@
     <string name="bug_report_failed">发送失败。请检查网络后重试。</string>
     <string name="bug_report_too_long">文字超出了这个岛接受的长度。稍微缩短一点就能发出去。</string>
     <string name="bug_report_sent">谢谢。你的反馈已发送。</string>
-    <string name="settings_row_move_uin">迁移到新 UIN</string>
+    <string name="settings_row_move_uin">换一个随机的新 UIN</string>
     <string name="settings_row_burn">销毁账号</string>
     <!-- UIN shop -->
     <string name="settings_row_uin_shop">UIN 商店</string>
@@ -568,13 +568,13 @@
     <string name="vis_contacts">联系人</string>
     <string name="vis_nobody">无人</string>
     <!-- Settings: account / history / about dialogs + footers -->
-    <string name="cs_move_footer">获取一个新的 UIN。你的联系人、群组、密钥和聊天记录都会保留。</string>
+    <string name="cs_move_footer">岛会为你随机挑选一个新号码。联系人、群组、密钥和聊天记录都会保留。要选择特定号码，请使用 UIN 商店。</string>
     <string name="cs_burn_footer">在所有地方抹除此账号。不可撤销。</string>
     <string name="cs_clear_title">清除聊天记录？</string>
     <string name="cs_clear_body">从这台设备移除所有消息。你的账号和联系人会保留。</string>
     <string name="cs_history_cleared">聊天记录已清除</string>
-    <string name="cs_move_title">迁移到新的 UIN？</string>
-    <string name="cs_move_body">你会获得一个新分配的 UIN。这台设备上的联系人、群组、密钥和聊天记录都会保留。</string>
+    <string name="cs_move_title">换一个随机的新 UIN？</string>
+    <string name="cs_move_body">号码由岛挑选，这里无法自选。此设备上的联系人、群组、密钥和聊天记录都会保留。</string>
     <string name="cs_moved_toast">已迁移到 %1$d</string>
     <string name="cs_move_failed">迁移失败。请稍后重试。</string>
     <string name="cs_burn_cta">销毁</string>
