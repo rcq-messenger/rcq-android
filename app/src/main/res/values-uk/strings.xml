@@ -101,6 +101,8 @@
     <string name="home_create_group">Створити групу</string>
     <string name="home_accept">Прийняти</string>
     <string name="home_decline">Відхилити</string>
+    <string name="home_discover_title">Відкриті групи</string>
+    <string name="home_discover_join">Приєднатися</string>
     <string name="home_empty_title">Контактів поки немає</string>
     <string name="home_empty_body">Додай друга за його UIN або поділися своїм QR-кодом, щоб почати.</string>
     <string name="home_connecting_title">З\'єднання з сервером</string>

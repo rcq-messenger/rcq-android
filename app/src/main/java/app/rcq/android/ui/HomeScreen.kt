@@ -1017,7 +1017,7 @@ internal fun HomeScreen(
                 // petal loader instead of the misleading "no contacts" prompt.
                 if (contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()) {
                     item(key = "empty") {
-                        if (connecting) ConnectingState(stealth = stealthActive) else EmptyState(onAdd = { showAdd = true }, myUin = uin)
+                        if (connecting) ConnectingState(stealth = stealthActive) else EmptyState(onAdd = { showAdd = true }, myUin = uin, session = session, onOpenGroup = onOpenGroup)
                     }
                 } else if (contacts.isEmpty() && !connecting) {
                     // ⚠ The state above is almost never reached: every new
@@ -2524,16 +2524,20 @@ private fun InviteNudge(myUin: Int, onAdd: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState(onAdd: () -> Unit, myUin: Int) {
+private fun EmptyState(onAdd: () -> Unit, myUin: Int, session: Session, onOpenGroup: (Int) -> Unit) {
     // Fills the list area with nothing but the wallpaper behind it, so it takes
     // the wallpaper's foregrounds and not the theme's, same as the header (#554).
     val c = homeChrome()
     val context = LocalContext.current
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 60.dp, horizontal = 32.dp),
+        Modifier.fillMaxWidth().padding(vertical = 36.dp, horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        // Rooms to walk into, before anything about contacts: nobody arrives
+        // with friends already here, and every new account used to be dropped
+        // into one beta room for exactly this reason. Now it is a choice.
+        DiscoverGroupsRow(session, onOpenGroup)
         StatusIcon(UserStatus.ONLINE, size = 44.dp)
         Text(stringResource(R.string.home_empty_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Text(stringResource(R.string.home_empty_body), color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
@@ -2551,6 +2555,67 @@ private fun EmptyState(onAdd: () -> Unit, myUin: Int) {
                 .clickable { app.rcq.android.net.UpdateChecker.shareInvite(context, myUin) }
                 .padding(vertical = 6.dp, horizontal = 12.dp),
         )
+    }
+}
+
+/** Open rooms, biggest first, each joinable in one tap. Drawn only when the
+ *  island answered with something; an empty or failed answer draws nothing, so
+ *  the screen never carries a heading over an empty strip. */
+@Composable
+private fun DiscoverGroupsRow(session: Session, onOpenGroup: (Int) -> Unit) {
+    val c = homeChrome()
+    val scope = rememberCoroutineScope()
+    var rooms by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
+    var joining by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(Unit) { rooms = session.discoverGroups(12) }
+    if (rooms.isEmpty()) return
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            stringResource(R.string.home_discover_title).uppercase(),
+            color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        )
+        androidx.compose.foundation.lazy.LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+        ) {
+            items(rooms, key = { it.id }) { g ->
+                Column(
+                    Modifier.width(132.dp).clip(RoundedCornerShape(16.dp)).background(c.bgSecondary).padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    GroupAvatarMedia(g.avatar_media_id, g.avatar_media_key, session, 48.dp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            g.name ?: "#${g.id}", color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        BadgeMark(g.badge, size = 12.dp)
+                    }
+                    Text(
+                        pluralStringResource(R.plurals.members, g.member_count, g.member_count),
+                        color = c.textSecondary, fontSize = 11.sp,
+                    )
+                    val busy = joining == g.id
+                    Text(
+                        stringResource(R.string.home_discover_join),
+                        color = if (busy) c.textSecondary else c.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(enabled = joining == null) {
+                                joining = g.id
+                                scope.launch {
+                                    val joined = session.joinGroup(g.id)
+                                    joining = null
+                                    if (joined != null) onOpenGroup(g.id)
+                                    else rooms = rooms.filterNot { it.id == g.id }
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

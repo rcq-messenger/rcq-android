@@ -101,6 +101,8 @@
     <string name="home_create_group">Grup oluştur</string>
     <string name="home_accept">Kabul et</string>
     <string name="home_decline">Reddet</string>
+    <string name="home_discover_title">Açık gruplar</string>
+    <string name="home_discover_join">Katıl</string>
     <string name="home_empty_title">Henüz kişi yok</string>
     <string name="home_empty_body">Bir arkadaşını UIN\'iyle ekle ya da başlamak için QR kodunu paylaş.</string>
     <string name="home_connecting_title">Sunucuya bağlanılıyor</string>

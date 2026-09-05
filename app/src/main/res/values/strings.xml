@@ -114,6 +114,8 @@
     <string name="home_create_group">Create a group</string>
     <string name="home_accept">Accept</string>
     <string name="home_decline">Decline</string>
+    <string name="home_discover_title">Open groups</string>
+    <string name="home_discover_join">Join</string>
     <string name="home_empty_title">No contacts yet</string>
     <string name="home_empty_body">Add a friend by their UIN, or share your QR code to get started.</string>
     <string name="home_connecting_title">Connecting to server</string>

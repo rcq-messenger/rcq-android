@@ -4379,6 +4379,11 @@ class Session(context: Context) {
     /** Join a group from a shared invite. Already-member is a no-op that just
      *  returns the existing group (the caller jumps into the chat). Returns
      *  null on failure (e.g. a closed group). */
+    /** Open rooms I am not in, biggest first, for the empty home. Failure is
+     *  an empty list: the screen simply has no carousel that time. */
+    suspend fun discoverGroups(limit: Int = 12): List<RcqApi.GroupPreviewOut> =
+        runCatching { api.discoverGroups(limit) }.getOrDefault(emptyList())
+
     suspend fun joinGroup(id: Int): RcqGroup? {
         group(id)?.let { return it }
         return runCatching { mapGroup(api.joinGroup(id)).also { upsertGroup(it); roomJoined() } }.getOrNull()
