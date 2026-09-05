@@ -3,6 +3,7 @@ package app.rcq.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -397,6 +398,7 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun HeldRow(
     c: RcqColors,
@@ -410,14 +412,27 @@ private fun HeldRow(
     onSell: () -> Unit,
     onUnlist: () -> Unit,
 ) {
-    Row(
+    // ⚠ FlowRow, not Row: three Russian labels and a number do not fit one
+    // line on a narrow phone, and the number lost — it broke into a column of
+    // single digits (#898, screenshot). The actions drop to their own line
+    // when the row is tight and stay beside the number when it is not, which
+    // is what the web page does.
+    androidx.compose.foundation.layout.FlowRow(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
             .clickable(enabled = enabled, onClick = onTap)
             .padding(vertical = 15.dp, horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(item.uin.toString(), color = c.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+        Column(
+            Modifier.weight(1f).widthIn(min = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                item.uin.toString(),
+                color = c.textPrimary, fontSize = 19.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, softWrap = false,
+            )
             Text(
                 if (listing != null)
                     stringResource(R.string.my_uins_on_sale, listing.price_display)
@@ -428,7 +443,7 @@ private fun HeldRow(
         }
         if (busy) {
             CircularProgressIndicator(color = c.accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-        } else {
+        } else Row(verticalAlignment = Alignment.CenterVertically) {
             // Release before Use, quieter than it: the collection fills up with
             // numbers nobody picked (every switch parks the previous one here),
             // and there was no way to get rid of one. Deliberately a plain
