@@ -502,6 +502,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Disappearing messages: the picker, and this thread's live timer. Read
     // once per thread and kept here so the menu row and the picker agree
     // without either of them reaching into the store on every recomposition.
+    // What the peer was last told about typing, and when: see onTyping below.
+    var lastTypingSent by remember(target) { mutableStateOf(false) }
+    var lastTypingAt by remember(target) { mutableStateOf(0L) }
     var showTtlPicker by remember { mutableStateOf(false) }
     var threadTtl by remember(thisThread) { mutableStateOf(DisappearingMessages.get(thisThread)) }
     var showSearch by remember { mutableStateOf(false) }
@@ -2150,7 +2153,21 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     attachMenu = true
                 },
                 onTyping = { nonBlank ->
-                    if (!isGroup && !isSelf && peer != null) session.sendTyping(peer, nonBlank)
+                    // ⚠ Throttled. A frame per keystroke put tens of them on
+                    // the socket for one message, on relays people pay for by
+                    // the megabyte, and the peer's indicator has its own 6 s
+                    // timeout anyway (audit, 05.09). "Stopped typing" is never
+                    // throttled: it ends the indicator.
+                    if (!isGroup && !isSelf && peer != null) {
+                        val now = System.currentTimeMillis()
+                        if (!nonBlank) {
+                            if (lastTypingSent) { session.sendTyping(peer, false); lastTypingSent = false }
+                        } else if (!lastTypingSent || now - lastTypingAt > 4_000) {
+                            session.sendTyping(peer, true)
+                            lastTypingSent = true
+                            lastTypingAt = now
+                        }
+                    }
                 },
                 onSend = { body ->
                     // Carry the REAL author nick in the quote (never the literal
@@ -2714,6 +2731,10 @@ private fun Composer(
     val c = RcqTheme.colors
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
+    // Whether the caret was in this field when the app went away, so coming
+    // back returns the keyboard rather than a draft with a cold field.
+    var composerFocused by remember { mutableStateOf(false) }
+    var hadComposerFocus by remember { mutableStateOf(false) }
     // Don't let the keyboard auto-reappear after the app is backgrounded and
     // resumed (reading a chat, switch apps, come back → IME used to pop up).
     // On ON_STOP we drop the composer's focus + hide the IME, so resume has
@@ -2723,8 +2744,18 @@ private fun Composer(
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
+                // Remember whether the composer had the caret, so coming back
+                // from another app (or a cancelled picker) returns the
+                // keyboard instead of leaving a draft with a cold field
+                // (audit, 05.09). The clear itself stays: it is what keeps
+                // the keyboard from popping up over the resumed screen.
+                hadComposerFocus = composerFocused
                 focusManager.clearFocus(force = true)
                 keyboard?.hide()
+            }
+            if (event == Lifecycle.Event.ON_RESUME && hadComposerFocus) {
+                hadComposerFocus = false
+                runCatching { focusRequester.requestFocus() }
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -2860,7 +2891,10 @@ private fun Composer(
                         keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
                         maxLines = 5,
                         modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
-                            .onFocusChanged { if (it.isFocused) onShowEmoji(false) },
+                            .onFocusChanged {
+                                composerFocused = it.isFocused
+                                if (it.isFocused) onShowEmoji(false)
+                            },
                     )
                 }
             }
