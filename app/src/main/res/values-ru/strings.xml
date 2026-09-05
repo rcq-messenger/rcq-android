@@ -1342,8 +1342,9 @@
     <string name="island_trust_via_ca">удостоверяющий центр</string>
     <string name="island_trust_accept">Доверять новому отпечатку</string>
     <string name="island_trust_later">Не сейчас</string>
-    <string name="island_trust_settings_ca">Доверие через удостоверяющий центр</string>
+    <string name="island_trust_settings_ca">Доверие по сертификату</string>
     <string name="island_trust_settings_pinned">Доверие по отпечатку</string>
+    <string name="island_trust_settings_footer">Как это устройство решило доверять острову. Остров без удостоверяющего центра проверяется по отпечатку его собственного сертификата.</string>
     <string name="island_trust_copy">Скопировать адрес с отпечатком</string>
     <string name="island_trust_copied">Адрес скопирован</string>
     <string name="island_trust_not_fingerprint">Это не отпечаток. После # идёт отпечаток SHA-256 острова: 64 шестнадцатеричных символа.</string>

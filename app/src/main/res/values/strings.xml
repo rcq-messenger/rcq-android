@@ -1347,8 +1347,9 @@
     <string name="island_trust_via_ca">a certificate authority</string>
     <string name="island_trust_accept">Trust the new fingerprint</string>
     <string name="island_trust_later">Not now</string>
-    <string name="island_trust_settings_ca">Trusted through a certificate authority</string>
+    <string name="island_trust_settings_ca">Trusted by certificate</string>
     <string name="island_trust_settings_pinned">Trusted by fingerprint</string>
+    <string name="island_trust_settings_footer">How this device decided to trust this island. An island without a certificate authority is trusted by the fingerprint of its own certificate instead.</string>
     <string name="island_trust_copy">Copy address with fingerprint</string>
     <string name="island_trust_copied">Address copied</string>
     <string name="island_trust_not_fingerprint">Not a fingerprint. After # comes the island\'s SHA-256 fingerprint: 64 hex characters.</string>

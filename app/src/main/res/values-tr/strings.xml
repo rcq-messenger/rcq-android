@@ -1295,8 +1295,9 @@
     <string name="island_trust_via_ca">bir sertifika otoritesi</string>
     <string name="island_trust_accept">Yeni parmak izine güven</string>
     <string name="island_trust_later">Şimdi değil</string>
-    <string name="island_trust_settings_ca">Sertifika otoritesi üzerinden güveniliyor</string>
+    <string name="island_trust_settings_ca">Sertifikayla güveniliyor</string>
     <string name="island_trust_settings_pinned">Parmak iziyle güveniliyor</string>
+    <string name="island_trust_settings_footer">Bu cihazın bu adaya nasıl güvenmeye karar verdiği. Sertifika otoritesi olmayan bir ada, kendi sertifikasının parmak iziyle doğrulanır.</string>
     <string name="island_trust_copy">Adresi parmak iziyle kopyala</string>
     <string name="island_trust_copied">Adres kopyalandı</string>
     <string name="island_trust_not_fingerprint">Bu bir parmak izi değil. # işaretinden sonra adanın SHA-256 parmak izi gelir: 64 onaltılık karakter.</string>

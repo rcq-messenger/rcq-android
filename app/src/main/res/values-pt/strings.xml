@@ -1295,8 +1295,9 @@
     <string name="island_trust_via_ca">uma autoridade certificadora</string>
     <string name="island_trust_accept">Confiar na nova impressão digital</string>
     <string name="island_trust_later">Agora não</string>
-    <string name="island_trust_settings_ca">Confiança por autoridade certificadora</string>
+    <string name="island_trust_settings_ca">Confiável pelo certificado</string>
     <string name="island_trust_settings_pinned">Confiança por impressão digital</string>
+    <string name="island_trust_settings_footer">Como este dispositivo decidiu confiar nesta ilha. Uma ilha sem autoridade certificadora é verificada pela impressão digital do seu próprio certificado.</string>
     <string name="island_trust_copy">Copiar endereço com impressão digital</string>
     <string name="island_trust_copied">Endereço copiado</string>
     <string name="island_trust_not_fingerprint">Isso não é uma impressão digital. Depois de # vem a impressão SHA-256 da ilha: 64 caracteres hexadecimais.</string>
