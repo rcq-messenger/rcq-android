@@ -1766,6 +1766,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             MessageBubble(
                                 session, m,
                                 senderName = if (isGroup && !m.fromMe && row.showSender) authorName(m) else null,
+                                senderBadge = if (isGroup && !m.fromMe && row.showSender) group?.memberBadge(m.senderUin ?: 0) else null,
                                 senderAvatarId = senderPic?.avatarMediaId,
                                 senderAvatarKey = senderPic?.avatarMediaKey,
                                 replyAuthorOverride = if (row.replyMine) youLabel else null,
@@ -1798,6 +1799,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     is ChatRow.Album -> AlbumBubble(
                         session, row.items,
                         senderName = if (isGroup && !row.items.first().fromMe && row.showSender) authorName(row.items.first()) else null,
+                        senderBadge = if (isGroup && !row.items.first().fromMe && row.showSender) group?.memberBadge(row.items.first().senderUin ?: 0) else null,
                         senderAvatarId = if (row.showSender) authorMember(row.items.first())?.avatarMediaId else null,
                         senderAvatarKey = if (row.showSender) authorMember(row.items.first())?.avatarMediaKey else null,
                         // #749 stays exactly as it was: the HELD tile is the
@@ -4288,7 +4290,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: (ChatMessage) -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: (ChatMessage) -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -4305,6 +4307,7 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
             ) {
                 SenderAvatar(senderAvatarId, senderAvatarKey, session, 15.dp)
                 Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                senderBadge?.let { Spacer(Modifier.width(3.dp)); BadgeMark(it, size = 11.dp) }
             }
         }
         AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo, onOpenAlbum)
@@ -4547,7 +4550,7 @@ private fun SwipeToReply(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, linksEnabled: Boolean = true) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -4596,6 +4599,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 // a picture: without one the line stays what it always was.
                 SenderAvatar(senderAvatarId, senderAvatarKey, session, 15.dp)
                 Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                senderBadge?.let { Spacer(Modifier.width(3.dp)); BadgeMark(it, size = 11.dp) }
             }
         }
         if (groupLinkId != null) {
@@ -4649,6 +4653,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     ) {
                         SenderAvatar(senderAvatarId, senderAvatarKey, session, 16.dp)
                         Text(senderName, color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        senderBadge?.let { Spacer(Modifier.width(3.dp)); BadgeMark(it, size = 12.dp) }
                     }
                 }
                 if (m.replyToSnippet != null) {
