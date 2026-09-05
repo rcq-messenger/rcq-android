@@ -1,5 +1,6 @@
 package app.rcq.android
 
+import androidx.compose.ui.draw.alpha
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
@@ -1124,6 +1125,9 @@ private fun RcqApp(session: Session) {
             if (!locked) ServerJoinDialog(
                 host = req.host,
                 hasInvite = !req.invite.isNullOrBlank(),
+                // A scanned invite is a second door into "create an account":
+                // the same agreement the onboarding asks for is asked here.
+                requireTerms = s is UiState.Onboarding,
                 onConfirm = {
                     ServerJoinLink.pending.value = null
                     if (s is UiState.Onboarding) register(req.host, req.invite) else addAccount(req.host, req.invite)
@@ -1322,8 +1326,10 @@ private fun WebLinkDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ServerJoinDialog(host: String, hasInvite: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun ServerJoinDialog(host: String, hasInvite: Boolean, requireTerms: Boolean = false, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
+    var acceptedTerms by remember { mutableStateOf(false) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     // The island's own name and house rules, asked of the island itself. Both
     // have been served on /server/info since islands existed and no client read
     // either, so the admin panel carried a note saying that whatever an operator
@@ -1362,8 +1368,28 @@ private fun ServerJoinDialog(host: String, hasInvite: Boolean, onConfirm: () -> 
                 )
             }
             if (hasInvite) Text(stringResource(R.string.join_server_invite), color = c.accent, fontSize = 12.sp)
+            if (requireTerms) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = acceptedTerms, onCheckedChange = { acceptedTerms = it })
+                    Text(
+                        stringResource(R.string.onboard_terms_accept) + " " + stringResource(R.string.onboard_terms_terms) + " " + stringResource(R.string.onboard_terms_and) + " " + stringResource(R.string.onboard_terms_privacy),
+                        color = c.textSecondary, fontSize = 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(start = 12.dp)) {
+                    Text(stringResource(R.string.onboard_terms_terms), color = c.accent, fontSize = 12.sp,
+                        modifier = Modifier.clickable { uriHandler.openUri("https://rcq.app/terms") })
+                    Text(stringResource(R.string.onboard_terms_privacy), color = c.accent, fontSize = 12.sp,
+                        modifier = Modifier.clickable { uriHandler.openUri("https://rcq.app/privacy") })
+                }
+            }
             Spacer(Modifier.height(8.dp))
-            CapsuleButton(stringResource(R.string.join_server_join), modifier = Modifier.fillMaxWidth(), onClick = onConfirm)
+            CapsuleButton(
+                stringResource(R.string.join_server_join),
+                modifier = Modifier.fillMaxWidth().alpha(if (!requireTerms || acceptedTerms) 1f else 0.45f),
+                onClick = { if (!requireTerms || acceptedTerms) onConfirm() },
+            )
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.common_cancel), color = c.textSecondary)
             }

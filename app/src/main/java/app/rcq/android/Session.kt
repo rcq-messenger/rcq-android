@@ -9442,11 +9442,10 @@ class Session(context: Context) {
 
     private suspend fun refreshPending() {
         // #900: the block lives on this device (stage 4b), so the island still
-        // delivers a blocked person's request. It is declined here, quietly,
-        // before it can reach the list; declining is what the person would
-        // have done by hand, and the requester learns nothing new.
-        val (blocked, kept) = api.pending().partition { LocalStores.isBlocked(it.from_uin) }
-        blocked.forEach { req -> runCatching { api.respondContact(req.id, false) } }
+        // delivers a blocked person's request. It is hidden here and NOT
+        // answered: a decline travels back as "declined" and tells the blocked
+        // person exactly what happened. Left pending, they learn nothing.
+        val kept = api.pending().filterNot { LocalStores.isBlocked(it.from_uin) }
         _pending.value = kept.map {
             PendingRequest(it.id, it.from_uin, it.nickname ?: "${it.from_uin}")
         }

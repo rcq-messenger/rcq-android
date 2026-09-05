@@ -202,6 +202,10 @@ fun UinShopScreen(
     // the confirmation, and comes back - without this sweep their money bought
     // a voucher sitting in a till nobody asks. Runs once per open, quietly, and
     // only ever finishes what was already paid for.
+    // Bumped when the sweep below changes the remembered invoices, so the
+    // "payment in progress" list re-reads them instead of showing rows the
+    // sweep just forgot.
+    var invoiceTick by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) {
         UinInvoices.init(ctx)
         for (open in UinInvoices.all()) {
@@ -212,6 +216,7 @@ fun UinShopScreen(
                 inv.status == "expired" -> UinInvoices.forget(inv.id)
             }
         }
+        invoiceTick++
     }
 
     fun runPurchase() {
@@ -374,7 +379,7 @@ fun UinShopScreen(
             // number again: somebody who closed the window and did not keep
             // the link had no way back to it and waited out the hold (#898).
             // Listed here, one tap away, for as long as the invoice is open.
-            val openInvoices = remember(typed, redeemed.value) {
+            val openInvoices = remember(typed, redeemed.value, invoiceTick) {
                 app.rcq.android.data.UinInvoices.all().distinctBy { it.uin }
             }
             if (openInvoices.isNotEmpty()) {

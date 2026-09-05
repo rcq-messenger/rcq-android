@@ -1407,4 +1407,6 @@
     <string name="badge_desc_tester">Тестер. Участвовал в альфа- и бета-тестировании RCQ и помогал находить, что сломано.</string>
     <string name="badge_desc_special">Выдаётся за впечатляющий вклад на этапе альфа- и бета-тестирования RCQ.</string>
     <string name="badge_desc_unknown">Знак, выданный этим островом.</string>
+    <string name="home_discover_join_failed">Не удалось вступить, попробуйте ещё раз.</string>
+    <string name="cs_move_footer_play">Остров выберет вам новый случайный номер. Контакты, группы, ключи и история чатов сохраняются.</string>
 </resources>

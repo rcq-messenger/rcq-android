@@ -2563,6 +2563,7 @@ private fun EmptyState(onAdd: () -> Unit, myUin: Int, session: Session, onOpenGr
  *  the screen never carries a heading over an empty strip. */
 @Composable
 private fun DiscoverGroupsRow(session: Session, onOpenGroup: (Int) -> Unit) {
+    val ctx = LocalContext.current
     val c = homeChrome()
     val scope = rememberCoroutineScope()
     var rooms by remember { mutableStateOf<List<RcqApi.GroupPreviewOut>>(emptyList()) }
@@ -2607,8 +2608,10 @@ private fun DiscoverGroupsRow(session: Session, onOpenGroup: (Int) -> Unit) {
                                 scope.launch {
                                     val joined = session.joinGroup(g.id)
                                     joining = null
+                                    // A failed join keeps the card and says so:
+                                    // dropping it read as "the room is gone".
                                     if (joined != null) onOpenGroup(g.id)
-                                    else rooms = rooms.filterNot { it.id == g.id }
+                                    else android.widget.Toast.makeText(ctx, R.string.home_discover_join_failed, android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             }
                             .padding(horizontal = 12.dp, vertical = 4.dp),

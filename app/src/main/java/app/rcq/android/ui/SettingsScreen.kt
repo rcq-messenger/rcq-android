@@ -1,5 +1,6 @@
 package app.rcq.android.ui
 
+import app.rcq.android.BuildConfig
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -660,6 +661,7 @@ private fun SettingsRoot(
                     if (!uinShopEnabled && heldCount == 0) add(SettingsFind.MY_UINS)
                     if (!reportsOn) { add(SettingsFind.REPORT_BUG); add(SettingsFind.MY_REPORTS) }
                     if (!hofOffered) add(SettingsFind.HALL_OF_FAME)
+                    if (BuildConfig.PLAY_STORE) add(SettingsFind.SHARE_APK)
                 }
             }
             SettingsSearchResults(
@@ -925,7 +927,8 @@ private fun SettingsRoot(
                 SettingsRow(Icons.Filled.Autorenew, stringResource(R.string.settings_row_move_uin), modifier = anchor(SettingsFind.MOVE_UIN)) { if (!migrating) confirmMigrate = true }
             }
             Text(
-                stringResource(R.string.cs_move_footer),
+                // The Play build has no shop to point at.
+                stringResource(if (BuildConfig.PLAY_STORE) R.string.cs_move_footer_play else R.string.cs_move_footer),
                 color = c.textSecondary, fontSize = 11.sp,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 14.dp),
                 textAlign = TextAlign.Center,
@@ -1170,7 +1173,9 @@ private fun SettingsRoot(
                 }
                 Divider()
                 val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
-                when {
+                // The Play build updates through Play: no check here, or it says
+                // "latest" about a store it never asked.
+                if (!BuildConfig.PLAY_STORE) when {
                     active != null -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (active.progress < 0f) androidx.compose.material3.LinearProgressIndicator(color = c.accent, modifier = Modifier.fillMaxWidth())
                         else androidx.compose.material3.LinearProgressIndicator(progress = { active.progress }, color = c.accent, modifier = Modifier.fillMaxWidth())

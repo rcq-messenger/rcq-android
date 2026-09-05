@@ -1360,4 +1360,6 @@
     <string name="badge_desc_tester">Testador. Participou do alfa e do beta do RCQ e ajudou a encontrar o que estava quebrado.</string>
     <string name="badge_desc_special">Concedida por uma contribuição excepcional durante o alfa e o beta do RCQ.</string>
     <string name="badge_desc_unknown">Uma marca concedida por esta ilha.</string>
+    <string name="home_discover_join_failed">Não foi possível entrar, tente novamente.</string>
+    <string name="cs_move_footer_play">A ilha escolhe um novo número aleatório para você. Contatos, grupos, chaves e histórico são mantidos.</string>
 </resources>
