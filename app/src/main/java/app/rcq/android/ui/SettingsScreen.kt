@@ -872,13 +872,6 @@ private fun SettingsRoot(
                 // address to hand to somebody. Nothing before the first
                 // handshake has written a record.
                 IslandTrustRow(host = islandHost)
-                // ⚠ The sentence sits on the SECTION, not inside the row: the
-                // row draws nothing until a handshake has written a record,
-                // and a description that disappears with the thing it
-                // describes explains nothing. The line reports a decision
-                // nobody made by hand, so without this it is vocabulary
-                // rather than an answer (founder, 05.09).
-                SectionFooter(stringResource(R.string.island_trust_settings_footer))
                 if (islandRules != null) {
                     Divider()
                     SettingsRow(Icons.Filled.Gavel, stringResource(R.string.island_rules_title)) {
@@ -4391,7 +4384,24 @@ private fun IslandTrustRow(host: String) {
     if (!viaCa && fp == null) return
     Divider()
     if (viaCa || fp == null) {
-        SettingsRow(Icons.Filled.Lock, stringResource(R.string.island_trust_settings_ca), chevron = false) { }
+        // The sentence under the title, inside the row, with the row's own
+        // insets: as a footer of the section it sat flush with the card's
+        // sides and against the next divider (founder, 05.09). Same shape as
+        // the pinned branch below.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(Icons.Filled.Lock, null, tint = c.accent, modifier = Modifier.size(20.dp).padding(top = 1.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.island_trust_settings_ca), color = c.textPrimary, fontSize = 16.sp)
+                Text(
+                    stringResource(R.string.island_trust_settings_footer),
+                    color = c.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+                )
+            }
+        }
         return
     }
     Row(
