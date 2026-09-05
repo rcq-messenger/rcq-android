@@ -814,6 +814,7 @@
     <string name="gi_transfer_err_failed">Не удалось передать группу.</string>
     <string name="gi_you"> (вы)</string>
     <string name="gi_delete">Удалить группу</string>
+    <string name="gi_report_group">Пожаловаться на группу</string>
     <string name="gi_leave">Покинуть группу</string>
     <string name="gi_delete_q">Удалить группу?</string>
     <string name="gi_leave_q">Покинуть группу?</string>

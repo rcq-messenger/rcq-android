@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -172,6 +173,14 @@ fun SitesScreen(
     // was asked for and try it again.
     var typed by remember { mutableStateOf(initialAddress.orEmpty()) }
     var addr by remember { mutableStateOf<SiteAddress?>(null) }
+    var reportSite by remember { mutableStateOf(false) }
+    if (reportSite) addr?.let { a ->
+        ReportDialog(
+            name = a.display,
+            onSubmit = { reason -> scope.launch { session.report(0, reason, "site:${a.name}@${a.host}") }; reportSite = false },
+            onDismiss = { reportSite = false },
+        )
+    }
     var page by remember { mutableStateOf<SitesRepository.SitePage?>(null) }
     var errorCode by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -445,6 +454,20 @@ fun SitesScreen(
                             .padding(end = 6.dp)
                             .size(18.dp)
                             .clickable { addr?.let { share(it.display) } },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // The page being read can be reported from here (founder,
+                    // 05.09). Tagged site:<name>@<host>; the reader does not
+                    // know the owner, so nobody is named and the operator's
+                    // queue offers to freeze the site by name.
+                    Icon(
+                        Icons.Filled.Flag,
+                        stringResource(R.string.home_report),
+                        tint = Color(0xFFE5484D),
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .size(18.dp)
+                            .clickable { reportSite = true },
                     )
                 }
             }

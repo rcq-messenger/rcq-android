@@ -149,6 +149,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     val ownUin = session.uin ?: 0
     val isOwner = group?.ownerUin == ownUin
     var confirmDestructive by remember { mutableStateOf(false) }
+    var reportGroup by remember { mutableStateOf(false) }
     var showAddMember by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showPin by remember { mutableStateOf(false) }
@@ -632,7 +633,32 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     Text(stringResource(if (isOwner) R.string.gi_delete else R.string.gi_leave), color = Color(0xFFE5484D), fontWeight = FontWeight.SemiBold)
                 }
             }
+            // A room can be reported from its own page (founder, 05.09). Tagged
+            // group:<id>; the target is the owner when the island can name one.
+            if (!isOwner) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        stringResource(R.string.gi_report_group),
+                        color = c.textSecondary, fontSize = 13.sp,
+                        modifier = Modifier.clickable { reportGroup = true }.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+            }
         }
+    }
+
+    if (reportGroup) {
+
+        ReportDialog(
+
+            name = group?.name ?: "#$groupId",
+
+            onSubmit = { reason -> scope.launch { session.report(group?.ownerUin ?: 0, reason, "group:$groupId") }; reportGroup = false },
+
+            onDismiss = { reportGroup = false },
+
+        )
+
     }
 
     if (confirmDestructive) {

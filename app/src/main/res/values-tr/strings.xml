@@ -785,6 +785,7 @@
     <string name="gi_transfer_err_failed">Grup devredilemedi.</string>
     <string name="gi_you"> (sen)</string>
     <string name="gi_delete">Grubu sil</string>
+    <string name="gi_report_group">Bu grubu şikayet et</string>
     <string name="gi_leave">Gruptan ayrıl</string>
     <string name="gi_delete_q">Grup silinsin mi?</string>
     <string name="gi_leave_q">Gruptan ayrılınsın mı?</string>

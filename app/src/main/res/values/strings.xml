@@ -818,6 +818,7 @@
     <string name="gi_transfer_err_failed">Could not hand the group over.</string>
     <string name="gi_you"> (you)</string>
     <string name="gi_delete">Delete group</string>
+    <string name="gi_report_group">Report this group</string>
     <string name="gi_leave">Leave group</string>
     <string name="gi_delete_q">Delete group?</string>
     <string name="gi_leave_q">Leave group?</string>

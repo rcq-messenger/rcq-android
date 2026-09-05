@@ -785,6 +785,7 @@
     <string name="gi_transfer_err_failed">No se pudo transferir el grupo.</string>
     <string name="gi_you"> (tú)</string>
     <string name="gi_delete">Eliminar el grupo</string>
+    <string name="gi_report_group">Denunciar este grupo</string>
     <string name="gi_leave">Salir del grupo</string>
     <string name="gi_delete_q">¿Eliminar el grupo?</string>
     <string name="gi_leave_q">¿Salir del grupo?</string>
