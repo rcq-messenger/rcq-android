@@ -1,5 +1,7 @@
 package app.rcq.android.ui
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.wrapContentSize
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -530,10 +532,29 @@ internal fun BadgeMark(kind: String?, size: androidx.compose.ui.unit.Dp = 13.dp)
     // was given for (founder, 05.09). The tap stays on the seal itself; the
     // row around it keeps its own.
     var info by remember { mutableStateOf(false) }
-    Icon(
-        Icons.Filled.Verified, badgeLabel(kind), tint = badgeTint(kind),
-        modifier = Modifier.size(size).clickable { info = true },
-    )
+    // The seal is 11-18dp, a finger is not: a bare `clickable` on the glyph
+    // was a target nobody hit, and the tap fell through to the row (founder,
+    // on the emulator). The outer box takes exactly the seal's place in the
+    // layout; the inner one is laid out larger than its parent (unbounded)
+    // and carries the click, so the target is ~40dp without moving a pixel
+    // of the row. Rows keep their own click outside that.
+    Box(
+        Modifier.size(size).wrapContentSize(unbounded = true),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(maxOf(size, 40.dp))
+                .clip(CircleShape)
+                .clickable(role = Role.Button) { info = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Verified, badgeLabel(kind), tint = badgeTint(kind),
+                modifier = Modifier.size(size),
+            )
+        }
+    }
     if (info) BadgeInfoSheet(kind) { info = false }
 }
 
