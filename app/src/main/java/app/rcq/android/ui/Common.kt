@@ -329,7 +329,22 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
     // rather than at the seven call sites so a new one cannot forget it.
     val mayAnimate by app.rcq.android.data.LocalStores.animateAvatars.collectAsState()
     val animatableGif = bytes?.takeIf { animated && mayAnimate && it.isGif() }
-    Box(Modifier.size(size).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
+    // ⚠ The accent disc is the FALLBACK, not a mat under the picture. Painted on
+    // the container it sat behind every avatar, and a GIF is the one format that
+    // reaches here with an alpha channel (compressImageFor re-encodes everything
+    // else to JPEG, which has none), so a transparent group icon came out on RCQ
+    // green and there was no way to get rid of it (#886). IslandAvatar learned
+    // the same lesson on 24.08 with the founder's flower on a green square.
+    //
+    // `image` covers the animated branch too: rememberGifFirstFrame has a frame
+    // decoded while SafeAnimatedGif is still starting its decoder, so gating on
+    // the picture rather than on the animation leaves no green flash.
+    val hasPicture = animatableGif != null || image != null
+    Box(
+        Modifier.size(size).clip(CircleShape)
+            .then(if (hasPicture) Modifier else Modifier.background(c.accent)),
+        contentAlignment = Alignment.Center,
+    ) {
         when {
             // Animated GIF avatar (chat header only) — pure-Java decoder, safe
             // on every ROM; one instance so no list-wide churn.
