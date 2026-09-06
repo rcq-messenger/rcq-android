@@ -1408,9 +1408,9 @@
     <string name="badge_official">Official</string>
     <string name="badge_tester">Tester</string>
     <string name="badge_special">Special contribution</string>
-    <string name="badge_desc_official">Official account, confirmed by the island: the RCQ team or a source it vouches for.</string>
-    <string name="badge_desc_tester">Tester. Took part in the alpha and beta of RCQ and helped find what was broken.</string>
-    <string name="badge_desc_special">Given for an outstanding contribution during the alpha and beta of RCQ.</string>
+    <string name="badge_desc_official">Official account, confirmed by this island: its team, or a source the island vouches for.</string>
+    <string name="badge_desc_tester">Tester. Took part in testing and helped find what was broken.</string>
+    <string name="badge_desc_special">Given by this island for an outstanding contribution.</string>
     <string name="badge_desc_unknown">A mark given by this island.</string>
     <string name="home_discover_join_failed">Couldn\'t join, try again.</string>
     <string name="cs_move_footer_play">The island picks a fresh random number for you. Contacts, groups, keys and chat history are all kept.</string>

@@ -1354,9 +1354,9 @@
     <string name="badge_official">官方</string>
     <string name="badge_tester">测试者</string>
     <string name="badge_special">特殊贡献</string>
-    <string name="badge_desc_official">官方账号，由岛屿确认：RCQ 团队或岛屿担保的来源。</string>
-    <string name="badge_desc_tester">测试者。参与了 RCQ 的 alpha 和 beta 测试，帮助发现问题。</string>
-    <string name="badge_desc_special">因在 RCQ alpha 和 beta 阶段的杰出贡献而授予。</string>
+    <string name="badge_desc_official">官方账号，由本岛屿确认：本岛团队或本岛担保的来源。</string>
+    <string name="badge_desc_tester">测试者。参与了测试，帮助发现问题。</string>
+    <string name="badge_desc_special">由本岛屿因杰出贡献而授予。</string>
     <string name="badge_desc_unknown">由本岛授予的标记。</string>
     <string name="home_discover_join_failed">无法加入，请重试。</string>
     <string name="cs_move_footer_play">岛屿会为你随机选择一个新号码。联系人、群组、密钥和聊天记录都会保留。</string>
