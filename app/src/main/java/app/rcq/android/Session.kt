@@ -1397,7 +1397,7 @@ class Session(context: Context) {
         socket = newSocket()
         peerIdentityCache.clear()
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
+        noV2Peers.clear(); previewCache.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
         // a socket and a peer number that mean somebody else entirely on the
@@ -4382,8 +4382,22 @@ class Session(context: Context) {
         else appCtx.getString(R.string.gi_transfer_err_rate_limited)
 
     /** Fetch a group invite-card snapshot (no membership needed). */
+    /** Cards for invite links, memoised for the process.
+     *
+     *  ⚠⚠ A pinned message can carry many links, and the sheet composes a chip
+     *  per link, each firing its own preview. The pin in one production room
+     *  holds nineteen; `GET /groups/{id}/preview` allows thirty per minute per
+     *  identity, so opening that sheet twice inside a minute spent the whole
+     *  bucket and every request came back 429. A failure returns null here, and
+     *  null draws the placeholder — so the whole list turned into identical
+     *  "Группа" rows with the generic glyph, which is report #918. Successes
+     *  only: a failure must stay retryable, or one bad minute would poison the
+     *  card for the life of the process.
+     */
+    private val previewCache = java.util.concurrent.ConcurrentHashMap<Int, RcqApi.GroupPreviewOut>()
+
     suspend fun previewGroup(id: Int): RcqApi.GroupPreviewOut? =
-        runCatching { api.previewGroup(id) }.getOrNull()
+        previewCache[id] ?: runCatching { api.previewGroup(id) }.getOrNull()?.also { previewCache[id] = it }
 
     /** Join a group from a shared invite. Already-member is a no-op that just
      *  returns the existing group (the caller jumps into the chat). Returns
