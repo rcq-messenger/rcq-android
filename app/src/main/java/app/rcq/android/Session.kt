@@ -5820,13 +5820,17 @@ class Session(context: Context) {
     fun deleteLocal(msg: ChatMessage) {
         db.delete(msg.id)
         if (msg.groupId != null) {
+            synchronized(msgFlowLock) {
             val cur = _groupMessages.value.toMutableMap()
             cur[msg.groupId] = (cur[msg.groupId] ?: emptyList()).filterNot { it.id == msg.id }
             _groupMessages.value = cur
+            }
         } else {
+            synchronized(msgFlowLock) {
             val cur = _messages.value.toMutableMap()
             cur[msg.peerUin] = (cur[msg.peerUin] ?: emptyList()).filterNot { it.id == msg.id }
             _messages.value = cur
+            }
         }
     }
 
@@ -6937,13 +6941,17 @@ class Session(context: Context) {
         if (!db.insert(msg, honourTombstones = false)) return
         val gid = msg.groupId
         if (gid != null) {
+            synchronized(msgFlowLock) {
             val cur = _groupMessages.value.toMutableMap()
             cur[gid] = ((cur[gid] ?: emptyList()) + msg).sortedBy { it.sentAt }
             _groupMessages.value = cur
+            }
         } else {
+            synchronized(msgFlowLock) {
             val cur = _messages.value.toMutableMap()
             cur[msg.peerUin] = ((cur[msg.peerUin] ?: emptyList()) + msg).sortedBy { it.sentAt }
             _messages.value = cur
+            }
         }
     }
 
@@ -7021,6 +7029,7 @@ class Session(context: Context) {
      *  walk the bubble back a state. */
     private fun applyDeliveredReceipt(peer: Int, ids: List<String>) {
         val idSet = ids.toHashSet()
+        synchronized(msgFlowLock) {
         val cur = _messages.value.toMutableMap()
         val list = cur[peer] ?: return
         var changed = false
@@ -7032,12 +7041,14 @@ class Session(context: Context) {
             } else m
         }
         if (changed) { cur[peer] = updated; _messages.value = cur }
+        }
     }
 
     /** Inbound read receipt: flip our own sent messages to READ once [peer]
      *  reports seeing them. Only touches `fromMe` bubbles. */
     private fun applyReadReceipt(peer: Int, ids: List<String>) {
         val idSet = ids.toHashSet()
+        synchronized(msgFlowLock) {
         val cur = _messages.value.toMutableMap()
         val list = cur[peer] ?: return
         var changed = false
@@ -7049,6 +7060,7 @@ class Session(context: Context) {
             } else m
         }
         if (changed) { cur[peer] = updated; _messages.value = cur }
+        }
     }
 
     /** Declared OUTER envelope_type for a control envelope — mirrors iOS
@@ -9111,6 +9123,20 @@ class Session(context: Context) {
      *  two or three "о-оу". Whoever holds the lock does the compare-and-swap
      *  alone, and the ones behind it compare against the already-updated list
      *  and find nothing to announce. */
+    /// ⚠⚠ Every mutation of `_messages` and `_groupMessages` runs under this.
+    /// They are `Map<Int, List<ChatMessage>>` in a StateFlow, and every mutator
+    /// copied the WHOLE map, changed one key and wrote the map back. Four
+    /// writers do that concurrently — `handleEvent` on OkHttp's websocket
+    /// reader thread, and three drains launched side by side by `syncGraph()`
+    /// — and only two of them shared a lock. One late write-back reverted the
+    /// map to that writer's snapshot and silently deleted every row the others
+    /// had stored since, which is why a burst of three messages could vanish
+    /// at once. SQLite kept them (`db.insert` is its own transaction) and the
+    /// unread badge kept counting them (it writes a different map), so the
+    /// chat showed nothing while the row said 3, and a restart brought them
+    /// all back from disk. Reports #915 and #917 on 0.173.
+    private val msgFlowLock = Any()
+
     private val contactsRefreshLock = Mutex()
 
     // Explicit Unit: the body bails out early on an account switch, and a bare
@@ -9143,11 +9169,19 @@ class Session(context: Context) {
         // rows we kept from that answer. The hash covers presence too, so a
         // status that moved while we were away comes back as a full body.
         val answer = api.contactsIfChanged(rosterEtag)
-        val fetched = answer.rows ?: rosterServed ?: api.contacts()
-        if (answer.rows != null) {
-            rosterServed = answer.rows
-            rosterEtag = answer.etag
-        }
+        // ⚠⚠ 304 means "nothing changed on the island", and the ONLY correct
+        // response is to leave the list alone. Re-folding the rows kept from
+        // the last full answer looked equivalent and is not: presence arrives
+        // over the websocket and is applied to `_contacts` directly, and a
+        // `presence` frame ALSO triggers this refresh (line ~9769). So the
+        // sequence was: contact comes online, the frame paints them green, the
+        // refresh it triggered answers 304, and the stored snapshot painted
+        // them offline again half a second later. Report #909, "the flower
+        // goes green for a second and then red", on 0.173 within hours.
+        if (answer.rows == null) return@withLock
+        val fetched = answer.rows
+        rosterServed = answer.rows
+        rosterEtag = answer.etag
         // ⚠⚠ The pin above guarded ONLY the vault mirror. Everything between
         // here and the end of this function writes the roster somewhere else:
         // the live flow the screens render, and the plaintext cache on disk
@@ -10055,9 +10089,11 @@ class Session(context: Context) {
         val row = if (ownNote) msg.copy(fromMe = true) else msg
         // INSERT OR IGNORE dedups by envelope UUID (WS vs queue overlap).
         if (!db.insert(row)) return false
+        synchronized(msgFlowLock) {
         val cur = _messages.value.toMutableMap()
         cur[row.peerUin] = ((cur[row.peerUin] ?: emptyList()) + row).sortedBy { it.sentAt }
         _messages.value = cur
+        }
         // Not everything that lands in a thread is something to catch up on.
         // A finished call is a record of something both people were present
         // for; only a missed one is still owed attention.
@@ -10329,26 +10365,32 @@ class Session(context: Context) {
     private fun updateMessageState(id: String, peer: Int, state: DeliveryState) {
         if (state == DeliveryState.FAILED) armFailedRetryTimer()
         db.updateState(id, state)
+        synchronized(msgFlowLock) {
         val cur = _messages.value.toMutableMap()
         cur[peer] = (cur[peer] ?: emptyList()).map { if (it.id == id) it.copy(state = state) else it }
         _messages.value = cur
+        }
     }
 
     private fun storeGroup(msg: ChatMessage) {
         if (!db.insert(msg)) return
         val gid = msg.groupId ?: return
+        synchronized(msgFlowLock) {
         val cur = _groupMessages.value.toMutableMap()
         cur[gid] = ((cur[gid] ?: emptyList()) + msg).sortedBy { it.sentAt }
         _groupMessages.value = cur
+        }
         bumpUnreadIfInbound(msg, LocalStores.groupThread(gid))
     }
 
     private fun updateGroupMsgState(groupId: Int, id: String, state: DeliveryState) {
         if (state == DeliveryState.FAILED) armFailedRetryTimer()
         db.updateState(id, state)
+        synchronized(msgFlowLock) {
         val cur = _groupMessages.value.toMutableMap()
         cur[groupId] = (cur[groupId] ?: emptyList()).map { if (it.id == id) it.copy(state = state) else it }
         _groupMessages.value = cur
+        }
     }
 
     /** Set/clear [reactorUin]'s reaction on a 1:1 message (one reaction per
@@ -10386,6 +10428,7 @@ class Session(context: Context) {
     }
 
     private fun addPeerReaction(peer: Int, targetId: String, reactorUin: Int, asset: String?) {
+        synchronized(msgFlowLock) {
         val cur = _messages.value.toMutableMap()
         val list = cur[peer] ?: return
         var changed = false
@@ -10410,31 +10453,37 @@ class Session(context: Context) {
             } else m
         }
         if (changed) { cur[peer] = updated; _messages.value = cur }
+        }
     }
 
     /** Replace a message's body in a thread flow (+ DB), flagging it edited.
      *  Caller enforces who's allowed to edit (own send, or inbound author). */
     private fun editInFlow(flow: MutableStateFlow<Map<Int, List<ChatMessage>>>, key: Int, id: String, text: String) {
+        synchronized(msgFlowLock) {
         val cur = flow.value.toMutableMap()
         val list = cur[key] ?: return
         if (list.none { it.id == id }) return
         db.updateBody(id, text)
         cur[key] = list.map { if (it.id == id) it.copy(body = text, edited = true) else it }
         flow.value = cur
+        }
     }
 
     /** Remove a message from a thread flow (+ DB). Caller enforces authority. */
     private fun deleteInFlow(flow: MutableStateFlow<Map<Int, List<ChatMessage>>>, key: Int, id: String) {
+        synchronized(msgFlowLock) {
         val cur = flow.value.toMutableMap()
         val list = cur[key] ?: return
         if (list.none { it.id == id }) return
         db.delete(id)
         cur[key] = list.filterNot { it.id == id }
         flow.value = cur
+        }
     }
 
     /** Group analogue of [addPeerReaction]. */
     private fun addGroupReaction(groupId: Int, targetId: String, reactorUin: Int, asset: String?) {
+        synchronized(msgFlowLock) {
         val cur = _groupMessages.value.toMutableMap()
         val list = cur[groupId] ?: return
         var changed = false
@@ -10459,6 +10508,7 @@ class Session(context: Context) {
             } else m
         }
         if (changed) { cur[groupId] = updated; _groupMessages.value = cur }
+        }
     }
 
     /** Decrypt an inbound sealed payload, dispatching on the outer wire
