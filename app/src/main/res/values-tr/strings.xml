@@ -1356,9 +1356,9 @@
     <string name="badge_official">Resmi</string>
     <string name="badge_tester">Test kullanıcısı</string>
     <string name="badge_special">Özel katkı</string>
-    <string name="badge_desc_official">Resmi hesap, ada tarafından onaylanmış: RCQ ekibi veya adanın kefil olduğu bir kaynak.</string>
-    <string name="badge_desc_tester">Test kullanıcısı. RCQ alfa ve beta sürecine katıldı ve bozuk olanı bulmaya yardım etti.</string>
-    <string name="badge_desc_special">RCQ alfa ve beta sürecindeki olağanüstü katkı için verilir.</string>
+    <string name="badge_desc_official">Resmi hesap, bu ada tarafından onaylanmış: adanın ekibi veya adanın kefil olduğu bir kaynak.</string>
+    <string name="badge_desc_tester">Test kullanıcısı. Testlere katıldı ve bozuk olanı bulmaya yardım etti.</string>
+    <string name="badge_desc_special">Bu ada tarafından olağanüstü katkı için verildi.</string>
     <string name="badge_desc_unknown">Bu adanın verdiği bir işaret.</string>
     <string name="home_discover_join_failed">Katılamadı, tekrar deneyin.</string>
     <string name="cs_move_footer_play">Ada size yeni bir rastgele numara seçer. Kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur.</string>

@@ -2098,8 +2098,14 @@ class Session(context: Context) {
                 // into at the moment. Not in a decoy session: nothing about
                 // one is written to disk, here as everywhere.
                 if (!app.rcq.android.data.AccountManager.isDecoyMode) {
+                    app.rcq.android.data.IslandCards.markActive(askedHost)
                     app.rcq.android.data.IslandCards.record(
                         appCtx, askedHost, info.name, info.logo_version,
+                        info.badges.mapValues {
+                            app.rcq.android.data.IslandCards.BadgeText(
+                                it.value.label, it.value.description, it.value.color,
+                            )
+                        },
                     )
                 }
                 val wasLogReader = groupLogReader

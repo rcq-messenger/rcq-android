@@ -1689,6 +1689,28 @@ class RcqApi(
          *  the same permissive default the capability flags take. */
         val logo_version: String = "",
         val capabilities: ServerCapabilities = ServerCapabilities(),
+        /** What THIS island calls its badges, keyed by kind.
+         *
+         *  ⚠ The client's built-in strings are the flagship's words, and on
+         *  somebody else's island they are a lie: the stock description for
+         *  `official` names the RCQ team as the thing being vouched for, on an
+         *  island the RCQ team does not run. An operator can now say what their
+         *  own marks mean, and a kind they invented gets a name at all.
+         *
+         *  Empty map on an island older than the field, and an empty entry for
+         *  a kind the operator has not renamed: both fall back to the built-in
+         *  strings, so nothing changes for anyone who does not set it. */
+        val badges: Map<String, BadgeTextResponse> = emptyMap(),
+    )
+
+    /** One badge's words, as its island says them. Any field may be empty,
+     *  which means "use your own". */
+    data class BadgeTextResponse(
+        val label: String = "",
+        val description: String = "",
+        /** A hex colour, so an island can mint a kind the clients have never
+         *  seen and still have it look like something. */
+        val color: String = "",
     )
 
 

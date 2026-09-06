@@ -566,22 +566,54 @@ internal fun badgeTintOf(kind: String, fallback: Color): Color = when (kind) {
 }
 
 @Composable
-private fun badgeTint(kind: String): Color = badgeTintOf(kind, RcqTheme.colors.textSecondary)
+private fun badgeTint(kind: String): Color {
+    // An island can colour a kind this client has never heard of. Parsed
+    // defensively: anything that is not #RRGGBB or #AARRGGBB falls through to
+    // the built-in colour rather than throwing inside a list row.
+    val hex = islandBadge(kind)?.color?.trim().orEmpty()
+    if (hex.startsWith("#") && (hex.length == 7 || hex.length == 9)) {
+        runCatching { return Color(android.graphics.Color.parseColor(hex)) }
+    }
+    return badgeTintOf(kind, RcqTheme.colors.textSecondary)
+}
+
+/**
+ * ⚠ THE ISLAND'S OWN WORDS FIRST, and this client's strings only as a
+ * fallback.
+ *
+ * The built-in text is the flagship's: `badge_desc_official` names the RCQ
+ * team as the thing being vouched for. On somebody else's island that is
+ * simply false, and an operator who mints a kind of their own got the raw slug
+ * with no explanation at all. `/server/info` now carries what the island calls
+ * its marks, and this is where that lands.
+ *
+ * A blank field is "I have not renamed this one", not "call it nothing", so
+ * each of the three falls back on its own.
+ */
+@Composable
+private fun islandBadge(kind: String): app.rcq.android.data.IslandCards.BadgeText? =
+    app.rcq.android.data.IslandCards.badgeText(app.rcq.android.data.IslandCards.activeHost(), kind)
 
 @Composable
-internal fun badgeLabel(kind: String): String = when (kind) {
-    "official" -> stringResource(R.string.badge_official)
-    "tester" -> stringResource(R.string.badge_tester)
-    "special" -> stringResource(R.string.badge_special)
-    else -> kind
+internal fun badgeLabel(kind: String): String {
+    islandBadge(kind)?.label?.takeIf { it.isNotBlank() }?.let { return it }
+    return when (kind) {
+        "official" -> stringResource(R.string.badge_official)
+        "tester" -> stringResource(R.string.badge_tester)
+        "special" -> stringResource(R.string.badge_special)
+        else -> kind
+    }
 }
 
 @Composable
-private fun badgeDescription(kind: String): String = when (kind) {
-    "official" -> stringResource(R.string.badge_desc_official)
-    "tester" -> stringResource(R.string.badge_desc_tester)
-    "special" -> stringResource(R.string.badge_desc_special)
-    else -> stringResource(R.string.badge_desc_unknown)
+private fun badgeDescription(kind: String): String {
+    islandBadge(kind)?.description?.takeIf { it.isNotBlank() }?.let { return it }
+    return when (kind) {
+        "official" -> stringResource(R.string.badge_desc_official)
+        "tester" -> stringResource(R.string.badge_desc_tester)
+        "special" -> stringResource(R.string.badge_desc_special)
+        else -> stringResource(R.string.badge_desc_unknown)
+    }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
