@@ -40,6 +40,11 @@ object Vault {
      *  the same way, so the island still sees only 32 hex characters. */
     const val SECTIONS = "sections"
 
+    /** Contacts on OTHER islands. Not a mirror of anything: there is no
+     *  server-side row for a cross-island peer, so this slot is the only copy
+     *  that outlives the device. See [app.rcq.android.data.CrossIslandVault]. */
+    const val CROSSISLAND = "crossisland"
+
     /** My profile key: the AES key my avatar blob is sealed under, mirrored
      *  here so a second install of this account reuses it instead of minting a
      *  rival one (docs/profile-key-design.md).
