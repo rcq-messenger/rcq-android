@@ -33,6 +33,7 @@ import app.rcq.android.net.CrossIslandSender
 import app.rcq.android.net.DeviceId
 import app.rcq.android.net.JwtPeek
 import app.rcq.android.net.CrossIslandStore
+import app.rcq.android.net.GuestCardStore
 import app.rcq.android.net.VisitedIslandsStore
 import app.rcq.android.net.GroupLogPage
 import app.rcq.android.net.Multihome
@@ -940,7 +941,9 @@ class Session(context: Context) {
         // Federation (F2): local cross-island contact store (per-account;
         // AccountManager.init has already run in MainActivity.onCreate).
         CrossIslandStore.init(appCtx)
+        GuestCardStore.init(appCtx)
         CrossIslandStore.bindAccount(AccountManager.activeId.value)
+        GuestCardStore.bindAccount(AccountManager.activeId.value)
         // Cross-island groups (§5c): guest registrations + foreign-group aliases.
         VisitedIslandsStore.init(appCtx)
         VisitedIslandsStore.bindAccount(AccountManager.activeId.value)
@@ -1364,6 +1367,7 @@ class Session(context: Context) {
         LocalStores.bindAccount(accountId)
         app.rcq.android.data.VisitStore.bindAccount(accountId)
         CrossIslandStore.bindAccount(accountId)
+        GuestCardStore.bindAccount(accountId)
         VisitedIslandsStore.bindAccount(accountId)
     }
 
@@ -5393,6 +5397,7 @@ class Session(context: Context) {
             LocalStores.bindAccount(null)
             app.rcq.android.data.VisitStore.bindAccount(null)
             CrossIslandStore.bindAccount(null)
+            GuestCardStore.bindAccount(null)
             VisitedIslandsStore.bindAccount(null)
             // Nothing is signed in any more, so the two device-wide island
             // caches are now a plaintext list of every island this device ever
@@ -7642,8 +7647,15 @@ class Session(context: Context) {
 
     private suspend fun recipientKey(uin: Int): ByteArray {
         peerIdentityCache[uin]?.let { return it }
+        // ⚠⚠ THE FUNNEL. Every 1:1 seal on this client comes through here, and
+        // the fallback below is the one the closed-island call-site map flagged
+        // first: a peer who is NOT in the roster is sealed to with a key
+        // fetched from /users/{uin}/info. On a closed island that lookup is
+        // refused unless we present the card they gave us, so replying to a
+        // stranger who wrote first — the exact case the card exists for — dies
+        // silently without this argument.
         val keyB64 = _contacts.value.firstOrNull { it.uin == uin }?.identityKey
-            ?: api.userInfo(uin).identity_key
+            ?: api.userInfo(uin, app.rcq.android.net.GuestCardStore.theirCard(uin)).identity_key
             ?: throw IllegalStateException("peer has no identity key")
         return Base64.decode(keyB64, Base64.NO_WRAP).also { peerIdentityCache[uin] = it }
     }
@@ -9084,6 +9096,14 @@ class Session(context: Context) {
             val gone = if (ci != null) {
                 CrossIslandSender.peerMissing(ci.host, uin)
             } else {
+                // ⚠ NO CARD HERE, deliberately. This asks "has this account
+                // gone away", and a closed island answers a caller with no
+                // card using the SAME 404 it uses for a number that never
+                // existed. Presenting a card would make the answer depend on
+                // whether we happen to hold one, so an account we simply
+                // cannot see would be reported as deleted and its thread
+                // marked gone. The ambiguity is the point of the refusal; this
+                // caller has to live with it rather than paper over it.
                 runCatching { api.userInfo(uin) }.exceptionOrNull()
                     ?.message?.startsWith("HTTP 404") == true
             }
@@ -9094,7 +9114,7 @@ class Session(context: Context) {
     /** Resolve ONE exact UIN (the `#911` search form). Null when nobody holds
      *  that number, which is a different answer from "no name matched". */
     suspend fun lookupUin(uin: Int): RcqApi.UserInfo? =
-        runCatching { api.userInfo(uin) }.getOrNull()
+        runCatching { api.userInfo(uin, GuestCardStore.theirCard(uin)) }.getOrNull()
 
     /** What the island said about a number — three answers, not two.
      *
@@ -9116,7 +9136,7 @@ class Session(context: Context) {
     }
 
     suspend fun lookupUinDetailed(uin: Int): UinLookup =
-        runCatching { api.userInfo(uin) }.fold(
+        runCatching { api.userInfo(uin, GuestCardStore.theirCard(uin)) }.fold(
             onSuccess = { UinLookup.Found(it) },
             onFailure = {
                 if (it.message?.startsWith("HTTP 404") == true) UinLookup.Absent else UinLookup.Unknown

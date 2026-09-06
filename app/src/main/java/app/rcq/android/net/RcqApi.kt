@@ -530,8 +530,29 @@ class RcqApi(
         val last_name: String? = null,
     )
 
-    suspend fun userInfo(uin: Int): UserInfo = withContext(Dispatchers.IO) {
-        get("/users/$uin/info", authed = true, UserInfo::class.java)
+    /** [card] is a guest card, presented on a CLOSED island. Without it that
+     *  island answers "no such user" for somebody who has not shared one, and
+     *  the refusal is deliberately indistinguishable from a number that does
+     *  not exist. See net/GuestCardStore.kt. */
+    suspend fun userInfo(uin: Int, card: String? = null): UserInfo = withContext(Dispatchers.IO) {
+        get("/users/$uin/info", authed = true, UserInfo::class.java, card)
+    }
+
+    // Guest cards (closed islands). The island is only ever told a DIGEST.
+
+    data class GuestCardIn(val card_hash: String, val label: String?)
+
+    suspend fun addGuestCard(hash: String, label: String? = null) = withContext(Dispatchers.IO) {
+        val body = gson.toJson(GuestCardIn(hash, label)).toRequestBody(JSON)
+        val b = Request.Builder().url("$baseUrl/guest-cards").post(body)
+        token?.let { b.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+        }
+    }
+
+    suspend fun revokeGuestCard(hash: String) = withContext(Dispatchers.IO) {
+        deleteNoContent("/guest-cards/$hash", authed = true)
     }
 
     /** Server-side people search (nickname / name / city / exact UIN). Powers
@@ -2207,9 +2228,13 @@ private class SealingBody(
         }
     }
 
-    private fun <T> get(path: String, authed: Boolean, type: Class<T>): T {
+    private fun <T> get(path: String, authed: Boolean, type: Class<T>, card: String? = null): T {
         val builder = Request.Builder().url("$baseUrl$path").get()
         if (authed) token?.let { builder.header("Authorization", "Bearer $it") }
+        // ⚠ A guest card goes in a HEADER, never the path or a query string.
+        // It is a live credential with no expiry, and a query string is an
+        // access log: that is how session tokens reached journald until 22.08.
+        card?.takeIf { it.isNotBlank() }?.let { builder.header("X-RCQ-Guest-Card", it) }
         return execute(builder.build(), type)
     }
 
