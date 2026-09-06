@@ -9346,6 +9346,16 @@ class Session(context: Context) {
         }
     }
 
+    /**
+     * The same context, for the cross-island slot. Built through [sectionsCtx]
+     * so the duress guard, the store id and the `stillOurs` conditions are the
+     * ONE set of rules rather than two that can drift apart.
+     */
+    private fun crossIslandCtx(): app.rcq.android.data.CrossIslandVault.Ctx? {
+        val s = sectionsCtx() ?: return null
+        return app.rcq.android.data.CrossIslandVault.Ctx(s.api, s.identityPriv, s.uin, s.account, s.scope, s.stillOurs)
+    }
+
     /** Apply one local edit to the sections tree and get it to the island.
      *  Throws [app.rcq.android.data.Sections.SectionsException] from the caps
      *  before anything is saved, so the caller can say "this section is full".
@@ -9423,6 +9433,17 @@ class Session(context: Context) {
                     runCatching { app.rcq.android.data.ContactsVault.read(ctx.api, ctx.identityPriv) }
                     vaultMirrored = null
                 }
+                if (!ctx.stillOurs()) return@launch
+                // ⚠ Unconditionally, unlike the two above. This slot is not a
+                // mirror of anything the island can be asked for again: an
+                // unchanged version means the island has not moved, NOT that it
+                // holds what this device holds, and the device whose write
+                // failed is exactly the one carrying rows nothing else has. The
+                // sync is a no-op when both sides already agree.
+                crossIslandCtx()?.let {
+                    app.rcq.android.data.CrossIslandVault.arm(it)
+                    app.rcq.android.data.CrossIslandVault.sync(it)
+                }
             } finally {
                 vaultSweepInFlight.set(false)
             }
@@ -9455,6 +9476,11 @@ class Session(context: Context) {
                 runCatching { app.rcq.android.data.ContactsVault.read(ctx.api, ctx.identityPriv) }
                 vaultMirrored = null
             }
+            return
+        }
+        if (slot == app.rcq.android.data.CrossIslandVault.slotOf(ctx.identityPriv)) {
+            if (version > 0L && version <= LocalStores.vaultSlotVersion(slot)) return
+            crossIslandCtx()?.let { c -> scope.launch { app.rcq.android.data.CrossIslandVault.sync(c) } }
         }
     }
 
@@ -9483,7 +9509,9 @@ class Session(context: Context) {
         val who = store.uin ?: return
         LocalStores.forgetVaultSlotVersion(app.rcq.android.data.SectionsVault.slotOf(ik))
         LocalStores.setVaultContactsVersion(0)
+        LocalStores.forgetVaultSlotVersion(app.rcq.android.data.CrossIslandVault.slotOf(ik))
         app.rcq.android.data.SectionsVault.retire(who)
+        app.rcq.android.data.CrossIslandVault.retire(who)
         contactsVaultRetired = true
         android.util.Log.w("RCQvault", "the account rotated its identity elsewhere; this derivation is retired")
     }

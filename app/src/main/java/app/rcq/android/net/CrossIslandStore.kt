@@ -54,6 +54,11 @@ object CrossIslandStore {
     private val gson = Gson()
     private const val KEY = "contacts.v1"
 
+    /** Removals have to be remembered, or the next vault sync fetches the row
+     *  straight back off the island and deleting a cross-island contact undoes
+     *  itself on the following boot. Per account, next to the rows. */
+    private const val GRAVES = "graves.v1"
+
     /** §5e inbound bounds. A media id is a client-chosen uuid4 (with or without
      *  dashes) or an island-assigned id; it goes straight into `/media/{id}`,
      *  so the charset is restricted on the way IN. Identical to web's gate. */
@@ -76,6 +81,55 @@ object CrossIslandStore {
     }
 
     private fun storageKey(accountId: String) = "$accountId.$KEY"
+    private fun gravesKey(accountId: String) = "$accountId.$GRAVES"
+
+    /** A local write the vault mirror has to publish. Set by this store,
+     *  cleared by nothing: the mirror registers a listener rather than being
+     *  imported here, because this file is also read by the push receiver,
+     *  where there is no session and no vault. */
+    @Volatile private var listener: ((removed: Pair<Int, String>?) -> Unit)? = null
+
+    fun setListener(fn: ((removed: Pair<Int, String>?) -> Unit)?) { listener = fn }
+
+    private fun notify(removed: Pair<Int, String>? = null) {
+        runCatching { listener?.invoke(removed) }
+    }
+
+    fun tombstones(): Map<String, Long> {
+        val a = acct ?: return emptyMap()
+        if (!::prefs.isInitialized) return emptyMap()
+        val raw = prefs.getString(gravesKey(a), "{}") ?: "{}"
+        val type = object : TypeToken<MutableMap<String, Long>>() {}.type
+        return runCatching { gson.fromJson<MutableMap<String, Long>>(raw, type) }.getOrNull() ?: emptyMap()
+    }
+
+    private fun bury(uin: Int, host: String) {
+        val a = acct ?: return
+        if (!::prefs.isInitialized) return
+        val g = HashMap(tombstones())
+        g[ciKey(uin, host)] = System.currentTimeMillis()
+        prefs.edit().putString(gravesKey(a), gson.toJson(g)).apply()
+    }
+
+    /**
+     * The vault sync writing the merged set back. Deliberately silent: it is
+     * the listener's own result coming home, and announcing it would loop.
+     *
+     * ⚠ Takes the account explicitly and drops the write when the stores have
+     * been rebound since the merge started (an account switch, or the duress
+     * PIN): the rows about to land are the ones the SYNCING account's slot
+     * holds, and writing them into whoever is bound now would hand one
+     * account's cross-island contacts to another.
+     */
+    fun replaceAll(accountId: String, rows: List<Contact>, graves: Map<String, Long>) {
+        if (!::prefs.isInitialized || acct != accountId) return
+        val m = LinkedHashMap<String, Contact>()
+        for (r in rows) m[ciKey(r.uin, r.host)] = r
+        prefs.edit()
+            .putString(storageKey(accountId), gson.toJson(m))
+            .putString(gravesKey(accountId), gson.toJson(graves))
+            .apply()
+    }
 
     private fun ciKey(uin: Int, host: String) = "$uin@${host.lowercase()}"
 
@@ -93,6 +147,7 @@ object CrossIslandStore {
 
     fun save(c: Contact) {
         val m = loadAll(); m[ciKey(c.uin, c.host)] = c; saveAll(m)
+        notify()
     }
 
     fun get(uin: Int, host: String): Contact? = loadAll()[ciKey(uin, host)]
@@ -154,6 +209,7 @@ object CrossIslandStore {
         if (next == cur) return false
         m[k] = next
         prefs.edit().putString(storageKey(a), gson.toJson(m)).commit()
+        notify()
         return true
     }
 
@@ -179,10 +235,14 @@ object CrossIslandStore {
 
     fun remove(uin: Int, host: String) {
         val m = loadAll(); m.remove(ciKey(uin, host)); saveAll(m)
+        bury(uin, host)
+        notify(uin to host)
     }
 
     /** Wipe a specific (possibly non-active) account's contacts (burn / local delete). */
     fun wipeAccount(accountId: String) {
-        if (::prefs.isInitialized) prefs.edit().remove(storageKey(accountId)).apply()
+        if (::prefs.isInitialized) {
+            prefs.edit().remove(storageKey(accountId)).remove(gravesKey(accountId)).apply()
+        }
     }
 }
