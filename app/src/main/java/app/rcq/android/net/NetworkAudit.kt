@@ -74,7 +74,7 @@ object NetworkAudit {
 
     data class Report(val lines: List<Line>, val verdict: Verdict, val compact: String)
 
-    enum class Verdict { ALL_FINE, CALLS_BLOCKED, NO_INTERNET, BY_NAME, BY_ADDRESS, UNCLEAR }
+    enum class Verdict { ALL_FINE, CALLS_BLOCKED, REALTIME_DOWN, NO_INTERNET, BY_NAME, BY_ADDRESS, UNCLEAR }
 
     /** Outcome of a single connection attempt, kept coarse on purpose. */
     private enum class Reach {
@@ -200,7 +200,19 @@ object NetworkAudit {
         }
     }.getOrDefault(false)
 
-    fun run(islandHost: String): Report {
+    /** @param realtimeUp the app's own live-channel state, or null when the
+     *   caller has none to give.
+     *
+     *  ⚠⚠ THE INSTRUMENT COULD NOT SEE THE FAULT IT IS OPENED FOR. Everything
+     *  measured here is a request/response over TCP or UDP; the live socket was
+     *  not among them and had no field in the compact line. So a person
+     *  watching the status blink red, with messages arriving as pushes and not
+     *  appearing in the chat, ran the full check and read "Остров отвечает
+     *  напрямую. Здесь ничего не режется." — which was true and useless
+     *  (#922). Worse, opening this screen brings the app to the foreground,
+     *  which re-dials the socket, so the instrument silently REPAIRED what it
+     *  refused to measure and the person was told nothing had been wrong. */
+    fun run(islandHost: String, realtimeUp: Boolean? = null): Report {
         val lines = ArrayList<Line>()
         fun add(name: String, r: Pair<Reach, String>) {
             lines += Line(name, r.first == Reach.OPEN, "${r.first.name.lowercase()} (${r.second})")
@@ -400,8 +412,20 @@ object NetworkAudit {
             }
         }
 
+        realtimeUp?.let {
+            lines += Line(
+                "канал реального времени",
+                it,
+                if (it) "открыт" else "закрыт, сообщения приходят только по запросу",
+            )
+        }
+
         val verdict = when {
             !controlOk && direct.first == Reach.BLOCKED -> Verdict.NO_INTERNET
+            // The island answering an HTTP request says nothing about the live
+            // channel, and the live channel is what delivers a message the
+            // moment it is sent. Reachable-but-mute is its own answer.
+            direct.first == Reach.OPEN && realtimeUp == false -> Verdict.REALTIME_DOWN
             // ⚠ Everything can be reachable and calls still impossible: the
             // media relay is a separate host on separate ports, and no other
             // check here touches it. Saying ALL_FINE to someone whose calls
@@ -424,7 +448,11 @@ object NetworkAudit {
             // last-call fields were, /4 for `cip` (carrier address under our
             // name): a line without them is from an older build, not from a
             // network that lacked them.
-            append("RCQ-NET/4 ")
+            // /5 adds `ws`, the live channel: a line without it is from a
+            // build that could not see the channel, not from a session that
+            // had none.
+            append("RCQ-NET/5 ")
+            realtimeUp?.let { append("ws:${if (it) "up" else "DOWN"} ") }
             append(if (controlOk) "ctl:ok " else "ctl:dead ")
             append("dns:${if (islandIp != null) "ok" else "fail"} ")
             append("dir:${short(direct.first)} ")

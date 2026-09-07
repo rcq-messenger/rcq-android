@@ -274,6 +274,22 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         }
     }
 
+    /** Who sent [id] and whether it was us, or null when no such message is on
+     *  this device.
+     *
+     *  ⚠ Same distinction as [reactionsOf], and it exists for the same reason:
+     *  an incoming edit or delete used to be applied only when its target was
+     *  loaded in memory, so a correction to anything older than the newest page
+     *  was thrown away and never came back — the sender saw "edited", the other
+     *  phone kept the original text forever (#920). Authority has to be checked
+     *  against the row on disk, not against a list that may not be loaded. */
+    fun authorOf(id: String): Pair<Int, Boolean>? {
+        db.query("messages", arrayOf("sender_uin", "from_me"), "id = ?", arrayOf(id), null, null, null, "1").use { c ->
+            if (!c.moveToFirst()) return null
+            return c.getInt(0) to (c.getInt(1) != 0)
+        }
+    }
+
     fun updateReactions(id: String, reactions: Map<Int, String>) {
         db.update("messages", ContentValues().apply { put("reactions", reactionsToJson(reactions)) }, "id = ?", arrayOf(id))
     }

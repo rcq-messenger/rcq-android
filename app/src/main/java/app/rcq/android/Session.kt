@@ -1549,6 +1549,31 @@ class Session(context: Context) {
                 runCatching { drainVisitedQueuesOnce(ep) }
             }
         }
+        // ⚠⚠ THE PRIMARY ISLAND'S MAILBOX HAD NO TIMER AT ALL. Backup and
+        // visited islands are polled every 30s by the loop above; the island
+        // this account actually lives on was drained only on start, on the
+        // socket reaching connected, on the app coming to the foreground, on a
+        // push, on a capability change and on entering a room. Every one of
+        // those is an EVENT. So the single case where nothing fires is the one
+        // that matters: the socket is broken while the app sits open in front
+        // of you. Then nothing asks the island for anything, and the only
+        // cures are backgrounding the app or restarting it — which is exactly
+        // what the reports describe people doing (#922, "при любых неполадках
+        // очередь должна быть стабильной", and #921's screenshots of a message
+        // present on the desktop and absent on the phone).
+        //
+        // Only while DISCONNECTED, so a healthy session pays nothing: with the
+        // socket up, messages arrive over it and this loop does not run.
+        scope.launch {
+            val ep = epochNow()
+            while (stillOn(ep)) {
+                delay(30_000)
+                if (!stillOn(ep)) return@launch
+                if (duressViewUp || _connected.value) continue
+                runCatching { drainQueue() }
+                runCatching { drainGroupLog() }
+            }
+        }
         // Disappearing-message reaper: expire messages whose TTL lapsed while a
         // chat is open. 10s cadence keeps a 1-minute timer visibly honest
         // without busy-waiting; the on-load sweep covers longer closed gaps.
@@ -3465,13 +3490,14 @@ class Session(context: Context) {
      *  the whole conversation back and "delete" had quietly meant "hide". */
     fun clearPeerThread(uin: Int) {
         db.deletePeerThread(uin)
-        _messages.value = _messages.value - uin
+        // Under the lock: `- uin` reads the whole map and writes it back.
+        synchronized(msgFlowLock) { _messages.value = _messages.value - uin }
         LocalStores.clearUnread(LocalStores.peerThread(uin))
     }
 
     fun clearGroupThread(groupId: Int) {
         db.deleteGroupThread(groupId)
-        _groupMessages.value = _groupMessages.value - groupId
+        synchronized(msgFlowLock) { _groupMessages.value = _groupMessages.value - groupId }
         LocalStores.clearUnread(LocalStores.groupThread(groupId))
     }
 
@@ -5135,16 +5161,22 @@ class Session(context: Context) {
                     // admin needs the cached roster. An OLDER client ignores a
                     // foreign delete and keeps the message — nothing breaks, it
                     // just stays there. 1:1 deletes remain author-only.
-                    val t = _groupMessages.value[groupId]?.firstOrNull { it.id == env.targetId }
-                    if (t != null) {
-                        val byAuthor = t.senderUin == dec.senderUin
+                    // ⚠ Authority off the ROW, not off the loaded page. The
+                    // in-memory lookup was the gate, so a retraction for
+                    // anything not currently loaded was silently ignored
+                    // (#920). `authorOf` answers for every message on this
+                    // device, and null means we simply do not have it.
+                    val author = db.authorOf(env.targetId)?.first
+                    if (author != null) {
+                        val byAuthor = author == dec.senderUin
                         val byModerator = group(groupId)?.moderator(dec.senderUin) == true
                         if (byAuthor || byModerator) deleteInFlow(_groupMessages, groupId, env.targetId)
                     }
                 }
                 is Envelope.Edit -> {
-                    val t = _groupMessages.value[groupId]?.firstOrNull { it.id == env.targetId }
-                    if (t != null && t.senderUin == dec.senderUin) editInFlow(_groupMessages, groupId, env.targetId, env.text)
+                    if (db.authorOf(env.targetId)?.first == dec.senderUin) {
+                        editInFlow(_groupMessages, groupId, env.targetId, env.text)
+                    }
                 }
                 is Envelope.ReadReceipt -> Unit  // group read receipts not surfaced per-message
                 // Same for delivery: a group message has as many recipients as
@@ -7974,13 +8006,15 @@ class Session(context: Context) {
                 is Envelope.Reaction -> applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
                     // Author-only: a peer can only retract their own message.
-                    val t = _messages.value[dec.senderUin]?.firstOrNull { it.id == env.targetId }
-                    if (t != null && (fromOwnDevice(dec.senderUin) || !t.fromMe))
+                    // Read off the row rather than off the loaded page, see the
+                    // group branch above and #920.
+                    val fromMe = db.authorOf(env.targetId)?.second
+                    if (fromMe != null && (fromOwnDevice(dec.senderUin) || !fromMe))
                         deleteInFlow(_messages, dec.senderUin, env.targetId)
                 }
                 is Envelope.Edit -> {
-                    val t = _messages.value[dec.senderUin]?.firstOrNull { it.id == env.targetId }
-                    if (t != null && (fromOwnDevice(dec.senderUin) || !t.fromMe))
+                    val fromMe = db.authorOf(env.targetId)?.second
+                    if (fromMe != null && (fromOwnDevice(dec.senderUin) || !fromMe))
                         editInFlow(_messages, dec.senderUin, env.targetId, env.text)
                 }
                 is Envelope.ReadReceipt -> applyReadReceipt(dec.senderUin, env.targetIds)
@@ -10004,8 +10038,12 @@ class Session(context: Context) {
             for ((gid, rows) in all.filter { it.groupId in hitGroups }.groupBy { it.groupId!! })
                 shedLapsedUnread(LocalStores.groupThread(gid), rows, doomedIds)
         }
-        _messages.value = live.filter { it.groupId == null }.groupBy { it.peerUin }
-        _groupMessages.value = live.filter { it.groupId != null }.groupBy { it.groupId!! }
+        // Under the lock for the same reason as the sweep: this replaces both
+        // maps wholesale, and the drain can be storing into them while it runs.
+        synchronized(msgFlowLock) {
+            _messages.value = live.filter { it.groupId == null }.groupBy { it.peerUin }
+            _groupMessages.value = live.filter { it.groupId != null }.groupBy { it.groupId!! }
+        }
         cancelShadeFor(
             peers = doomed.filter { it.groupId == null }.map { it.peerUin }.distinct(),
             groups = doomed.mapNotNull { it.groupId }.distinct(),
@@ -10106,8 +10144,16 @@ class Session(context: Context) {
         val groups = _groupMessages.value.filterValues { l -> l.any { it.id in expired } }.keys.toList()
         for (p in peers) shedLapsedUnread(LocalStores.peerThread(p), _messages.value[p].orEmpty(), expired)
         for (g in groups) shedLapsedUnread(LocalStores.groupThread(g), _groupMessages.value[g].orEmpty(), expired)
-        _messages.value = _messages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
-        _groupMessages.value = _groupMessages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
+        // ⚠⚠ UNDER THE LOCK. These two are read-modify-write over the WHOLE
+        // map and ran outside it, so the ten-second sweep could read the map,
+        // an arriving message could be added, and the sweep's write would put
+        // the pre-arrival map back — losing a message that had already been
+        // stored and pushed. That is the tail of #915/#917 that 5a2dba1 did
+        // not reach, and what vss and DIEZLE are still seeing on 0.174.
+        synchronized(msgFlowLock) {
+            _messages.value = _messages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
+            _groupMessages.value = _groupMessages.value.mapValues { (_, list) -> list.filterNot { it.id in expired } }
+        }
         cancelShadeFor(peers, groups)
     }
 
@@ -10224,11 +10270,28 @@ class Session(context: Context) {
         val ownNote = !msg.fromMe && msg.groupId == null && msg.peerUin == store.uin
         val row = if (ownNote) msg.copy(fromMe = true) else msg
         // INSERT OR IGNORE dedups by envelope UUID (WS vs queue overlap).
-        if (!db.insert(row)) return false
+        // A duplicate still repairs a thread that lost the row — see the note
+        // on [storeGroup]; without that, one lost row stayed lost until the
+        // app was restarted.
+        val fresh = db.insert(row)
+        if (!fresh) {
+            // A redelivery. Put it back on screen if the thread is loaded and
+            // lost it, then stop: the badge was raised the first time, the
+            // delivered receipt below was sent the first time, and doing either
+            // again would be a second announcement of one message.
+            synchronized(msgFlowLock) {
+                val cur = _messages.value.toMutableMap()
+                val list = cur[row.peerUin] ?: return false
+                if (list.any { it.id == row.id }) return false
+                cur[row.peerUin] = (list + row).sortedBy { it.sentAt }
+                _messages.value = cur
+            }
+            return false
+        }
         synchronized(msgFlowLock) {
-        val cur = _messages.value.toMutableMap()
-        cur[row.peerUin] = ((cur[row.peerUin] ?: emptyList()) + row).sortedBy { it.sentAt }
-        _messages.value = cur
+            val cur = _messages.value.toMutableMap()
+            cur[row.peerUin] = ((cur[row.peerUin] ?: emptyList()) + row).sortedBy { it.sentAt }
+            _messages.value = cur
         }
         // Not everything that lands in a thread is something to catch up on.
         // A finished call is a record of something both people were present
@@ -10509,12 +10572,33 @@ class Session(context: Context) {
     }
 
     private fun storeGroup(msg: ChatMessage) {
-        if (!db.insert(msg)) return
         val gid = msg.groupId ?: return
+        // ⚠⚠ A DUPLICATE STILL HEALS THE SCREEN. This used to `return` the
+        // moment the insert deduped, which made any single lost row permanent
+        // for the life of the session: the message was on disk, so every later
+        // redelivery from the queue was ignored, and only a restart — which
+        // reloads both maps from SQLite — could put it back. That is why the
+        // reports all end "после перезагрузки сообщения появляются".
+        //
+        // So: a fresh row is stored and counted as usual; a duplicate is put
+        // into the flow ONLY if the thread is loaded and does not already have
+        // it, and never bumps the badge or makes a sound, because the person
+        // was already told about it the first time.
+        val fresh = db.insert(msg)
+        if (!fresh) {
+            synchronized(msgFlowLock) {
+                val cur = _groupMessages.value.toMutableMap()
+                val list = cur[gid] ?: return
+                if (list.any { it.id == msg.id }) return
+                cur[gid] = (list + msg).sortedBy { it.sentAt }
+                _groupMessages.value = cur
+            }
+            return
+        }
         synchronized(msgFlowLock) {
-        val cur = _groupMessages.value.toMutableMap()
-        cur[gid] = ((cur[gid] ?: emptyList()) + msg).sortedBy { it.sentAt }
-        _groupMessages.value = cur
+            val cur = _groupMessages.value.toMutableMap()
+            cur[gid] = ((cur[gid] ?: emptyList()) + msg).sortedBy { it.sentAt }
+            _groupMessages.value = cur
         }
         bumpUnreadIfInbound(msg, LocalStores.groupThread(gid))
     }
@@ -10593,27 +10677,41 @@ class Session(context: Context) {
     }
 
     /** Replace a message's body in a thread flow (+ DB), flagging it edited.
-     *  Caller enforces who's allowed to edit (own send, or inbound author). */
+     *  Caller enforces who's allowed to edit (own send, or inbound author).
+     *
+     *  ⚠⚠ THE DISK WRITE IS UNCONDITIONAL AND COMES FIRST. This used to bail
+     *  out on `cur[key] ?: return` and on `list.none { it.id == id }` BEFORE
+     *  touching SQLite, so an edit for a thread nobody had opened this run, or
+     *  for a message older than the page held in memory, was dropped and never
+     *  came back: the row on disk kept the original text, and a restart could
+     *  not repair what had never been written. That is #920 — the sender's
+     *  phone showing "edited", the other one showing the old words a quarter
+     *  of an hour later. Exactly the hole 0e8375e closed for reactions and
+     *  left open here.
+     *
+     *  A message that is genuinely not on this device is a no-op: `updateBody`
+     *  matches no row, and there is nothing to repair. */
     private fun editInFlow(flow: MutableStateFlow<Map<Int, List<ChatMessage>>>, key: Int, id: String, text: String) {
-        synchronized(msgFlowLock) {
-        val cur = flow.value.toMutableMap()
-        val list = cur[key] ?: return
-        if (list.none { it.id == id }) return
         db.updateBody(id, text)
-        cur[key] = list.map { if (it.id == id) it.copy(body = text, edited = true) else it }
-        flow.value = cur
+        synchronized(msgFlowLock) {
+            val cur = flow.value.toMutableMap()
+            val list = cur[key] ?: return
+            if (list.none { it.id == id }) return
+            cur[key] = list.map { if (it.id == id) it.copy(body = text, edited = true) else it }
+            flow.value = cur
         }
     }
 
-    /** Remove a message from a thread flow (+ DB). Caller enforces authority. */
+    /** Remove a message from a thread flow (+ DB). Caller enforces authority.
+     *  Disk first, for the reason spelled out on [editInFlow]. */
     private fun deleteInFlow(flow: MutableStateFlow<Map<Int, List<ChatMessage>>>, key: Int, id: String) {
-        synchronized(msgFlowLock) {
-        val cur = flow.value.toMutableMap()
-        val list = cur[key] ?: return
-        if (list.none { it.id == id }) return
         db.delete(id)
-        cur[key] = list.filterNot { it.id == id }
-        flow.value = cur
+        synchronized(msgFlowLock) {
+            val cur = flow.value.toMutableMap()
+            val list = cur[key] ?: return
+            if (list.none { it.id == id }) return
+            cur[key] = list.filterNot { it.id == id }
+            flow.value = cur
         }
     }
 
