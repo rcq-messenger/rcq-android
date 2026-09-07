@@ -2376,7 +2376,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                 auditing = true; audit = null
                 scope.launch {
                     audit = withContext(Dispatchers.IO) {
-                        runCatching { app.rcq.android.net.NetworkAudit.run(session.currentServer) }.getOrNull()
+                        runCatching { app.rcq.android.net.NetworkAudit.run(session.currentServer, session.connected.value) }.getOrNull()
                     }
                     auditing = false
                 }
@@ -2393,6 +2393,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                         when (a.verdict) {
                             app.rcq.android.net.NetworkAudit.Verdict.ALL_FINE -> R.string.diag_audit_fine
                             app.rcq.android.net.NetworkAudit.Verdict.CALLS_BLOCKED -> R.string.diag_audit_calls_blocked
+                            app.rcq.android.net.NetworkAudit.Verdict.REALTIME_DOWN -> R.string.diag_audit_realtime_down
                             app.rcq.android.net.NetworkAudit.Verdict.NO_INTERNET -> R.string.diag_audit_no_net
                             app.rcq.android.net.NetworkAudit.Verdict.BY_NAME -> R.string.diag_audit_by_name
                             app.rcq.android.net.NetworkAudit.Verdict.BY_ADDRESS -> R.string.diag_audit_by_addr

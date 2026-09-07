@@ -1158,6 +1158,7 @@
     <string name="onboard_netcheck_send">Copie esta linha e mande para a gente</string>
     <string name="diag_audit_hint">Abre sockets simples para esta ilha, para o front, para os relays e para dois hosts de controle conhecidos, para descobrir o que esta rede filtra. Nada é enviado a lugar nenhum; copie o resultado você mesmo.</string>
     <string name="diag_audit_calls_blocked">As mensagens passam, as chamadas não vão passar. O relay que leva o áudio das chamadas está inacessível a partir desta rede, e os relays do RCQ não cobrem chamadas: a voz sai direto, por fora deles.</string>
+    <string name="diag_audit_realtime_down">A ilha responde, mas o canal em tempo real está fechado. As mensagens chegarão quando o app as pedir, não no momento do envio.</string>
     <string name="diag_audit_fine">A ilha responde direto. Nada está sendo filtrado aqui.</string>
     <string name="diag_audit_no_net">Até os hosts de controle estão inacessíveis: este aparelho não tem internet funcionando, então nada abaixo é sobre o RCQ.</string>
     <string name="diag_audit_by_name">Nosso endereço responde com outro nome. O filtro vai pelo NOME, então um nome diferente na frente do mesmo servidor deve passar.</string>
