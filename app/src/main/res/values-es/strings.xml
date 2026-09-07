@@ -1152,6 +1152,8 @@
     <string name="pv_calls">Quién puede llamarte</string>
     <string name="pv_badge">Llevar mi marca</string>
     <string name="pv_badge_desc">La marca de la isla junto a tu nombre. Si lo desactivas, nadie más la ve; tú sigues viéndola.</string>
+    <string name="pv_badge_pick">Qué marca llevar</string>
+    <string name="pv_badge_pick_desc">Tienes más de una. Solo la elegida aparece junto a tu nombre.</string>
     <string name="pv_calls_desc">Las llamadas entrantes de cualquiera que quede fuera de este círculo se rechazan.</string>
     <string name="diag_audit_run">Revisión completa de la red</string>
     <string name="diag_audit_running">Comprobando…</string>

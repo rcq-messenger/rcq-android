@@ -1187,6 +1187,8 @@
     <string name="pv_calls">Кто может звонить</string>
     <string name="pv_badge">Показывать мою метку</string>
     <string name="pv_badge_desc">Метка острова рядом с вашим именем. Если выключить, её не увидит никто, кроме вас.</string>
+    <string name="pv_badge_pick">Какую метку носить</string>
+    <string name="pv_badge_pick_desc">У вас их несколько. Рядом с именем показывается только выбранная.</string>
     <string name="pv_calls_desc">Входящие звонки от всех, кто вне этого круга, отклоняются.</string>
     <string name="diag_audit_run">Полная проверка сети</string>
     <string name="diag_audit_running">\u041f\u0440\u043e\u0432\u0435\u0440\u044f\u044e\u2026</string>
