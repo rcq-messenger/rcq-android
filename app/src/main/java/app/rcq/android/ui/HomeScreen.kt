@@ -1957,7 +1957,17 @@ private fun HomeHeader(
             // reach the backend; amber when the relays are engaged but not yet
             // (or no longer) carrying traffic, so it can't claim a working
             // relay route when the chain is dead ("щит есть, связи нет").
-            if (stealthActive) {
+            // ⚠ It takes real width, so the name moves over when relays come
+            // up — but it slides, it does not jump, and the shield fades in
+            // rather than blinking into place. The founder saw both and chose
+            // the moving one over holding an empty 30dp gap open for the whole
+            // life of the app (07.09). `expandHorizontally` is what carries
+            // the avatar and the name; the fade is only for the icon itself.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = stealthActive,
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandHorizontally(),
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkHorizontally(),
+            ) {
                 Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Filled.Shield,
@@ -2059,10 +2069,11 @@ private fun HomeHeader(
                     )
                 }
             }
-            // The counterweight for the shield that now leads the row. Only
-            // while the shield is actually there: with no shield the row is
-            // the width it always was, and the nick does not drift.
-            if (stealthActive) Spacer(Modifier.size(30.dp))
+            // ⚠ A counterweight spacer lived here for a day, so the row grew
+            // symmetrically and the nick never moved at all. It is gone on
+            // purpose: iOS lets the name shift and animates the shift, and two
+            // clients disagreeing about whether the header moves is worse than
+            // the movement. See the shield above.
         }
 
         // Right — overflow menu.
