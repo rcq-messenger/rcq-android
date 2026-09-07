@@ -1143,6 +1143,8 @@
     <string name="myreports_send_error">Gönderilemedi. Tekrar deneyin.</string>
     <string name="burn_failed">Sunucuya ulaşılamadı, bu yüzden hiçbir şey silinmedi. Hesabına dokunulmadı. Bağlantın olduğunda tekrar dene.</string>
     <string name="account_burned_elsewhere">Bu hesap başka bir cihazdan yakıldı. Yerel veriler silindi.</string>
+    <string name="account_moved_followed">Bu hesap artık %1$d numarasıyla yanıt veriyor. Yazışmaların burada duruyor.</string>
+    <string name="account_moved_stuck">Bu hesap başka bir numaraya taşındı ve bu cihaz onu takip edemedi. Burada hiçbir şey silinmedi. Kurtarma ifadenle yeniden giriş yap.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d not</item>
         <item quantity="other">%d not</item>
@@ -1382,6 +1384,7 @@
     <string name="island_entry_buy">satın al</string>
     <!-- Joining a closed island: the door, the code, and the counter of
          invites a resident may hand out (founder, 06.09). -->
+    <string name="island_back_to_list">Listeye dön</string>
     <string name="island_entry_open">Açık ada</string>
     <string name="join_closed_title">Kapalı ada</string>
     <string name="join_checking_island">Adaya soruluyor…</string>

@@ -527,6 +527,28 @@ private fun RcqApp(session: Session) {
         }
     }
 
+    // 07.09: the account MOVED to another number, on another device of this
+    // person's. The opposite of the burn above — nothing was erased, and the
+    // word "burned" must never appear on this path. Session has already
+    // followed the move when `followed` is true (chat history rides along: it
+    // is keyed by the PEER's number, and it is ours that changed), so the only
+    // thing left here is to point the UI at the new number. When it is false
+    // the island refused to resolve the move (one signing key, two accounts)
+    // and this device is untouched but stuck on a number that is gone, so we
+    // say so and leave everything exactly where it is.
+    LaunchedEffect(Unit) {
+        session.accountMoved.collect { ev ->
+            val to = ev.to
+            if (ev.followed && to != null) {
+                resetNav()
+                state = UiState.Registered(to)
+                Toast.makeText(context, context.getString(R.string.account_moved_followed, to), Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, context.getString(R.string.account_moved_stuck), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     // Kept for "Try again": retrying after a transient failure must re-use the
     // ISLAND the user picked — retrying with null silently registered a
     // self-hoster's account on the flagship.

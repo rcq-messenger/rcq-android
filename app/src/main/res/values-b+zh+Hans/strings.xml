@@ -1143,6 +1143,8 @@
     <string name="myreports_send_error">没能发送，请再试一次。</string>
     <string name="burn_failed">没能连上服务器，所以什么都没有删除，你的账号原封不动。等有网络时再试一次。</string>
     <string name="account_burned_elsewhere">此账号已在其他设备上销毁。本地数据已清除。</string>
+    <string name="account_moved_followed">此账号现在使用 %1$d。你的聊天记录都还在。</string>
+    <string name="account_moved_stuck">此账号已迁移到别的号码，本设备没能跟上。这里什么都没有删除。请用恢复助记词重新登录。</string>
     <plurals name="saved_notes">
         <item quantity="other">%d 条备忘</item>
     </plurals>
@@ -1380,6 +1382,7 @@
     <string name="island_entry_buy">购买</string>
     <!-- Joining a closed island: the door, the code, and the counter of
          invites a resident may hand out (founder, 06.09). -->
+    <string name="island_back_to_list">返回列表</string>
     <string name="island_entry_open">开放岛屿</string>
     <string name="join_closed_title">封闭岛屿</string>
     <string name="join_checking_island">正在询问岛屿…</string>
