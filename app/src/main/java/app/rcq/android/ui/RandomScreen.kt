@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -315,6 +317,11 @@ private fun MatchedChat(session: Session, matched: RandomState.Matched) {
                     value = draft, onValueChange = { draft = it },
                     textStyle = TextStyle(color = c.textPrimary, fontSize = 15.sp),
                     cursorBrush = SolidColor(c.accent),
+                    // ⚠ Every other composer in the app asks the keyboard to
+                    // capitalise sentences; this one was written by hand and
+                    // never got it, so a random chat was the one place that
+                    // started every sentence in lower case (#942).
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

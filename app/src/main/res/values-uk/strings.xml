@@ -88,9 +88,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Створює нову анонімну особу поруч з нинішньою. Лиши поле сервера порожнім, щоб узяти публічний сервер.</string>
     <string name="add_account_create">Створити</string>
-    <string name="access_token_label">Токен доступу (необов\'язково)</string>
-    <string name="access_token_hint">Для приватного (закритого) острова встав токен доступу, який тобі видали.</string>
-    <string name="access_token_bad">Недійсний або прострочений токен доступу для цього острова.</string>
+    <string name="access_token_label">Ключ шлюзу (необовʼязково)</string>
+    <string name="access_token_hint">Тільки якщо острів схований за шлюзом. Це не код доступу вище.</string>
+    <string name="access_token_bad">Ключ шлюзу неправильний або прострочений для цього острова.</string>
     <string name="manage_accounts_intro">Акаунти на цьому пристрої. Перемикатися між ними можна кнопкою акаунта на головному екрані. Видалення акаунта тут прибирає його лише з цього пристрою: сама особа лишається на сервері.</string>
     <string name="manage_accounts_active">Активний</string>
     <string name="manage_accounts_add_by_phrase">Додати акаунт за фразою відновлення</string>
@@ -486,7 +486,7 @@
     <string name="uin_shop_status_unavailable">Недоступний</string>
     <string name="uin_shop_hint_too_short">Потрібно щонайменше 3 цифри</string>
     <string name="uin_shop_info_what_title">Що таке UIN</string>
-    <string name="uin_shop_info_what_body">UIN це твоє ім\'я в RCQ, номер, не прив\'язаний ні до телефона, ні до пошти. Інші знаходять тебе за ним; коротші номери рідкісніші, тому коштують більше.</string>
+    <string name="uin_shop_info_what_body">UIN це твоє ім\'я на цьому острові, номер, не прив\'язаний ні до телефона, ні до пошти. Інші знаходять тебе за ним; коротші номери рідкісніші, тому коштують більше.</string>
     <string name="uin_shop_info_migrate_title">Узяти номер не означає стати кимось іншим</string>
     <string name="uin_shop_info_migrate_body">Номер потрапляє в твою колекцію, а відповідаєш ти й далі так само, як зараз. Перехід на нього це окремий крок у розділі «Твої UIN», і його можна скасувати: номер, який ти лишаєш, теж лишається твоїм, тож ніхто інший його не візьме.</string>
     <string name="uin_shop_info_current">Твій нинішній UIN · %1$s</string>
@@ -737,8 +737,8 @@
     <string name="csrv_intro">Додай акаунт на острові організації або на власному сервері RCQ. Твій нинішній акаунт лишається на цьому пристрої.</string>
     <string name="csrv_current">ПОТОЧНИЙ СЕРВЕР</string>
     <string name="csrv_host">Хост сервера</string>
-    <string name="csrv_invite">Код запрошення (необов\'язково)</string>
-    <string name="csrv_invite_hint">Потрібен лише для закритих серверів, які вимагають запрошення. Для відкритих лиши порожнім.</string>
+    <string name="csrv_invite">Код доступу (необовʼязково)</string>
+    <string name="csrv_invite_hint">Потрібен лише для закритого острова. Це код, який видав його оператор, або той, що ви отримали під час оплати входу. Для відкритого залиште порожнім.</string>
     <string name="csrv_warning">Це додає новий акаунт на тому сервері. Твій нинішній акаунт лишається на цьому пристрої з усіма чатами і контактами; перемикатися між ними можна в меню акаунта.</string>
     <string name="csrv_reset_btn">Додати акаунт на публічному сервері</string>
     <string name="csrv_switching">Додаємо…</string>
@@ -1384,4 +1384,18 @@
     <string name="island_entry_price">Вхід: %1$s</string>
     <string name="island_entry_closed">Закритий клуб</string>
     <string name="island_entry_buy">купити</string>
+    <!-- Joining a closed island: the door, the code, and the counter of
+         invites a resident may hand out (founder, 06.09). -->
+    <string name="island_entry_open">Відкритий острів</string>
+    <string name="join_closed_title">Закритий острів</string>
+    <string name="join_checking_island">Питаємо острів…</string>
+    <string name="invites_title">Запрошення</string>
+    <string name="invites_count">Лишилося %1$d з %2$d</string>
+    <string name="invites_next">Наступне надійде %1$s.</string>
+    <string name="invites_all">У вас на руках усі.</string>
+    <string name="invites_mint">Створити запрошення</string>
+    <string name="invites_minting">Створюємо…</string>
+    <string name="invites_copy">Скопіювати посилання</string>
+    <string name="invites_once">Показується один раз. Острів копії не зберігає: закриєте, не скопіювавши, і запрошення витрачено намарно.</string>
+    <string name="invites_failed">Острів не видав запрошення.</string>
 </resources>

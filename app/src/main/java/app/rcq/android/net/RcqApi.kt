@@ -631,6 +631,16 @@ class RcqApi(
         /** The whole exchange, oldest first. Empty on an island that predates
          *  tickets, and on a report nobody has answered or added to. */
         val thread: List<ReportTurn> = emptyList(),
+        /** Whether the island would let this row leave my own list.
+         *
+         *  ⚠ Defaults TRUE, which is how an island that predates the field
+         *  behaves: the screen then offers Delete and finds out by asking, i.e.
+         *  exactly today's behaviour rather than a button that vanishes for
+         *  everyone the moment one island is out of date. The rule itself is
+         *  the island's (`reports._removable`): a complaint ABOUT SOMEBODY
+         *  ELSE stays while it is open, because the reporter is a live party
+         *  to that case (#941). */
+        val removable: Boolean = true,
     )
 
     suspend fun myReports(): List<MyReport> = withContext(Dispatchers.IO) {
@@ -674,6 +684,57 @@ class RcqApi(
      *  verdict and the reporter can still be asked things in the thread. */
     suspend fun deleteMyReport(id: Int) = withContext(Dispatchers.IO) {
         deleteNoContent("/reports/mine/$id", authed = true)
+    }
+
+    // ── invites a RESIDENT hands out (GET/POST /invites) ─────────────
+    // Distinct from the operator's invites under /admin: a resident paid to be
+    // here, may bring a few people, and the count is the whole feature.
+
+    /** ⚠ THE ISLAND HAS ALREADY DONE THE ARITHMETIC. Granted, used, remaining
+     *  and the date the next one lands all come off the wire; nothing here
+     *  recomputes them from `resident_since`, because the accrual rule lives on
+     *  the island so that changing it does not need a release on every client,
+     *  and a client doing its own sum would disagree with the server the moment
+     *  an operator changed the period.
+     *
+     *  [eligible] is false for everybody who did not pay for entry, and
+     *  [enabled] is false on an island that runs no such allowance. The screen
+     *  draws NOTHING in either case rather than a counter reading zero — see
+     *  the row in SettingsScreen for why.
+     *
+     *  Every field defaults, so an island too old to know the endpoint (404,
+     *  caught by the caller) and one that answers a shorter body both behave. */
+    data class ResidentInvites(
+        val enabled: Boolean = false,
+        val eligible: Boolean = false,
+        val total: Int = 0,
+        val granted: Int = 0,
+        val used: Int = 0,
+        val remaining: Int = 0,
+        /** ISO-8601, or null when this account already holds the lot. */
+        val next_at: String? = null,
+    )
+
+    /** ⚠⚠ [code] and [link] come back ONCE. The island stores only the hash, so
+     *  a caller that drops this response has spent one of a finite allowance on
+     *  nothing — which is why the UI that shows it must offer a copy button and
+     *  must not close itself. */
+    data class MintedInvite(
+        val code: String = "",
+        val link: String = "",
+        val expires_at: String? = null,
+    )
+
+    suspend fun myInvites(): ResidentInvites = withContext(Dispatchers.IO) {
+        get("/invites", authed = true, ResidentInvites::class.java)
+    }
+
+    /** Spend one. Refusals carry a code: `not_a_resident`, `no_invites_left`,
+     *  `account_suspended`, `not_available`. */
+    suspend fun mintInvite(): MintedInvite = withContext(Dispatchers.IO) {
+        // Empty object rather than no body: the endpoint takes no payload, and
+        // a POST with no body at all is the one shape some proxies rewrite.
+        post("/invites", "{}", authed = true, MintedInvite::class.java)
     }
 
     // ── random chat (anonymous time-boxed 1:1 with a stranger) ───────

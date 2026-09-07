@@ -398,6 +398,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 }
 
+/** An island's refusal of "add another account", kept until the person has
+ *  answered it or dismissed it. [host] is null when the add was aimed at the
+ *  default island, and the sheet says so by name rather than leaving a blank. */
+private data class AddFailure(val host: String?, val message: String)
+
 private sealed interface UiState {
     data object Onboarding : UiState
     data object Registering : UiState
@@ -535,6 +540,12 @@ private fun RcqApp(session: Session) {
     var lastRegisterServer by remember { mutableStateOf<String?>(null) }
     var lastRegisterInvite by remember { mutableStateOf<String?>(null) }
 
+    // The island's refusal of an ADD, parked so [AddAccountFailedSheet] can
+    // offer the code field and a cancel. `remember`, for the same reason the
+    // two above are: the recomposition that draws the sheet would otherwise
+    // clear the very thing the sheet is drawn from.
+    var addFailure by remember { mutableStateOf<AddFailure?>(null) }
+
     fun register(server: String? = null, invite: String? = null) {
         lastRegisterServer = server
         lastRegisterInvite = invite
@@ -552,8 +563,15 @@ private fun RcqApp(session: Session) {
     fun retryRegister() = register(lastRegisterServer, lastRegisterInvite)
 
     // Add a further account from the switcher. Register-first means a
-    // failure leaves the current account intact, so we surface a toast and
-    // stay put rather than dropping to the full-screen Failed state.
+    // failure leaves the current account intact, so we stay put rather than
+    // dropping to the full-screen Failed state.
+    //
+    // ⚠⚠ `current` IS THE ACCOUNT THIS PERSON WAS ON, and landing back on it is
+    // the whole contract of this function. iOS dropped somebody who failed to
+    // join a closed island onto a different account of theirs — "not even the
+    // one I had been on, it looks like the first in the list" (founder, item 4
+    // of 06.09). Nothing here may fall back to "some account": either the one
+    // that was live, or, if there genuinely was none, onboarding.
     fun addAccount(server: String? = null, invite: String? = null) {
         val current = (state as? UiState.Registered)?.uin
         resetNav()
@@ -562,7 +580,11 @@ private fun RcqApp(session: Session) {
             state = try {
                 UiState.Registered(session.registerNewAccount("user-${(1000..9999).random()}", server, invite))
             } catch (e: Exception) {
-                Toast.makeText(context, e.message ?: "Couldn't add account", Toast.LENGTH_LONG).show()
+                // ⚠ The refusal goes to a SHEET with a code field, not to a
+                // Toast. A Toast carrying `HTTP 403: {"detail":{"code":
+                // "invite_required"}}` is not a thing anybody can answer, and
+                // answering is exactly what a closed island is asking for.
+                addFailure = AddFailure(server, e.message.orEmpty())
                 current?.let { UiState.Registered(it) } ?: UiState.Onboarding
             }
         }
@@ -974,6 +996,25 @@ private fun RcqApp(session: Session) {
                 s.message,
                 onRetry = { retryRegister() },
                 onRetryWithInvite = { code -> register(lastRegisterServer, code) },
+                // Back to the deck. Nothing was created (registration is
+                // register-first), so there is nothing to undo — only a screen
+                // that had no exit until now.
+                onCancel = { state = UiState.Onboarding },
+            )
+        }
+
+        // The refusal of an ADD, over whatever account the person is back on.
+        // Outside the `when` because it is a sheet, not a screen: the session
+        // underneath it is live and untouched.
+        addFailure?.let { f ->
+            AddAccountFailedSheet(
+                host = f.host?.takeIf { it.isNotBlank() } ?: RcqApi.DEFAULT_HOST,
+                message = f.message,
+                onRetryWithInvite = { code ->
+                    addFailure = null
+                    addAccount(f.host, code.takeIf { it.isNotBlank() })
+                },
+                onDismiss = { addFailure = null },
             )
         }
         }
@@ -1508,18 +1549,57 @@ private fun Registering() {
     }
 }
 
+/** Does this refusal want a code, and which sentence explains it?
+ *
+ *  ⚠ A CLOSED ISLAND ANSWERS WITH A CODE, NOT A SENTENCE. The island refuses
+ *  registration with `{"code": "invite_required"}` (or `invite_invalid` for a
+ *  code that was spent, expired, or minted by a different island), and the raw
+ *  exception message is `HTTP 403: {"detail":...}` — which is what somebody
+ *  handed a code in words used to be shown, with nowhere to type it.
+ *
+ *  Shared by the two places a join can be refused: the full-screen [Failed]
+ *  during onboarding, and the sheet over Home when an EXISTING account adds
+ *  another. One reading of the wire, so the two cannot drift into telling the
+ *  same person two different things about the same refusal. */
+private class JoinRefusal(val needsCode: Boolean, val badCode: Boolean)
+
+private fun joinRefusal(message: String) = JoinRefusal(
+    needsCode = message.contains("invite_required") || message.contains("invite_invalid"),
+    badCode = message.contains("invite_invalid"),
+)
+
+/** The sentence to put under the title for a refusal, in the island's terms
+ *  when it named one and in its own words when it did not. */
 @Composable
-private fun Failed(message: String, onRetry: () -> Unit, onRetryWithInvite: ((String) -> Unit)? = null) {
+private fun joinRefusalText(message: String): String {
+    val r = joinRefusal(message)
+    return when {
+        r.badCode -> stringResource(R.string.reg_invite_invalid)
+        r.needsCode -> stringResource(R.string.reg_invite_required)
+        else -> message
+    }
+}
+
+@Composable
+private fun Failed(
+    message: String,
+    onRetry: () -> Unit,
+    onRetryWithInvite: ((String) -> Unit)? = null,
+    /// ⚠⚠ A WAY OUT, AND IT IS NOT OPTIONAL IN PRACTICE. This screen used to
+    /// offer "Try again" and nothing else, and the system Back is disabled
+    /// while it is up (see `backPopsOverlay`), so a person who reached it with
+    /// no code — or with the wrong one — could only close the app. That is the
+    /// founder's items 1 and 5 of 06.09 on iOS, and Android had the same dead
+    /// end. Null only for a caller that genuinely has nowhere to go back to.
+    onCancel: (() -> Unit)? = null,
+) {
     val c = RcqTheme.colors
-    // ⚠ A CLOSED ISLAND ANSWERS WITH A CODE, NOT A SENTENCE. The island refuses
-    // registration with `{"code": "invite_required"}`, and until now this
-    // screen printed the raw exception message — `HTTP 403: {"detail":...}` —
-    // to somebody who has been handed a code in words and has nowhere to type
-    // it. The field appears on the refusal rather than up front: an open
-    // island must not ask for a code it does not want.
-    val needsInvite = message.contains("invite_required")
-    val badInvite = message.contains("invite_invalid")
+    val r = joinRefusal(message)
     var invite by remember { mutableStateOf("") }
+    // Back leaves, exactly as the button does. Composed here rather than added
+    // to the screen-level handler because that one is keyed off the overlay
+    // stack of a REGISTERED session, which this state is not part of.
+    if (onCancel != null) BackHandler(enabled = true) { onCancel() }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1530,21 +1610,25 @@ private fun Failed(message: String, onRetry: () -> Unit, onRetryWithInvite: ((St
         // the decision, and until now it was on a screen this person has not
         // reached yet. Scrollable because the notice carries two fingerprints.
         app.rcq.android.ui.IslandTrustNotices()
-        Text(stringResource(R.string.boot_connect_failed_title), color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            when {
-                needsInvite -> stringResource(R.string.reg_invite_required)
-                badInvite -> stringResource(R.string.reg_invite_invalid)
-                else -> message
-            },
+            stringResource(if (r.needsCode) R.string.join_closed_title else R.string.boot_connect_failed_title),
+            color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            joinRefusalText(message),
             color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center,
         )
-        if ((needsInvite || badInvite) && onRetryWithInvite != null) {
-            androidx.compose.material3.OutlinedTextField(
+        if (r.needsCode && onRetryWithInvite != null) {
+            // ⚠ RcqField, not Material's OutlinedTextField. This was the one
+            // screen in the app still drawing a bordered box with a floating
+            // label, on the first screen a new user ever sees going wrong —
+            // "the sheet looks cheap next to the rest of the app" (founder,
+            // item 2 of 06.09). See [RcqField] for the house rule.
+            app.rcq.android.ui.RcqField(
                 value = invite,
                 onValueChange = { invite = it.take(128) },
+                placeholder = stringResource(R.string.reg_invite_label),
                 singleLine = true,
-                label = { Text(stringResource(R.string.reg_invite_label)) },
                 modifier = Modifier.fillMaxWidth(),
             )
             CapsuleButton(
@@ -1554,6 +1638,64 @@ private fun Failed(message: String, onRetry: () -> Unit, onRetryWithInvite: ((St
             )
         } else {
             CapsuleButton(stringResource(R.string.boot_connect_retry), onClick = onRetry)
+        }
+        if (onCancel != null) {
+            TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+            }
+        }
+    }
+}
+
+/** The same refusal, over an account that already exists.
+ *
+ *  ⚠ A SHEET, NOT THE FULL-SCREEN [Failed]. Adding an account is register-first
+ *  (see [Session.registerNewAccount]): nothing local is touched until the
+ *  island has said yes, so a refusal leaves the person exactly where they were
+ *  and the right shape is something that sits ON their session rather than
+ *  replacing it. What it must NOT do is what iOS did and drop them onto some
+ *  other account (founder, item 4 of 06.09).
+ *
+ *  ⚠ And it must carry the code field. Until now this path raised a Toast with
+ *  the raw `HTTP 403: {"detail":…}` in it and no way to answer, so a closed
+ *  island simply could not be joined from the account switcher at all unless
+ *  the code arrived as an `rcq://server/<host>?invite=…` link. */
+@Composable
+private fun AddAccountFailedSheet(
+    host: String,
+    message: String,
+    onRetryWithInvite: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    val r = joinRefusal(message)
+    var invite by remember { mutableStateOf("") }
+    RcqSheet(
+        onDismiss = onDismiss,
+        title = stringResource(if (r.needsCode) R.string.join_closed_title else R.string.boot_connect_failed_title),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(host, color = c.textPrimary, fontSize = 14.sp)
+            Text(joinRefusalText(message), color = c.textSecondary, fontSize = 13.sp)
+            if (r.needsCode) {
+                app.rcq.android.ui.RcqField(
+                    value = invite,
+                    onValueChange = { invite = it.take(128) },
+                    placeholder = stringResource(R.string.reg_invite_label),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            CapsuleButton(
+                stringResource(R.string.boot_connect_retry),
+                enabled = !r.needsCode || invite.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onRetryWithInvite(invite.trim()) },
+            )
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+            }
         }
     }
 }

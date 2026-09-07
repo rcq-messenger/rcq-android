@@ -88,9 +88,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">在你当前身份之外创建一个新的匿名身份。服务器留空则使用公共服务器。</string>
     <string name="add_account_create">创建</string>
-    <string name="access_token_label">访问令牌（可选）</string>
-    <string name="access_token_hint">如果是私有（封闭）岛，请粘贴发给你的访问令牌。</string>
-    <string name="access_token_bad">这个岛的访问令牌无效或已过期。</string>
+    <string name="access_token_label">网关密钥（可选）</string>
+    <string name="access_token_hint">仅当岛屿隐藏在网关后面时需要。它不是上面的访问码。</string>
+    <string name="access_token_bad">该网关密钥对这座岛屿无效或已过期。</string>
     <string name="manage_accounts_intro">这台设备上的账号。在主屏幕的账号按钮里切换。在这里删除账号只是把它从这台设备上移除，身份仍然留在服务器上。</string>
     <string name="manage_accounts_active">使用中</string>
     <string name="manage_accounts_add_by_phrase">用恢复短语添加账号</string>
@@ -486,7 +486,7 @@
     <string name="uin_shop_status_unavailable">不可用</string>
     <string name="uin_shop_hint_too_short">至少需要 3 位数字</string>
     <string name="uin_shop_info_what_title">什么是 UIN</string>
-    <string name="uin_shop_info_what_body">UIN 是你在 RCQ 里的标识，一串不绑定手机号或邮箱的数字。其他用户靠它找到你；越短的 UIN 越稀缺，所以价格更高。</string>
+    <string name="uin_shop_info_what_body">UIN 是你在这座岛上的标识，一串不绑定手机号或邮箱的数字。其他用户靠它找到你；越短的 UIN 越稀缺，所以价格更高。</string>
     <string name="uin_shop_info_migrate_title">拿到一个号码不会改变你是谁</string>
     <string name="uin_shop_info_migrate_body">号码会加入你的号码集合，你仍然以现在的号码对外回应。迁移到它是“我的 UIN”里的单独一步，而且可以撤回：你离开的号码同样归你所有，别人无法占用。</string>
     <string name="uin_shop_info_current">你当前的 UIN · %1$s</string>
@@ -737,8 +737,8 @@
     <string name="csrv_intro">在组织的岛或你自建的 RCQ 服务器上添加一个账号。你当前的账号会保留在这台设备上。</string>
     <string name="csrv_current">当前服务器</string>
     <string name="csrv_host">服务器地址</string>
-    <string name="csrv_invite">邀请码（可选）</string>
-    <string name="csrv_invite_hint">只有需要邀请的封闭服务器才要填。开放服务器请留空。</string>
+    <string name="csrv_invite">访问码（可选）</string>
+    <string name="csrv_invite_hint">只有封闭岛屿才需要。它是岛屿运营者给你的码，或者你付费入场时拿到的码。开放岛屿请留空。</string>
     <string name="csrv_warning">这会在该服务器上添加一个新账号。你当前的账号连同它的所有聊天和联系人都会保留在这台设备上；在账号菜单里可以互相切换。</string>
     <string name="csrv_reset_btn">添加公共服务器账号</string>
     <string name="csrv_switching">正在添加…</string>
@@ -1378,4 +1378,18 @@
     <string name="island_entry_price">入场：%1$s</string>
     <string name="island_entry_closed">封闭俱乐部</string>
     <string name="island_entry_buy">购买</string>
+    <!-- Joining a closed island: the door, the code, and the counter of
+         invites a resident may hand out (founder, 06.09). -->
+    <string name="island_entry_open">开放岛屿</string>
+    <string name="join_closed_title">封闭岛屿</string>
+    <string name="join_checking_island">正在询问岛屿…</string>
+    <string name="invites_title">可发出的邀请</string>
+    <string name="invites_count">还剩 %1$d 个，共 %2$d 个</string>
+    <string name="invites_next">下一个在 %1$s 到账。</string>
+    <string name="invites_all">全部都在你手上。</string>
+    <string name="invites_mint">创建邀请</string>
+    <string name="invites_minting">正在创建…</string>
+    <string name="invites_copy">复制链接</string>
+    <string name="invites_once">只显示一次。岛屿不保留副本：不复制就关闭，这个邀请就白白用掉了。</string>
+    <string name="invites_failed">岛屿没有发出邀请。</string>
 </resources>
