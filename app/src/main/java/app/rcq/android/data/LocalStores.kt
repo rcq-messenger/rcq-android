@@ -681,6 +681,36 @@ object LocalStores {
         prefs.edit().putStringSet(pk(K_REMOVED), _removed.value.map(Int::toString).toSet()).apply()
     }
 
+    /** Numbers whose random-chat session has just ended, with the moment each
+     *  ended, per account.
+     *
+     *  ⚠ On disk because the process is killed routinely and the message that
+     *  leaks arrives on the NEXT launch, out of the offline queue. See
+     *  `Session.endedRandomPeers` for what it is guarding against. Stored as
+     *  "uin:millis" strings in the set the rest of this file already uses, so
+     *  it needs no new storage shape.
+     */
+    fun finishedStrangers(): Map<Int, Long> {
+        if (acct == null) return emptyMap()
+        val raw = prefs.getStringSet(pk(K_FINISHED_STRANGERS), emptySet()) ?: emptySet()
+        val out = HashMap<Int, Long>()
+        for (e in raw) {
+            val i = e.indexOf(':')
+            if (i <= 0) continue
+            val uin = e.substring(0, i).toIntOrNull() ?: continue
+            val at = e.substring(i + 1).toLongOrNull() ?: continue
+            out[uin] = at
+        }
+        return out
+    }
+
+    fun setFinishedStrangers(m: Map<Int, Long>) {
+        if (acct == null) return
+        prefs.edit()
+            .putStringSet(pk(K_FINISHED_STRANGERS), m.entries.map { "${it.key}:${it.value}" }.toSet())
+            .apply()
+    }
+
     fun addRemoved(uin: Int) {
         if (acct == null || uin in _removed.value) return
         _removed.value = _removed.value + uin
@@ -1493,6 +1523,7 @@ object LocalStores {
     private const val K_ARCH = "archived"
     private const val K_LOCKED = "locked"
     private const val K_REMOVED = "removed"
+    private const val K_FINISHED_STRANGERS = "finished_strangers"
     private const val K_BLOCKED = "blocked"
     private const val K_STRANGER_Q = "strangers_quarantine"
     private const val K_STRANGER_ALLOW = "strangers_allowed"

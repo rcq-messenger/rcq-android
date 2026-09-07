@@ -610,6 +610,56 @@ class Session(context: Context) {
     private val _randomMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val randomMessages: StateFlow<List<ChatMessage>> = _randomMessages.asStateFlow()
     @Volatile private var activeRandomPeer: Int? = null
+
+    /** Numbers whose random-chat session has just ended, and when.
+     *
+     *  ⚠⚠ A PRIVACY GATE, not bookkeeping, and it has to survive a restart.
+     *  A random-chat message is an ordinary sealed envelope: nothing on the
+     *  wire marks it, because the island must not be able to tell either. The
+     *  only thing that made one "random" was [activeRandomPeer] — this client
+     *  knowing who it was talking to at that moment. So a message still in
+     *  flight when the session ended fell through to the ordinary path, was
+     *  written into a permanent thread, and the app then fetched the sender's
+     *  profile and showed their nickname. That is the one thing random chat
+     *  promises never to do, and it is symmetric: it happened to both sides.
+     *  Reported first hand on iOS on 07.09; this client had the same hole.
+     *
+     *  On disk because Android kills a backgrounded process routinely and the
+     *  queued message is then drained on the next launch, where an in-memory
+     *  set would already be gone. Numbers and timestamps only, swept after a
+     *  day: far longer than a message can plausibly be in flight, short enough
+     *  that this never becomes a list of who you talked to.
+     */
+    private val endedRandomPeers: MutableMap<Int, Long> by lazy {
+        val out = HashMap<Int, Long>()
+        LocalStores.finishedStrangers().forEach { (uin, at) -> out[uin] = at }
+        out
+    }
+
+    private fun rememberEndedRandom() {
+        val peer = activeRandomPeer ?: return
+        val now = System.currentTimeMillis()
+        endedRandomPeers[peer] = now
+        endedRandomPeers.entries.removeAll { now - it.value > RANDOM_ENDED_GRACE_MS }
+        LocalStores.setFinishedStrangers(endedRandomPeers)
+    }
+
+    /** Drop a message from somebody whose random session is over.
+     *
+     *  ⚠ Not for anybody who is now a CONTACT. Two people can choose to swap
+     *  contacts during a random chat, and once they have they are not
+     *  strangers: dropping those would break the one feature that lets a
+     *  random chat become a real one.
+     */
+    private fun isFinishedStranger(uin: Int): Boolean {
+        val at = endedRandomPeers[uin] ?: return false
+        if (System.currentTimeMillis() - at > RANDOM_ENDED_GRACE_MS) {
+            endedRandomPeers.remove(uin)
+            LocalStores.setFinishedStrangers(endedRandomPeers)
+            return false
+        }
+        return _contacts.value.none { it.uin == uin }
+    }
     @Volatile private var activeRandomPairId: String? = null
 
     /** Own presence status, reflected in the header status picker. */
@@ -3807,6 +3857,7 @@ class Session(context: Context) {
     }
 
     private fun clearRandom() {
+        rememberEndedRandom()
         activeRandomPeer = null
         activeRandomPairId = null
         _randomMessages.value = emptyList()
@@ -8017,6 +8068,10 @@ class Session(context: Context) {
                 (dec.envelope as? Envelope.Text)?.let { appendRandom(ChatMessage(it.id, dec.senderUin, fromMe = false, body = it.text, sentAt = now)) }
                 return@runCatching
             }
+            // ⚠⚠ The session with this stranger is OVER, so this is dropped
+            // rather than filed: the promise is that a random chat ends when it
+            // ends. See [endedRandomPeers] for what used to happen instead.
+            if (isFinishedStranger(dec.senderUin)) return@runCatching
             // ⚠ A GUEST CARD the sender handed us, read BEFORE anything is
             // decided about the message. It is what makes "they wrote to me"
             // into "I can answer them", and the answer path runs immediately
@@ -10031,6 +10086,8 @@ class Session(context: Context) {
             "random_end" -> {
                 val pairId = obj.get("pair_id")?.takeIf { !it.isJsonNull }?.asString
                 if (pairId == null || pairId == activeRandomPairId) {
+                    // Ended by the other side or by the island: same gate.
+                    rememberEndedRandom()
                     activeRandomPeer = null
                     activeRandomPairId = null
                     _random.value = RandomState.Ended(obj.get("reason")?.takeIf { !it.isJsonNull }?.asString ?: "ended")
@@ -10880,6 +10937,9 @@ class Session(context: Context) {
          *  Long enough to swallow a VPN client rebuilding its tunnel, short
          *  enough that walking out of wifi still reconnects immediately. */
         const val NETWORK_REDIAL_GAP_MS = 5_000L
+        /** How long after a random session ends a message from that stranger
+         *  is still treated as belonging to the session that is over. */
+        const val RANDOM_ENDED_GRACE_MS = 24 * 60 * 60 * 1000L
         const val OFFLINE_RELADDER_MS = 90_000L
         /** Floor between two burned-account probes (#655): the socket redials
          *  on its backoff and every 4401 close would otherwise probe again. */
