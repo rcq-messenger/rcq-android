@@ -3121,6 +3121,8 @@ private fun AddContactDialog(
                                                 android.widget.Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), android.widget.Toast.LENGTH_LONG).show()
                                                 onOpenChat(ci.uin)
                                             }
+                                            Session.CiAdd.CLOSED_ISLAND ->
+                                                android.widget.Toast.makeText(context, context.getString(R.string.ci_closed_island), android.widget.Toast.LENGTH_LONG).show()
                                             Session.CiAdd.FAILED ->
                                                 android.widget.Toast.makeText(context, context.getString(R.string.ci_request_failed), android.widget.Toast.LENGTH_LONG).show()
                                         }

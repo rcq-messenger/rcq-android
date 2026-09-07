@@ -8603,7 +8603,21 @@ class Session(context: Context) {
      *  the peer's island took our `contactreq`; [ADDED_ONLY] = the row is here
      *  but nothing reached them (say so — do NOT claim a request was sent);
      *  [FAILED] = no card, no row, nothing happened. */
-    enum class CiAdd { FAILED, ADDED_ONLY, SENT }
+    /** [CLOSED_ISLAND] is a FAILED that we can explain. A closed island answers
+     *  a stranger with the SAME "no such number" it gives for a number that
+     *  never existed — deliberately, or it would be a directory for guessing
+     *  which numbers exist — so the island cannot tell the truth and the client
+     *  is the only thing that can. Without this the person sees the generic
+     *  failure and reads it as "the app is broken" or "you gave me a wrong
+     *  number". */
+    enum class CiAdd { FAILED, CLOSED_ISLAND, ADDED_ONLY, SENT }
+
+    /** Ask an island whether it is closed, to turn a deliberate "no such
+     *  number" into a sentence a person can act on. Best effort: an island
+     *  that does not answer is reported as an ordinary failure, which is the
+     *  honest answer when we do not know. */
+    private suspend fun islandIsClosed(host: String): Boolean =
+        runCatching { RcqApi.serverInfoOf(host)?.capabilities?.closed_island == true }.getOrDefault(false)
 
     // ⚠ There is deliberately no boolean `addCrossIslandContact` any more. A
     // single yes/no is what let every caller print "Request sent" for what was
@@ -8629,7 +8643,8 @@ class Session(context: Context) {
         act: String? = Envelope.ACT_REQUEST,
     ): CiAdd = withContext(Dispatchers.IO) {
         if (clashesWithKnownNumber(uin, host)) return@withContext CiAdd.FAILED
-        val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() ?: return@withContext CiAdd.FAILED
+        val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull()
+            ?: return@withContext if (islandIsClosed(host)) CiAdd.CLOSED_ISLAND else CiAdd.FAILED
         val contact = CrossIslandStore.Contact(
             uin = uin, host = host,
             nickname = card.nickname?.takeIf { it.isNotBlank() } ?: "$uin@$host",

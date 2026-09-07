@@ -1224,6 +1224,8 @@ private fun RcqApp(session: Session) {
                                             Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), Toast.LENGTH_LONG).show()
                                             chatTarget = ChatTarget.Peer(req.uin)
                                         }
+                                        Session.CiAdd.CLOSED_ISLAND ->
+                                            Toast.makeText(context, context.getString(R.string.ci_closed_island), Toast.LENGTH_LONG).show()
                                         Session.CiAdd.FAILED ->
                                             Toast.makeText(context, context.getString(R.string.addlink_failed), Toast.LENGTH_LONG).show()
                                     }
