@@ -301,6 +301,8 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                                         requestSent = true
                                         Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), Toast.LENGTH_LONG).show()
                                     }
+                                    Session.CiAdd.CLOSED_ISLAND ->
+                                        Toast.makeText(context, context.getString(R.string.ci_closed_island), Toast.LENGTH_LONG).show()
                                     Session.CiAdd.FAILED ->
                                         Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
                                 }
