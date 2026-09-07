@@ -1366,4 +1366,7 @@
     <string name="badge_desc_unknown">Знак, виданий цим островом.</string>
     <string name="home_discover_join_failed">Не вдалося вступити, спробуйте ще раз.</string>
     <string name="cs_move_footer_play">Острів вибере вам новий випадковий номер. Контакти, групи, ключі й історія чатів зберігаються.</string>
+    <string name="reg_invite_label">Код доступу</string>
+    <string name="reg_invite_required">Острів закритий: щоб увійти, потрібен код від його оператора. Вставте його нижче.</string>
+    <string name="reg_invite_invalid">Код не прийнято. Можливо, він уже використаний, минув або виданий для іншого острова.</string>
 </resources>
