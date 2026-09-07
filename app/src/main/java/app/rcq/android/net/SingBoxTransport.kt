@@ -497,6 +497,11 @@ object SingBoxTransport {
         val now = android.os.SystemClock.elapsedRealtime()
         if (lastDeclinedNoticeAt != 0L && now - lastDeclinedNoticeAt < DECLINED_NOTICE_GAP_MS) return
         lastDeclinedNoticeAt = now
+        // ⚠ A system Toast, and since Android 12 that means TWO LINES and an
+        // ellipsis. The old wording spent both lines restating the setting and
+        // was cut off at "по…", exactly before the sentence telling you what to
+        // do about it (#929). The action goes first now, and the string has to
+        // stay short enough to survive the clip.
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             runCatching {
                 android.widget.Toast.makeText(
