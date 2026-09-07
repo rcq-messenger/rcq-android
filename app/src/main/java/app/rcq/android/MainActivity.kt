@@ -952,7 +952,11 @@ private fun RcqApp(session: Session) {
             }
             s is UiState.Onboarding -> OnboardingScreen(onStart = ::register, onRestore = { showRestore = true })
             s is UiState.Registering -> Registering()
-            s is UiState.Failed -> Failed(s.message, onRetry = { retryRegister() })
+            s is UiState.Failed -> Failed(
+                s.message,
+                onRetry = { retryRegister() },
+                onRetryWithInvite = { code -> register(lastRegisterServer, code) },
+            )
         }
         }
 
@@ -1464,8 +1468,17 @@ private fun Registering() {
 }
 
 @Composable
-private fun Failed(message: String, onRetry: () -> Unit) {
+private fun Failed(message: String, onRetry: () -> Unit, onRetryWithInvite: ((String) -> Unit)? = null) {
     val c = RcqTheme.colors
+    // ⚠ A CLOSED ISLAND ANSWERS WITH A CODE, NOT A SENTENCE. The island refuses
+    // registration with `{"code": "invite_required"}`, and until now this
+    // screen printed the raw exception message — `HTTP 403: {"detail":...}` —
+    // to somebody who has been handed a code in words and has nowhere to type
+    // it. The field appears on the refusal rather than up front: an open
+    // island must not ask for a code it does not want.
+    val needsInvite = message.contains("invite_required")
+    val badInvite = message.contains("invite_invalid")
+    var invite by remember { mutableStateOf("") }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1477,7 +1490,29 @@ private fun Failed(message: String, onRetry: () -> Unit) {
         // reached yet. Scrollable because the notice carries two fingerprints.
         app.rcq.android.ui.IslandTrustNotices()
         Text(stringResource(R.string.boot_connect_failed_title), color = c.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-        Text(message, color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
-        CapsuleButton(stringResource(R.string.boot_connect_retry), onClick = onRetry)
+        Text(
+            when {
+                needsInvite -> stringResource(R.string.reg_invite_required)
+                badInvite -> stringResource(R.string.reg_invite_invalid)
+                else -> message
+            },
+            color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center,
+        )
+        if ((needsInvite || badInvite) && onRetryWithInvite != null) {
+            androidx.compose.material3.OutlinedTextField(
+                value = invite,
+                onValueChange = { invite = it.take(128) },
+                singleLine = true,
+                label = { Text(stringResource(R.string.reg_invite_label)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            CapsuleButton(
+                stringResource(R.string.boot_connect_retry),
+                enabled = invite.isNotBlank(),
+                onClick = { onRetryWithInvite(invite.trim()) },
+            )
+        } else {
+            CapsuleButton(stringResource(R.string.boot_connect_retry), onClick = onRetry)
+        }
     }
 }

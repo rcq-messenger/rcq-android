@@ -1409,4 +1409,7 @@
     <string name="badge_desc_unknown">Знак, выданный этим островом.</string>
     <string name="home_discover_join_failed">Не удалось вступить, попробуйте ещё раз.</string>
     <string name="cs_move_footer_play">Остров выберет вам новый случайный номер. Контакты, группы, ключи и история чатов сохраняются.</string>
+    <string name="reg_invite_label">Код доступа</string>
+    <string name="reg_invite_required">Остров закрытый: чтобы войти, нужен код от его оператора. Вставьте его ниже.</string>
+    <string name="reg_invite_invalid">Код не принят. Возможно, он уже использован, истёк или выдан для другого острова.</string>
 </resources>

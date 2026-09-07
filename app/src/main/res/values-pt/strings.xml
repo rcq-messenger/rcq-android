@@ -1362,4 +1362,7 @@
     <string name="badge_desc_unknown">Uma marca concedida por esta ilha.</string>
     <string name="home_discover_join_failed">Não foi possível entrar, tente novamente.</string>
     <string name="cs_move_footer_play">A ilha escolhe um novo número aleatório para você. Contatos, grupos, chaves e histórico são mantidos.</string>
+    <string name="reg_invite_label">Código de acesso</string>
+    <string name="reg_invite_required">A ilha é fechada: para entrar é preciso um código do operador dela. Cole-o abaixo.</string>
+    <string name="reg_invite_invalid">Esse código não foi aceito. Pode estar usado, expirado ou ser de outra ilha.</string>
 </resources>

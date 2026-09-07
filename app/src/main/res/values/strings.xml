@@ -1414,4 +1414,7 @@
     <string name="badge_desc_unknown">A mark given by this island.</string>
     <string name="home_discover_join_failed">Couldn\'t join, try again.</string>
     <string name="cs_move_footer_play">The island picks a fresh random number for you. Contacts, groups, keys and chat history are all kept.</string>
+    <string name="reg_invite_label">Access code</string>
+    <string name="reg_invite_required">This island is closed: joining needs a code from its operator. Paste it below.</string>
+    <string name="reg_invite_invalid">That code was not accepted. It may be used up, expired, or meant for another island.</string>
 </resources>

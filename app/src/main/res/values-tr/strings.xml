@@ -1362,4 +1362,7 @@
     <string name="badge_desc_unknown">Bu adanın verdiği bir işaret.</string>
     <string name="home_discover_join_failed">Katılamadı, tekrar deneyin.</string>
     <string name="cs_move_footer_play">Ada size yeni bir rastgele numara seçer. Kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur.</string>
+    <string name="reg_invite_label">Erişim kodu</string>
+    <string name="reg_invite_required">Ada kapalı: girmek için işletmecisinden bir kod gerekiyor. Aşağıya yapıştırın.</string>
+    <string name="reg_invite_invalid">Bu kod kabul edilmedi. Kullanılmış, süresi dolmuş veya başka bir adaya ait olabilir.</string>
 </resources>
