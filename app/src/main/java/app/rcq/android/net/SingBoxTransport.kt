@@ -389,14 +389,31 @@ object SingBoxTransport {
         host.contains(':') || host.all { it.isDigit() || it == '.' }
 
     /** Reach the backend through whatever route is live RIGHT NOW — the tunnel
-     *  if engaged, else direct. Used by the diagnostics screen. Blocking. */
-    fun probeCurrentRoute(host: String): Reachability = try {
-        OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS).proxy(proxy() ?: Proxy.NO_PROXY)
-            .islandTrust().build()
-            .newCall(Request.Builder().url("https://$host/health").get().build())
-            .execute().use { if (it.isSuccessful) Reachability.REACHABLE else Reachability.UNREACHABLE }
-    } catch (e: Exception) {
-        if (IslandTrust.isChangedRefusal(e)) Reachability.REFUSED else Reachability.UNREACHABLE
+     *  if engaged, else direct. Used by the diagnostics screen. Blocking.
+     *
+     *  ⚠ Same two budgets as [probeDirect], and it used to have one of six
+     *  seconds. This path is strictly longer than the direct one: SOCKS, then a
+     *  relay, then the island. Giving the longer road the shorter deadline
+     *  produced "direct: reachable / current route: UNREACHABLE" as a matter of
+     *  course on a slow mobile network, with the socket alive the whole time,
+     *  and that red line is what people photograph and report (#927). */
+    fun probeCurrentRoute(host: String): Reachability {
+        for (budget in intArrayOf(4_000, 11_000)) {
+            val r = try {
+                OkHttpClient.Builder()
+                    .callTimeout(budget.toLong(), TimeUnit.MILLISECONDS)
+                    .proxy(proxy() ?: Proxy.NO_PROXY)
+                    .islandTrust().build()
+                    .newCall(Request.Builder().url("https://$host/health").get().build())
+                    .execute().use {
+                        if (it.isSuccessful) Reachability.REACHABLE else Reachability.UNREACHABLE
+                    }
+            } catch (e: Exception) {
+                if (IslandTrust.isChangedRefusal(e)) Reachability.REFUSED else Reachability.UNREACHABLE
+            }
+            if (r != Reachability.UNREACHABLE) return r
+        }
+        return Reachability.UNREACHABLE
     }
 
     fun setEnabled(ctx: Context, on: Boolean) {
@@ -427,7 +444,30 @@ object SingBoxTransport {
      *  and home-menu toggles, and the local-proxy switch, are the user asking
      *  for the tunnel out loud; the opt-out is about the app deciding on its
      *  own, so those paths must not consult this. */
-    fun mayAutoEngage(ctx: Context): Boolean = !localProxyMode() && !autoEngageDisabled(ctx)
+    fun mayAutoEngage(ctx: Context): Boolean =
+        !localProxyMode() && !autoEngageDisabled(ctx) && !systemVpnActive(ctx)
+
+    /** Is somebody else's VPN carrying this device right now?
+     *
+     *  ⚠⚠ Nothing in this app asked this question until three separate people
+     *  reported the same thing (#922, #926, and a message quoted in #921's
+     *  screenshot): RCQ misbehaves under a VPN unless you point it at your own
+     *  proxy on 127.0.0.1. Under a tunnel with a small MTU our direct probe
+     *  does not always finish inside its budget, so the app concluded the
+     *  island was blocked and raised its OWN tunnel on top of the user's —
+     *  two encapsulations, a worse path than either alone, and a red blinking
+     *  dot. There is a manual opt-out for auto-engaging, but it lives in
+     *  Privacy settings and nobody being bitten by this knows it is there.
+     *
+     *  A person running a VPN has already chosen how their traffic leaves.
+     *  Stacking on top of that decision without being asked is not our call.
+     *  It says nothing about the toggles: asking for relays out loud still
+     *  works, VPN or not, which is what `mayAutoEngage` documents above. */
+    fun systemVpnActive(ctx: Context): Boolean = runCatching {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) } ?: return false
+        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+    }.getOrDefault(false)
 
     // Rate limit for the notice below: every request against a blocked island
     // arrives here, and the answer is the same every time.

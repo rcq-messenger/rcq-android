@@ -1201,6 +1201,7 @@
     <string name="diag_audit_hint">Opens plain sockets to this island, the front, the relays and two well-known control hosts, to work out what this network filters. Nothing is sent anywhere; copy the result out yourself.</string>
     <string name="diag_audit_calls_blocked">Messages get through, calls will not. The relay that carries call audio is unreachable from this network, and RCQ relays do not cover calls: voice goes out directly, past them.</string>
     <string name="diag_audit_realtime_down">The island answers, but the live channel is closed. Messages will arrive when the app asks for them, not the moment they are sent.</string>
+    <string name="diag_audit_route_dead">The island answers if you go straight to it, but the relays the app is routing through are not carrying it. Turning RCQ relays off should get you connected.</string>
     <string name="diag_audit_fine">The island answers directly. Nothing is being filtered here.</string>
     <string name="diag_audit_no_net">Even the control hosts are unreachable: this device has no working internet, so nothing below is about RCQ.</string>
     <string name="diag_audit_by_name">Our address answers under another name. The filter goes by NAME, so a different name in front of the same server should get through.</string>
