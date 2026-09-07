@@ -94,7 +94,10 @@ object ServerJoinLink {
  *  from their island anyway). RcqApp confirms, then routes: cross-island host →
  *  addCrossIslandContact + open the chat; same island → contact request. */
 object ContactAddLink {
-    data class Req(val uin: Int, val host: String?)
+    /** [card] is a GUEST CARD the sharer put in the link's FRAGMENT, on a
+     *  closed island: what lets us reach them at all. See
+     *  [app.rcq.android.net.GuestCardStore]. */
+    data class Req(val uin: Int, val host: String?, val card: String? = null)
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromUri(uri: android.net.Uri?): Req? {
@@ -108,7 +111,22 @@ object ContactAddLink {
             uri.host == "rcq.app" && uri.pathSegments.firstOrNull() in setOf("u", "r")
         if (!isRcq && !isWeb) return null
         val uin = uri.lastPathSegment?.toIntOrNull()?.takeIf { it > 0 } ?: return null
-        return Req(uin, uri.getQueryParameter("h")?.takeIf { it.isNotBlank() })
+        // ⚠⚠ THE CARD COMES OUT OF THE FRAGMENT, and it is there rather than in
+        // the query on purpose: a fragment is never sent to a server, so a link
+        // can be pasted anywhere without rcq.app, its CDN or a middlebox ever
+        // seeing a live credential. `Uri.getQueryParameter` cannot reach it, so
+        // the fragment is parsed by hand.
+        //
+        // Bounded, because it arrives from a tapped link and leaves as a
+        // request header.
+        val card = uri.fragment
+            ?.split('&')
+            ?.firstOrNull { it.startsWith("c=") }
+            ?.removePrefix("c=")
+            ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it.length <= 128 }
+        return Req(uin, uri.getQueryParameter("h")?.takeIf { it.isNotBlank() }, card)
     }
 }
 
@@ -1175,6 +1193,11 @@ private fun RcqApp(session: Session) {
         val addReq by ContactAddLink.pending.collectAsState()
         if (s is UiState.Registered && !locked) {
             addReq?.let { req ->
+                // Kept the moment the link is opened, before the confirm sheet
+                // and before any decision: the card is what the NEXT request
+                // about this person needs, and a person who taps Cancel and
+                // adds them later would otherwise have thrown it away.
+                req.card?.let { app.rcq.android.net.GuestCardStore.rememberTheirCard(req.uin, req.host, it) }
                 if (req.uin == s.uin) {
                     ContactAddLink.pending.value = null
                 } else {

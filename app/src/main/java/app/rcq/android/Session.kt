@@ -8576,7 +8576,16 @@ class Session(context: Context) {
         val sk = runCatching {
             android.util.Base64.encodeToString(signingPub(), android.util.Base64.NO_WRAP)
         }.getOrNull()
-        return RcqFederation.buildContactQr(a, sk) to RcqFederation.buildContactLink(a, sk)
+        // ⚠ Only on a CLOSED island, and this is not an optimisation: minting
+        // a card on an open island would put a live credential into every code
+        // anybody has ever held up to a camera, for a door that is not locked.
+        // It is also the moment the card is first created, so an open island
+        // never registers one at all.
+        val card = if (!closedIsland) null else GuestCardStore.shareableCard { hash ->
+            kotlinx.coroutines.runBlocking { api.addGuestCard(hash) }
+        }
+        return RcqFederation.buildContactQr(a, sk, card = card) to
+            RcqFederation.buildContactLink(a, sk, card = card)
     }
 
     /** True when this account already knows a DIFFERENT person carrying the
