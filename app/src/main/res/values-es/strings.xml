@@ -1373,4 +1373,5 @@
     <string name="ci_closed_island">Esta isla es cerrada. Para escribirle a alguien de ahí hace falta un enlace suyo: que comparta su contacto, o que te escriba primero.</string>
     <string name="island_entry_price">Entrada: %1$s</string>
     <string name="island_entry_closed">Club cerrado</string>
+    <string name="island_entry_buy">comprar</string>
 </resources>

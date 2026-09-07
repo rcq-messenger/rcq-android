@@ -280,9 +280,34 @@ private fun IslandCard(island: IslandCatalog.Entry) {
         // One page, one island, one question.
         val entry = islandEntry(island.host)
         if (entry != null) {
+            val (entryText, entryUrl) = entry
+            val label = if (entryUrl != null) {
+                entryText + " · " + stringResource(R.string.island_entry_buy)
+            } else {
+                entryText
+            }
             Text(
-                entry, color = c.accent, fontSize = 12.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 2.dp),
+                label, color = c.accent, fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    // ⚠ The click stops here. This line sits on the card that
+                    // PICKS the island, and one tap that both opened a shop and
+                    // chose an island would be two answers to a question the
+                    // person asked once.
+                    .then(
+                        if (entryUrl != null) {
+                            Modifier.clickable {
+                                runCatching {
+                                    ctx.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(entryUrl),
+                                        ),
+                                    )
+                                }
+                            }
+                        } else Modifier,
+                    ),
             )
         }
         // ⚠ A RESERVED box, not an optional block. Each page used to measure
@@ -311,19 +336,27 @@ private fun IslandCard(island: IslandCatalog.Entry) {
 /// A card that has never been opened asks nothing. The answer is remembered
 /// for the life of the sheet, so swiping back and forth does not re-ask.
 @Composable
-private fun islandEntry(host: String): String? {
+/// The price line, and where to buy, in the ISLAND'S own words.
+///
+/// `entry_url` is the operator's setting, so a self-hoster sends people to
+/// their own shop and we send people to ours. An island that set a price and
+/// no address gets the line without a link rather than a link somewhere we
+/// invented for it.
+private fun islandEntry(host: String): Pair<String, String?>? {
     val ctx = LocalContext.current
-    var line by remember(host) { mutableStateOf<String?>(null) }
+    var line by remember(host) { mutableStateOf<Pair<String, String?>?>(null) }
     LaunchedEffect(host) {
         val caps = runCatching { RcqApi.serverInfoOf(host)?.capabilities }.getOrNull() ?: return@LaunchedEffect
         if (!caps.closed_island) return@LaunchedEffect
         val cents = caps.entry_price_cents
-        line = if (cents > 0) {
+        val text = if (cents > 0) {
             val price = if (cents % 100 == 0) "$" + (cents / 100) else "$" + "%.2f".format(cents / 100.0)
             ctx.getString(R.string.island_entry_price, price)
         } else {
             ctx.getString(R.string.island_entry_closed)
         }
+        val url = caps.entry_url.trim().takeIf { it.startsWith("https://", ignoreCase = true) }
+        line = text to url
     }
     return line
 }
