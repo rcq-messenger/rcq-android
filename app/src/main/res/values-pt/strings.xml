@@ -1366,4 +1366,6 @@
     <string name="reg_invite_required">A ilha é fechada: para entrar é preciso um código do operador dela. Cole-o abaixo.</string>
     <string name="reg_invite_invalid">Esse código não foi aceito. Pode estar usado, expirado ou ser de outra ilha.</string>
     <string name="ci_closed_island">Esta ilha é fechada. Para escrever a alguém de lá é preciso um link da própria pessoa: ela compartilha o contato, ou escreve para você primeiro.</string>
+    <string name="island_entry_price">Entrada: %1$s</string>
+    <string name="island_entry_closed">Clube fechado</string>
 </resources>

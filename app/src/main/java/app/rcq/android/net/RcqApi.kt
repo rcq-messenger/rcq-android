@@ -1683,6 +1683,11 @@ class RcqApi(
          *  number", or a closed island becomes a directory for guessing which
          *  numbers exist. False on any island older than the field. */
         val closed_island: Boolean = false,
+        /** What this island charges to join, in US cents; 0 = not sold. Read
+         *  from the island rather than the catalogue, which the team edits by
+         *  hand and which would be stale the day after a price changed. */
+        val entry_price_cents: Int = 0,
+        val entry_url: String = "",
         val vault: Boolean = false,
         val vault_max_blob_bytes: Int = 0,
         val vault_max_slots: Int = 0,

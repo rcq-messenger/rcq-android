@@ -1366,4 +1366,6 @@
     <string name="reg_invite_required">Ada kapalı: girmek için işletmecisinden bir kod gerekiyor. Aşağıya yapıştırın.</string>
     <string name="reg_invite_invalid">Bu kod kabul edilmedi. Kullanılmış, süresi dolmuş veya başka bir adaya ait olabilir.</string>
     <string name="ci_closed_island">Bu ada kapalı. Oradaki birine yazmak için kişinin kendisinden bir bağlantı gerekir: kişiyi paylaşması ya da size önce yazması.</string>
+    <string name="island_entry_price">Giriş: %1$s</string>
+    <string name="island_entry_closed">Kapalı kulüp</string>
 </resources>
