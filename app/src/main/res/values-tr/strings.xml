@@ -1159,6 +1159,7 @@
     <string name="diag_audit_hint">Bu adaya, ön uca, rölelere ve iyi bilinen iki denetim sunucusuna düz soket açar; böylece bu ağın neyi süzdüğünü anlar. Hiçbir yere bir şey gönderilmez; sonucu kendin kopyala.</string>
     <string name="diag_audit_calls_blocked">Mesajlar geçiyor, aramalar geçmeyecek. Arama sesini taşıyan röleye bu ağdan erişilemiyor ve RCQ röleleri aramaları kapsamıyor: ses onların yanından doğrudan çıkıyor.</string>
     <string name="diag_audit_realtime_down">Ada yanıt veriyor ama gerçek zamanlı kanal kapalı. Mesajlar gönderildiği anda değil, uygulama istediğinde gelecek.</string>
+    <string name="diag_audit_route_dead">Doğrudan gidildiğinde ada yanıt veriyor, ama uygulamanın geçtiği aktarıcılar onu taşımıyor. RCQ aktarıcılarını kapatın, bağlantı gelmeli.</string>
     <string name="diag_audit_fine">Ada doğrudan cevap veriyor. Burada bir şey süzülmüyor.</string>
     <string name="diag_audit_no_net">Denetim sunucularına bile erişilemiyor: bu cihazda çalışan bir internet yok, yani aşağıdakilerin RCQ ile ilgisi yok.</string>
     <string name="diag_audit_by_name">Adresimiz başka bir adla cevap veriyor. Süzgeç İSME göre çalışıyor, yani aynı sunucunun önündeki farklı bir ad geçmeli.</string>

@@ -74,7 +74,7 @@ object NetworkAudit {
 
     data class Report(val lines: List<Line>, val verdict: Verdict, val compact: String)
 
-    enum class Verdict { ALL_FINE, CALLS_BLOCKED, REALTIME_DOWN, NO_INTERNET, BY_NAME, BY_ADDRESS, UNCLEAR }
+    enum class Verdict { ALL_FINE, CALLS_BLOCKED, REALTIME_DOWN, ROUTE_DEAD, NO_INTERNET, BY_NAME, BY_ADDRESS, UNCLEAR }
 
     /** Outcome of a single connection attempt, kept coarse on purpose. */
     private enum class Reach {
@@ -212,10 +212,30 @@ object NetworkAudit {
      *  (#922). Worse, opening this screen brings the app to the foreground,
      *  which re-dials the socket, so the instrument silently REPAIRED what it
      *  refused to measure and the person was told nothing had been wrong. */
-    fun run(islandHost: String, realtimeUp: Boolean? = null): Report {
+    /// - Parameter knownTurnHost: the call relay's hostname when the caller
+    ///   could look it up. See the note where it is used: without it, the call
+    ///   check only runs for somebody who has already placed a call in this
+    ///   process, which is never the person opening this screen because calls
+    ///   do not work.
+    fun run(
+        islandHost: String,
+        realtimeUp: Boolean? = null,
+        knownTurnHost: String? = null,
+    ): Report {
         val lines = ArrayList<Line>()
         fun add(name: String, r: Pair<Reach, String>) {
             lines += Line(name, r.first == Reach.OPEN, "${r.first.name.lowercase()} (${r.second})")
+        }
+
+        // ⚠ The crossed probes read the OPPOSITE way round, and painting them
+        // like the rest was telling people the good news in red. For A and B in
+        // the header comment, REACHED is the PASS: our bytes got to a real
+        // server and were rejected there by TLS, which is exactly how we learn
+        // that this half is not what is being cut. Only BLOCKED is bad here.
+        // Somebody photographed a red "наш адрес + чужое имя: reached" next to
+        // a verdict saying nothing is cut, and both were right (#927/#925).
+        fun addCross(name: String, r: Pair<Reach, String>) {
+            lines += Line(name, r.first != Reach.BLOCKED, "${r.first.name.lowercase()} (${r.second})")
         }
 
         // 1. Is there any usable internet at all.
@@ -270,10 +290,10 @@ object NetworkAudit {
         //    A: permitted address, our name.
         val controlIp = CONTROL_HOSTS.firstNotNullOfOrNull { resolve(it) }
         val crossName = controlIp?.let { probe(it, 443, islandHost) }
-        crossName?.let { add("чужой адрес + наше имя", it) }
+        crossName?.let { addCross("чужой адрес + наше имя", it) }
         //    B: our address, permitted name.
         val crossAddr = islandIp?.let { probe(it, 443, CONTROL_HOSTS.first()) }
-        crossAddr?.let { add("наш адрес + чужое имя", it) }
+        crossAddr?.let { addCross("наш адрес + чужое имя", it) }
 
         // 5. If our own address is unreachable, where COULD a machine stand?
         //    Only worth the seconds when something is actually wrong; on a
@@ -351,7 +371,15 @@ object NetworkAudit {
         // place a single call still reported ALL_FINE (report #468). A verdict
         // that cannot see the thing that is broken is worse than no verdict.
         var turnOk: Boolean? = null
-        app.rcq.android.call.CallDiagnostics.turnHost?.let { th ->
+        // ⚠⚠ ASK THE ISLAND when no call has been placed in this process.
+        // `CallDiagnostics.turnHost` is written in exactly one place, when a
+        // call starts, and it lives in memory — so it is null on every fresh
+        // launch. The whole TURN block hung off it, which meant the one person
+        // most likely to open this screen, somebody whose CALLS DO NOT WORK,
+        // got no call line at all and a verdict of ALL_FINE. That is #468
+        // coming back through a different door, and #927 is the report.
+        val turn = app.rcq.android.call.CallDiagnostics.turnHost ?: knownTurnHost
+        turn?.let { th ->
             // ⚠ Measure the road the call will actually take. With the tunnel up
             // the media is forwarded through it (TurnTunnel), so testing the
             // direct path would condemn a set-up that works; with the tunnel
@@ -420,12 +448,38 @@ object NetworkAudit {
             )
         }
 
+        // ⚠⚠ THE ROUTE THE APP IS ACTUALLY ON. Everything above measures roads
+        // the app is not necessarily driving: `direct` says the island answers
+        // if you go straight there, and that is what the verdict was computed
+        // from. With relays engaged the app does NOT go straight there. So the
+        // connection card on this very screen could say "current route:
+        // unreachable" while the verdict underneath said "nothing is being cut
+        // here", and both came off the same data (#927). If the road we are on
+        // is dead, that is the answer, whatever the road we are not on says.
+        val routeDead = SingBoxTransport.isActive && run {
+            val r = SingBoxTransport.probeCurrentRoute(islandHost)
+            lines += Line(
+                "маршрут, которым идёт приложение",
+                r == SingBoxTransport.Reachability.REACHABLE,
+                when (r) {
+                    SingBoxTransport.Reachability.REACHABLE -> "через релеи, отвечает"
+                    SingBoxTransport.Reachability.REFUSED -> "через релеи, сертификат не тот"
+                    else -> "через релеи, не отвечает"
+                },
+            )
+            r != SingBoxTransport.Reachability.REACHABLE
+        }
+
         val verdict = when {
             !controlOk && direct.first == Reach.BLOCKED -> Verdict.NO_INTERNET
             // The island answering an HTTP request says nothing about the live
             // channel, and the live channel is what delivers a message the
             // moment it is sent. Reachable-but-mute is its own answer.
             direct.first == Reach.OPEN && realtimeUp == false -> Verdict.REALTIME_DOWN
+            // Reachable directly, but the app is on relays and they are not
+            // carrying it. Actionable in a way ALL_FINE never was: turn the
+            // relays off and the island is right there.
+            direct.first == Reach.OPEN && routeDead -> Verdict.ROUTE_DEAD
             // ⚠ Everything can be reachable and calls still impossible: the
             // media relay is a separate host on separate ports, and no other
             // check here touches it. Saying ALL_FINE to someone whose calls
@@ -453,6 +507,7 @@ object NetworkAudit {
             // had none.
             append("RCQ-NET/5 ")
             realtimeUp?.let { append("ws:${if (it) "up" else "DOWN"} ") }
+            if (SingBoxTransport.isActive) append("route:${if (routeDead) "DEAD" else "ok"} ")
             append(if (controlOk) "ctl:ok " else "ctl:dead ")
             append("dns:${if (islandIp != null) "ok" else "fail"} ")
             append("dir:${short(direct.first)} ")

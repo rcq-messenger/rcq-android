@@ -222,6 +222,20 @@ class Session(context: Context) {
     @Volatile private var capsLiveHost: String? = null
     private val capsRefreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private var api = newApi()
+
+    /** The call relay's hostname, asked of the island.
+     *
+     *  For the network audit, which has no session of its own and until now
+     *  could only report on calls if one had already been placed in this
+     *  process — so the person whose calls do not work got no call line at all
+     *  (#468, and #927 again). Null when the island has no relay configured or
+     *  the request fails, which the audit already handles.
+     */
+    suspend fun callRelayHost(): String? = runCatching {
+        api.turnCredentials().urls.firstNotNullOfOrNull { url ->
+            Regex("^turns?:([^:/?]+)").find(url)?.groupValues?.get(1)
+        }
+    }.getOrNull()
     private var socket = newSocket()
     private fun newApi(): RcqApi =
         RcqApi("https://${apiHost()}", isPrimary = true, anonKeyLookup = { this@Session.anonKeyLookup }).apply {
@@ -912,6 +926,22 @@ class Session(context: Context) {
     private var defaultNetwork: android.net.Network? = null
     @Volatile
     private var sawFirstNetwork = false
+    /** When the last redial was ordered by [networkCallback], to collapse a
+     *  burst of them into one.
+     *
+     *  ⚠⚠ A `Network` is an OBJECT, and a new one does not mean a new way out.
+     *  A VPN client rebuilding its tunnel, or rotating servers, hands out a
+     *  fresh object every time, and each one dropped and redialled the socket.
+     *  That is the red blinking three separate people reported (#921, #922,
+     *  #926) and it does more damage than the flicker: the route ladder only
+     *  replays after 90 seconds of CONTINUOUS offline, and a redial every few
+     *  seconds resets that clock, so the ladder never ran at all and the app
+     *  sat on a bad route with a healthy direct path right there. Which is the
+     *  connection card in #927.
+     */
+    @Volatile
+    private var lastNetworkRedialAt = 0L
+
     private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: android.net.Network) {
             val previous = defaultNetwork
@@ -920,7 +950,13 @@ class Session(context: Context) {
                 sawFirstNetwork = true
                 return
             }
-            if (network != previous) socket.reconnectNow()
+            if (network == previous) return
+            // Debounced, not suppressed: a real change (wifi to mobile) still
+            // redials at once, a burst from one VPN reconnect redials once.
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastNetworkRedialAt < NETWORK_REDIAL_GAP_MS) return
+            lastNetworkRedialAt = now
+            socket.reconnectNow()
         }
 
         override fun onLost(network: android.net.Network) {
@@ -10840,6 +10876,10 @@ class Session(context: Context) {
         /** How long the socket must stay down before the route ladder is walked
          *  again. Longer than the socket's own max backoff (30s) so ordinary
          *  blips are handled where they belong. */
+        /** Floor between two redials ordered by a change of default network.
+         *  Long enough to swallow a VPN client rebuilding its tunnel, short
+         *  enough that walking out of wifi still reconnects immediately. */
+        const val NETWORK_REDIAL_GAP_MS = 5_000L
         const val OFFLINE_RELADDER_MS = 90_000L
         /** Floor between two burned-account probes (#655): the socket redials
          *  on its backoff and every 4401 close would otherwise probe again. */

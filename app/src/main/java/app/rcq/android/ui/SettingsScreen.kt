@@ -1,3 +1,4 @@
+@file:OptIn(ExperimentalLayoutApi::class)
 package app.rcq.android.ui
 
 import app.rcq.android.BuildConfig
@@ -145,6 +146,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -1161,7 +1164,16 @@ private fun SettingsRoot(
                 // The two documents a store wants reachable from inside the app,
                 // and the two a person should find without a search engine
                 // (founder, 05.09).
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                // ⚠ FlowRow, not Row. Side by side these two fit in English and
+                // do not fit in Russian: "Политика конфиденциальности" plus
+                // "Условия использования" at 12sp overflowed, and the second
+                // was squeezed until it broke mid-word (#925). Wrapping is the
+                // honest answer — shrinking the text or truncating a legal
+                // document's name is not.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
                         stringResource(R.string.cs_about_privacy), color = c.accent, fontSize = 12.sp,
                         modifier = Modifier.clickable { uriHandler.openUri("https://rcq.app/privacy") },
@@ -2376,7 +2388,15 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                 auditing = true; audit = null
                 scope.launch {
                     audit = withContext(Dispatchers.IO) {
-                        runCatching { app.rcq.android.net.NetworkAudit.run(session.currentServer, session.connected.value) }.getOrNull()
+                        runCatching {
+                            // The call relay's name, asked for HERE because the
+                            // audit has no session to ask with. Null is fine and
+                            // means the same as it always did: no call line.
+                            val turnHost = session.callRelayHost()
+                            app.rcq.android.net.NetworkAudit.run(
+                                session.currentServer, session.connected.value, turnHost,
+                            )
+                        }.getOrNull()
                     }
                     auditing = false
                 }
@@ -2394,6 +2414,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                             app.rcq.android.net.NetworkAudit.Verdict.ALL_FINE -> R.string.diag_audit_fine
                             app.rcq.android.net.NetworkAudit.Verdict.CALLS_BLOCKED -> R.string.diag_audit_calls_blocked
                             app.rcq.android.net.NetworkAudit.Verdict.REALTIME_DOWN -> R.string.diag_audit_realtime_down
+                            app.rcq.android.net.NetworkAudit.Verdict.ROUTE_DEAD -> R.string.diag_audit_route_dead
                             app.rcq.android.net.NetworkAudit.Verdict.NO_INTERNET -> R.string.diag_audit_no_net
                             app.rcq.android.net.NetworkAudit.Verdict.BY_NAME -> R.string.diag_audit_by_name
                             app.rcq.android.net.NetworkAudit.Verdict.BY_ADDRESS -> R.string.diag_audit_by_addr
@@ -2435,9 +2456,19 @@ private fun DiagRow(label: String, value: String, ok: Boolean?) {
         false -> Color(0xFFE5484D)
         null -> c.textSecondary
     }
+    // ⚠ BOTH weighted, and the label gets the larger share. Only the label was
+    // weighted, so the value — an unweighted child — was measured first and took
+    // whatever it wanted: "reached (SocketTimeoutException)" left the label a
+    // couple of characters and Compose broke "наш адрес + чужое имя" into a
+    // column one letter wide (#925). A row of two texts has to say how the
+    // width is divided, or the longer one simply wins.
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = c.textPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Text(value, color = tint, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = c.textPrimary, fontSize = 14.sp, modifier = Modifier.weight(0.55f))
+        Text(
+            value, color = tint, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.45f).padding(start = 8.dp),
+        )
     }
 }
 
