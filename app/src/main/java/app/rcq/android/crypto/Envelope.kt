@@ -44,7 +44,18 @@ sealed interface Envelope {
      *
      *  ⚠ ATTACKER-CONTROLLED. It is a number a peer's client chose; the reader
      *  (`Session.expiryFor`) rails it before trusting it. Nothing here does. */
-    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null, val ts: Long? = null) : Envelope
+    /** [card] is a GUEST CARD the sender is handing the recipient, on a CLOSED
+     *  island. It is the whole of "I wrote to you first, so you may write
+     *  back": it needs no server state, no screen and no round trip, because
+     *  it rides INSIDE the sealed envelope where only the recipient can read
+     *  it. The island sees an opaque blob, exactly as before, and could never
+     *  enforce this itself — `/messages/sealed` takes no auth by design and the
+     *  message row has no sender column.
+     *
+     *  ⚠ 1:1 only, and never on an open island: a card is a live credential
+     *  with no business travelling to a door that is not locked, or to a room
+     *  whose membership can change after the fact. */
+    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null, val ts: Long? = null, val card: String? = null) : Envelope
     /** Photo. `mediaId`/`mediaKey` point at the out-of-band encrypted
      *  blob (rcq-spec 9). caption may be empty. [spoiler] = sent blurred,
      *  the recipient taps to reveal (Android-only flag; iOS ignores it). */
@@ -330,6 +341,7 @@ sealed interface Envelope {
                     addProperty("authorName", it.authorName)
                 })
             }
+            card?.takeIf { it.isNotBlank() }?.let { addProperty("card", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Photo -> JsonObject().apply {
             addProperty("kind", "photo")
@@ -622,9 +634,9 @@ sealed interface Envelope {
             return t to System.currentTimeMillis() / 1000
         }
 
-        fun text(body: String, replyTo: Reply? = null, ttl: Int? = null): Text {
+        fun text(body: String, replyTo: Reply? = null, ttl: Int? = null, card: String? = null): Text {
             val (t, ts) = dying(ttl)
-            return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts)
+            return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts, card = card)
         }
 
         fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null): Photo {
@@ -735,7 +747,12 @@ sealed interface Envelope {
             val ts = obj.get("ts")?.takeIf { it.isJsonPrimitive }
                 ?.let { runCatching { it.asLong }.getOrNull() }
             return when (val kind = obj.get("kind")?.asString) {
-                "text" -> Text(id, obj.get("text")?.asString.orEmpty(), reply, ttl, ts)
+                "text" -> Text(
+                    id, obj.get("text")?.asString.orEmpty(), reply, ttl, ts,
+                    // Bounded on the way in: it arrives from a peer and leaves
+                    // as a request header.
+                    card = obj.get("card")?.asString?.takeIf { it.isNotBlank() && it.length <= 128 },
+                )
                 "photo" -> Photo(
                     id = id,
                     mediaId = obj.get("mediaID")?.asString.orEmpty(),

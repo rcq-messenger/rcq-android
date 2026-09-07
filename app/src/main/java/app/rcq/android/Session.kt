@@ -190,6 +190,12 @@ class Session(context: Context) {
     @Volatile private var vaultEnabled: Boolean =
         capsCache(serverHost())?.vault ?: false
 
+    /** Whether this island withholds keys from strangers. Drives whether an
+     *  outgoing envelope carries a guest card at all: on an open island a card
+     *  is a live credential travelling to a door that is not locked. */
+    @Volatile private var closedIsland: Boolean =
+        capsCache(serverHost())?.closed_island ?: false
+
     /**
      * The same question the chat list asks, with THREE answers rather than two:
      * true, false, and **null = not answered yet**.
@@ -657,6 +663,7 @@ class Session(context: Context) {
         anonKeyLookup = c.anon_keys && c.deposit_auth
         groupLogReader = c.group_log
         vaultEnabled = c.vault
+        closedIsland = c.closed_island
         if (live || c.vault) _vaultAvailable.value = c.vault
         // Zero means the island did not say, and the shipped default stands.
         // An island that DID say wins even when it says something smaller than
@@ -5792,10 +5799,30 @@ class Session(context: Context) {
      *  function exists to make. The deadline comes off `env.ts`, so both copies
      *  die at the same instant. */
     suspend fun sendText(toUin: Int, text: String, replyTo: Reply? = null) {
-        val env = Envelope.text(text, replyTo, peerTtl(toUin))
+        // ⚠ On a CLOSED island the envelope carries a guest card, and that is
+        // the whole of "I wrote to you first, so you may write back": no server
+        // state, no screen, no round trip, because it rides inside the sealed
+        // blob. 1:1 only — a card handed to a room is a card handed to whoever
+        // joins it later — and never on an open island, where a live credential
+        // would be travelling to a door that is not locked.
+        val env = Envelope.text(text, replyTo, peerTtl(toUin), card = outgoingGuestCard())
         val now = System.currentTimeMillis()
         store(ChatMessage(env.id, toUin, fromMe = true, body = text, sentAt = now, state = DeliveryState.SENDING, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
         sendEnvelope(env, env.id, toUin)
+    }
+
+    /** The card to attach to a 1:1 envelope, or null.
+     *
+     *  Minted on first use and registered with the island before it is stored,
+     *  because a card we kept but never told the island about opens nothing
+     *  and we would hand it out believing it works. Cheap after that: the
+     *  capability answer is cached and the card is read from preferences.
+     */
+    private suspend fun outgoingGuestCard(): String? {
+        if (!closedIsland) return null
+        return GuestCardStore.shareableCard { hash ->
+            kotlinx.coroutines.runBlocking { api.addGuestCard(hash) }
+        }
     }
 
     /** In-chat bridge sharing: hand [toUin] a relay descriptor from your known
@@ -7921,6 +7948,15 @@ class Session(context: Context) {
             if (dec.senderUin == activeRandomPeer) {
                 (dec.envelope as? Envelope.Text)?.let { appendRandom(ChatMessage(it.id, dec.senderUin, fromMe = false, body = it.text, sentAt = now)) }
                 return@runCatching
+            }
+            // ⚠ A GUEST CARD the sender handed us, read BEFORE anything is
+            // decided about the message. It is what makes "they wrote to me"
+            // into "I can answer them", and the answer path runs immediately
+            // after this. Kept even for a message we go on to treat as a
+            // stranger's: the card costs nothing to hold, and the alternative
+            // is somebody who accepts an hour later and then cannot reply.
+            (dec.envelope as? Envelope.Text)?.card?.let {
+                GuestCardStore.rememberTheirCard(dec.senderUin, null, it)
             }
             when (val env = dec.envelope) {
                 is Envelope.Text ->

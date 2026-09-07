@@ -1677,6 +1677,12 @@ class RcqApi(
         // refresh (see Session.mirrorContactsToVault); one that does not is
         // left alone. Default false: an older island omits it. The two caps
         // ride along so a client never has to discover them by failing.
+        /** The island withholds the key that seals an envelope to its
+         *  residents, so a number alone no longer reaches somebody. Read
+         *  because the refusal cannot say so: it is byte-identical to "no such
+         *  number", or a closed island becomes a directory for guessing which
+         *  numbers exist. False on any island older than the field. */
+        val closed_island: Boolean = false,
         val vault: Boolean = false,
         val vault_max_blob_bytes: Int = 0,
         val vault_max_slots: Int = 0,
