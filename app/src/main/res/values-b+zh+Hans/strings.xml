@@ -595,11 +595,7 @@
     <string name="pe_title">编辑个人资料</string>
     <string name="pe_saved">个人资料已保存</string>
     <string name="pe_views_title">个人资料浏览</string>
-    <string name="pe_views_desc">过去 7 天内打开过你个人资料的人。</string>
-    <string name="pe_views_empty">过去 7 天内没有人打开过你的个人资料。</string>
-    <string name="pe_views_unknown">不在你的联系人中</string>
-    <string name="pe_views_note">此列表只保存在本设备上，由其他客户端打开你的个人资料时发送的提示汇总而成。岛屿看不到它。</string>
-    <string name="ci_visit_notice">对方可以看到你打开过他的资料。</string>
+    <string name="pe_views_desc">最近 7 天内您的资料被打开的次数。</string>
     <string name="pe_nickname">昵称</string>
     <string name="pe_status_message">状态消息</string>
     <string name="pe_first_name">名字</string>
@@ -646,7 +642,11 @@
     <string name="pv_obfuscated">让应用走 RCQ 中继</string>
     <string name="pv_obfuscated_desc">流量不直接发往岛，而是走我们的中继：岛看不到你的地址，你和岛之间的网络也看不出你在用 RCQ。立即生效：应用会重新连接。在 RCQ 被封锁的地方，这也是唯一的通路。</string>
     <string name="pv_obf_auto_disable">不自动启用中继</string>
-    <string name="bypass_auto_off_unreachable">无法连接岛屿。设置中已关闭自动中继，请在菜单中开启 RCQ 中继。</string>
+    <string name="bypass_auto_off_unreachable">你的岛屿没有响应，自动中继已关闭。请在菜单中开启 RCQ 中继。</string>
+    <string name="bypass_auto_off_calls">通话中继没有响应，自动中继已关闭。请在菜单中开启 RCQ 中继。</string>
+    <string name="bypass_auto_off_foreign">%1$s 没有响应，自动中继已关闭。请在菜单中开启 RCQ 中继。</string>
+    <string name="bypass_auto_off_backup">没有备用岛屿响应，自动中继已关闭。请在菜单中开启 RCQ 中继。</string>
+    <string name="island_unreachable_relays_off">没有响应。RCQ 中继已关闭。</string>
     <string name="pv_obf_auto_disable_desc">默认情况下，如果无法直接连到岛，应用会自动打开中继。如果你已经把流量走自己的 VPN/代理，请打开这个开关，避免我们的传输叠加在你的之上。</string>
     <string name="pv_onion">洋葱路由（实验性）</string>
     <string name="pv_onion_desc">经过两个中继转发，任何单个中继都无法同时看到你和岛。会自动打开 RCQ 中继。速度略慢。下次启动时生效。</string>

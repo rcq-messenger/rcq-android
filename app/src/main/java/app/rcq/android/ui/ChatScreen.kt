@@ -1469,7 +1469,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     // (founder, 05.09): a room's or a person's.
                     BadgeMark(if (isGroup) group?.badge else if (isSelf) null else peerContact?.badge)
                 }
-                val sub = when {
+                // Second half of the pair is the UIN the subtitle takes turns
+                // with, and only the offline-with-a-last-seen case has one. It
+                // rides along in the `when` rather than being recomputed beside
+                // it on purpose: the condition that picks the last-seen phrase
+                // and the condition that turns the alternation on are the SAME
+                // condition, and two copies of it would drift the first time a
+                // branch above moves (the cross-island branch already shadows
+                // this one, and must keep shadowing it).
+                val (sub: String, altUin: String?) = when {
                     isGroup -> {
                         // The count, not the roster's size: the roster arrives a
                         // moment later than the header does.
@@ -1479,18 +1487,36 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         // [memberCountLabel] is the shared label (CountFormat.kt),
                         // the same one the chat list uses, so one room cannot read
                         // "12.5K" in the list and "12480" here.
-                        memberCountLabel(n)
+                        memberCountLabel(n) to null
                     }
-                    isSelf -> stringResource(R.string.chat_saved_subtitle)
-                    isTyping -> stringResource(R.string.chat_typing)
-                    peerContact == null -> CrossIslandStore.findByUin(peer ?: 0)?.host ?: "$peer"
+                    isSelf -> stringResource(R.string.chat_saved_subtitle) to null
+                    isTyping -> stringResource(R.string.chat_typing) to null
+                    peerContact == null -> (CrossIslandStore.findByUin(peer ?: 0)?.host ?: "$peer") to null
                     // Cross-island peer: show their island, not a fake "offline"
                     // (presence isn't tracked across islands).
-                    peerContact.host != null -> peerContact.host
-                    peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null -> lastSeenPhrase(peerContact.lastSeen, peerContact.gender, context)
-                    else -> stringResource(peerContact.presence.labelRes).lowercase()
+                    peerContact.host != null -> peerContact.host to null
+                    // Ours, offline, and we know when they were last around: the
+                    // one line has two things worth saying, so it alternates the
+                    // way iOS does (founder: "one to one" with ChatView.swift's
+                    // `peerSubtitle`) - 7s per side, 0.2s per fade, UIN first.
+                    peerContact.presence == UserStatus.OFFLINE && peerContact.lastSeen != null ->
+                        lastSeenPhrase(peerContact.lastSeen, peerContact.gender, context) to peerContact.uin.toString()
+                    else -> stringResource(peerContact.presence.labelRes).lowercase() to null
                 }
-                Text(sub, color = if (isTyping) c.accent else c.textSecondary, fontSize = 12.sp)
+                if (altUin != null) {
+                    // ⚠ Both halves stay laid out inside [AltText]'s Box, so the
+                    // header keeps the height and width it has while the fade
+                    // runs; the static branch below is capped to one line for
+                    // the same reason, or a long last-seen phrase would make the
+                    // non-alternating header taller than the alternating one.
+                    AltText(
+                        altUin, sub, c.textSecondary, 12.sp,
+                        periodMs = 7000, fadeMs = 200,
+                        familyA = FontFamily.Monospace,
+                    )
+                } else {
+                    Text(sub, color = if (isTyping) c.accent else c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             // Calling somebody was two taps and a menu you had to know about.
             // The web client has always had the phone and the camera straight

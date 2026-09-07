@@ -617,11 +617,7 @@
     <string name="pe_title">Редактировать профиль</string>
     <string name="pe_saved">Профиль сохранён</string>
     <string name="pe_views_title">Просмотры профиля</string>
-    <string name="pe_views_desc">Кто открывал ваш профиль за последние 7 дней.</string>
-    <string name="pe_views_empty">За последние 7 дней ваш профиль никто не открывал.</string>
-    <string name="pe_views_unknown">Не в ваших контактах</string>
-    <string name="pe_views_note">Список хранится только на этом устройстве и собирается из сигналов, которые присылают клиенты при открытии вашего профиля. Остров его не видит.</string>
-    <string name="ci_visit_notice">Человек увидит, что вы открывали его профиль.</string>
+    <string name="pe_views_desc">Сколько раз ваш профиль открывали за последние 7 дней.</string>
     <string name="pe_nickname">Никнейм</string>
     <string name="pe_status_message">Статус</string>
     <string name="pe_first_name">Имя</string>
@@ -642,7 +638,11 @@
     <string name="stealth_shield_amber">Щит оранжевый: релеи включены, но что данные через них доходят, пока не подтверждено. Если так и останется, попробуйте выключить и включить релеи в меню.</string>
     <string name="stealth_info_body">Приложение идёт через релеи RCQ: остров не видит ваш адрес, а сеть между вами и островом не видит, что вы пользуетесь RCQ. Включилось само, потому что прямое соединение не прошло, настраивать ничего не нужно.</string>
     <string name="connecting_stealth">Подключаюсь через релеи…</string>
-    <string name="bypass_auto_off_unreachable">Остров недоступен. Автоподъём релеев выключен в настройках, включите релеи RCQ в меню.</string>
+    <string name="bypass_auto_off_unreachable">Ваш остров не отвечает, автоподъём релеев выключен. Включите релеи RCQ в меню.</string>
+    <string name="bypass_auto_off_calls">Релей звонков не отвечает, автоподъём релеев выключен. Включите релеи RCQ в меню.</string>
+    <string name="bypass_auto_off_foreign">%1$s не отвечает, автоподъём релеев выключен. Включите релеи RCQ в меню.</string>
+    <string name="bypass_auto_off_backup">Ни один запасной остров не ответил, автоподъём релеев выключен. Включите релеи RCQ в меню.</string>
+    <string name="island_unreachable_relays_off">Не отвечает. Релеи RCQ выключены.</string>
     <string name="pv_profile_card">Карточка профиля</string>
     <string name="pv_profile_card_desc">Кто может открыть ваш полный профиль (город, возраст, о себе).</string>
     <string name="pv_gender_desc">Кто видит ваш пол в профиле.</string>

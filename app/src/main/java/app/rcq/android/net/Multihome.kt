@@ -198,7 +198,17 @@ object Multihome {
         // statement, and the only one worth a tunnel for. The user asked for
         // this pass out loud by tapping the toggle.
         if (SingBoxTransport.proxy() != null) return@runCatching null
-        if (!SingBoxTransport.engageForBlockedDestination("multihome:auto-pick")) return@runCatching null
+        // ⚠ BACKUP_SEARCH keeps a Toast where every other foreign path lost one
+        // (#929). There is no island to blame here — the catalogue AND every
+        // island in it stayed silent — so there is no card to draw a line on,
+        // and the toggle's own failure can only say "no island available",
+        // which is the sentence that made the opt-out look like a broken app in
+        // the first place (#588). The WHY has nowhere else to go.
+        if (!SingBoxTransport.engageForBlockedDestination(
+                "multihome:auto-pick",
+                SingBoxTransport.DeclineScope.BACKUP_SEARCH,
+            )
+        ) return@runCatching null
         pickPass(ownHost, exclude)
     }.getOrNull()
 

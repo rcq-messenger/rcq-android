@@ -170,12 +170,12 @@ class RcqApi(
         // for a certificate the person has yet to judge — and keep it on after
         // they accept it.
         if (host in blockedHosts && !IslandTrust.isHostRefused(host) &&
-            SingBoxTransport.engageForBlockedDestination("api:$host")
+            SingBoxTransport.engageForBlockedDestination(host, declineScope())
         ) {
-            return call(http())
+            return call(http()).also { SingBoxTransport.noteHostReachable(host) }
         }
         return try {
-            call(http())
+            call(http()).also { SingBoxTransport.noteHostReachable(host) }
         } catch (e: IOException) {
             // ⚠ A trust refusal is NOT a blocked route (design §5.5). It
             // arrives here as the SSLHandshakeException Conscrypt wrapped
@@ -188,11 +188,26 @@ class RcqApi(
             if (IslandTrust.isChangedRefusal(e)) throw e
             // Already tunnelled: another attempt would only double the wait.
             if (SingBoxTransport.proxy() != null) throw e
-            if (!SingBoxTransport.engageForBlockedDestination("api:$host")) throw e
+            if (!SingBoxTransport.engageForBlockedDestination(host, declineScope())) throw e
             blockedHosts.add(host)
-            call(http())
+            call(http()).also { SingBoxTransport.noteHostReachable(host) }
         }
     }
+
+    /** Whose island this instance is talking to, which decides whether an
+     *  unreachable host is a Toast about YOUR connection or a red line on THAT
+     *  island's card (#929).
+     *
+     *  ⚠ Asked of the HOST, not of [isPrimary]. The primary client returns at
+     *  the top of [viaBestRoute] and never reaches the engage path, yet the own
+     *  island is still spoken to through the ad-hoc instances that do: a second
+     *  account on the same island, an island logo, the join sheet for the
+     *  island you are already on. Reading the flag instead would label every
+     *  one of those foreign and print somebody else's sentence about the
+     *  person's own home. */
+    private fun declineScope(): SingBoxTransport.DeclineScope =
+        if (SingBoxTransport.isOwnIsland(host)) SingBoxTransport.DeclineScope.OWN_ISLAND
+        else SingBoxTransport.DeclineScope.FOREIGN_ISLAND
 
     /** Drop all pooled connections so the next request opens a fresh
      *  TCP+TLS one. Called between send retries: on mobile data a pooled

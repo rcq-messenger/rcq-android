@@ -125,30 +125,50 @@ internal fun formatTime(ts: Long): String =
  *  waits for it, so the swap looks the same in both directions - the same bug
  *  and the same cure as the chat header on the web.
  *
- *  Both halves stay laid out in the same box, so the row never changes height. */
+ *  Both halves stay laid out in the same box, so the row never changes height.
+ *
+ *  ⚠ Not Crossfade / AnimatedContent. Both of those run the two children's
+ *  animations together, which is the smear above; the sequenced pair of
+ *  `animateFloatAsState` below is the whole point of hand-rolling this.
+ *
+ *  [periodMs] / [fadeMs] default to what the CONTACT LIST wants and what it has
+ *  always had. The chat header copies iOS instead (7000 / 200, ChatView.swift's
+ *  `peerSubtitle`), so it passes its own; do not "unify" the two, they were
+ *  decided separately. [familyA] / [familyB] are per-half because the header
+ *  draws the UIN monospaced and the last-seen phrase in the normal face, the
+ *  same split iOS makes; null means the theme's default face, which is what the
+ *  contact row uses for both. */
 @Composable
-internal fun AltText(a: String, b: String, color: androidx.compose.ui.graphics.Color, fontSize: androidx.compose.ui.unit.TextUnit) {
+internal fun AltText(
+    a: String,
+    b: String,
+    color: androidx.compose.ui.graphics.Color,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    periodMs: Long = 4000,
+    fadeMs: Int = 500,
+    familyA: androidx.compose.ui.text.font.FontFamily? = null,
+    familyB: androidx.compose.ui.text.font.FontFamily? = null,
+) {
     var alt by remember { mutableStateOf(false) }
-    LaunchedEffect(a, b) {
+    LaunchedEffect(a, b, periodMs) {
         while (true) {
-            kotlinx.coroutines.delay(4000)
+            kotlinx.coroutines.delay(periodMs)
             alt = !alt
         }
     }
-    val fade = 500
     val aAlpha by animateFloatAsState(
         targetValue = if (alt) 0f else 1f,
-        animationSpec = tween(durationMillis = fade, delayMillis = if (alt) 0 else fade),
+        animationSpec = tween(durationMillis = fadeMs, delayMillis = if (alt) 0 else fadeMs),
         label = "altA",
     )
     val bAlpha by animateFloatAsState(
         targetValue = if (alt) 1f else 0f,
-        animationSpec = tween(durationMillis = fade, delayMillis = if (alt) fade else 0),
+        animationSpec = tween(durationMillis = fadeMs, delayMillis = if (alt) fadeMs else 0),
         label = "altB",
     )
     Box {
-        Text(a, color = color, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(aAlpha))
-        Text(b, color = color, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(bAlpha))
+        Text(a, color = color, fontSize = fontSize, fontFamily = familyA, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(aAlpha))
+        Text(b, color = color, fontSize = fontSize, fontFamily = familyB, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(bAlpha))
     }
 }
 

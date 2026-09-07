@@ -226,24 +226,6 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 }
                 sub?.let { Text(it, color = c.textSecondary, fontSize = 13.sp) }
                 statusMessage?.let { Text(it, color = c.textPrimary, fontSize = 14.sp, textAlign = TextAlign.Center) }
-                // ⚠⚠ THE OTHER HALF OF "PROFILE VIEWS", and it has to be here
-                // rather than only in the owner's list. Opening this screen
-                // fires a sealed `visit` ping (above, LaunchedEffect(uin)), and
-                // the person on the other side can now see a list of who looked
-                // and when. Until today nothing anywhere told the person doing
-                // the looking, which is a one-sided arrangement this app has no
-                // business shipping. The island learns nothing either way: the
-                // ping is end-to-end sealed and ephemeral.
-                //
-                // Only for a real profile on our own island: a cross-island
-                // card is fetched, not pinged, and a number that answers to
-                // nobody has no one to tell.
-                if (crossIslandHost == null && !notFound && uin != session.uin) {
-                    Text(
-                        stringResource(R.string.ci_visit_notice),
-                        color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
-                    )
-                }
             }
 
             Spacer(Modifier.height(12.dp))

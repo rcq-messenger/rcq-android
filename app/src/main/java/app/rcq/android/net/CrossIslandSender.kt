@@ -70,6 +70,15 @@ object CrossIslandSender {
      *
      * Only connection-level failures trigger it. An HTTP error means we reached
      * the island and it answered, which the tunnel would not change.
+     *
+     * ⚠ Both engage points below say FOREIGN_ISLAND_NO_CARD, not
+     * FOREIGN_ISLAND. Every other foreign path is entered from a screen showing
+     * that island's card, and #929 asks for the line to go on the card instead
+     * of onto a Toast covering the screen. This one is a sealed send to a
+     * contact: nothing about their island is on screen, and a card line alone
+     * would be no signal at all. So it keeps a Toast — worded about THEIR
+     * island rather than ours — and still feeds the card for whenever it is
+     * next opened.
      */
     private fun <T> viaBestRoute(host: String, call: (OkHttpClient) -> T): T {
         // Everything here is addressed FROM the real uin and signed with the
@@ -79,12 +88,15 @@ object CrossIslandSender {
         // The memo outlives a refusal, so it is asked the same question as the
         // catch below: a refused island must not ride the tunnel either.
         if (host in needsTunnel && !IslandTrust.isHostRefused(host) &&
-            SingBoxTransport.engageForBlockedDestination(host)
+            SingBoxTransport.engageForBlockedDestination(
+                host,
+                SingBoxTransport.DeclineScope.FOREIGN_ISLAND_NO_CARD,
+            )
         ) {
-            return call(http())
+            return call(http()).also { SingBoxTransport.noteHostReachable(host) }
         }
         return try {
-            call(http())
+            call(http()).also { SingBoxTransport.noteHostReachable(host) }
         } catch (e: java.io.IOException) {
             // ⚠ A refused certificate is not a blocked route (design §5.5): a
             // foreign island whose operator rotated its certificate answered
@@ -95,9 +107,13 @@ object CrossIslandSender {
             // Already tunnelled: a failure here is the island or the relay path,
             // and re-running the same call would only double the wait.
             if (SingBoxTransport.proxy() != null) throw e
-            if (!SingBoxTransport.engageForBlockedDestination(host)) throw e
+            if (!SingBoxTransport.engageForBlockedDestination(
+                    host,
+                    SingBoxTransport.DeclineScope.FOREIGN_ISLAND_NO_CARD,
+                )
+            ) throw e
             needsTunnel.add(host)
-            call(http())
+            call(http()).also { SingBoxTransport.noteHostReachable(host) }
         }
     }
 

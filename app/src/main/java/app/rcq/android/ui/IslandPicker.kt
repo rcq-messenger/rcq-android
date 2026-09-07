@@ -50,6 +50,7 @@ import app.rcq.android.R
 import app.rcq.android.data.IslandCards
 import app.rcq.android.data.IslandCatalog
 import app.rcq.android.net.RcqApi
+import app.rcq.android.net.SingBoxTransport
 
 /**
  * Picking an island, as a thing you swipe through rather than a host you type.
@@ -194,6 +195,12 @@ private fun IslandCard(island: IslandCatalog.Entry) {
     val c = RcqTheme.colors
     val ctx = LocalContext.current
     val cards by IslandCards.cards.collectAsState()
+    // #929: an island that did not answer, while the user's opt-out forbade
+    // raising the relays for it, says so ON ITS OWN CARD. The Toast is kept for
+    // the connection here and now (your own island, a call being placed) and
+    // nothing else — a popup about somebody else's server covers the screen you
+    // are reading to tell you a fact about the card already in front of you.
+    val declined by SingBoxTransport.declinedIslands.collectAsState()
     val art by produceState<ByteArray?>(initialValue = null, island.host) {
         value = IslandCatalog.art(ctx, island.host)
     }
@@ -318,7 +325,30 @@ private fun IslandCard(island: IslandCatalog.Entry) {
         // lines whether its island has anything to say or not.
         Spacer(Modifier.height(6.dp))
         Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.TopCenter) {
-            island.description?.takeIf { it.isNotBlank() }?.let {
+            // ⚠⚠ The unreachable line lives INSIDE this box and TAKES THE PLACE
+            // of the description. Not a row of its own, not a line above or
+            // below: an extra line is a taller page, a taller page re-measures
+            // the pager, and that is #736 back — the whole sheet twitching up
+            // and down on every swipe. Whatever this box draws, it is 44dp.
+            //
+            // The age is read at composition and is not itself state, so an
+            // entry that goes stale while the sheet sits open keeps its line
+            // until the flow next changes or the card is reopened. Both are
+            // seconds away in practice, and the alternative is a ticker
+            // recomposing every card in the deck.
+            val declinedAt = declined[SingBoxTransport.declineKey(island.host)]
+            val unreachable = declinedAt != null &&
+                System.currentTimeMillis() - declinedAt < SingBoxTransport.DECLINED_LINE_TTL_MS
+            if (unreachable) {
+                Text(
+                    stringResource(R.string.island_unreachable_relays_off),
+                    color = androidx.compose.ui.graphics.Color(0xFFE5484D),
+                    fontSize = 11.sp, textAlign = TextAlign.Center,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            } else island.description?.takeIf { it.isNotBlank() }?.let {
                 Text(
                     it, color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
                     maxLines = 3,

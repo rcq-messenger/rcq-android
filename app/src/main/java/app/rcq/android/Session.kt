@@ -1024,6 +1024,15 @@ class Session(context: Context) {
     }
 
     init {
+        // Which island is OURS, for everything that has to tell "your connection
+        // is bad" apart from "that island is down" (#929).
+        // ⚠ A SUPPLIER, not the string. [serverHost] changes under an account
+        // switch, a rebindTo and a home promotion, and a copy taken here would
+        // outlive all three — the own island would then be filed as somebody
+        // else's and say the wrong thing. Bound in the constructor because the
+        // first foreign fetch can happen before [start] runs, and an unbound
+        // answer would label that fetch by guesswork.
+        app.rcq.android.net.SingBoxTransport.bindOwnIsland { serverHost() }
         // Network-path watcher for the instant reconnect above. ACCESS_NETWORK_STATE
         // is a normal permission; runCatching guards exotic ROMs only.
         runCatching {
@@ -1161,7 +1170,10 @@ class Session(context: Context) {
                 // host we already know we cannot reach. Name the reason, or the
                 // screen shows its generic error and the opt-out looks like a
                 // broken app.
-                transport.noteAutoEngageDeclined(host)
+                transport.noteAutoEngageDeclined(
+                    host,
+                    app.rcq.android.net.SingBoxTransport.DeclineScope.OWN_ISLAND,
+                )
             }
         }
         _stealthActive.value = transport.isActive
@@ -1986,7 +1998,10 @@ class Session(context: Context) {
         // Silent when the opt-out is off, so the ordinary auto-engage is
         // unchanged.
         if (!directOk && frontHost == null && !transport.isActive && !transport.isEnabled(appCtx)) {
-            transport.noteAutoEngageDeclined(serverHost())
+            transport.noteAutoEngageDeclined(
+                serverHost(),
+                app.rcq.android.net.SingBoxTransport.DeclineScope.OWN_ISLAND,
+            )
         }
         // Post-engage health check + DIRECT fallback (iOS parity, AppState
         // re-probe). The trap behind "Резерв включён, но работает только с

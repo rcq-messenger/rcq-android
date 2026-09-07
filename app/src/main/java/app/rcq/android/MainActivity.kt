@@ -1367,6 +1367,15 @@ private fun ServerJoinDialog(host: String, hasInvite: Boolean, requireTerms: Boo
     val info by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(initialValue = null, host) {
         value = app.rcq.android.net.RcqApi.serverInfoOf(host)
     }
+    // The OTHER place a foreign island fails with its own card on screen: this
+    // fetch is exactly the request that gets declined, and until #929 it raised
+    // a Toast over the sheet saying "island unreachable" while the sheet itself
+    // sat there looking perfectly fine. The line goes in the sheet instead, and
+    // no Toast is raised for a foreign island at all.
+    val declined by app.rcq.android.net.SingBoxTransport.declinedIslands.collectAsState()
+    val declinedAt = declined[app.rcq.android.net.SingBoxTransport.declineKey(host)]
+    val unreachable = declinedAt != null &&
+        System.currentTimeMillis() - declinedAt < app.rcq.android.net.SingBoxTransport.DECLINED_LINE_TTL_MS
     RcqSheet(
         onDismiss = onDismiss,
         title = info?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.join_server_title),
@@ -1388,6 +1397,13 @@ private fun ServerJoinDialog(host: String, hasInvite: Boolean, requireTerms: Boo
                 )
                 Text(stringResource(R.string.join_server_body, host), color = c.textSecondary, fontSize = 14.sp)
             }
+            // No reserved-height rule here: this sheet is not a swipeable pager
+            // and growing by one line costs nothing (#736 is about the card
+            // deck), so the line is simply added rather than swapped in.
+            if (unreachable) Text(
+                stringResource(R.string.island_unreachable_relays_off),
+                color = androidx.compose.ui.graphics.Color(0xFFE5484D), fontSize = 12.sp,
+            )
             info?.welcome?.takeIf { it.isNotBlank() }?.let { rules ->
                 Text(
                     rules, color = c.textPrimary, fontSize = 13.sp,
