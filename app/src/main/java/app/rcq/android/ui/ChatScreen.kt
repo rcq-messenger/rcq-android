@@ -4846,6 +4846,92 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
     }
 }
 
+// ── media bubble geometry ───────────────────────────────────────────────────
+//
+// ⚠ A photo/video bubble used to be Modifier.size(220.dp) + ContentScale.Crop:
+// a hard square that threw the sides away from everything landscape ("the
+// video is simply not shown full width horizontally, the way ordinary players
+// do"). The box follows the media's own aspect ratio now, so a 16:9 clip
+// spends the whole bubble width and a portrait shot goes tall instead of being
+// cut down the middle.
+//
+// The BOUNDS matter as much as the ratio. An unclamped ratio turns a panorama
+// into a 12dp strip of pixels and a screenshot-of-a-chat into a column taller
+// than the phone. So: width capped absolutely and against the screen, height
+// capped, and a floor under both. Past the floor the picture IS cropped again,
+// on purpose — a sliver you cannot see anything in is worse than a crop.
+private val MEDIA_BUBBLE_MAX_W = 260.dp
+private val MEDIA_BUBBLE_MAX_H = 300.dp
+private val MEDIA_BUBBLE_MIN = 120.dp
+
+/** Shape of a photo whose bytes have not arrived yet: nothing on the wire
+ *  carries width/height (see [MediaAspect]), so the first sight of a photo
+ *  reserves the same square box this bubble has always reserved. */
+private const val PHOTO_FALLBACK_RATIO = 1f
+
+/** Shape of a clip whose poster frame is missing or will not decode. An empty
+ *  box with a play disc in it reads as a player, and a player is 16:9. */
+private const val VIDEO_FALLBACK_RATIO = 16f / 9f
+
+/** Box (width to height) for media of aspect [ratio] = width / height. */
+@Composable
+private fun mediaBubbleBox(ratio: Float): Pair<Dp, Dp> {
+    // 0.72 of the screen, not the 0.86 a text bubble gets: a picture running
+    // nearly edge to edge eats the gap that says who sent it, and left/right is
+    // how you read that at a glance (tester #7, see MessageBubble).
+    val maxW = minOf(MEDIA_BUBBLE_MAX_W, (LocalConfiguration.current.screenWidthDp * 0.72f).dp)
+    val r = ratio.takeIf { it.isFinite() && it > 0f }?.coerceIn(0.05f, 20f) ?: 1f
+    var w = maxW
+    var h = maxW / r
+    if (h > MEDIA_BUBBLE_MAX_H) {
+        h = MEDIA_BUBBLE_MAX_H
+        w = h * r
+    }
+    return Pair(w.coerceAtLeast(MEDIA_BUBBLE_MIN), h.coerceAtLeast(MEDIA_BUBBLE_MIN))
+}
+
+/** Aspect ratios of media this process has already decoded, keyed by media id.
+ *
+ *  ⚠⚠ JITTER, and the whole reason this cache exists. Nothing on the wire
+ *  carries a picture's width and height: a photo bubble only learns its shape
+ *  once the encrypted bytes have come down AND decoded, which is several frames
+ *  after the row was laid out. Sizing the box straight off that would resize a
+ *  settled row EVERY time it scrolled back into view — rows that change size
+ *  after layout are a bug this chat has been bitten by more than once. So the
+ *  ratio is written down the first time it is learned and read back
+ *  synchronously, during composition, on every later pass: the box is decided
+ *  BEFORE the image on every appearance except the very first one. On that
+ *  first one the box is the reserved square and it reflows once, at the instant
+ *  the spinner becomes a picture (content appearing, not settled layout
+ *  jumping). A VIDEO never reflows at all: its poster frame travels inside the
+ *  message, so [VideoBubble] knows the ratio before it writes the box.
+ *
+ *  Bounded and access-ordered: a thread scrolled back through a thousand photos
+ *  must not leave a map that grew with the scrollback. */
+private object MediaAspect {
+    private const val MAX_ENTRIES = 512
+    private val ratios = object : LinkedHashMap<String, Float>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Float>?): Boolean = size > MAX_ENTRIES
+    }
+
+    @Synchronized fun get(mediaId: String?): Float? = mediaId?.let { ratios[it] }
+
+    @Synchronized fun put(mediaId: String?, ratio: Float) {
+        if (mediaId != null && ratio.isFinite() && ratio > 0f) ratios[mediaId] = ratio
+    }
+}
+
+/** Aspect of a GIF read straight out of its header (logical screen descriptor,
+ *  bytes 6..9, little endian). The animated path decodes frames on another
+ *  thread, and waiting for the first frame to size the bubble would resize the
+ *  row when it landed — the header is there in the bytes we already hold. */
+private fun gifAspect(bytes: ByteArray): Float? {
+    if (bytes.size < 10) return null
+    val w = (bytes[6].toInt() and 0xFF) or ((bytes[7].toInt() and 0xFF) shl 8)
+    val h = (bytes[8].toInt() and 0xFF) or ((bytes[9].toInt() and 0xFF) shl 8)
+    return if (w > 0 && h > 0) w.toFloat() / h else null
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PhotoBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit, onView: (ByteArray) -> Unit = {}) {
@@ -4856,25 +4942,51 @@ private fun PhotoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
         value = if (m.mediaId != null && m.mediaKey != null) session.fetchImage(m.mediaId, m.mediaKey, m.groupId?.let { session.groupHost(it) }) else null
     }
     val b = bytes
+    val isGif = b != null && b.isGif()
+    // ⚠ The three decode paths are hoisted OUT of the box below, where they
+    // used to sit. The box is sized from the picture now, so the picture has to
+    // be known before the box is written, not inside it. Same three paths, same
+    // threads, same reasons — only the place they are called from moved.
+    //
+    // Spoiler: a heavily blurred copy until the viewer taps it. Decoded and
+    // blurred off the main thread (the full-res decode used to block the UI
+    // thread during composition).
+    val blurred by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, b, hidden) {
+        value = if (b == null || !hidden) null else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { decodeSampled(b, 360)?.let { blurForSpoiler(it).asImageBitmap() } }.getOrNull()
+        }
+    }
+    // Downsampled + decoded off the main thread — a full-res JPEG decode here
+    // stalled the UI thread when the row scrolled in (notably the keyboard-open
+    // auto-scroll → the "tap freezes" bug). Not run for a covered spoiler (the
+    // blurred copy is all that may be decoded there) nor for a GIF (the native
+    // decoder SIGSEGVs on some OEM ROMs; SafeGif.kt handles those).
+    val image = if (b != null && !hidden && !isGif) rememberSampledBitmap(b) else null
+    // Aspect, best source first: what actually decoded; a GIF's header (no need
+    // to wait for a frame); what this process learned about this media earlier;
+    // the reserved square. Only a REAL ratio is written back — remembering the
+    // placeholder would teach the cache a lie about a photo that never loaded.
+    val gifRatio = remember(b) { if (b != null && isGif) gifAspect(b) else null }
+    val decodedRatio = (image ?: blurred)?.let { it.width.toFloat() / it.height.coerceAtLeast(1) }
+    val cachedRatio = remember(m.mediaId) { MediaAspect.get(m.mediaId) }
+    val knownRatio = decodedRatio ?: gifRatio
+    LaunchedEffect(knownRatio) { if (knownRatio != null) MediaAspect.put(m.mediaId, knownRatio) }
+    val (boxW, boxH) = mediaBubbleBox(knownRatio ?: cachedRatio ?: PHOTO_FALLBACK_RATIO)
     Box(
         Modifier
-            .size(220.dp)
+            .size(boxW, boxH)
             .clip(RoundedCornerShape(14.dp))
             .background(c.bgSecondary)
             .combinedClickable(onClick = { if (hidden) revealed = true else b?.let(onView) }, onLongClick = onLongPress),
         contentAlignment = Alignment.Center,
     ) {
+        // ContentScale.Crop stays deliberately: the box now carries the
+        // picture's own ratio, so Crop has nothing to cut. It only bites in the
+        // clamped extremes (a panorama, a very tall screenshot), which is
+        // exactly where filling the floor box beats letterboxing it.
         when {
             b == null -> CircularProgressIndicator(color = c.accent, modifier = Modifier.size(22.dp))
-            // Spoiler: render a heavily blurred copy until the viewer taps it.
-            // Decoded + blurred off the main thread (the full-res decode used to
-            // block the UI thread during composition).
             hidden -> {
-                val blurred by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, b) {
-                    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                        runCatching { decodeSampled(b, 360)?.let { blurForSpoiler(it).asImageBitmap() } }.getOrNull()
-                    }
-                }
                 blurred?.let { Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
                 SpoilerOverlay()
             }
@@ -4882,16 +4994,9 @@ private fun PhotoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
             // bytes) — rendered animated via the pure-Java decoder (SafeGif.kt),
             // which works on all API levels and never hits the crashing native
             // GIF decoder on realme/ColorOS.
-            b.isGif() ->
-                SafeAnimatedGif(b, Modifier.fillMaxSize())
-            else -> {
-                // Downsampled + decoded off the main thread — a full-res JPEG
-                // decode here stalled the UI thread when the row scrolled in
-                // (notably the keyboard-open auto-scroll → the "tap freezes" bug).
-                val image = rememberSampledBitmap(b)
-                if (image != null) Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                else CircularProgressIndicator(color = c.accent, modifier = Modifier.size(22.dp))
-            }
+            b != null && isGif -> SafeAnimatedGif(b, Modifier.fillMaxSize())
+            image != null -> Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            else -> CircularProgressIndicator(color = c.accent, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -5669,9 +5774,17 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
     val thumb = remember(thumbBmp, hidden) {
         thumbBmp?.let { (if (hidden) blurForSpoiler(it) else it).asImageBitmap() }
     }
+    // ⚠ No jitter to avoid here, and that is not luck: the poster frame travels
+    // INSIDE the message (thumbB64), so it is decoded synchronously above and
+    // its ratio is known before this box is written. The row is laid out once,
+    // at its final size, and a landscape clip fills the bubble width the way a
+    // player does. A clip with no usable poster falls back to 16:9.
+    val ratio = thumbBmp?.takeIf { it.width > 0 && it.height > 0 }?.let { it.width.toFloat() / it.height }
+        ?: VIDEO_FALLBACK_RATIO
+    val (boxW, boxH) = mediaBubbleBox(ratio)
     Box(
         Modifier
-            .size(220.dp)
+            .size(boxW, boxH)
             .clip(RoundedCornerShape(14.dp))
             .background(c.bgSecondary)
             .combinedClickable(
@@ -5701,6 +5814,8 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
         contentAlignment = Alignment.Center,
     ) {
         if (thumb != null) {
+            // Crop, with the box carrying the poster's own ratio: nothing is cut
+            // except in the clamped extremes (see mediaBubbleBox).
             Image(bitmap = thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         if (hidden) {

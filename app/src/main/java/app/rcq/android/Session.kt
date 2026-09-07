@@ -5574,7 +5574,64 @@ class Session(context: Context) {
     private val _accountLost = MutableSharedFlow<AccountLost>(extraBufferCapacity = 1)
     val accountLost: SharedFlow<AccountLost> = _accountLost
 
+    /** The opposite of [AccountLost], and the whole point of the 07.09 fix:
+     *  the account is ALIVE and answers as another number now, because its
+     *  owner moved it on one of their other devices. **Nothing is erased on
+     *  this path, ever.** [followed] true means we already answer as [to] and
+     *  the history came with us; false means /auth/refresh refused (see
+     *  [followAccountMove]) and this device is untouched but stuck on a number
+     *  that no longer exists, so the person has to recover by phrase. */
+    data class AccountMoved(val from: Int, val to: Int?, val followed: Boolean)
+    private val _accountMoved = MutableSharedFlow<AccountMoved>(extraBufferCapacity = 1)
+    val accountMoved: SharedFlow<AccountMoved> = _accountMoved
+
     @Volatile private var lastBurnProbeAt = 0L
+
+    /** ⚠⚠ THE NUMBER WE WERE TOLD THIS ACCOUNT LEFT, and the one thing standing
+     *  between a live account and [eraseActiveAccountLocally] on the probe path.
+     *
+     *  /auth/refresh answers `identity_not_found` for TWO different situations,
+     *  and only one of them is a burn: the row is gone because the account was
+     *  destroyed, or the row is gone because the account moved and the refresh
+     *  REFUSED to resolve it (the signing key is carried by more than one
+     *  account, which is true of a handful of keys on the flagship — deliberate,
+     *  those people recover by phrase). Migrating bumps the uin epoch, so the
+     *  socket is closed 4401 within seconds of the move and [probeBurnedAccount]
+     *  runs — and without this marker its refusal branch would wipe a living
+     *  account whose owner merely bought a shorter number on their laptop.
+     *
+     *  Set only from a frame the island sent us on our OWN authenticated socket,
+     *  and cleared the moment we land on the new number. ⚠ In memory only: after
+     *  a restart the probe is on its own again (see the note there). */
+    @Volatile private var movedAwayFrom: Int? = null
+
+    /** One follow at a time. The island may repeat the frame (a reconnect that
+     *  races the move), and two follows would each swap the token. */
+    @Volatile private var followingMove = false
+
+    /** ⚠⚠ THIS DEVICE IS THE ONE DOING THE MOVING — suppress `account_moved`
+     *  on ourselves. The island broadcasts it to the OLD number and we are one
+     *  of the sockets listening there, so without this the migrating device
+     *  would race [applyMigration] with a follow of its own move.
+     *
+     *  A deadline rather than a boolean because the frame can arrive on either
+     *  side of the HTTP answer that carries the new token, and the window has
+     *  to cover both. Opened before the request, closed by hand when the server
+     *  refused or did not switch us, and left to lapse otherwise. */
+    @Volatile private var selfMigrationUntil = 0L
+
+    private fun beginSelfMigration() {
+        selfMigrationUntil = System.currentTimeMillis() + SELF_MIGRATION_GRACE_MS
+    }
+
+    /** Nothing moved after all (cooldown, 409, a number merely held): reopen
+     *  the door at once, so a move made on ANOTHER device seconds later is
+     *  still followed instead of silently dropped. */
+    private fun endSelfMigration() {
+        selfMigrationUntil = 0L
+    }
+
+    private fun isSelfMigrating(): Boolean = System.currentTimeMillis() < selfMigrationUntil
 
     /** The socket was refused with 4401. Could be three different things —
      *  expired token, revoked device, burned account — and only a probe can
@@ -5599,16 +5656,46 @@ class Session(context: Context) {
      *  clean `identity_not_found` means the account row is GONE (burned from
      *  another device): wipe locally, exactly like a self-burn minus the
      *  server call, and tell the UI. Any other failure (offline, 5xx) means
-     *  nothing and changes nothing. */
+     *  nothing and changes nothing.
+     *
+     *  ⚠⚠ ONE EXCEPTION TO THE WIPE, and it is the 07.09 bug: a MIGRATION also
+     *  leaves no row under the old number and also bumps the epoch, so it
+     *  arrives here looking exactly like a burn. [movedAwayFrom] is how the two
+     *  are told apart, and it is set only when the island itself said the
+     *  account moved. */
     private suspend fun probeBurnedAccount() {
         val me = store.uin ?: return
-        val spubB64 = Base64.encodeToString(signingPub(), Base64.NO_WRAP)
         val fresh = try {
-            val challenge = api.recoverChallenge(spubB64).challenge
-            val signature = app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv(), challenge)
-            api.refreshSession(RcqApi.RefreshRequest(me, spubB64, challenge, signature, DeviceId.get(appCtx)))
+            refreshForSelf(me)
         } catch (e: Exception) {
+            // ⚠⚠ THE ISLAND NOW SEPARATES THE TWO REFUSALS, and this is the
+            // one that must never wipe. `identity_ambiguous` means the number
+            // is vacant AND this signing key answers for more than one
+            // account, so the island declines to pick a winner: the account is
+            // ALIVE somewhere and the person has to finish the move by phrase.
+            // It used to arrive as `identity_not_found`, which this function
+            // reads as a burn, so a phone switched OFF during its owner's move
+            // erased a living account on its next launch. The in-memory
+            // [movedAwayFrom] below cannot help there: nothing told this
+            // process anything, because it was not running.
+            if (e.message?.contains("identity_ambiguous") == true) {
+                android.util.Log.w("RCQmove", "#$me is vacant and the key is shared - refusing to guess, keeping local data")
+                announceMoveRefused(me, null)
+                return
+            }
             if (e.message?.contains("identity_not_found") == true) {
+                // ⚠⚠ THE ONE PLACE THAT DELETES A LIVE ACCOUNT IF IT IS WRONG.
+                // `identity_not_found` means the row for #me is gone, which is
+                // a burn UNLESS we were told the account merely moved off it —
+                // then it is the refresh refusing an ambiguous signing key, and
+                // the account it would erase is alive under another number.
+                // See [movedAwayFrom]. Told once (the socket asks again on
+                // every redial), and nothing here is erased.
+                if (movedAwayFrom == me) {
+                    android.util.Log.w("RCQmove", "#$me is gone because it MOVED, not burned - keeping local data")
+                    announceMoveRefused(me, null)
+                    return
+                }
                 android.util.Log.w("RCQburn", "island no longer knows #$me — wiping the local copy (#655)")
                 val next = eraseActiveAccountLocally(AccountManager.activeId.value)
                 _accountLost.tryEmit(AccountLost(me, next))
@@ -5624,9 +5711,134 @@ class Session(context: Context) {
         if (fresh.moved_from == me && fresh.uin != me) {
             android.util.Log.i("RCQburn", "#$me moved to #" + fresh.uin + " elsewhere - following it")
             applyMigration(fresh.uin, fresh.token)
+            movedAwayFrom = null; moveRefusalTold = null
+            _accountMoved.tryEmit(AccountMoved(me, fresh.uin, followed = true))
             return
         }
         // Alive after all — the token had merely rotted. Adopt + redial.
+        movedAwayFrom = null; moveRefusalTold = null
+        store.updateToken(fresh.token)
+        api.setToken(fresh.token)
+        socket.disconnect()
+        connectAndSync(me, fresh.token)
+    }
+
+    /** The 03.09 rescue in one place: prove possession of our signing key for
+     *  our own number and take whatever /auth/refresh answers — a fresh token
+     *  under the same number, or the number this account moved to plus
+     *  `moved_from`. Throws on any refusal, and every caller must decide for
+     *  itself what a refusal means; ⚠⚠ only ONE of them may ever wipe. */
+    private suspend fun refreshForSelf(me: Int): RcqApi.RegisterResponse {
+        val spubB64 = Base64.encodeToString(signingPub(), Base64.NO_WRAP)
+        val challenge = api.recoverChallenge(spubB64).challenge
+        val signature = app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv(), challenge)
+        return api.refreshSession(RcqApi.RefreshRequest(me, spubB64, challenge, signature, DeviceId.get(appCtx)))
+    }
+
+    /** `account_moved` — the island telling the OLD number that the account
+     *  now answers as [announced]. The migration flow used to broadcast
+     *  `account_burned` here instead, which is a lie told to the owner's own
+     *  other devices, and the clients believed it: a laptop that took a
+     *  shorter number left two phones erasing themselves (server fix and the
+     *  report, 07.09).
+     *
+     *  ⚠⚠ THIS EVENT NEVER WIPES ANYTHING. A real `account_burned` still does,
+     *  through the 4401 probe in [probeBurnedAccount] — the two paths stay
+     *  apart on purpose, and [movedAwayFrom] is what keeps the probe from
+     *  mistaking the aftermath of a move for a burn.
+     *
+     *  Nothing is decided from the frame's own number: it is a hint for the
+     *  log and for telling our own move apart from somebody else's. The move
+     *  is proved by /auth/refresh, with our signing key, exactly as it would
+     *  be on the next cold start. */
+    private fun onAccountMoved(announced: Int?) {
+        // Same rule as the probe: never from a duress view. `store` is the real
+        // account's, and rebooting the session onto another number in front of
+        // a coercer shows them the account the decoy exists to hide.
+        if (duressViewUp) return
+        val me = store.uin ?: return
+        // Our own move, echoed back to us on the socket we are still holding
+        // under the old number. [applyMigration] is already doing this properly.
+        if (isSelfMigrating()) {
+            android.util.Log.i("RCQmove", "account_moved for #$me is our own migration - ignoring")
+            return
+        }
+        // Already there (a duplicate frame, or we followed a moment ago).
+        if (announced != null && announced == me) return
+        movedAwayFrom = me
+        if (followingMove) return
+        followingMove = true
+        val ep = epochNow()
+        scope.launch {
+            try {
+                followAccountMove(me, announced, ep)
+            } finally {
+                followingMove = false
+            }
+        }
+    }
+
+    /** Tell the person, ONCE per number, that this device cannot follow the
+     *  move on its own. Once, because the refusal is permanent while the key
+     *  stays ambiguous and the socket asks again on every redial: repeating it
+     *  would put a toast on the screen every minute for ever. */
+    @Volatile private var moveRefusalTold: Int? = null
+
+    private fun announceMoveRefused(me: Int, announced: Int?) {
+        if (moveRefusalTold == me) return
+        moveRefusalTold = me
+        _accountMoved.tryEmit(AccountMoved(me, announced, followed = false))
+    }
+
+    /** Follow the account to its new number, online, by the same road a device
+     *  that had been asleep takes on its next launch.
+     *
+     *  Its two guards live on the island and we do not argue with them: the old
+     *  number must be VACANT, and the signing key must resolve to EXACTLY ONE
+     *  account. A key carried by two accounts is refused, and that refusal is
+     *  the right answer — picking a winner is how a device lands in a
+     *  stranger's account. ⚠⚠ A refusal therefore changes NOTHING here: no
+     *  wipe, no token swap, no rebind. The person keeps every message on this
+     *  device and is told to sign in again with their recovery phrase, which is
+     *  the one path that asks a human which account is theirs. */
+    private suspend fun followAccountMove(me: Int, announced: Int?, ep: Int) {
+        val fresh = try {
+            refreshForSelf(me)
+        } catch (e: Exception) {
+            // ⚠ Two very different failures, and only one is worth a message.
+            // `identity_ambiguous` (and, from an island too old to say it,
+            // `identity_not_found`) here is the REFUSAL (the number is vacant
+            // and the key is ambiguous): final, and the person has to act.
+            // Anything else is a network that was not there — silent, because
+            // the socket keeps redialing and [probeBurnedAccount] runs this
+            // very refresh again on the next 4401. Either way nothing local is
+            // touched, and [movedAwayFrom] stays set so that retry cannot wipe.
+            val refused = e.message?.let {
+                it.contains("identity_ambiguous") || it.contains("identity_not_found")
+            } == true
+            if (refused) {
+                android.util.Log.w("RCQmove", "#$me moved but the island refuses to resolve it - local data left alone")
+                announceMoveRefused(me, announced)
+            } else {
+                android.util.Log.w("RCQmove", "#$me moved; follow failed for now (${e.message}) - will retry on the next probe")
+            }
+            return
+        }
+        // The account switched under us while the round trip was in the air, so
+        // this answer belongs to a number we are no longer serving. Writing it
+        // down would put one account's token into another's store.
+        if (!stillOn(ep) || store.uin != me) return
+        if (fresh.moved_from == me && fresh.uin != me) {
+            android.util.Log.i("RCQmove", "#$me -> #${fresh.uin}, following live")
+            applyMigration(fresh.uin, fresh.token)
+            movedAwayFrom = null; moveRefusalTold = null
+            _accountMoved.tryEmit(AccountMoved(me, fresh.uin, followed = true))
+            return
+        }
+        // The island still answers as #me: the frame was not about this
+        // account's number after all. Take the fresh token (ours is about to
+        // die of the epoch bump anyway) and redial, the same tail the probe has.
+        movedAwayFrom = null; moveRefusalTold = null
         store.updateToken(fresh.token)
         api.setToken(fresh.token)
         socket.disconnect()
@@ -5657,7 +5869,16 @@ class Session(context: Context) {
      *  so it stays valid. Contacts/groups re-sync from the server. Returns
      *  the new UIN. Throws on server refusal (e.g. cooldown). */
     suspend fun migrateToNewUin(): Int {
-        val resp = api.migrateAccount()
+        // ⚠ Before the request, not after: the island broadcasts `account_moved`
+        // to the old number while this call is still in flight, and this socket
+        // is one of the ones listening. See [selfMigrationUntil].
+        beginSelfMigration()
+        val resp = try {
+            api.migrateAccount()
+        } catch (e: Exception) {
+            endSelfMigration()
+            throw e
+        }
         applyMigration(resp)
         return resp.new_uin
     }
@@ -5677,9 +5898,14 @@ class Session(context: Context) {
      *  403 on a short or patterned number is [PurchaseResult.Reserved]; other
      *  failures bubble up as [PurchaseResult.Other]. */
     suspend fun purchaseUin(uin: Int, switch: Boolean = true): PurchaseResult {
+        // Same reason as [migrateToNewUin]: a purchase that switches IS a
+        // migration, so our own `account_moved` must be suppressed from before
+        // the request until [applyTake] has decided what happened.
+        if (switch) beginSelfMigration()
         val resp = try {
             api.purchaseUin(uin, switch)
         } catch (e: Exception) {
+            endSelfMigration()
             val msg = e.message ?: ""
             // Both arrive as 409: "someone took it first" and "your collection
             // is full" are different answers to the user, so tell them apart by
@@ -5805,9 +6031,12 @@ class Session(context: Context) {
      *  number in use goes into the collection in its place, so this is
      *  reversible. Same migration handling as a purchase-with-switch. */
     suspend fun activateUin(uin: Int): PurchaseResult {
+        // Activating a held number is a migration too — same suppression.
+        beginSelfMigration()
         val resp = try {
             api.activateUin(uin)
         } catch (e: Exception) {
+            endSelfMigration()
             val msg = e.message ?: ""
             return if (msg.contains("HTTP 404")) PurchaseResult.NotOwned else PurchaseResult.Other(msg)
         }
@@ -5823,6 +6052,9 @@ class Session(context: Context) {
             applyMigration(newUin, token)
             return PurchaseResult.Success(newUin)
         }
+        // The number is only HELD: this device did not move, so stop
+        // suppressing a move that another device may be making right now.
+        endSelfMigration()
         return PurchaseResult.Held(resp.owned)
     }
 
@@ -10033,6 +10265,13 @@ class Session(context: Context) {
             "group_deleted" -> {
                 obj.get("group_id")?.asInt?.let { gid -> _groups.value = _groups.value.filterNot { it.id == gid } }
             }
+            // ⚠⚠ THE ACCOUNT MOVED, IT WAS NOT BURNED. Until 07.09 the island
+            // sent `account_burned` here, and the owner's OTHER devices did
+            // what that word says: erased themselves. Nothing on this branch
+            // deletes anything — see [onAccountMoved]. A genuine burn does not
+            // come through here at all: it kills every token, the socket is
+            // closed 4401, and [probeBurnedAccount] does the wiping.
+            "account_moved" -> onAccountMoved(obj.get("uin")?.takeIf { !it.isJsonNull }?.asInt)
             // The vault moved on some device of this account (SPEC §4.9).
             // ⚠ The frame names the slot by its HASH, which means nothing
             // without the identity key, so it is matched by deriving both names
@@ -10973,6 +11212,12 @@ class Session(context: Context) {
         /** Floor between two burned-account probes (#655): the socket redials
          *  on its backoff and every 4401 close would otherwise probe again. */
         const val BURN_PROBE_THROTTLE_MS = 60_000L
+        /** How long a migration started on THIS device keeps us deaf to
+         *  `account_moved` about our own number. Wide enough to cover a slow
+         *  purchase round trip, since the island broadcasts before it answers
+         *  and the frame can land on either side of that answer; the window is
+         *  closed by hand the moment we learn nothing moved. */
+        const val SELF_MIGRATION_GRACE_MS = 30_000L
         /** Held call signals kept while the socket is down (#699). A call is a
          *  handful of frames; a box with no ceiling would replay a crowd after
          *  a long outage. */

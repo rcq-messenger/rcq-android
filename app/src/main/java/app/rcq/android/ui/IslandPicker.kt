@@ -17,14 +17,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -158,15 +164,50 @@ internal fun IslandCarousel(
 ) {
     val c = RcqTheme.colors
     if (islands.isEmpty()) return
+    // ⚠ REMEMBERED ABOVE THE BRANCH BELOW, not inside the deck. Reading an
+    // island's rules takes the pager out of composition, and a pager state
+    // created inside it would be a NEW one on the way back: you would open the
+    // rules of the third island and return to the first.
+    val startAt = islands.indexOfFirst { it.host.equals(current.trim(), ignoreCase = true) }.coerceAtLeast(0)
+    val pager = rememberPagerState(initialPage = startAt) { islands.size }
+    // The island whose rules are being read, and the name to put over them.
+    //
+    // ⚠ A PAGE OF THIS SAME SHEET, not a sheet of its own. Both callers draw
+    // this deck INSIDE a sheet already (see [IslandPickerSheet] and the
+    // add-account flow in HomeScreen), and a sheet within a sheet is not a
+    // thing here — so reading the rules replaces the deck the way «enter an
+    // address» does, with one way back. The height changes, which is fine: it
+    // changes on a deliberate tap, not on every swipe, and #736 is about the
+    // latter.
+    var reading by remember { mutableStateOf<IslandRulesPage?>(null) }
+    val page = reading
+    if (page != null) {
+        Text(page.name, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        SheetGap(8)
+        Text(
+            page.rules, color = c.textPrimary, fontSize = 14.sp,
+            modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+        )
+        SheetGap(12)
+        Text(
+            stringResource(R.string.island_back_to_list), color = c.accent, fontSize = 13.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable { reading = null }.padding(vertical = 6.dp),
+        )
+        return
+    }
     run {
-            val startAt = islands.indexOfFirst { it.host.equals(current.trim(), ignoreCase = true) }.coerceAtLeast(0)
-            val pager = rememberPagerState(initialPage = startAt) { islands.size }
             HorizontalPager(
                 state = pager,
                 contentPadding = PaddingValues(horizontal = 28.dp),
                 pageSpacing = 12.dp,
                 modifier = Modifier.fillMaxWidth(),
-            ) { page -> IslandCard(islands[page]) }
+            ) { index ->
+                IslandCard(islands[index]) { name, rules ->
+                    reading = IslandRulesPage(name, rules)
+                }
+            }
             Spacer(Modifier.height(12.dp))
             // Where you are in the deck. Dots rather than "3 / 5": the count is
             // not the point, the fact that there is more to the left and right is.
@@ -189,9 +230,16 @@ internal fun IslandCarousel(
         }
 }
 
-/** One island: its painting, its logo, and what it says about itself. */
+/// One island's house rules, being read in place of the deck.
+private class IslandRulesPage(val name: String, val rules: String)
+
+/** One island: its painting, its logo, and what it says about itself.
+ *
+ *  [onRules] is handed the island's name and the rules text, and only ever
+ *  from a card that HAS rules — the caller draws them, because this card is a
+ *  page of a pager inside a sheet and has nowhere of its own to put them. */
 @Composable
-private fun IslandCard(island: IslandCatalog.Entry) {
+private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) -> Unit) {
     val c = RcqTheme.colors
     val ctx = LocalContext.current
     val cards by IslandCards.cards.collectAsState()
@@ -205,6 +253,22 @@ private fun IslandCard(island: IslandCatalog.Entry) {
         value = IslandCatalog.art(ctx, island.host)
     }
     val image = rememberSampledBitmap(art, maxPx = 512)
+    // ⚠ Read HERE, not inside the box below, because two things need the same
+    // answer now: the line in the reserved box, and the rules button beside
+    // the name. Still one question per card — [islandDoor] remembers it for
+    // the life of the sheet.
+    //
+    // The age is read at composition and is not itself state, so an entry that
+    // goes stale while the sheet sits open keeps its line until the flow next
+    // changes or the card is reopened. Both are seconds away in practice, and
+    // the alternative is a ticker recomposing every card in the deck.
+    val declinedAt = declined[SingBoxTransport.declineKey(island.host)]
+    val unreachable = declinedAt != null &&
+        System.currentTimeMillis() - declinedAt < SingBoxTransport.DECLINED_LINE_TTL_MS
+    // ⚠ NOT asked of an island this device has just declined to reach: that
+    // decline is the person's own opt-out from raising the relays for it, and
+    // a request we know will fail is not made to fill in a label.
+    val door = if (unreachable) null else islandDoor(island.host)
     // No card under it. The island is a cut-out and the sheet already has a
     // ground of its own; a second panel behind the painting turned a floating
     // island into a sticker on a tile (founder, 24.08). Everything here stands
@@ -268,10 +332,48 @@ private fun IslandCard(island: IslandCatalog.Entry) {
         // the catalogue for its name the moment this sheet opens would hand our
         // address to five hosts the person has not chosen yet.
         val name = cards[island.host]?.name?.takeIf { it.isNotBlank() } ?: island.name
-        Text(
-            name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center,
-            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-        )
+        // The island's house rules, a tap away from the deck (founder, 07.09:
+        // "a good idea, so you can look before joining"). The same words its
+        // own Settings screen shows to the people already living there.
+        //
+        // ⚠ TWO RESERVED SLOTS, ONE ON EACH SIDE, and both of them are #736.
+        // The rules arrive from the island a moment AFTER the swipe lands on
+        // the card, so a button that simply appeared would change this row's
+        // height under the pager and the whole sheet would twitch — the exact
+        // fault the 44dp box below was built to end. The right slot is drawn
+        // whether the island answered or not; the left one is its mirror, so
+        // the name stays centred instead of sitting 24dp off to the left.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(Modifier.size(24.dp))
+            Text(
+                name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            // ⚠ An icon ONLY when there is something behind it. An operator
+            // who never wrote a welcome is the ordinary case, and a button
+            // that opens an empty page is worse than no button at all.
+            val rules = door?.rules
+            Box(
+                Modifier.size(24.dp).then(
+                    if (rules != null) {
+                        Modifier.clip(CircleShape).clickable { onRules(name, rules) }
+                    } else Modifier,
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (rules != null) Icon(
+                    Icons.Filled.Gavel,
+                    contentDescription = stringResource(R.string.island_rules_title),
+                    tint = c.accent,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
         Text(
             island.region?.let { "${island.host} · $it" } ?: island.host,
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
@@ -289,15 +391,6 @@ private fun IslandCard(island: IslandCatalog.Entry) {
             // below: an extra line is a taller page, a taller page re-measures
             // the pager, and that is #736 back — the whole sheet twitching up
             // and down on every swipe. Whatever this box draws, it is 44dp.
-            //
-            // The age is read at composition and is not itself state, so an
-            // entry that goes stale while the sheet sits open keeps its line
-            // until the flow next changes or the card is reopened. Both are
-            // seconds away in practice, and the alternative is a ticker
-            // recomposing every card in the deck.
-            val declinedAt = declined[SingBoxTransport.declineKey(island.host)]
-            val unreachable = declinedAt != null &&
-                System.currentTimeMillis() - declinedAt < SingBoxTransport.DECLINED_LINE_TTL_MS
             if (unreachable) {
                 Text(
                     stringResource(R.string.island_unreachable_relays_off),
@@ -320,7 +413,6 @@ private fun IslandCard(island: IslandCatalog.Entry) {
                 //
                 // 14dp and lineHeight 14sp on both texts: one door line plus two
                 // description lines is 42dp and fits the 44 the box promises.
-                val door = islandDoor(island.host)
                 Box(Modifier.height(14.dp), contentAlignment = Alignment.Center) {
                     if (door != null) {
                         val buyUrl = door.buyUrl
@@ -375,13 +467,21 @@ private fun IslandCard(island: IslandCatalog.Entry) {
     }
 }
 
-/// Whether the island's door is open, and what it costs when it is not.
+/// Whether the island's door is open, what it costs when it is not, and what
+/// its operator wrote on the wall beside it.
 internal class IslandDoor(
     /// The whole line, already worded and already priced.
     val label: String,
     val closed: Boolean,
     /// The operator's own shop, when they named one and it is https.
     val buyUrl: String?,
+    /// The house rules, or null when the operator wrote none.
+    ///
+    /// ⚠ Carried HERE rather than fetched on its own. It is a second field of
+    /// the same `/server/info` reply the door is read from, and a rules button
+    /// that asked for itself would double the requests this deck already makes
+    /// (one per opened card) for a string we have already been handed.
+    val rules: String?,
 )
 
 /// What the island says about its OWN door, or null while it has not answered.
@@ -412,10 +512,14 @@ private fun islandDoor(host: String): IslandDoor? {
     val ctx = LocalContext.current
     var door by remember(host) { mutableStateOf<IslandDoor?>(null) }
     LaunchedEffect(host) {
-        val caps = runCatching { RcqApi.serverInfoOf(host)?.capabilities }.getOrNull() ?: return@LaunchedEffect
+        val info = runCatching { RcqApi.serverInfoOf(host) }.getOrNull() ?: return@LaunchedEffect
+        val caps = info.capabilities
+        val rules = info.welcome.trim().takeIf { it.isNotBlank() }
         val closed = caps.closed_island || caps.registration_policy.equals("invite", ignoreCase = true)
         if (!closed) {
-            door = IslandDoor(ctx.getString(R.string.island_entry_open), closed = false, buyUrl = null)
+            door = IslandDoor(
+                ctx.getString(R.string.island_entry_open), closed = false, buyUrl = null, rules = rules,
+            )
             return@LaunchedEffect
         }
         val cents = caps.entry_price_cents
@@ -428,7 +532,7 @@ private fun islandDoor(host: String): IslandDoor? {
         // An island that set a price and no address gets the line without a
         // link, rather than a link somewhere we invented for it.
         val url = caps.entry_url.trim().takeIf { it.startsWith("https://", ignoreCase = true) }
-        door = IslandDoor(text, closed = true, buyUrl = url)
+        door = IslandDoor(text, closed = true, buyUrl = url, rules = rules)
     }
     return door
 }

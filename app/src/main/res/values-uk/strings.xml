@@ -1143,6 +1143,8 @@
     <string name="myreports_send_error">Не надіслалося. Спробуйте ще раз.</string>
     <string name="burn_failed">Не вдалося дістатися сервера, тож нічого не видалено. Акаунт цілий. Спробуй ще раз, коли буде зв\'язок.</string>
     <string name="account_burned_elsewhere">Акаунт було спалено з іншого пристрою. Локальні дані видалено.</string>
+    <string name="account_moved_followed">Акаунт тепер відповідає як %1$d. Листування на місці.</string>
+    <string name="account_moved_stuck">Акаунт переїхав на інший номер, а цей пристрій не зміг піти за ним. Тут нічого не видалено. Увійдіть знову за фразою відновлення.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d нотатка</item>
         <item quantity="few">%d нотатки</item>
@@ -1386,6 +1388,7 @@
     <string name="island_entry_buy">купити</string>
     <!-- Joining a closed island: the door, the code, and the counter of
          invites a resident may hand out (founder, 06.09). -->
+    <string name="island_back_to_list">Назад до списку</string>
     <string name="island_entry_open">Відкритий острів</string>
     <string name="join_closed_title">Закритий острів</string>
     <string name="join_checking_island">Питаємо острів…</string>

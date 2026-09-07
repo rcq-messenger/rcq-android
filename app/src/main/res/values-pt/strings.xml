@@ -1143,6 +1143,8 @@
     <string name="myreports_send_error">Não deu para enviar. Tente de novo.</string>
     <string name="burn_failed">Não foi possível alcançar o servidor, então nada foi apagado. Sua conta está intacta. Tente de novo quando tiver conexão.</string>
     <string name="account_burned_elsewhere">Esta conta foi queimada em outro aparelho. Os dados locais foram apagados.</string>
+    <string name="account_moved_followed">Esta conta agora atende como %1$d. Suas conversas continuam aqui.</string>
+    <string name="account_moved_stuck">Esta conta mudou para outro número e este aparelho não conseguiu acompanhar. Nada aqui foi apagado. Entre de novo com sua frase de recuperação.</string>
     <plurals name="saved_notes">
         <item quantity="one">%d nota</item>
         <item quantity="other">%d notas</item>
@@ -1382,6 +1384,7 @@
     <string name="island_entry_buy">comprar</string>
     <!-- Joining a closed island: the door, the code, and the counter of
          invites a resident may hand out (founder, 06.09). -->
+    <string name="island_back_to_list">Voltar à lista</string>
     <string name="island_entry_open">Ilha aberta</string>
     <string name="join_closed_title">Ilha fechada</string>
     <string name="join_checking_island">Perguntando à ilha…</string>
