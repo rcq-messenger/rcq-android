@@ -9506,6 +9506,13 @@ class Session(context: Context) {
                     app.rcq.android.data.CrossIslandVault.arm(it)
                     app.rcq.android.data.CrossIslandVault.sync(it)
                 }
+                // ⚠ Guest cards OTHERS gave us. Unconditional like the slot
+                // above, and for a sharper reason: these are the only copy in
+                // existence, and losing them is invisible — a closed island
+                // answers a caller with no card by saying "no such number",
+                // which is the refusal working correctly.
+                if (!ctx.stillOurs()) return@launch
+                sectionsCtx()?.let { app.rcq.android.data.GuestCardVault.sync(it, closedIsland) }
             } finally {
                 vaultSweepInFlight.set(false)
             }
@@ -9574,6 +9581,7 @@ class Session(context: Context) {
         LocalStores.forgetVaultSlotVersion(app.rcq.android.data.CrossIslandVault.slotOf(ik))
         app.rcq.android.data.SectionsVault.retire(who)
         app.rcq.android.data.CrossIslandVault.retire(who)
+        app.rcq.android.data.GuestCardVault.retire(who)
         contactsVaultRetired = true
         android.util.Log.w("RCQvault", "the account rotated its identity elsewhere; this derivation is retired")
     }
