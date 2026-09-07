@@ -1377,4 +1377,5 @@
     <string name="ci_closed_island">Цей острів закритий. Щоб написати туди, потрібне посилання від самої людини: вона ділиться контактом або пише вам першою.</string>
     <string name="island_entry_price">Вхід: %1$s</string>
     <string name="island_entry_closed">Закритий клуб</string>
+    <string name="island_entry_buy">купити</string>
 </resources>

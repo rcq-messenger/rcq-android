@@ -1419,4 +1419,5 @@
     <string name="ci_closed_island">Этот остров закрытый. Чтобы написать туда, нужна ссылка от самого человека: он делится контактом или пишет вам первым.</string>
     <string name="island_entry_price">Вход: %1$s</string>
     <string name="island_entry_closed">Закрытый клуб</string>
+    <string name="island_entry_buy">купить</string>
 </resources>
