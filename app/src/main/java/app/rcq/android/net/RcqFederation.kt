@@ -189,14 +189,25 @@ object RcqFederation {
 
     /** Build the contact deep link. Flagship + no keys yields exactly the legacy
      *  `https://rcq.app/u/<uin>`. */
-    fun buildContactLink(a: Address, sk: String? = null, ik: String? = null, base: String = "https://rcq.app"): String =
-        "$base/u/${a.uin}" + contactQuery(a, sk, ik)
+    fun buildContactLink(a: Address, sk: String? = null, ik: String? = null, base: String = "https://rcq.app", card: String? = null): String =
+        "$base/u/${a.uin}" + contactQuery(a, sk, ik) + fragment(card)
+
+    /** ⚠⚠ THE GUEST CARD GOES AFTER THE HASH. Everything else in this link is
+     *  a PUBLIC key card and rides the query as it always has; a guest card
+     *  cannot share that home, because it is a live credential with no expiry.
+     *  A fragment is never sent to a server: not to rcq.app, not to the CDN in
+     *  front of it, not in a Referer. In the query it would land in an access
+     *  log, which is how session tokens reached journald until 22.08. */
+    private fun fragment(card: String?): String =
+        card?.takeIf { it.isNotBlank() }
+            ?.let { "#c=" + java.net.URLEncoder.encode(it, "UTF-8") }
+            ?: ""
 
     /** The `rcq://add/…` form encoded in the contact QR — any camera app fires
      *  the VIEW intent for the custom scheme, no in-app scanner needed. Same
      *  query params as [buildContactLink]. */
-    fun buildContactQr(a: Address, sk: String? = null, ik: String? = null): String =
-        "rcq://add/${a.uin}" + contactQuery(a, sk, ik)
+    fun buildContactQr(a: Address, sk: String? = null, ik: String? = null, card: String? = null): String =
+        "rcq://add/${a.uin}" + contactQuery(a, sk, ik) + fragment(card)
 
     data class ParsedContactLink(val address: Address, val sk: String?, val ik: String?)
 
