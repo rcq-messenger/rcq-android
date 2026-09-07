@@ -3399,11 +3399,78 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
                 value = app.rcq.android.data.IslandCatalog.load(ctxLocal)
             }
             var manual by remember { mutableStateOf(false) }
+            // The island picked out of the deck that turned out to be closed,
+            // and the code being typed for it.
+            var closedHost by remember { mutableStateOf<String?>(null) }
+            val pendingClosed = closedHost
+            // ⚠⚠ THE CODE IS ASKED FOR BEFORE THE ATTEMPT, NOT AFTER THE
+            // REFUSAL. Picking a closed island out of the deck used to register
+            // with no code at all, be refused, and drop the refusal somewhere
+            // else entirely — so joining took two goes with fiddling in
+            // between, and the founder's item 6 of 06.09 is exactly that: "it
+            // must work the first time". The deck already asks each opened card
+            // about its door for the line it draws, so this answer is one the
+            // person has usually already been shown.
+            if (pendingClosed != null) {
+                Text(
+                    stringResource(R.string.join_closed_title),
+                    color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Text(pendingClosed, color = c.textSecondary, fontSize = 13.sp)
+                Text(stringResource(R.string.reg_invite_required), color = c.textSecondary, fontSize = 13.sp)
+                RcqField(
+                    value = invite,
+                    onValueChange = { invite = it.trim() },
+                    placeholder = stringResource(R.string.reg_invite_label),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                CapsuleButton(
+                    stringResource(R.string.add_account_create),
+                    enabled = invite.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { onAdd(pendingClosed, invite) }
+                // Two ways back, because they are two different intentions:
+                // pick a different island, or leave altogether. Neither of them
+                // existed on the iOS sheet this replaces (founder, item 1).
+                TextButton(onClick = { closedHost = null }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text(stringResource(R.string.island_back_to_list), color = c.accent)
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
+                }
+                return@Column
+            }
             if (!manual && islands.isNotEmpty()) {
-                // Picking a card carries no invite: the deck is the OPEN path, and a
-                // closed island that wants a code is reached through "enter an
-                // address" below, where the field for it lives.
-                IslandCarousel(current = "", islands = islands, onPick = { onAdd(it, null) })
+                // ⚠ An island that does not ANSWER is not treated as closed:
+                // the add goes ahead and the refusal path still catches a
+                // closed one. Guessing "closed" from silence would demand a
+                // code from somebody joining an open island over a bad line.
+                IslandCarousel(
+                    current = "", islands = islands,
+                    onPick = { host ->
+                        if (!checking) {
+                            checking = true
+                            scope.launch {
+                                val closed = islandRefusesRegistration(host)
+                                checking = false
+                                // ⚠ The person may have walked away from the
+                                // deck while the island was being asked (the
+                                // "enter an address" door is one tap and the
+                                // probe can take seconds on a bad line). Acting
+                                // on a stale answer would create an account
+                                // under somebody typing a different host.
+                                if (manual) return@launch
+                                if (closed == true) closedHost = host else onAdd(host, null)
+                            }
+                        }
+                    },
+                )
+                if (checking) Text(
+                    stringResource(R.string.join_checking_island),
+                    color = c.textSecondary, fontSize = 12.sp,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp),
+                )
                 // Two doors under the deck, the same pair iOS offers: type an
                 // address, or bring an account that already exists. Restoring
                 // by phrase lived only in onboarding and in account management,

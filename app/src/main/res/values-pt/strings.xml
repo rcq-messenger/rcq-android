@@ -88,9 +88,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Cria uma identidade anônima nova ao lado da que você já tem. Deixe o servidor em branco para usar o servidor público.</string>
     <string name="add_account_create">Criar</string>
-    <string name="access_token_label">Token de acesso (opcional)</string>
-    <string name="access_token_hint">Para uma ilha privada (fechada), cole o token de acesso que te deram.</string>
-    <string name="access_token_bad">Token de acesso inválido ou expirado para esta ilha.</string>
+    <string name="access_token_label">Chave do gateway (opcional)</string>
+    <string name="access_token_hint">Só se a ilha estiver escondida atrás de um gateway. Não é o código de acesso acima.</string>
+    <string name="access_token_bad">Essa chave do gateway está errada ou expirou para esta ilha.</string>
     <string name="manage_accounts_intro">Contas neste aparelho. Alterne entre elas pelo botão de conta na tela inicial. Apagar uma conta aqui remove ela só deste aparelho: a identidade continua no servidor.</string>
     <string name="manage_accounts_active">Ativa</string>
     <string name="manage_accounts_add_by_phrase">Adicionar conta por frase de recuperação</string>
@@ -486,7 +486,7 @@
     <string name="uin_shop_status_unavailable">Indisponível</string>
     <string name="uin_shop_hint_too_short">Precisa de pelo menos 3 dígitos</string>
     <string name="uin_shop_info_what_title">O que é um UIN</string>
-    <string name="uin_shop_info_what_body">Seu UIN é o seu nome no RCQ, um número que não está ligado a telefone nem e-mail. As pessoas te acham por ele; os UINs mais curtos são mais escassos, então custam mais.</string>
+    <string name="uin_shop_info_what_body">Seu UIN é o seu nome nesta ilha, um número que não está ligado a telefone nem e-mail. As pessoas te acham por ele; os UINs mais curtos são mais escassos, então custam mais.</string>
     <string name="uin_shop_info_migrate_title">Pegar um número não muda quem você é</string>
     <string name="uin_shop_info_migrate_body">O número entra na sua coleção e você continua respondendo como agora. Passar a usá-lo é um passo separado, em Meus UINs, e dá para voltar atrás: o número que você deixa continua seu, então ninguém mais pode pegar.</string>
     <string name="uin_shop_info_current">Seu UIN de agora · %1$s</string>
@@ -737,8 +737,8 @@
     <string name="csrv_intro">Adicione uma conta na ilha de uma organização ou no seu próprio servidor RCQ. Sua conta atual continua neste aparelho.</string>
     <string name="csrv_current">SERVIDOR ATUAL</string>
     <string name="csrv_host">Host do servidor</string>
-    <string name="csrv_invite">Código de convite (opcional)</string>
-    <string name="csrv_invite_hint">Só é preciso em servidores fechados que exigem convite. Deixe em branco nos abertos.</string>
+    <string name="csrv_invite">Código de acesso (opcional)</string>
+    <string name="csrv_invite_hint">Só é preciso numa ilha fechada. É o código que o operador dela lhe deu, ou o que você recebeu ao pagar a entrada. Numa ilha aberta deixe vazio.</string>
     <string name="csrv_warning">Isto adiciona uma conta nova naquele servidor. Sua conta atual continua neste aparelho com todas as conversas e contatos; alterne entre elas pelo menu de contas.</string>
     <string name="csrv_reset_btn">Adicionar conta no servidor público</string>
     <string name="csrv_switching">Adicionando…</string>
@@ -1380,4 +1380,18 @@
     <string name="island_entry_price">Entrada: %1$s</string>
     <string name="island_entry_closed">Clube fechado</string>
     <string name="island_entry_buy">comprar</string>
+    <!-- Joining a closed island: the door, the code, and the counter of
+         invites a resident may hand out (founder, 06.09). -->
+    <string name="island_entry_open">Ilha aberta</string>
+    <string name="join_closed_title">Ilha fechada</string>
+    <string name="join_checking_island">Perguntando à ilha…</string>
+    <string name="invites_title">Convites para distribuir</string>
+    <string name="invites_count">Restam %1$d de %2$d</string>
+    <string name="invites_next">O próximo chega em %1$s.</string>
+    <string name="invites_all">Você está com todos.</string>
+    <string name="invites_mint">Criar um convite</string>
+    <string name="invites_minting">Criando…</string>
+    <string name="invites_copy">Copiar o link</string>
+    <string name="invites_once">Aparece uma única vez. A ilha não guarda cópia: se fechar sem copiar, o convite foi gasto à toa.</string>
+    <string name="invites_failed">A ilha não entregou nenhum convite.</string>
 </resources>

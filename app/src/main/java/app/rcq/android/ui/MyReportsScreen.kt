@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import app.rcq.android.R
 import app.rcq.android.Session
@@ -77,6 +78,11 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
  * expects to be able to do with their own text and could not: copy it, fix the
  * typo in it while nobody has answered yet, and take a stale one off the list.
  */
+/// How long a red one-line notice stays up before it clears itself.
+/// Long enough to read a sentence, short enough that it cannot outlive
+/// the action it is about (#941).
+private const val NOTICE_MS = 6_000L
+
 @Composable
 fun MyReportsScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
@@ -171,6 +177,13 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
             )
         }
 
+        // ⚠ Both of these used to hang until the screen was left and reopened,
+        // because nothing ever set them back to false: a red line about one tap
+        // stayed over every later tap (#941). They clear themselves now, and the
+        // keys are the flags, so a second refusal restarts the timer rather than
+        // riding out the first one.
+        LaunchedEffect(refused) { if (refused) { delay(NOTICE_MS); refused = false } }
+        LaunchedEffect(removeFailed) { if (removeFailed) { delay(NOTICE_MS); removeFailed = false } }
         if (refused) {
             Text(
                 stringResource(R.string.myreports_delete_refused),
@@ -537,12 +550,27 @@ private fun ReportCard(
                         onClick = onStartEdit,
                     )
                 }
-                IconAction(
-                    icon = Icons.Outlined.Delete,
-                    label = stringResource(R.string.myreports_delete),
-                    tint = c.textSecondary,
-                    onClick = onRemove,
-                )
+                // ⚠ ASKED BEFORE OFFERING, not after (#941). The island says
+                // whether this row may leave the list, so a complaint about
+                // somebody else that is still open simply has no Delete rather
+                // than one that asks "are you sure" and then refuses. The
+                // reason sits where the button was, so the answer is on screen
+                // instead of arriving as a red line after a wasted tap.
+                if (report.removable) {
+                    IconAction(
+                        icon = Icons.Outlined.Delete,
+                        label = stringResource(R.string.myreports_delete),
+                        tint = c.textSecondary,
+                        onClick = onRemove,
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.myreports_delete_refused),
+                        color = c.textSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.weight(2f).padding(start = 8.dp),
+                    )
+                }
             }
         }
 

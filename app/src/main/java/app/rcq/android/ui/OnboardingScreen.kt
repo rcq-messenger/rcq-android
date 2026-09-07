@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,10 +89,14 @@ private data class OnbPage(val kicker: Int, val title: Int, val body: Int, val h
  * (top-right) switches the UI language live; on the last page the
  * top-left slot becomes a server picker. "Get started" mints the account
  * on the chosen server.
+ *
+ * [onStart] takes the island AND an access code, because a closed island
+ * refuses a registration that arrives without one and the person is holding
+ * that code before they ever tap the button.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit = {}) {
+internal fun OnboardingScreen(onStart: (String?, String?) -> Unit, onRestore: () -> Unit = {}) {
     val c = RcqTheme.colors
     val activity = LocalContext.current as? Activity
     val currentLang by LanguageManager.current.collectAsState()
@@ -118,6 +123,20 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
     var audit by remember { mutableStateOf<app.rcq.android.net.NetworkAudit.Report?>(null) }
     var showServer by remember { mutableStateOf(false) }
     var showLang by remember { mutableStateOf(false) }
+    // ⚠ Asked WHEN THE ISLAND IS CHOSEN, not when "Get started" is tapped. The
+    // answer has to be in hand before the first registration — a closed island
+    // refuses one that carries no code, and that refusal used to be the only
+    // way anybody found out (founder, item 6 of 06.09: joining took two goes,
+    // it must work the first time). Putting the round trip on the button would
+    // instead park a spinner in front of EVERY first launch, including on the
+    // open flagship where the answer can only ever be "open".
+    //
+    // ⚠ Null is "the island has not answered", which is NOT "closed": we go
+    // ahead and let the refusal screen ask for the code, rather than demanding
+    // one from somebody joining an open island over a bad line.
+    var serverClosed by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(server) { serverClosed = islandRefusesRegistration(server) }
+    var askCode by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary).systemBarsPadding()) {
         // Top bar: Skip / server pill (left), language pill (right).
@@ -205,8 +224,9 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
             if (lastPage) stringResource(R.string.onboard_cta_start) else stringResource(R.string.onboard_cta_next),
             enabled = !lastPage || acceptedTerms,
             onClick = {
-                if (lastPage) onStart(server)
-                else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
+                if (lastPage) {
+                    if (serverClosed == true) askCode = true else onStart(server, null)
+                } else scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
             },
             modifier = Modifier.padding(horizontal = 32.dp).fillMaxWidth(),
         )
@@ -267,6 +287,13 @@ internal fun OnboardingScreen(onStart: (String?) -> Unit, onRestore: () -> Unit 
     if (showServer) {
         ServerPickerDialog(server, onPick = { server = it; showServer = false }, onDismiss = { showServer = false })
     }
+    if (askCode) {
+        ClosedIslandCodeSheet(
+            host = serverHostLabel(server),
+            onJoin = { code -> askCode = false; onStart(server, code) },
+            onDismiss = { askCode = false },
+        )
+    }
     if (showLang) {
         LanguagePickerDialog(currentLang, onPick = { code -> showLang = false; activity?.let { LanguageManager.set(it, code) } }, onDismiss = { showLang = false })
     }
@@ -307,6 +334,51 @@ private fun PageContent(p: OnbPage) {
 /** Bare host shown on the server pill ("api.rcq.app" for the default). */
 private fun serverHostLabel(server: String): String =
     server.ifBlank { RcqApi.DEFAULT_HOST }
+
+/**
+ * The door of a closed island: what it is, and the field for the code.
+ *
+ * ⚠⚠ IT CANCELS. Both ways: the button below the field, and the drag-down and
+ * scrim every [RcqSheet] has. The iOS version of this sheet had neither, so
+ * somebody who opened it without a code was stuck in it (founder, item 1 of
+ * 06.09) — and this is the screen a person meets BEFORE they have an account,
+ * with nothing behind it but the app they have just installed.
+ *
+ * ⚠ It is a sheet in the app's own colours with the app's own field, not a
+ * Material dialog with a bordered box and a floating label. That is the founder's
+ * item 2 ("looks cheap next to the rest of the app") and the house rule behind
+ * [RcqField] and [RcqSheet].
+ */
+@Composable
+private fun ClosedIslandCodeSheet(host: String, onJoin: (String) -> Unit, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    var code by remember { mutableStateOf("") }
+    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.join_closed_title)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(host, color = c.textPrimary, fontSize = 14.sp)
+            Text(stringResource(R.string.reg_invite_required), color = c.textSecondary, fontSize = 13.sp)
+            RcqField(
+                value = code,
+                onValueChange = { code = it.take(128).trim() },
+                placeholder = stringResource(R.string.reg_invite_label),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SheetGap(4)
+            CapsuleButton(
+                stringResource(R.string.onboard_cta_start),
+                enabled = code.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { onJoin(code) }
+            Text(
+                stringResource(R.string.common_cancel), color = c.textSecondary, fontSize = 15.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onDismiss).padding(vertical = 14.dp),
+            )
+        }
+    }
+}
 
 /// The island picker, now one shared view (see [IslandPickerSheet]): the
 /// catalogue as cards you swipe through, with typing an address kept one tap

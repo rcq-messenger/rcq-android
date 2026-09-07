@@ -88,9 +88,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Şimdikinin yanına yeni bir anonim kimlik oluşturur. Herkese açık sunucuyu kullanmak için sunucu alanını boş bırak.</string>
     <string name="add_account_create">Oluştur</string>
-    <string name="access_token_label">Erişim jetonu (isteğe bağlı)</string>
-    <string name="access_token_hint">Özel (kapalı) bir ada için sana verilen erişim jetonunu yapıştır.</string>
-    <string name="access_token_bad">Bu ada için erişim jetonu geçersiz ya da süresi dolmuş.</string>
+    <string name="access_token_label">Ağ geçidi anahtarı (isteğe bağlı)</string>
+    <string name="access_token_hint">Yalnızca ada bir ağ geçidinin arkasındaysa. Yukarıdaki erişim kodu değildir.</string>
+    <string name="access_token_bad">Bu ağ geçidi anahtarı bu ada için yanlış ya da süresi dolmuş.</string>
     <string name="manage_accounts_intro">Bu cihazdaki hesaplar. Aralarında ana ekrandaki hesap düğmesinden geçebilirsin. Buradan bir hesabı silmek onu yalnızca bu cihazdan kaldırır, kimliği sunucuda kalır.</string>
     <string name="manage_accounts_active">Etkin</string>
     <string name="manage_accounts_add_by_phrase">Kurtarma ifadesiyle hesap ekle</string>
@@ -486,7 +486,7 @@
     <string name="uin_shop_status_unavailable">Uygun değil</string>
     <string name="uin_shop_hint_too_short">En az 3 rakam gerekir</string>
     <string name="uin_shop_info_what_title">UIN nedir</string>
-    <string name="uin_shop_info_what_body">UIN, RCQ\'daki adresin; hiçbir telefona ya da e-postaya bağlı olmayan bir numara. Başkaları seni onunla bulur; kısa UIN\'ler daha az bulunur, o yüzden daha pahalıdır.</string>
+    <string name="uin_shop_info_what_body">UIN, bu adadaki adresin; hiçbir telefona ya da e-postaya bağlı olmayan bir numara. Başkaları seni onunla bulur; kısa UIN\'ler daha az bulunur, o yüzden daha pahalıdır.</string>
     <string name="uin_shop_info_migrate_title">Numara almak kim olduğunu değiştirmez</string>
     <string name="uin_shop_info_migrate_body">Numara koleksiyonuna katılır, sen de şimdiki gibi cevap vermeyi sürdürürsün. Üzerine geçmek, UIN\'lerim altında ayrı bir adım ve geri alınabilir: bıraktığın numara da senin kalır, kimse alamaz.</string>
     <string name="uin_shop_info_current">Şimdiki UIN\'in · %1$s</string>
@@ -737,8 +737,8 @@
     <string name="csrv_intro">Bir kurumun adasında ya da kendi kurduğun RCQ sunucusunda hesap ekle. Şimdiki hesabın bu cihazda kalır.</string>
     <string name="csrv_current">ŞİMDİKİ SUNUCU</string>
     <string name="csrv_host">Sunucu adresi</string>
-    <string name="csrv_invite">Davet kodu (isteğe bağlı)</string>
-    <string name="csrv_invite_hint">Yalnızca davet isteyen kapalı sunucular için gerekir. Açık olanlarda boş bırak.</string>
+    <string name="csrv_invite">Erişim kodu (isteğe bağlı)</string>
+    <string name="csrv_invite_hint">Yalnızca kapalı bir ada için gerekir. Adanın işletmecisinin verdiği kod ya da girişi öderken aldığın kod. Açık bir adada boş bırak.</string>
     <string name="csrv_warning">Bu, o sunucuda yeni bir hesap ekler. Şimdiki hesabın bütün sohbetleri ve kişileriyle bu cihazda kalır; aralarında hesap menüsünden geçebilirsin.</string>
     <string name="csrv_reset_btn">Herkese açık sunucuda hesap ekle</string>
     <string name="csrv_switching">Ekleniyor…</string>
@@ -1380,4 +1380,18 @@
     <string name="island_entry_price">Giriş: %1$s</string>
     <string name="island_entry_closed">Kapalı kulüp</string>
     <string name="island_entry_buy">satın al</string>
+    <!-- Joining a closed island: the door, the code, and the counter of
+         invites a resident may hand out (founder, 06.09). -->
+    <string name="island_entry_open">Açık ada</string>
+    <string name="join_closed_title">Kapalı ada</string>
+    <string name="join_checking_island">Adaya soruluyor…</string>
+    <string name="invites_title">Dağıtacağın davetler</string>
+    <string name="invites_count">%2$d davetten %1$d tanesi kaldı</string>
+    <string name="invites_next">Bir sonraki %1$s tarihinde geliyor.</string>
+    <string name="invites_all">Hepsi elinde.</string>
+    <string name="invites_mint">Davet oluştur</string>
+    <string name="invites_minting">Oluşturuluyor…</string>
+    <string name="invites_copy">Bağlantıyı kopyala</string>
+    <string name="invites_once">Bir kez gösterilir. Ada kopyasını tutmaz: kopyalamadan kapatırsan davet boşa gider.</string>
+    <string name="invites_failed">Ada bir davet vermedi.</string>
 </resources>

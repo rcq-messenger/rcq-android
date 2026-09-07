@@ -100,9 +100,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Creates a new anonymous identity alongside your current one. Leave the server blank to use the public server.</string>
     <string name="add_account_create">Create</string>
-    <string name="access_token_label">Access token (optional)</string>
-    <string name="access_token_hint">For a private (closed) island, paste the access token you were given.</string>
-    <string name="access_token_bad">Invalid or expired access token for this island.</string>
+    <string name="access_token_label">Gateway key (optional)</string>
+    <string name="access_token_hint">Only if the island hides behind a gateway. This is not the access code above.</string>
+    <string name="access_token_bad">That gateway key is wrong or has expired for this island.</string>
     <string name="manage_accounts_intro">Accounts on this device. Switch between them from the account button on the home screen. Deleting an account here removes it from this device only. Its identity stays on the server.</string>
     <string name="manage_accounts_active">Active</string>
     <string name="manage_accounts_add_by_phrase">Add account by recovery phrase</string>
@@ -508,7 +508,7 @@
     <string name="uin_shop_status_unavailable">Unavailable</string>
     <string name="uin_shop_hint_too_short">Need at least 3 digits</string>
     <string name="uin_shop_info_what_title">What is a UIN</string>
-    <string name="uin_shop_info_what_body">Your UIN is your handle in RCQ, a number tied to no phone or email. Other users find you by it; shorter UINs are scarcer, so they cost more.</string>
+    <string name="uin_shop_info_what_body">Your UIN is your handle on this island, a number tied to no phone or email. Other users find you by it; shorter UINs are scarcer, so they cost more.</string>
     <string name="uin_shop_info_migrate_title">Taking a number does not change who you are</string>
     <string name="uin_shop_info_migrate_body">The number joins your collection and you keep answering as you do now. Moving onto it is a separate step on My UINs, and it is reversible: the number you leave stays yours too, so nobody else can take it.</string>
     <string name="uin_shop_info_current">Your current UIN · %1$s</string>
@@ -767,8 +767,8 @@
     <string name="csrv_intro">Add an account on an organisation\'s island or your own self-hosted RCQ server. Your current account stays on this device.</string>
     <string name="csrv_current">CURRENT SERVER</string>
     <string name="csrv_host">Server host</string>
-    <string name="csrv_invite">Invite code (optional)</string>
-    <string name="csrv_invite_hint">Only needed for closed servers that require an invite. Leave blank for open ones.</string>
+    <string name="csrv_invite">Access code (optional)</string>
+    <string name="csrv_invite_hint">Only needed for a closed island. It is the code its operator gave you, or the one you got when you paid for entry. Leave blank for an open island.</string>
     <string name="csrv_warning">This adds a new account on that server. Your current account stays on this device with all its chats and contacts; switch between them from the account menu.</string>
     <string name="csrv_reset_btn">Add a public-server account</string>
     <string name="csrv_switching">Adding…</string>
@@ -1431,4 +1431,18 @@
     <string name="island_entry_price">Entry: %1$s</string>
     <string name="island_entry_closed">Closed club</string>
     <string name="island_entry_buy">buy</string>
+    <!-- Joining a closed island: the door, the code, and the counter of
+         invites a resident may hand out (founder, 06.09). -->
+    <string name="island_entry_open">Open island</string>
+    <string name="join_closed_title">Closed island</string>
+    <string name="join_checking_island">Asking the island…</string>
+    <string name="invites_title">Invites to hand out</string>
+    <string name="invites_count">%1$d of %2$d left</string>
+    <string name="invites_next">The next one arrives on %1$s.</string>
+    <string name="invites_all">You are holding all of them.</string>
+    <string name="invites_mint">Create an invite</string>
+    <string name="invites_minting">Creating…</string>
+    <string name="invites_copy">Copy the link</string>
+    <string name="invites_once">Shown once. The island keeps no copy of it: close this without copying and the invite is spent on nothing.</string>
+    <string name="invites_failed">The island did not give out an invite.</string>
 </resources>

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Add
@@ -297,7 +298,10 @@ private fun SettingsFind.row(): SettingsFindRow = when (this) {
     SettingsFind.PUSH -> SettingsFindRow(this, Icons.Filled.Notifications, R.string.notif_push, R.string.settings_row_notifications, SettingsRoute.NOTIFICATIONS,
         "push delivery ntfy background пуш доставка фон уведомления")
     SettingsFind.ISLAND -> SettingsFindRow(this, Icons.Filled.Dns, R.string.settings_sec_island, R.string.settings_sec_island, null,
-        "island server rules welcome остров сервер правила приветствие")
+        // The resident-invite counter lives inside this anchor's block, so its
+        // words belong here: searching "приглашения" must land on the island
+        // section, not only on "invite a friend" over in About.
+        "island server rules welcome resident invites остров сервер правила приветствие приглашения резидент")
     SettingsFind.CLEAR_HISTORY -> SettingsFindRow(this, Icons.Filled.DeleteSweep, R.string.settings_row_clear_history, R.string.settings_sec_history, null,
         "clear history delete messages очистить историю удалить сообщения переписку")
     SettingsFind.UIN_SHOP -> SettingsFindRow(this, Icons.Filled.Sell, R.string.settings_row_uin_shop, R.string.settings_sec_account, SettingsRoute.UIN_SHOP,
@@ -883,6 +887,10 @@ private fun SettingsRoot(
                         showIslandRules = true
                     }
                 }
+                // How many people this resident may still bring in. Here rather
+                // than under "About", because an allowance is a fact about THIS
+                // island and moves with the account when it moves.
+                ResidentInvitesRow(session)
                 if (showIslandRules && islandRules != null) {
                     RcqSheet(onDismiss = { showIslandRules = false }, title = islandName ?: islandHost) {
                         Text(
@@ -4452,6 +4460,139 @@ private fun Divider() {
 /** Last /server/info answer per host — process-lifetime, tiny, lets the
  *  network screen paint the island's name instantly on re-entry (#619). */
 private val serverInfoCache = mutableMapOf<String, app.rcq.android.net.RcqApi.ServerInfoResponse>()
+
+/**
+ * The invites a paying RESIDENT may hand out, on the island section.
+ *
+ * ⚠⚠ DRAWS NOTHING for anybody who is not eligible, and that is the point, not
+ * an oversight. Only somebody who paid for entry has any (`resident_since` is
+ * set by exactly one path, redeeming an entry voucher at registration), so a
+ * counter reading 0/0 for everyone else would put a question on screen — "why
+ * do I have none" — that a settings row is the wrong place to answer, and it
+ * would read as something taken away. Nothing to say, nothing drawn.
+ *
+ * ⚠ THE ISLAND HAS ALREADY DONE THE ARITHMETIC: remaining, total and the date
+ * the next one lands all come off the wire. Nothing here recomputes them from a
+ * date, because the accrual rule lives on the island so an operator can change
+ * it without four client releases, and a client doing its own sum would
+ * disagree with the server the moment they did.
+ *
+ * ⚠ Silent on failure, too: an island older than the endpoint answers 404 and a
+ * dead network answers nothing. Neither is a fact worth a row.
+ */
+@Composable
+private fun ResidentInvitesRow(session: Session) {
+    val c = RcqTheme.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var quota by remember(session.uin) { mutableStateOf<app.rcq.android.net.RcqApi.ResidentInvites?>(null) }
+    LaunchedEffect(session.uin) { quota = session.residentInvites() }
+    val q = quota ?: return
+    if (!q.enabled || !q.eligible) return
+
+    var open by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    // ⚠⚠ THE MINTED LINK LIVES ONLY HERE. The island keeps a hash of the code
+    // and nothing else, so this string is the only copy in existence: closing
+    // the sheet without copying spends one of a finite allowance on nothing.
+    // That is why the sheet does not close itself after minting and why the
+    // copy action is the loudest thing in it.
+    var minted by remember { mutableStateOf<String?>(null) }
+    var mintFailed by remember { mutableStateOf(false) }
+
+    Divider()
+    SettingsRow(
+        Icons.Filled.ConfirmationNumber,
+        stringResource(R.string.invites_title),
+        value = "${q.remaining}/${q.total}",
+    ) { open = true }
+
+    if (open) {
+        RcqSheet(onDismiss = { open = false }, title = stringResource(R.string.invites_title)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(R.string.invites_count, q.remaining, q.total),
+                    color = c.textPrimary, fontSize = 15.sp,
+                )
+                Text(
+                    q.next_at?.let { stringResource(R.string.invites_next, formatInviteDate(it)) }
+                        ?: stringResource(R.string.invites_all),
+                    color = c.textSecondary, fontSize = 12.sp,
+                )
+                if (mintFailed) Text(
+                    stringResource(R.string.invites_failed),
+                    color = Color(0xFFE5484D), fontSize = 12.sp,
+                )
+                val link = minted
+                if (link != null) {
+                    // Monospace and selectable: this is a credential being read
+                    // off a screen, and a proportional font hides the
+                    // difference between l, I and 1.
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(
+                            link,
+                            color = c.textMono, fontSize = 12.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(c.bgPrimary)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable {
+                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("RCQ invite", link))
+                            Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                        }.padding(vertical = 6.dp, horizontal = 4.dp),
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, null, tint = c.accent, modifier = Modifier.size(16.dp))
+                        Text(stringResource(R.string.invites_copy), color = c.accent, fontSize = 14.sp)
+                    }
+                    Text(stringResource(R.string.invites_once), color = c.textSecondary, fontSize = 11.sp)
+                }
+                if (q.remaining > 0) {
+                    SheetGap(4)
+                    CapsuleButton(
+                        stringResource(if (busy) R.string.invites_minting else R.string.invites_mint),
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        busy = true; mintFailed = false
+                        scope.launch {
+                            val m = session.mintResidentInvite()
+                            busy = false
+                            if (m == null || m.link.isBlank()) {
+                                mintFailed = true
+                            } else {
+                                minted = m.link
+                                // Re-read rather than decrementing by hand: the
+                                // count and the next-accrual date are the
+                                // island's arithmetic, not ours.
+                                session.residentInvites()?.let { quota = it }
+                            }
+                        }
+                    }
+                }
+                TextButton(onClick = { open = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.common_done), color = c.accent)
+                }
+            }
+        }
+    }
+}
+
+/** Best-effort ISO-8601 to a localized date; falls back to the date part. */
+private fun formatInviteDate(iso: String): String {
+    val fmt = java.time.format.DateTimeFormatter
+        .ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
+        .withZone(java.time.ZoneId.systemDefault())
+    return runCatching { fmt.format(java.time.OffsetDateTime.parse(iso).toInstant()) }
+        .recoverCatching { fmt.format(java.time.Instant.parse(iso)) }
+        .getOrDefault(iso.take(10))
+}
 
 @Composable
 private fun SettingsRow(

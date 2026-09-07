@@ -99,9 +99,9 @@
     <!-- Multi-account: add + manage -->
     <string name="add_account_body">Создаёт новую анонимную личность рядом с текущей. Оставьте поле сервера пустым, чтобы использовать публичный сервер.</string>
     <string name="add_account_create">Создать</string>
-    <string name="access_token_label">Токен доступа (необязательно)</string>
-    <string name="access_token_hint">Для приватного (закрытого) острова вставьте выданный токен доступа.</string>
-    <string name="access_token_bad">Неверный или просроченный токен доступа для острова.</string>
+    <string name="access_token_label">Ключ шлюза (необязательно)</string>
+    <string name="access_token_hint">Только если остров спрятан за шлюзом. Это не код доступа выше.</string>
+    <string name="access_token_bad">Ключ шлюза неверный или просрочен для этого острова.</string>
     <string name="manage_accounts_intro">Аккаунты на этом устройстве. Переключайтесь между ними кнопкой аккаунта на главном экране. Удаление аккаунта здесь убирает его только с этого устройства, личность остаётся на сервере.</string>
     <string name="manage_accounts_active">Активный</string>
     <string name="manage_accounts_add_by_phrase">Добавить аккаунт по фразе восстановления</string>
@@ -504,7 +504,7 @@
     <string name="uin_shop_status_unavailable">Недоступен</string>
     <string name="uin_shop_hint_too_short">Минимум 3 цифры</string>
     <string name="uin_shop_info_what_title">Что такое UIN</string>
-    <string name="uin_shop_info_what_body">UIN это ваш ник в RCQ. Номер не привязан к телефону или почте, по нему вас находят другие. Чем короче, тем он реже, поэтому стоит дороже.</string>
+    <string name="uin_shop_info_what_body">UIN это ваш ник на этом острове. Номер не привязан к телефону или почте, по нему вас находят другие. Чем короче, тем он реже, поэтому стоит дороже.</string>
     <string name="uin_shop_info_migrate_title">Взять номер это не сменить себя</string>
     <string name="uin_shop_info_migrate_body">Номер попадает в вашу коллекцию, а отвечаете вы по-прежнему как сейчас. Перейти на него это отдельное действие на экране «Мои UIN\'ы», и оно обратимо: номер, с которого вы уходите, тоже остаётся вашим, занять его никто не сможет.</string>
     <string name="uin_shop_info_current">Ваш сейчас · %1$s</string>
@@ -763,8 +763,8 @@
     <string name="csrv_intro">Добавьте аккаунт на острове организации или своём self-host сервере RCQ. Текущий аккаунт останется на этом устройстве.</string>
     <string name="csrv_current">ТЕКУЩИЙ СЕРВЕР</string>
     <string name="csrv_host">Хост сервера</string>
-    <string name="csrv_invite">Код-приглашение (необязательно)</string>
-    <string name="csrv_invite_hint">Нужен только для закрытых серверов с приглашением. Для открытых оставьте пустым.</string>
+    <string name="csrv_invite">Код доступа (необязательно)</string>
+    <string name="csrv_invite_hint">Нужен только для закрытого острова. Это код, который выдал его оператор, или тот, что вы получили при оплате входа. Для открытого оставьте пустым.</string>
     <string name="csrv_warning">Это добавляет новый аккаунт на том сервере. Ваш текущий аккаунт остаётся на этом устройстве со всеми чатами и контактами, переключаться между ними можно в меню аккаунтов.</string>
     <string name="csrv_reset_btn">Добавить аккаунт на публичном сервере</string>
     <string name="csrv_switching">Добавление…</string>
@@ -1356,7 +1356,7 @@
     <string name="island_trust_changed_short">%1$s предъявил сертификат, которому это устройство не доверяет. Решите в уведомлении.</string>
     <string name="island_trust_disagrees">Это устройство уже доверяет %1$s с другим отпечатком, не тем, что введён. Ничего не подключено; решите в уведомлении.</string>
     <string name="island_trust_changed_entered">Отпечаток, введённый для %1$s, отличается от того, которому это устройство уже доверяет.</string>
-    <string name="island_trust_not_an_address">Это не адрес острова. Адрес — это хост и порт, если он не 443: island.example:8443</string>
+    <string name="island_trust_not_an_address">Это не адрес острова. Адрес это хост и порт, если он не 443: island.example:8443</string>
     <string name="island_trust_on_file">На устройстве</string>
     <string name="island_trust_presented">Предъявлен сейчас</string>
     <string name="island_trust_entered">Введён</string>
@@ -1426,4 +1426,18 @@
     <string name="island_entry_price">Вход: %1$s</string>
     <string name="island_entry_closed">Закрытый клуб</string>
     <string name="island_entry_buy">купить</string>
+    <!-- Joining a closed island: the door, the code, and the counter of
+         invites a resident may hand out (founder, 06.09). -->
+    <string name="island_entry_open">Открытый остров</string>
+    <string name="join_closed_title">Закрытый остров</string>
+    <string name="join_checking_island">Спрашиваем остров…</string>
+    <string name="invites_title">Приглашения</string>
+    <string name="invites_count">Осталось %1$d из %2$d</string>
+    <string name="invites_next">Следующее придёт %1$s.</string>
+    <string name="invites_all">У вас на руках все.</string>
+    <string name="invites_mint">Создать приглашение</string>
+    <string name="invites_minting">Создаём…</string>
+    <string name="invites_copy">Скопировать ссылку</string>
+    <string name="invites_once">Показывается один раз. Остров копию не хранит: закроете, не скопировав, и приглашение потрачено впустую.</string>
+    <string name="invites_failed">Остров не выдал приглашение.</string>
 </resources>

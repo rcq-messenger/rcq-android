@@ -276,47 +276,6 @@ private fun IslandCard(island: IslandCatalog.Entry) {
             island.region?.let { "${island.host} · $it" } ?: island.host,
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
         )
-        // ⚠ What getting in costs, asked of the ISLAND rather than of the
-        // catalogue. servers.json is a file the team edits by hand and it
-        // would be stale the day after an operator changed a price — and a
-        // wrong price is worse than no price at all.
-        //
-        // ⚠ Only for a card the person has already opened. The comment above
-        // explains why this sheet does not talk to every island in the list on
-        // open: that would hand our address to five hosts nobody has chosen.
-        // One page, one island, one question.
-        val entry = islandEntry(island.host)
-        if (entry != null) {
-            val (entryText, entryUrl) = entry
-            val label = if (entryUrl != null) {
-                entryText + " · " + stringResource(R.string.island_entry_buy)
-            } else {
-                entryText
-            }
-            Text(
-                label, color = c.accent, fontSize = 12.sp, textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    // ⚠ The click stops here. This line sits on the card that
-                    // PICKS the island, and one tap that both opened a shop and
-                    // chose an island would be two answers to a question the
-                    // person asked once.
-                    .then(
-                        if (entryUrl != null) {
-                            Modifier.clickable {
-                                runCatching {
-                                    ctx.startActivity(
-                                        android.content.Intent(
-                                            android.content.Intent.ACTION_VIEW,
-                                            android.net.Uri.parse(entryUrl),
-                                        ),
-                                    )
-                                }
-                            }
-                        } else Modifier,
-                    ),
-            )
-        }
         // ⚠ A RESERVED box, not an optional block. Each page used to measure
         // its own height — two lines of description here, none there — so the
         // pager, and the sheet around it, re-measured on every swipe and the
@@ -343,50 +302,153 @@ private fun IslandCard(island: IslandCatalog.Entry) {
                 Text(
                     stringResource(R.string.island_unreachable_relays_off),
                     color = androidx.compose.ui.graphics.Color(0xFFE5484D),
-                    fontSize = 11.sp, textAlign = TextAlign.Center,
+                    fontSize = 11.sp, lineHeight = 14.sp, textAlign = TextAlign.Center,
                     maxLines = 3,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 14.dp),
                 )
-            } else island.description?.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    it, color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
-                    maxLines = 3,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                )
+            } else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // ⚠⚠ THE DOOR LINE IS INSIDE THE BOX, AND ITS SLOT IS FIXED.
+                // Until 07.09 it was drawn ABOVE this box as an ordinary Text
+                // that appeared only for a closed island, and it arrived
+                // ASYNCHRONOUSLY: the card grew a line a moment after the swipe
+                // landed on it. That is #736 exactly — the sheet twitching up
+                // and down while browsing — reintroduced by the very block that
+                // was careful not to touch the box below it. The slot is drawn
+                // whether there is an answer or not, so an island that has not
+                // replied, an open one and a closed one are all the same height.
+                //
+                // 14dp and lineHeight 14sp on both texts: one door line plus two
+                // description lines is 42dp and fits the 44 the box promises.
+                val door = islandDoor(island.host)
+                Box(Modifier.height(14.dp), contentAlignment = Alignment.Center) {
+                    if (door != null) {
+                        val buyUrl = door.buyUrl
+                        val label = if (buyUrl != null) {
+                            door.label + " · " + stringResource(R.string.island_entry_buy)
+                        } else {
+                            door.label
+                        }
+                        Text(
+                            label,
+                            // Closed is a fact to notice, open is a fact to
+                            // glance past: the accent is spent on the one that
+                            // changes what happens next.
+                            color = if (door.closed) c.accent else c.textSecondary,
+                            fontSize = 11.sp, lineHeight = 14.sp, textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .padding(horizontal = 14.dp)
+                                // ⚠ The click stops here. This line sits on the
+                                // card that PICKS the island, and one tap that
+                                // both opened a shop and chose an island would
+                                // be two answers to a question asked once.
+                                .then(
+                                    if (buyUrl != null) {
+                                        Modifier.clickable {
+                                            runCatching {
+                                                ctx.startActivity(
+                                                    android.content.Intent(
+                                                        android.content.Intent.ACTION_VIEW,
+                                                        android.net.Uri.parse(buyUrl),
+                                                    ),
+                                                )
+                                            }
+                                        }
+                                    } else Modifier,
+                                ),
+                        )
+                    }
+                }
+                island.description?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        it, color = c.textSecondary, fontSize = 11.sp, lineHeight = 14.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                    )
+                }
             }
         }
     }
 }
 
-/// What an island charges to get in, as a line for the picker, or null when
-/// there is nothing to say: an open island, or a closed one with no price.
+/// Whether the island's door is open, and what it costs when it is not.
+internal class IslandDoor(
+    /// The whole line, already worded and already priced.
+    val label: String,
+    val closed: Boolean,
+    /// The operator's own shop, when they named one and it is https.
+    val buyUrl: String?,
+)
+
+/// What the island says about its OWN door, or null while it has not answered.
 ///
-/// A card that has never been opened asks nothing. The answer is remembered
-/// for the life of the sheet, so swiping back and forth does not re-ask.
+/// ⚠ THE DECK USED TO SAY NOTHING FOR AN OPEN ISLAND, which is the founder's
+/// item 3 of 06.09: "the carousel does not say whether an island is closed or
+/// open, it should". Silence is not the same statement as "open" — it is what a
+/// card that has not answered yet also looks like — so both answers are now
+/// spoken out loud and only "no answer at all" is silent.
+///
+/// ⚠ Two locks, either of which shuts the door, so both are read.
+/// `closed_island` is the island withholding the key that seals an envelope to
+/// its residents; `registration_policy == "invite"` is the island refusing to
+/// register a new account without a code. is2.rcq.app sets both, and an island
+/// may well set only the second: reading one of them would call that island
+/// open and send somebody into the refusal this whole change exists to avoid.
+///
+/// ⚠ Asked of the ISLAND, never of the catalogue. servers.json is a file the
+/// team edits by hand and would be stale the day after an operator changed a
+/// price or shut their doors, and a wrong answer here is worse than none.
+///
+/// ⚠ Only for a card the person has already opened — see [IslandCarousel]:
+/// asking every island in the deck the moment the sheet opens would hand our
+/// address to five hosts nobody has chosen. The answer is remembered for the
+/// life of the sheet, so swiping back and forth does not re-ask.
 @Composable
-/// The price line, and where to buy, in the ISLAND'S own words.
-///
-/// `entry_url` is the operator's setting, so a self-hoster sends people to
-/// their own shop and we send people to ours. An island that set a price and
-/// no address gets the line without a link rather than a link somewhere we
-/// invented for it.
-private fun islandEntry(host: String): Pair<String, String?>? {
+private fun islandDoor(host: String): IslandDoor? {
     val ctx = LocalContext.current
-    var line by remember(host) { mutableStateOf<Pair<String, String?>?>(null) }
+    var door by remember(host) { mutableStateOf<IslandDoor?>(null) }
     LaunchedEffect(host) {
         val caps = runCatching { RcqApi.serverInfoOf(host)?.capabilities }.getOrNull() ?: return@LaunchedEffect
-        if (!caps.closed_island) return@LaunchedEffect
+        val closed = caps.closed_island || caps.registration_policy.equals("invite", ignoreCase = true)
+        if (!closed) {
+            door = IslandDoor(ctx.getString(R.string.island_entry_open), closed = false, buyUrl = null)
+            return@LaunchedEffect
+        }
         val cents = caps.entry_price_cents
         val text = if (cents > 0) {
             val price = if (cents % 100 == 0) "$" + (cents / 100) else "$" + "%.2f".format(cents / 100.0)
-            ctx.getString(R.string.island_entry_price, price)
+            ctx.getString(R.string.island_entry_closed) + " · " + ctx.getString(R.string.island_entry_price, price)
         } else {
             ctx.getString(R.string.island_entry_closed)
         }
+        // An island that set a price and no address gets the line without a
+        // link, rather than a link somewhere we invented for it.
         val url = caps.entry_url.trim().takeIf { it.startsWith("https://", ignoreCase = true) }
-        line = text to url
+        door = IslandDoor(text, closed = true, buyUrl = url)
     }
-    return line
+    return door
+}
+
+/// Will this island REFUSE a registration that carries no code? Asked by the
+/// flows that register, so they can collect the code before spending a try
+/// rather than after being refused.
+///
+/// ⚠ Not the same question as `Session.islandIsClosed`, which asks whether the
+/// island's directory is sealed so that a failed card fetch can be called a
+/// closed island rather than a wrong number. That one answers false when it
+/// does not know; this one answers null, because "we could not ask" must not
+/// be turned into "paste a code".
+///
+/// ⚠ Null means "the island did not answer", which is NOT "open". A caller that
+/// treats null as open sends the person into a registration that fails; a
+/// caller that treats it as closed asks for a code nobody has. Both callers
+/// here go ahead and let the refusal path handle it, which is the only honest
+/// answer when the island is unreachable.
+internal suspend fun islandRefusesRegistration(host: String): Boolean? {
+    val caps = runCatching { RcqApi.serverInfoOf(host)?.capabilities }.getOrNull() ?: return null
+    return caps.closed_island || caps.registration_policy.equals("invite", ignoreCase = true)
 }

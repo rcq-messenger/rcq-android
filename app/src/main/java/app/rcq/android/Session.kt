@@ -3717,6 +3717,20 @@ class Session(context: Context) {
     suspend fun loadMyReports(): List<RcqApi.MyReport>? =
         runCatching { api.myReports() }.getOrNull()
 
+    /** How many entry invites this resident still has to hand out.
+     *
+     *  Soft-fails to null, and the row that reads it draws nothing for null:
+     *  an island older than the feature answers 404, and a dead network answers
+     *  nothing at all. Neither is a fact worth putting on the settings screen. */
+    suspend fun residentInvites(): RcqApi.ResidentInvites? =
+        runCatching { api.myInvites() }.getOrNull()
+
+    /** Spend one invite and get the one-time link back, or null when the island
+     *  refused (not a resident, none left, suspended, feature off). ⚠ The
+     *  caller owns the only copy of that link from here on. */
+    suspend fun mintResidentInvite(): RcqApi.MintedInvite? =
+        runCatching { api.mintInvite() }.getOrNull()
+
     /** The outcome of taking one of my own reports off my own list. Three
      *  cases, because they are three different sentences: [Refused] is the
      *  server holding an OPEN report about ANOTHER user until there is a
