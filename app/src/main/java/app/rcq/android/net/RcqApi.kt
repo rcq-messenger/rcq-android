@@ -641,6 +641,14 @@ class RcqApi(
          *  ELSE stays while it is open, because the reporter is a live party
          *  to that case (#941). */
         val removable: Boolean = true,
+        /** What I attached when I filed this, handed back by the island.
+         *
+         *  ⚠ Empty on an island that predates the field, and on every report
+         *  with no blobs. The write path has always stored these; the read
+         *  path simply had no field for them, so somebody who sent three
+         *  screenshots saw three identical rows of text and could not tell
+         *  which was which (#934). */
+        val attachments: List<ReportAttachment> = emptyList(),
     )
 
     suspend fun myReports(): List<MyReport> = withContext(Dispatchers.IO) {

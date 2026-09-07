@@ -28,6 +28,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.Image
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -219,6 +223,7 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
                 itemsIndexed(list, key = { _, r -> r.id }) { index, r ->
                     ReportCard(
                         report = r,
+                        session = session,
                         composing = replyTo == r.id,
                         draft = draft,
                         sending = sending,
@@ -340,6 +345,7 @@ fun MyReportsScreen(session: Session, onBack: () -> Unit) {
 @Composable
 private fun ReportCard(
     report: RcqApi.MyReport,
+    session: Session,
     composing: Boolean,
     draft: String,
     sending: Boolean,
@@ -482,6 +488,26 @@ private fun ReportCard(
             }
         }
 
+        // What I attached, right under what I wrote (#934). Until the island
+        // learned to hand these back, somebody who had sent three screenshots
+        // saw three rows of identical-looking text and could not tell which
+        // report was about which picture.
+        //
+        // ⚠ Fetched one blob at a time and only when the card is on screen:
+        // `produceState` keyed on the media id, the same pair the chat's own
+        // bubbles use, so a screenshot already in the memory cache draws at
+        // once and one that is not costs a single request.
+        if (report.attachments.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                report.attachments.take(4).forEach { a ->
+                    ReportAttachmentThumb(a, session)
+                }
+            }
+        }
+
         // The exchange, oldest first, as ONE conversation: see [reportTimeline].
         // The answer is the whole reason this screen exists, so it gets its own
         // block rather than a line of small print.
@@ -619,6 +645,44 @@ private fun reportTimeline(report: RcqApi.MyReport): List<RcqApi.ReportTurn> {
     val idx = thread.indexOfFirst { parseReportInstant(it.created_at)?.isAfter(at) == true }
     return if (idx < 0) thread + answer
     else thread.subList(0, idx) + answer + thread.subList(idx, thread.size)
+}
+
+/** One attachment on a report of mine, as a 64dp square.
+ *
+ *  ⚠ A fixed square whatever happens, so a card cannot change height while a
+ *  blob is still arriving: the placeholder, the picture and the failure are
+ *  all the same size. Non-image kinds get a glyph rather than a decode attempt.
+ */
+@Composable
+private fun ReportAttachmentThumb(a: RcqApi.ReportAttachment, session: Session) {
+    val c = RcqTheme.colors
+    val isImage = a.mime.startsWith("image/")
+    val bytes by produceState<ByteArray?>(session.cachedImage(a.media_id), a.media_id) {
+        if (isImage && value == null) {
+            value = runCatching { session.fetchImage(a.media_id, a.key) }.getOrNull()
+        }
+    }
+    val bmp = rememberSampledBitmap(bytes, maxPx = 256)
+    Box(
+        Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(c.bgPrimary),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            bmp != null -> Image(
+                bitmap = bmp,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+            !isImage -> Icon(
+                Icons.Outlined.InsertDriveFile,
+                contentDescription = null,
+                tint = c.textSecondary,
+                modifier = Modifier.size(22.dp),
+            )
+            else -> CircularProgressIndicator(color = c.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+        }
+    }
 }
 
 /** ISO-8601 off the island to an instant, or null when it cannot be read. The
