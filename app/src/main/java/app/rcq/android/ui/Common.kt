@@ -386,6 +386,13 @@ internal fun PersonAvatar(
     animated: Boolean = false,
     crossIsland: Boolean = false,
     onStatusClick: (() -> Unit)? = null,
+    /** Tap on the PICTURE itself, for a caller that can open it full screen
+     *  (report #938 — "the photo does not enlarge").
+     *
+     *  ⚠ Deliberately not wired into the no-picture branch below: with no
+     *  photo the avatar IS the status flower, and a tap there already means
+     *  "open the status", which is a different thing entirely. */
+    onPictureClick: (() -> Unit)? = null,
     /** Draw the person WITHOUT their presence. One screen asks for this: a
      *  call, where the flower answers "are they around" to somebody who is
      *  listening to them breathe. Off, the picture stands alone; with no
@@ -429,7 +436,10 @@ internal fun PersonAvatar(
     // 80dp contact card. Capped at both ends rather than a flat fraction.
     val badge = (size * 0.36f).coerceIn(12.dp, 26.dp)
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        Box(Modifier.matchParentSize().clip(CircleShape)) {
+        Box(
+            Modifier.matchParentSize().clip(CircleShape)
+                .then(if (onPictureClick != null) Modifier.clickable(onClick = onPictureClick) else Modifier),
+        ) {
             if (animatableGif != null) SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
             else Image(bitmap = image!!, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }

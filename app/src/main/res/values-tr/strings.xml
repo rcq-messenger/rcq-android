@@ -596,6 +596,10 @@
     <string name="pe_saved">Profil kaydedildi</string>
     <string name="pe_views_title">Profil görüntülemeleri</string>
     <string name="pe_views_desc">Son 7 günde profilini açan kişiler.</string>
+    <string name="pe_views_empty">Son 7 günde profilini kimse açmadı.</string>
+    <string name="pe_views_unknown">Kişilerinde yok</string>
+    <string name="pe_views_note">Bu liste yalnızca bu cihazda tutulur ve profilini açan istemcilerin gönderdiği bildirimlerden oluşur. Ada onu hiç görmez.</string>
+    <string name="ci_visit_notice">Bu kişi profilini açtığını görebilir.</string>
     <string name="pe_nickname">Takma ad</string>
     <string name="pe_status_message">Durum mesajı</string>
     <string name="pe_first_name">Ad</string>

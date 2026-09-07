@@ -618,6 +618,10 @@
     <string name="pe_saved">Профиль сохранён</string>
     <string name="pe_views_title">Просмотры профиля</string>
     <string name="pe_views_desc">Кто открывал ваш профиль за последние 7 дней.</string>
+    <string name="pe_views_empty">За последние 7 дней ваш профиль никто не открывал.</string>
+    <string name="pe_views_unknown">Не в ваших контактах</string>
+    <string name="pe_views_note">Список хранится только на этом устройстве и собирается из сигналов, которые присылают клиенты при открытии вашего профиля. Остров его не видит.</string>
+    <string name="ci_visit_notice">Человек увидит, что вы открывали его профиль.</string>
     <string name="pe_nickname">Никнейм</string>
     <string name="pe_status_message">Статус</string>
     <string name="pe_first_name">Имя</string>

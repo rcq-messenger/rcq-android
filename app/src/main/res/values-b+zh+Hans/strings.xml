@@ -596,6 +596,10 @@
     <string name="pe_saved">个人资料已保存</string>
     <string name="pe_views_title">个人资料浏览</string>
     <string name="pe_views_desc">过去 7 天内打开过你个人资料的人。</string>
+    <string name="pe_views_empty">过去 7 天内没有人打开过你的个人资料。</string>
+    <string name="pe_views_unknown">不在你的联系人中</string>
+    <string name="pe_views_note">此列表只保存在本设备上，由其他客户端打开你的个人资料时发送的提示汇总而成。岛屿看不到它。</string>
+    <string name="ci_visit_notice">对方可以看到你打开过他的资料。</string>
     <string name="pe_nickname">昵称</string>
     <string name="pe_status_message">状态消息</string>
     <string name="pe_first_name">名字</string>

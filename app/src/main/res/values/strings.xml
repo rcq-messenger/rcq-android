@@ -622,6 +622,10 @@
     <string name="pe_saved">Profile saved</string>
     <string name="pe_views_title">Profile views</string>
     <string name="pe_views_desc">People who opened your profile in the last 7 days.</string>
+    <string name="pe_views_empty">Nobody has opened your profile in the last 7 days.</string>
+    <string name="pe_views_unknown">Not in your contacts</string>
+    <string name="pe_views_note">This list is kept on this device only, built from the pings other clients send when they open your profile. The island never sees it.</string>
+    <string name="ci_visit_notice">They can see that you opened their profile.</string>
     <string name="pe_nickname">Nickname</string>
     <string name="pe_status_message">Status message</string>
     <string name="pe_first_name">First name</string>

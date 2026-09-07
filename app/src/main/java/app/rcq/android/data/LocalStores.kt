@@ -127,6 +127,18 @@ object LocalStores {
     private val _unread = MutableStateFlow<Map<String, Int>>(emptyMap())
     val unread: StateFlow<Map<String, Int>> = _unread.asStateFlow()
 
+    /** ⚠⚠ The unread map is written from TWO threads: the ingest path bumps it
+     *  off Dispatchers.IO (`Session.bumpUnreadIfInbound`, right after the row
+     *  is inserted) while the UI clears it on the main thread when a chat
+     *  opens. Every writer here does read-modify-write on an immutable map,
+     *  so without this monitor a bump that read the map before a clear wrote
+     *  it back afterwards, resurrecting the thread that had just been read,
+     *  and [persistUnread] then wrote to disk a map neither call intended
+     *  (#930: "I read a group, leave RCQ, come back and it is unread again").
+     *  Hold it across the compute AND the persist, or the two calls can still
+     *  race in the encoder and store the loser's map. */
+    private val unreadLock = Any()
+
     /** Threads with an UNSEEN reaction on one of MY messages (iOS reaction-inbox
      *  parity). Keyed "peer:<uin>"/"group:<id>"; marked when someone else reacts
      *  to my message in a thread I'm not looking at, cleared when the chat opens.
@@ -974,10 +986,12 @@ object LocalStores {
 
     fun bumpUnread(thread: String) {
         if (acct == null) return
-        val cur = _unread.value.toMutableMap()
-        cur[thread] = (cur[thread] ?: 0) + 1
-        _unread.value = cur
-        persistUnread()
+        synchronized(unreadLock) {
+            val cur = _unread.value.toMutableMap()
+            cur[thread] = (cur[thread] ?: 0) + 1
+            _unread.value = cur
+            persistUnread()
+        }
     }
 
     // ── room state keys (stage 6 phase 2) ────────────────────────────
@@ -1063,10 +1077,19 @@ object LocalStores {
         }.toMap()
     }
 
+    /** ⚠ The `acct == null` guard its siblings carry was missing here, so a
+     *  clear arriving between an unbind and the next bind mutated the flow
+     *  while [persistUnread] silently declined to write it: the in-memory map
+     *  and the stored one disagreed until the next [bindAccount] reload
+     *  overwrote whichever the user had just seen. */
     fun clearUnread(thread: String) {
-        if (_unread.value[thread] == null) return
-        _unread.value = _unread.value - thread
-        persistUnread()
+        if (acct == null) return
+        synchronized(unreadLock) {
+            if (_unread.value[thread] == null) return
+            _unread.value = _unread.value - thread
+            // Durable: this is the write #930 was about losing.
+            persistUnread(durable = true)
+        }
     }
 
     /** Take [by] off a thread's badge, for rows that left the thread without
@@ -1085,16 +1108,41 @@ object LocalStores {
      *  [clearUnread] leaves behind. */
     fun decUnread(thread: String, by: Int) {
         if (acct == null || by <= 0) return
-        val cur = _unread.value[thread] ?: return
-        val next = cur - by
-        _unread.value = if (next > 0) _unread.value + (thread to next) else _unread.value - thread
-        persistUnread()
+        synchronized(unreadLock) {
+            val cur = _unread.value[thread] ?: return
+            val next = cur - by
+            _unread.value = if (next > 0) _unread.value + (thread to next) else _unread.value - thread
+            // Also a downward write, and losing it resurrects a badge.
+            persistUnread(durable = true)
+        }
     }
 
-    /** Encode the map as a CSV "thread=count" StringSet for SharedPreferences. */
-    private fun persistUnread() {
+    /** Encode the map as a CSV "thread=count" StringSet for SharedPreferences.
+     *
+     *  ⚠ Callers must already hold [unreadLock]: this re-reads [_unread] to
+     *  build the row set, so outside the lock it can encode a map written by
+     *  someone else and store it under the caller's intent (#930).
+     *
+     *  ⚠ Synchronous commit(), not apply(). Reading a chat clears its badge
+     *  exactly ONCE, and the user's next move is usually to leave the app, so
+     *  an apply() that had not flushed when Android reclaimed or the user
+     *  force-stopped the process lost the clear and the messages came back
+     *  unread on relaunch. The map holds one short row per unread thread, so
+     *  the blocking write is negligible next to being wrong. */
+    /// ⚠ The caller must already hold [unreadLock]: this re-reads `_unread`,
+    /// so writing outside the lock persists a map somebody else may have just
+    /// replaced.
+    ///
+    /// ⚠⚠ `durable` is not a style choice. A LOST CLEAR is the bug (#930): a
+    /// thread read on screen and then force-stopped came back unread, because
+    /// `apply()` had not flushed. A lost BUMP costs nothing, since the count is
+    /// rebuilt from the queue on the next drain, and bumps happen once per
+    /// inbound message on a busy group. So the clear commits and the bump does
+    /// not, rather than paying for a synchronous disk write per message.
+    private fun persistUnread(durable: Boolean = false) {
         if (acct == null) return
-        prefs.edit().putStringSet(pk(K_UNREAD), _unread.value.map { "${it.key}=${it.value}" }.toSet()).apply()
+        val e = prefs.edit().putStringSet(pk(K_UNREAD), _unread.value.map { "${it.key}=${it.value}" }.toSet())
+        if (durable) e.commit() else e.apply()
     }
 
     /** Decode a "name=count" StringSet. Shared by the unread counters and the
@@ -1291,9 +1339,12 @@ object LocalStores {
      *  / reaction inbox happens once, on chat open, so an async apply() that
      *  hadn't flushed when the app was killed right after reading left the
      *  indicator to resurface on next launch (report: "mention reappears after
-     *  relaunch"). The unread counter never showed this because it's re-cleared
-     *  on every message render; these inboxes get a single clear, so it must be
-     *  durable. The set is tiny, so the main-thread write is negligible. */
+     *  relaunch"). The unread counter was long believed immune because "it is
+     *  re-cleared on every message render". It is not: the re-clear fires on
+     *  a change in message COUNT, and [clearUnread] bails out early once the
+     *  entry is gone, so nothing writes a second time. It lost clears the same
+     *  way (#930) and now commits too. The set is tiny, so the main-thread
+     *  write is negligible. */
     private fun removeFrom(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
         if (acct == null || thread !in flow.value) return
         flow.value = flow.value - thread

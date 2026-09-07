@@ -596,6 +596,10 @@
     <string name="pe_saved">Perfil guardado</string>
     <string name="pe_views_title">Visitas al perfil</string>
     <string name="pe_views_desc">Gente que abrió tu perfil en los últimos 7 días.</string>
+    <string name="pe_views_empty">Nadie ha abierto tu perfil en los últimos 7 días.</string>
+    <string name="pe_views_unknown">No está en tus contactos</string>
+    <string name="pe_views_note">Esta lista se guarda solo en este dispositivo y se arma con los avisos que envían otros clientes al abrir tu perfil. La isla nunca la ve.</string>
+    <string name="ci_visit_notice">Esta persona puede ver que abriste su perfil.</string>
     <string name="pe_nickname">Apodo</string>
     <string name="pe_status_message">Mensaje de estado</string>
     <string name="pe_first_name">Nombre</string>

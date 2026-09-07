@@ -141,6 +141,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -1130,6 +1131,15 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // they jumped FROM) instead of to the latest message — Telegram-style.
     var replyReturnIndex by remember(target) { mutableStateOf<Int?>(null) }
     var replyReturnOffset by remember(target) { mutableStateOf(0) }
+    // Report #937: a deliberate jump must survive the things that normally
+    // re-pin the list to the newest message. Both effects below (the IME one
+    // and the chrome-growth one) fire while the search overlay is closing, and
+    // either would drag the reader from the message they picked straight back
+    // down to the bottom.
+    // ⚠ The state OBJECT is handed to those effects rather than its value: they
+    // read it inside their own LaunchedEffect, so flipping it must not change
+    // any effect key and restart the collector mid-animation.
+    val autoPinToBottom = remember { mutableStateOf(true) }
 
     // Initial position: at the first unread (or the bottom). INSTANT (no
     // animation) — the old animateScroll-on-every-size-change was the "mota к
@@ -1301,12 +1311,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // And swap, never stack: whatever brings the keyboard back (Reply from the
     // menu, swipe-to-reply, a tap on the field) closes the emoticon panel,
     // not only a focus change (audit, 05.09).
-    KeyboardScrollEffect(listState, rows.size, onImeShown = { showEmoji = false })
+    KeyboardScrollEffect(listState, rows.size, autoPinToBottom, onImeShown = { showEmoji = false })
     // The same care for everything ELSE that changes the list's height: a
     // reply chip, a draft wrapping to a second line, the mention list, the
     // attachment strip. Only the IME re-pinned the list; the rest slid the
     // newest message under the composer line by line (audit, 05.09).
-    ChromeGrowthEffect(listState, rows.size)
+    ChromeGrowthEffect(listState, rows.size, autoPinToBottom)
     // Back with the panel open used to leave the chat; the keyboard in the
     // same position would just have closed.
     BackHandler(enabled = showEmoji) { showEmoji = false }
@@ -2643,9 +2653,25 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onClose = { showSearch = false },
             onSelect = { msg ->
                 showSearch = false
+                // ⚠ The list is laid out from `rows`, not from `messages`: date
+                // dividers are rows and an album is ONE row for many messages.
+                // An index taken from the flat list therefore names a different
+                // row, and past the end of `rows` the scroll clamps to the last
+                // one — the "it jumps to the bottom instead" of report #937.
+                // [onTapReply] already resolves a message id against the rows,
+                // leaves the return anchor for the jump-down arrow and flashes
+                // the message, which is exactly what a search hit wants too.
+                autoPinToBottom.value = false
+                onTapReply(msg.id)
+                // Closing the overlay closes the keyboard and shrinks the
+                // composer back, and both of those re-pin the list to the
+                // newest message; without this the jump above landed and was
+                // immediately undone. Long enough for the IME animation plus
+                // the scroll, short enough to fall well inside the 1400 ms
+                // highlight so pinning is back before the flash ends.
                 scope.launch {
-                    val idx = messages.indexOfFirst { it.id == msg.id }
-                    if (idx >= 0) listState.animateScrollToItem(idx)
+                    kotlinx.coroutines.delay(700)
+                    autoPinToBottom.value = true
                 }
             },
         )
@@ -3575,6 +3601,9 @@ private fun previewOfKind(m: ChatMessage, context: android.content.Context): Str
 private fun ChromeGrowthEffect(
     listState: androidx.compose.foundation.lazy.LazyListState,
     itemCount: Int,
+    /** False while somebody is being carried somewhere on purpose — see
+     *  `autoPinToBottom` in ChatScreen (#937). Read, never keyed on. */
+    enabled: State<Boolean>,
 ) {
     LaunchedEffect(listState, itemCount) {
         var prev = -1
@@ -3583,7 +3612,10 @@ private fun ChromeGrowthEffect(
             val atBottom = itemCount > 0 && last >= itemCount - 1
             // A user drag outranks this mutation and MutatorMutex throws;
             // caught, or the collector dies for the rest of the thread.
-            if (prev > 0 && h != prev && atBottom) runCatching { listState.scrollToItem(itemCount - 1) }
+            // ⚠ `prev` is updated even while suppressed: forgetting the height
+            // we skipped would make the FIRST unsuppressed frame look like a
+            // fresh growth and fire the very scroll the suppression prevented.
+            if (prev > 0 && h != prev && atBottom && enabled.value) runCatching { listState.scrollToItem(itemCount - 1) }
             prev = h
         }
     }
@@ -3593,6 +3625,9 @@ private fun ChromeGrowthEffect(
 private fun KeyboardScrollEffect(
     listState: androidx.compose.foundation.lazy.LazyListState,
     itemCount: Int,
+    /** False while somebody is being carried somewhere on purpose — see
+     *  `autoPinToBottom` in ChatScreen (#937). Read, never keyed on. */
+    enabled: State<Boolean>,
     onImeShown: () -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -3618,8 +3653,12 @@ private fun KeyboardScrollEffect(
     // back under the keyboard. Instead re-pin to the bottom on every inset frame
     // while it animates open (JUMP, never animate — an animated scroll racing the
     // inset animation stuttered on weak devices, report #29/#21).
+    // ⚠ This also runs while the keyboard is CLOSING: the inset is still above
+    // zero for the whole animation, so `imeVisible` stays true and every frame
+    // re-pins. That is what undid the in-chat search jump (#937), and why the
+    // suppression is read here rather than only on the opening edge.
     LaunchedEffect(imeBottom) {
-        if (imeVisible && followToBottom.value && itemCount > 0) {
+        if (imeVisible && followToBottom.value && itemCount > 0 && enabled.value) {
             listState.scrollToItem(itemCount - 1)
         }
     }
@@ -5168,12 +5207,17 @@ private fun AlbumPagerViewer(
 // above carries, for the same modifier.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FullscreenImageViewer(
+internal fun FullscreenImageViewer(
     bytes: ByteArray,
     senderName: String? = null,
     onSenderClick: (() -> Unit)? = null,
     onShare: (ByteArray) -> Unit = {},
     onSave: (ByteArray) -> Unit = {},
+    /** Off for a picture that is not a message: a profile photo is somebody's
+     *  identity, not something handed to you, and offering "save to gallery"
+     *  on it reads as an invitation to keep a copy. The default keeps every
+     *  chat call site exactly as it was. */
+    showActions: Boolean = true,
     onDismiss: () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -5249,7 +5293,7 @@ private fun FullscreenImageViewer(
                     ViewerSenderLabel(senderName, onClick = onSenderClick)
                 }
             }
-            ViewerChrome(chrome, Modifier.align(Alignment.TopEnd)) {
+            if (showActions) ViewerChrome(chrome, Modifier.align(Alignment.TopEnd)) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.statusBarsPadding().padding(16.dp),
