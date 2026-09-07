@@ -1613,6 +1613,7 @@ private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: 
     // The mark itself, so the row can show what it is talking about, and so
     // the row can stay away entirely from people who have no mark.
     var myBadge by remember { mutableStateOf(cached?.badge) }
+    var myBadges by remember { mutableStateOf(cached?.badges_earned ?: emptyList()) }
     var badgeHidden by remember { mutableStateOf(cached?.badge_hidden ?: false) }
     var hofAvatar by remember { mutableStateOf(cached?.hof_avatar) }   // data-URI or null
     var hofBusy by remember { mutableStateOf(false) }
@@ -1653,6 +1654,7 @@ private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: 
             hofOptIn = p.hof_opt_in ?: false
             myBadge = p.badge
             badgeHidden = p.badge_hidden ?: false
+            myBadges = p.badges_earned
             hofAvatar = p.hof_avatar
         }
     }
@@ -1711,6 +1713,43 @@ private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: 
             // offered it since; on Android the only answer to "a stranger is
             // calling me" was to leave the app.
             VisibilityPicker(stringResource(R.string.pv_calls), callPolicy, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_calls_desc)) { callPolicy = it; save(RcqApi.UpdateMeBody(call_policy = it)) }
+
+            // More than one mark held: which one to wear. Above the switch,
+            // because the questions run "which one" and then "show it at all";
+            // reversed, the picker looks like it belongs to a setting that may
+            // be off.
+            if (myBadges.size > 1) {
+                Column(Modifier.padding(top = 4.dp)) {
+                    Text(stringResource(R.string.pv_badge_pick), color = c.textPrimary,
+                         fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        myBadges.forEach { kind ->
+                            val on = myBadge == kind
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (on) c.accent else c.bgSecondary)
+                                    .clickable {
+                                        myBadge = kind
+                                        save(RcqApi.UpdateMeBody(badge = kind))
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            ) {
+                                BadgeMark(kind, size = 14.dp)
+                                Text(kind, color = if (on) Color.White else c.textSecondary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                    Text(stringResource(R.string.pv_badge_pick_desc), color = c.textSecondary,
+                         fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
 
             // Only for people who have a mark: a switch for hiding something
             // you were never given is noise. Your own row always carries the

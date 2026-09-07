@@ -1151,6 +1151,8 @@
     <string name="pv_calls">谁可以呼叫你</string>
     <string name="pv_badge">显示我的标记</string>
     <string name="pv_badge_desc">您名字旁边的岛屿标记。关闭后其他人都看不到，您自己仍然可见。</string>
+    <string name="pv_badge_pick">佩戴哪个标记</string>
+    <string name="pv_badge_pick_desc">您拥有多个。名字旁边只显示您选择的那一个。</string>
     <string name="pv_calls_desc">这个范围之外的来电会被拒绝。</string>
     <string name="diag_audit_run">完整网络检查</string>
     <string name="diag_audit_running">检查中…</string>

@@ -1836,6 +1836,10 @@ class RcqApi(
         // Owner-only echo: whether this account keeps its mark off other
         // people's screens. Absent from an island that predates the setting.
         val badge_hidden: Boolean? = null,
+        // Owner-only: every mark this account HOLDS. `badge` above is the one
+        // it wears. Empty on an island that predates the set, and on anybody
+        // holding one mark or none.
+        val badges_earned: List<String> = emptyList(),
         val read_receipts_visibility: String? = null,
         /** everyone | contacts | nobody. The one policy the server has always
          *  enforced and this client could never set: a person being called by
@@ -1967,6 +1971,9 @@ class RcqApi(
         // "Wear my mark where others can see it", inverted. The mark itself
         // is the island's to grant; only this flag is the account holder's.
         val badge_hidden: Boolean? = null,
+        // WHICH held mark to wear. Checked on the island against what this
+        // account actually holds, so it cannot award one.
+        val badge: String? = null,
         val read_receipts_visibility: String? = null,
         val call_policy: String? = null,
         val presence_persistent: Boolean? = null,

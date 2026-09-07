@@ -1154,6 +1154,8 @@
     <string name="pv_calls">Хто може тобі дзвонити</string>
     <string name="pv_badge">Показувати мою позначку</string>
     <string name="pv_badge_desc">Позначка острова поруч з вашим ім’ям. Якщо вимкнути, її не побачить ніхто, крім вас.</string>
+    <string name="pv_badge_pick">Яку позначку носити</string>
+    <string name="pv_badge_pick_desc">У вас їх кілька. Поруч з іменем показується лише вибрана.</string>
     <string name="pv_calls_desc">Вхідні дзвінки від усіх поза цим колом відхиляються.</string>
     <string name="diag_audit_run">Повна перевірка мережі</string>
     <string name="diag_audit_running">Перевірка…</string>
