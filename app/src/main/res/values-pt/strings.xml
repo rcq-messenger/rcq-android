@@ -642,6 +642,7 @@
     <string name="pv_obfuscated">Levar o app pelos relays do RCQ</string>
     <string name="pv_obfuscated_desc">O tráfego não vai direto para a ilha, vai pelos nossos relays: a ilha não vê o seu endereço, e a rede entre você e a ilha não vê que você usa o RCQ. Vale na hora: o app se reconecta. Onde o RCQ está bloqueado, esse ainda é o único caminho.</string>
     <string name="pv_obf_auto_disable">Não ligar os relays automaticamente</string>
+    <string name="bypass_auto_off_unreachable">Ilha inacessível. Os relés automáticos estão desligados; ligue os relés RCQ no menu.</string>
     <string name="pv_obf_auto_disable_desc">Por padrão o app liga os relays sozinho se não conseguir alcançar a ilha direto. Se você já leva seu tráfego pelo seu próprio VPN ou proxy, ligue isto para o nosso transporte não empilhar em cima do seu.</string>
     <string name="pv_onion">Roteamento onion (experimental)</string>
     <string name="pv_onion_desc">Passa por dois relays para que nenhum deles veja você e a ilha ao mesmo tempo. Liga os relays do RCQ automaticamente. Um pouco mais lento. Vale a partir da próxima abertura do app.</string>
