@@ -45,6 +45,12 @@ object Vault {
      *  that outlives the device. See [app.rcq.android.data.CrossIslandVault]. */
     const val CROSSISLAND = "crossisland"
 
+    /** Guest cards other people gave us, on a CLOSED island. The only way to
+     *  reach them; losing them looks exactly like the island working
+     *  correctly, because a closed island answers a caller with no card by
+     *  saying "no such number". See [app.rcq.android.data.GuestCardVault]. */
+    const val GUESTCARDS = "guestcards"
+
     /** My profile key: the AES key my avatar blob is sealed under, mirrored
      *  here so a second install of this account reuses it instead of minting a
      *  rival one (docs/profile-key-design.md).
