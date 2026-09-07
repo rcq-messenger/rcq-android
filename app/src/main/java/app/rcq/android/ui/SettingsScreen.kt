@@ -1252,8 +1252,6 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
     val ownUin = session.uin ?: 0
     val ownStatus by session.status.collectAsState()
     val profileViews by app.rcq.android.data.VisitStore.recentViews.collectAsState()
-    val profileVisitors by app.rcq.android.data.VisitStore.recentVisitors.collectAsState()
-    var showViews by remember { mutableStateOf(false) }
     var nickname by remember { mutableStateOf(session.nickname) }
     var statusMessage by remember { mutableStateOf("") }
     var firstName by remember { mutableStateOf("") }
@@ -1463,13 +1461,18 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
             // visit pings). Last, as on iOS: a count is not what the screen
             // is for (founder, 05.09).
             //
-            // #939: the row read as a button and behaved as a label. The copy
-            // under the title has always said "people who opened your profile",
-            // so the number alone was the app advertising a list it refused to
-            // open. The identities are in the store; the tap now shows them.
+            // ⚠⚠ A COUNT, AND ONLY A COUNT (founder, 07.09). Report #939 asked
+            // to open the list of who had looked, and the identities are in
+            // fact on the device, so a list was built and then taken back out:
+            // "why show who came by, what nonsense". Telling somebody WHO has
+            // been checking their profile is a different product from telling
+            // them how often it happened, and this app is not going to be the
+            // first one. The description below was reworded to promise the
+            // number and nothing more, so the row is honest rather than a
+            // button that refuses to open.
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.bgSecondary)
-                    .clickable { showViews = true }.padding(14.dp),
+                    .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -1477,103 +1480,11 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                     Text(stringResource(R.string.pe_views_desc), color = c.textSecondary, fontSize = 11.sp)
                 }
                 Text("$profileViews", color = c.accent, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Icon(Icons.Filled.ChevronRight, null, tint = c.textSecondary,
-                    modifier = Modifier.padding(start = 6.dp).size(20.dp))
             }
-        }
-    }
-    if (showViews) ProfileViewsSheet(session, profileVisitors) { showViews = false }
-}
-
-/**
- * Who opened our profile in the last 7 days (#939).
- *
- * One row per PERSON, not per ping. The number on the settings row counts
- * VIEWS, and somebody who came back three times is still one person, so the two
- * are allowed to differ; the repeat marker on the right is what reconciles
- * them. Grouping is also what the copy has always promised ("people who
- * opened", not "times opened").
- *
- * ⚠ Names come from the local roster and nowhere else. A viewer who is not a
- * contact is a bare number here on purpose: resolving it against the island
- * would tell the server that this tally exists and who is in it, which is the
- * one thing [app.rcq.android.data.VisitStore] is built to withhold. That is
- * also why nobody's picture can leak in through this list - the island only
- * serves an avatar to a mutual contact, so a stranger has none to draw and
- * falls back to the grey status glyph.
- *
- * Times are the same coarse buckets as "last seen" (recently / today /
- * yesterday / this week) rather than a clock: "opened your profile at 03:12"
- * is an activity pattern about the VIEWER, and this screen is not the place to
- * hand one out.
- */
-@Composable
-private fun ProfileViewsSheet(
-    session: Session,
-    visits: List<app.rcq.android.data.VisitStore.Visit>,
-    onDismiss: () -> Unit,
-) {
-    val c = RcqTheme.colors
-    val context = LocalContext.current
-    val contacts by session.contacts.collectAsState()
-    val people = remember(visits) {
-        visits.groupBy { it.uin }
-            .map { (uin, v) -> Triple(uin, v.maxOf { it.atMillis }, v.size) }
-            .sortedByDescending { it.second }
-    }
-    RcqSheet(onDismiss = onDismiss, title = stringResource(R.string.pe_views_title)) {
-        Text(stringResource(R.string.pe_views_desc), color = c.textSecondary, fontSize = 12.sp)
-        SheetGap()
-        if (people.isEmpty()) {
-            Text(stringResource(R.string.pe_views_empty), color = c.textSecondary, fontSize = 13.sp)
-        } else {
-            // ⚠ A plain Column, not a LazyColumn: RcqSheet already wraps its
-            // content in a verticalScroll, and a lazy list inside one is
-            // measured against an infinite height and throws. Seven days of
-            // deduplicated pings is a short list anyway.
-            Column(Modifier.fillMaxWidth()) {
-                people.forEachIndexed { index, (uin, at, times) ->
-                    if (index > 0) Divider()
-                    val ct = contacts.firstOrNull { it.uin == uin }
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        PersonAvatar(
-                            ct?.avatarMediaId, ct?.avatarMediaKey,
-                            ct?.presence ?: app.rcq.android.model.UserStatus.OFFLINE,
-                            session, 36.dp, host = ct?.host,
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                ct?.nickname?.takeIf { it.isNotBlank() } ?: stringResource(R.string.pe_views_unknown),
-                                color = if (ct != null) c.textPrimary else c.textSecondary,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text("$uin", color = c.textMono, fontSize = 12.sp)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(relativeLastSeen(at, context), color = c.textSecondary, fontSize = 12.sp)
-                            // "×3" rather than a sentence: a repeat count is the
-                            // one thing that reads the same in all seven locales
-                            // without dragging plural rules in for it.
-                            if (times > 1) Text("×$times", color = c.accent, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-        }
-        SheetGap()
-        Text(stringResource(R.string.pe_views_note), color = c.textSecondary, fontSize = 11.sp)
-        SheetGap()
-        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.common_done), color = c.accent)
         }
     }
 }
+
 
 // ── Privacy & Network ────────────────────────────────────────────────
 

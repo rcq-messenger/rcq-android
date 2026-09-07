@@ -595,11 +595,7 @@
     <string name="pe_title">Змінити профіль</string>
     <string name="pe_saved">Профіль збережено</string>
     <string name="pe_views_title">Перегляди профілю</string>
-    <string name="pe_views_desc">Люди, які відкривали твій профіль за останні 7 днів.</string>
-    <string name="pe_views_empty">За останні 7 днів твій профіль ніхто не відкривав.</string>
-    <string name="pe_views_unknown">Немає у твоїх контактах</string>
-    <string name="pe_views_note">Список зберігається лише на цьому пристрої та збирається із сигналів, які надсилають клієнти, коли відкривають твій профіль. Острів його не бачить.</string>
-    <string name="ci_visit_notice">Людина побачить, що ви відкривали її профіль.</string>
+    <string name="pe_views_desc">Скільки разів ваш профіль відкривали за останні 7 днів.</string>
     <string name="pe_nickname">Нік</string>
     <string name="pe_status_message">Статус</string>
     <string name="pe_first_name">Ім\'я</string>
@@ -646,7 +642,11 @@
     <string name="pv_obfuscated">Пускати застосунок через релеї RCQ</string>
     <string name="pv_obfuscated_desc">Трафік іде не прямо до острова, а через наші релеї: острів не бачить твоєї адреси, а мережа між тобою і островом не бачить, що ти користуєшся RCQ. Спрацьовує одразу: застосунок перепідключається. Там, де RCQ заблоковано, це до того ж єдиний шлях.</string>
     <string name="pv_obf_auto_disable">Не вмикати релеї автоматично</string>
-    <string name="bypass_auto_off_unreachable">Острів недоступний. Автопідйом релеїв вимкнено в налаштуваннях, увімкніть релеї RCQ у меню.</string>
+    <string name="bypass_auto_off_unreachable">Ваш острів не відповідає, автопідйом релеїв вимкнено. Увімкніть релеї RCQ у меню.</string>
+    <string name="bypass_auto_off_calls">Релей дзвінків не відповідає, автопідйом релеїв вимкнено. Увімкніть релеї RCQ у меню.</string>
+    <string name="bypass_auto_off_foreign">%1$s не відповідає, автопідйом релеїв вимкнено. Увімкніть релеї RCQ у меню.</string>
+    <string name="bypass_auto_off_backup">Жоден резервний острів не відповів, автопідйом релеїв вимкнено. Увімкніть релеї RCQ у меню.</string>
+    <string name="island_unreachable_relays_off">Не відповідає. Релеї RCQ вимкнено.</string>
     <string name="pv_obf_auto_disable_desc">За замовчуванням застосунок вмикає релеї сам, якщо не може дістатися острова напряму. Якщо ти ведеш свій трафік через власний VPN чи проксі, увімкни це, щоб наш транспорт не нашаровувався на твій.</string>
     <string name="pv_onion">Цибулева маршрутизація (експеримент)</string>
     <string name="pv_onion_desc">Веде трафік через два релеї, щоб жоден релей не бачив водночас і тебе, і острів. Релеї RCQ вмикає автоматично. Трохи повільніше. Спрацює після наступного запуску.</string>

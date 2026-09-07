@@ -595,11 +595,7 @@
     <string name="pe_title">Editar el perfil</string>
     <string name="pe_saved">Perfil guardado</string>
     <string name="pe_views_title">Visitas al perfil</string>
-    <string name="pe_views_desc">Gente que abrió tu perfil en los últimos 7 días.</string>
-    <string name="pe_views_empty">Nadie ha abierto tu perfil en los últimos 7 días.</string>
-    <string name="pe_views_unknown">No está en tus contactos</string>
-    <string name="pe_views_note">Esta lista se guarda solo en este dispositivo y se arma con los avisos que envían otros clientes al abrir tu perfil. La isla nunca la ve.</string>
-    <string name="ci_visit_notice">Esta persona puede ver que abriste su perfil.</string>
+    <string name="pe_views_desc">Cuántas veces se abrió tu perfil en los últimos 7 días.</string>
     <string name="pe_nickname">Apodo</string>
     <string name="pe_status_message">Mensaje de estado</string>
     <string name="pe_first_name">Nombre</string>
@@ -646,7 +642,11 @@
     <string name="pv_obfuscated">Llevar la app por los relays de RCQ</string>
     <string name="pv_obfuscated_desc">El tráfico no va directo a la isla, va por nuestros relays: la isla no ve tu dirección, y la red que hay entre tú y la isla no ve que usas RCQ. Se aplica al momento: la app se reconecta. Donde RCQ está bloqueado, además es el único camino.</string>
     <string name="pv_obf_auto_disable">No activar los relays automáticamente</string>
-    <string name="bypass_auto_off_unreachable">Isla inalcanzable. Los relés automáticos están desactivados; actívalos desde el menú.</string>
+    <string name="bypass_auto_off_unreachable">Tu isla no responde y los relés automáticos están desactivados. Actívalos desde el menú.</string>
+    <string name="bypass_auto_off_calls">El relé de llamadas no responde y los relés automáticos están desactivados. Actívalos desde el menú.</string>
+    <string name="bypass_auto_off_foreign">%1$s no responde y los relés automáticos están desactivados. Actívalos desde el menú.</string>
+    <string name="bypass_auto_off_backup">Ninguna isla de respaldo respondió y los relés automáticos están desactivados. Actívalos desde el menú.</string>
+    <string name="island_unreachable_relays_off">No responde. Los relés RCQ están desactivados.</string>
     <string name="pv_obf_auto_disable_desc">Por defecto la app activa los relays sola si no puede llegar a la isla en directo. Si ya llevas tu tráfico por tu propia VPN o proxy, activa esto para que nuestro transporte no se monte encima del tuyo.</string>
     <string name="pv_onion">Enrutado cebolla (experimental)</string>
     <string name="pv_onion_desc">Pasa por dos relays para que ningún relay vea a la vez quién eres tú y cuál es la isla. Activa sola los relays de RCQ. Va un poco más lento. Se aplica en el próximo arranque.</string>

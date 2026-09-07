@@ -306,7 +306,7 @@ internal fun HomeScreen(
     onOpenRadio: () -> Unit = {},
     onOpenSites: () -> Unit = {},
     onSwitchAccount: (String) -> Unit = {},
-    onAddAccount: (String?) -> Unit = {},
+    onAddAccount: (String?, String?) -> Unit = { _, _ -> },
     /** Add an account from its recovery phrase. Same destination the onboarding
      *  screen and the account-management screen already reach; the add-account
      *  sheet offers it too, because "I already have an account" is the other
@@ -1374,7 +1374,7 @@ internal fun HomeScreen(
     }
     if (showAddAccount) {
         AddAccountDialog(
-            onAdd = { host -> showAddAccount = false; onAddAccount(host) },
+            onAdd = { host, invite -> showAddAccount = false; onAddAccount(host, invite) },
             onRestore = { showAddAccount = false; onRestoreBySeed() },
             onDismiss = { showAddAccount = false },
         )
@@ -3349,12 +3349,24 @@ private fun AddResultRow(
  *  self-host. The new account is added alongside the current one. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, onDismiss: () -> Unit) {
+private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () -> Unit, onDismiss: () -> Unit) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var host by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
+    // ⚠⚠ A DIFFERENT CREDENTIAL FROM THE TOKEN, and until now this sheet had
+    // only the token, so a closed island could not be joined from here at all:
+    // the code had to arrive through an `rcq://server/<host>?invite=…` link, and
+    // somebody handed a bare code by an operator had nowhere to put it. The
+    // token above is the NETWORK gate on a MASQUERADED island, which serves a
+    // decoy page without it. This one is the DOOR on a CLOSED CLUB, which is
+    // perfectly reachable either way and simply refuses to register you. Two
+    // pasted strings that look alike and mean opposite things, which is exactly
+    // why they get separate labels rather than one shared "access" field.
+    // Same pair the Settings change-server form already offers, and the same
+    // two strings, so the vocabulary matches between the two doors.
+    var invite by remember { mutableStateOf("") }
     var checking by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     // Sheet: two text fields and a keyboard. A centred dialog gets shoved
@@ -3388,7 +3400,10 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
             }
             var manual by remember { mutableStateOf(false) }
             if (!manual && islands.isNotEmpty()) {
-                IslandCarousel(current = "", islands = islands, onPick = { onAdd(it) })
+                // Picking a card carries no invite: the deck is the OPEN path, and a
+                // closed island that wants a code is reached through "enter an
+                // address" below, where the field for it lives.
+                IslandCarousel(current = "", islands = islands, onPick = { onAdd(it, null) })
                 // Two doors under the deck, the same pair iOS offers: type an
                 // address, or bring an account that already exists. Restoring
                 // by phrase lived only in onboarding and in account management,
@@ -3434,6 +3449,14 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(stringResource(R.string.access_token_hint), color = c.textSecondary, fontSize = 11.sp)
+            RcqField(
+                value = invite,
+                onValueChange = { invite = it.trim(); err = null },
+                placeholder = stringResource(R.string.csrv_invite),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(stringResource(R.string.csrv_invite_hint), color = c.textSecondary, fontSize = 11.sp)
             err?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss) {
@@ -3463,11 +3486,11 @@ private fun AddAccountDialog(onAdd: (String?) -> Unit, onRestore: () -> Unit, on
                             if (res is app.rcq.android.net.RedeemResult.BadToken) {
                                 err = ctx.getString(R.string.access_token_bad)
                             } else {
-                                onAdd(h)
+                                onAdd(h, invite.ifBlank { null })
                             }
                         }
                     } else {
-                        onAdd(h)
+                        onAdd(h, invite.ifBlank { null })
                     }
                 }) {
                     Text(stringResource(R.string.add_account_create), color = c.accent)

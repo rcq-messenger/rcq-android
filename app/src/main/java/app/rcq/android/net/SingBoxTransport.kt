@@ -1,6 +1,10 @@
 package app.rcq.android.net
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -469,13 +473,181 @@ object SingBoxTransport {
         caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
     }.getOrDefault(false)
 
-    // Rate limit for the notice below: every request against a blocked island
-    // arrives here, and the answer is the same every time.
-    @Volatile private var lastDeclinedNoticeAt = 0L
+    /** WHOSE road is blocked, because one sentence cannot serve two of them.
+     *
+     *  #929: the tester saw the identical Toast for "my own island is down"
+     *  and "the island I am looking at is down". The two are different events
+     *  with different actions — the first is about the connection this phone
+     *  has right now, the second is a fact about somebody else's server — and
+     *  a notice that cannot tell them apart is read as noise.
+     *
+     *  There is deliberately NO default value: a call site that cannot say
+     *  whose host it is holding does not know enough to speak at all.
+     *
+     *  Where each one LANDS is [noteAutoEngageDeclined]'s job: the Toast is
+     *  reserved for the connection here and now, and everything about somebody
+     *  else's island is published for that island's card to draw in place. */
+    enum class DeclineScope {
+        /** The island this account lives on. */
+        OWN_ISLAND,
+
+        /** The call relay of the island we are on. Keeps the Toast: a call is
+         *  being placed right now and there is no card to write on. */
+        CALL_RELAY,
+
+        /** Somebody else's island, from a screen that draws its CARD (the
+         *  picker, the join sheet). NO Toast — the card says it, in place,
+         *  about the one island it is showing. */
+        FOREIGN_ISLAND,
+
+        /** Somebody else's island on a path with no card anywhere on screen:
+         *  a sealed send to a contact who lives there. Dropping the Toast here
+         *  would trade a wrong message for no message at all, so it keeps one,
+         *  worded about THAT island rather than ours, and still feeds the card
+         *  for whenever it is next opened. */
+        FOREIGN_ISLAND_NO_CARD,
+
+        /** The auto-backup pass, where "unreachable" is not one host but the
+         *  catalogue and every island in it. No host, so no card line; the
+         *  toggle's own error can only say "no island", so the WHY is a
+         *  Toast. */
+        BACKUP_SEARCH,
+    }
+
+    /** The key an island is remembered under, here and in the UI that draws
+     *  its card. Lower-cased, stripped of scheme, port, path and `#fp`,
+     *  because the same island arrives spelled three ways: `Session.serverHost`
+     *  keeps a port, `RcqApi.host` is `URI.host` and has already lost it, and
+     *  the published catalogue carries bare names. A key that does not match
+     *  is a card line that never appears.
+     *
+     *  ⚠ Two self-hosted islands on one address and different ports therefore
+     *  share a key. That is the accepted cost of the failure and the card
+     *  agreeing on a name; nothing is ROUTED by this string. */
+    fun declineKey(host: String): String =
+        host.substringAfter("://").substringBefore('/').substringBefore('#')
+            .substringBefore(':').trim().lowercase()
+
+    // The island this account lives on, as a supplier rather than a copied
+    // string.
+    // ⚠ Seeding order is the trap. "Is this host mine?" is first asked from an
+    // OkHttp call thread, and a value copied at startup would be stale after an
+    // account switch, a rebindTo or a home promotion — an own-island fetch
+    // would then be filed as foreign and say the wrong thing. A supplier bound
+    // in Session's constructor is always the CURRENT answer, and it is in place
+    // before any network call this process makes, because the Session is built
+    // before them.
+    @Volatile private var ownIslandHost: (() -> String?)? = null
+
+    /** Bind the own-island answer. Called once, from Session's constructor. */
+    fun bindOwnIsland(supplier: () -> String?) { ownIslandHost = supplier }
+
+    /** Is [host] the island this account lives on (or a CDN front of it, which
+     *  is a ROAD to it and not another island)?
+     *
+     *  ⚠ TRUE when the own host is not known yet, which means no Session has
+     *  been built in this process — a headless push start. That path only ever
+     *  talks to the account's own island, and of the two ways to be wrong, a
+     *  Toast about your own connection is one the person can act on, while a
+     *  card line nobody has on screen is not. */
+    fun isOwnIsland(host: String): Boolean {
+        val key = declineKey(host)
+        val own = declineKey(runCatching { ownIslandHost?.invoke() }.getOrNull() ?: return true)
+        if (key == own) return true
+        // A CDN front is a ROAD to the flagship, not another island — but only
+        // for somebody who actually lives on the flagship. For a self-hoster the
+        // front is as foreign as any other host.
+        return own == declineKey(RcqApi.DEFAULT_HOST) && RelayConfigStore.isFrontHost(key)
+    }
+
     private const val DECLINED_NOTICE_GAP_MS = 60_000L
 
-    /** Tell the user, at most once a minute, that a host was unreachable and
-     *  the tunnel was NOT raised because they asked for exactly that.
+    /** How long a foreign island's line stays true on its card. Long enough to
+     *  survive putting the phone down and opening the picker, short enough that
+     *  it is never the first thing a person reads about an island they have not
+     *  tried today. */
+    const val DECLINED_LINE_TTL_MS = 10 * 60_000L
+
+    /** Ceiling on both tables below. A process that visits a hundred islands
+     *  keeps the most recent handful and forgets the rest; forgetting one costs
+     *  at most one extra Toast. */
+    private const val DECLINED_KEYS_MAX = 32
+
+    // Sentinel keys for the two scopes that have no host of their own. A key
+    // out of [declineKey] was cut at the first colon, so it can never contain
+    // one, and neither sentinel can collide with an island.
+    private const val CALL_NOTICE_KEY = ":call"
+    private const val BACKUP_NOTICE_KEY = ":backup"
+
+    // ⚠ This used to be ONE global `lastDeclinedNoticeAt`, so a complaint about
+    // a foreign island was swallowed whenever the own island had complained
+    // within the minute — the "does not always appear" half of #929. The gap is
+    // per key now, which means a table that would grow forever unless it is
+    // capped: access-ordered and self-evicting.
+    //
+    // ⚠ Written from arbitrary threads (an OkHttp call thread, the call
+    // controller, the boot ladder). An access-ordered LinkedHashMap MUTATES ON
+    // READ, so every touch goes through [noticeLock], and the check-then-take
+    // in [claimNoticeSlot] is one critical section rather than two.
+    private val noticeLock = Any()
+    private val lastDeclinedNoticeAt = object : LinkedHashMap<String, Long>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>): Boolean =
+            size > DECLINED_KEYS_MAX
+    }
+
+    /** True at most once per [DECLINED_NOTICE_GAP_MS] per key, and it takes the
+     *  slot when it says true. */
+    private fun claimNoticeSlot(key: String): Boolean {
+        synchronized(noticeLock) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val prev = lastDeclinedNoticeAt[key]
+            if (prev != null && now - prev < DECLINED_NOTICE_GAP_MS) return false
+            lastDeclinedNoticeAt[key] = now
+            return true
+        }
+    }
+
+    private val _declinedIslands = MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    /** Foreign islands found unreachable while the opt-out forbade raising the
+     *  tunnel, keyed by [declineKey] and valued with the wall-clock moment.
+     *  The island CARD draws one red line from this and nothing else in the app
+     *  has to remember to check (same shape as [IslandTrust.changed]).
+     *
+     *  Wall clock rather than elapsedRealtime: the UI ages an entry against
+     *  [DECLINED_LINE_TTL_MS] and a card outlives a doze. */
+    val declinedIslands: StateFlow<Map<String, Long>> = _declinedIslands.asStateFlow()
+
+    private fun publishDecline(key: String) {
+        _declinedIslands.update { old ->
+            (old + (key to System.currentTimeMillis()))
+                .entries.sortedByDescending { it.value }.take(DECLINED_KEYS_MAX)
+                .associate { it.key to it.value }
+        }
+    }
+
+    /** [host] answered, so whatever its card is saying about it is stale
+     *  (#929 D). Called from every route that completes a request against a
+     *  foreign island. Reads a volatile and returns in the common case where
+     *  there is nothing to clear. */
+    fun noteHostReachable(host: String) {
+        val key = declineKey(host)
+        if (key !in _declinedIslands.value) return
+        _declinedIslands.update { it - key }
+        // The gap goes with it: the next failure of a host that has since
+        // recovered is news, not a repeat.
+        synchronized(noticeLock) { lastDeclinedNoticeAt.remove(key) }
+    }
+
+    /** The tunnel is up, so "unreachable, and the relays are off" has stopped
+     *  being true of anybody. */
+    private fun clearDeclines() {
+        if (_declinedIslands.value.isNotEmpty()) _declinedIslands.value = emptyMap()
+        synchronized(noticeLock) { lastDeclinedNoticeAt.clear() }
+    }
+
+    /** Tell the user that a host was unreachable and the tunnel was NOT raised
+     *  because they asked for exactly that.
      *
      *  Honouring the opt-out (#588) turns what used to be a tunnel nobody asked
      *  for into a request that simply fails, and a failure with no reason given
@@ -485,30 +657,52 @@ object SingBoxTransport {
      *  broken", so the notice names the setting and points at the manual
      *  switch, which still works.
      *
+     *  [what] is the ISLAND'S HOST for the three host-scoped values of [scope]
+     *  — a decorated string like "api:$host" would key a card line that can
+     *  never match — and a label for the log only for [DeclineScope.CALL_RELAY]
+     *  and [DeclineScope.BACKUP_SEARCH].
+     *
      *  Silent when the opt-out is off (the auto-engage path handles it and
      *  there is nothing to explain), and silent when the device has no network
      *  at all: that failure is not about the relays and the user knows about
      *  it already. Safe from any thread. */
-    fun noteAutoEngageDeclined(what: String) {
+    fun noteAutoEngageDeclined(what: String, scope: DeclineScope) {
         val ctx = appCtx ?: return
         if (!autoEngageDisabled(ctx)) return
-        android.util.Log.i("RCQfront", "$what unreachable; not engaging — the user opted out of automatic engage")
+        android.util.Log.i(
+            "RCQfront",
+            "$what unreachable ($scope); not engaging — the user opted out of automatic engage",
+        )
         if (!hasNetwork(ctx)) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (lastDeclinedNoticeAt != 0L && now - lastDeclinedNoticeAt < DECLINED_NOTICE_GAP_MS) return
-        lastDeclinedNoticeAt = now
+        val key = when (scope) {
+            DeclineScope.CALL_RELAY -> CALL_NOTICE_KEY
+            DeclineScope.BACKUP_SEARCH -> BACKUP_NOTICE_KEY
+            else -> declineKey(what)
+        }
+        if (!claimNoticeSlot(key)) return
+        // Somebody else's island: the line belongs ON that island's card, beside
+        // its name and its picture, not on a Toast that covers whatever the
+        // person is reading (#929 B). Published for the no-card path too — that
+        // card is not open YET, and the send also gets its own Toast below.
+        if (scope == DeclineScope.FOREIGN_ISLAND || scope == DeclineScope.FOREIGN_ISLAND_NO_CARD) {
+            publishDecline(key)
+            if (scope == DeclineScope.FOREIGN_ISLAND) return
+        }
         // ⚠ A system Toast, and since Android 12 that means TWO LINES and an
         // ellipsis. The old wording spent both lines restating the setting and
         // was cut off at "по…", exactly before the sentence telling you what to
-        // do about it (#929). The action goes first now, and the string has to
-        // stay short enough to survive the clip.
+        // do about it (#929). Every string below names its subject first and
+        // then the action, and has to stay short enough to survive the clip.
+        val text = when (scope) {
+            DeclineScope.CALL_RELAY -> ctx.getString(app.rcq.android.R.string.bypass_auto_off_calls)
+            DeclineScope.BACKUP_SEARCH -> ctx.getString(app.rcq.android.R.string.bypass_auto_off_backup)
+            DeclineScope.FOREIGN_ISLAND_NO_CARD ->
+                ctx.getString(app.rcq.android.R.string.bypass_auto_off_foreign, key)
+            else -> ctx.getString(app.rcq.android.R.string.bypass_auto_off_unreachable)
+        }
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             runCatching {
-                android.widget.Toast.makeText(
-                    ctx,
-                    ctx.getString(app.rcq.android.R.string.bypass_auto_off_unreachable),
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+                android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -529,17 +723,22 @@ object SingBoxTransport {
      *  boot-time auto-engage: never against the user's opt-out, and never in
      *  local-proxy mode, where the user's own proxy is the only allowed route
      *  and stacking sing-box under it would be a leak. Blocking — call off-main.
-     *  Returns true when a proxy is available afterwards. */
-    fun engageForBlockedDestination(reason: String): Boolean {
+     *  Returns true when a proxy is available afterwards.
+     *
+     *  [what] and [scope] are handed straight to [noteAutoEngageDeclined], so
+     *  read its contract before passing a decorated string: for a host-scoped
+     *  decline this MUST be the island's bare host. */
+    fun engageForBlockedDestination(what: String, scope: DeclineScope): Boolean {
         if (isActive) return true
         val ctx = appCtx ?: return false
         // Declining here is the end of the road for this request: the caller
         // throws its IOException and the send goes red with no explanation, so
-        // the reason is said out loud once (#588).
-        if (!mayAutoEngage(ctx)) { noteAutoEngageDeclined(reason); return false }
+        // the reason is said out loud once, in the words that fit whose island
+        // it is (#588, #929).
+        if (!mayAutoEngage(ctx)) { noteAutoEngageDeclined(what, scope); return false }
         RelayConfigStore.prime(ctx)
         val ok = start()
-        if (ok) android.util.Log.i("RCQfront", "engaged the tunnel for $reason (direct route blocked)")
+        if (ok) android.util.Log.i("RCQfront", "engaged the tunnel for $what (direct route blocked)")
         return ok
     }
 
@@ -557,6 +756,10 @@ object SingBoxTransport {
             svc.start(buildConfig())
             box = svc
             isActive = true
+            // Every "unreachable, and the relays are off" line on a card, and
+            // every rate-limit slot behind one, described a world where there
+            // was no tunnel. There is one now (#929 D).
+            clearDeclines()
             android.util.Log.i("RCQsingbox", "started — local proxy 127.0.0.1:$LOCAL_PORT")
             true
         }.getOrElse {

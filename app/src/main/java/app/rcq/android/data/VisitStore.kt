@@ -18,8 +18,15 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Same-viewer pings within [DEDUP_MS] collapse into one (unique view);
  * visits older than [PRUNE_MS] are dropped on every save. [recentViews] is
- * the rolling count within [WINDOW_MS] (7 days), and [recentVisitors] is the
- * same slice with the numbers still attached.
+ * the rolling count within [WINDOW_MS] (7 days).
+ *
+ * ⚠⚠ ONLY THE COUNT LEAVES THIS STORE. A visit ping carries the viewer's
+ * number, so the numbers are on disk, and report #939 asked for the list they
+ * would make. It was built and then taken straight back out: telling somebody
+ * WHO has been checking their profile is a different promise from telling them
+ * how often it happened, and it is not one this app makes (founder, 07.09).
+ * If that is ever revisited, the second half has to ship with it: nothing
+ * anywhere tells the person opening a card that a ping is sent at all.
  *
  * Call [init] once from MainActivity.onCreate, then [bindAccount].
  */
@@ -36,9 +43,7 @@ object VisitStore {
     val recentViews: StateFlow<Int> = _recentViews.asStateFlow()
 
     /** One recorded view: who opened our profile, and when (epoch millis). */
-    data class Visit(val uin: Int, val atMillis: Long)
 
-    private val _recentVisitors = MutableStateFlow<List<Visit>>(emptyList())
 
     /**
      * The same views [recentViews] counts, newest first.
@@ -53,7 +58,6 @@ object VisitStore {
      * two facts the tally exists to withhold, that we keep it at all and whose
      * numbers are in it. A name comes from the local roster or not at all.
      */
-    val recentVisitors: StateFlow<List<Visit>> = _recentVisitors.asStateFlow()
 
     const val DEDUP_MS = 60L * 60 * 1000           // 1h unique-visitor window
     const val PRUNE_MS = 30L * 86_400 * 1000        // keep 30 days
@@ -124,7 +128,6 @@ object VisitStore {
         val cutoff = System.currentTimeMillis() - WINDOW_MS
         val inWindow = _visits.value.filter { it.second >= cutoff }
         _recentViews.value = inWindow.size
-        _recentVisitors.value = inWindow.sortedByDescending { it.second }.map { Visit(it.first, it.second) }
     }
 
     private fun persist() {

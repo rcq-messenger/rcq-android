@@ -621,11 +621,7 @@
     <string name="pe_title">Edit profile</string>
     <string name="pe_saved">Profile saved</string>
     <string name="pe_views_title">Profile views</string>
-    <string name="pe_views_desc">People who opened your profile in the last 7 days.</string>
-    <string name="pe_views_empty">Nobody has opened your profile in the last 7 days.</string>
-    <string name="pe_views_unknown">Not in your contacts</string>
-    <string name="pe_views_note">This list is kept on this device only, built from the pings other clients send when they open your profile. The island never sees it.</string>
-    <string name="ci_visit_notice">They can see that you opened their profile.</string>
+    <string name="pe_views_desc">How many times your profile was opened in the last 7 days.</string>
     <string name="pe_nickname">Nickname</string>
     <string name="pe_status_message">Status message</string>
     <string name="pe_first_name">First name</string>
@@ -646,7 +642,11 @@
     <string name="stealth_shield_amber">Amber shield: the relays are on, but data getting through them is not confirmed yet. If it stays amber, try switching the relays off and on again from the menu.</string>
     <string name="stealth_info_body">The app is going through RCQ relays: the island does not see your address, and the network between you and the island does not see that you are using RCQ. It turned itself on because the direct connection did not go through, and there is nothing to set up.</string>
     <string name="connecting_stealth">Connecting through relays…</string>
-    <string name="bypass_auto_off_unreachable">Island unreachable. Auto relays are off in your settings, so turn on RCQ relays in the menu.</string>
+    <string name="bypass_auto_off_unreachable">Your island is not answering and auto relays are off. Turn on RCQ relays in the menu.</string>
+    <string name="bypass_auto_off_calls">The call relay is not answering and auto relays are off. Turn on RCQ relays in the menu.</string>
+    <string name="bypass_auto_off_foreign">%1$s is not answering and auto relays are off. Turn on RCQ relays in the menu.</string>
+    <string name="bypass_auto_off_backup">No backup island answered and auto relays are off. Turn on RCQ relays in the menu.</string>
+    <string name="island_unreachable_relays_off">Not answering. RCQ relays are off.</string>
     <string name="pv_profile_card">Profile card</string>
     <string name="pv_profile_card_desc">Who can open your full profile (city, age, about).</string>
     <string name="pv_gender_desc">Who can see your gender on your profile.</string>

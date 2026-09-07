@@ -1219,7 +1219,13 @@ class CallController(
         val transport = app.rcq.android.net.SingBoxTransport
         if (transport.isActive) return false  // already the road we measured
         if (!transport.mayAutoEngage(appContext)) {
-            transport.noteAutoEngageDeclined(CallDiagnostics.turnHost ?: "turn")
+            // A Toast, and deliberately so: a call is being placed RIGHT NOW,
+            // there is no card anywhere to write a line on, and the ringing
+            // screen is the one place the person is looking (#929).
+            transport.noteAutoEngageDeclined(
+                CallDiagnostics.turnHost ?: "turn",
+                app.rcq.android.net.SingBoxTransport.DeclineScope.CALL_RELAY,
+            )
             return false
         }
         android.util.Log.w("RCQcall", "relay unreachable directly — engaging the tunnel for calls (#608)")
