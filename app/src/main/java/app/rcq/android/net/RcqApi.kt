@@ -1833,6 +1833,9 @@ class RcqApi(
         val gender_visibility: String? = null,
         val profile_visibility: String? = null,
         val group_invite_policy: String? = null,
+        // Owner-only echo: whether this account keeps its mark off other
+        // people's screens. Absent from an island that predates the setting.
+        val badge_hidden: Boolean? = null,
         val read_receipts_visibility: String? = null,
         /** everyone | contacts | nobody. The one policy the server has always
          *  enforced and this client could never set: a person being called by
@@ -1961,6 +1964,9 @@ class RcqApi(
         val gender_visibility: String? = null,
         val profile_visibility: String? = null,
         val group_invite_policy: String? = null,
+        // "Wear my mark where others can see it", inverted. The mark itself
+        // is the island's to grant; only this flag is the account holder's.
+        val badge_hidden: Boolean? = null,
         val read_receipts_visibility: String? = null,
         val call_policy: String? = null,
         val presence_persistent: Boolean? = null,

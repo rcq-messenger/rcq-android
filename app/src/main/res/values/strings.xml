@@ -1191,6 +1191,8 @@
     <string name="home_no_contacts_title">No contacts of your own yet</string>
     <string name="home_no_contacts_body">Groups are one thing, but RCQ is better with people you know.</string>
     <string name="pv_calls">Who can call you</string>
+    <string name="pv_badge">Wear my mark</string>
+    <string name="pv_badge_desc">The island’s mark beside your name. Turning this off hides it from everyone else; you still see it yourself.</string>
     <string name="pv_calls_desc">Incoming calls from anyone outside this circle are refused.</string>
     <string name="diag_audit_run">Full network check</string>
     <string name="diag_audit_running">Checking\u2026</string>

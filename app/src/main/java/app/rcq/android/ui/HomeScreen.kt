@@ -1821,6 +1821,11 @@ private fun HomeHeader(
     var overflowMenu by remember { mutableStateOf(false) }
     var showStealthInfo by remember { mutableStateOf(false) }
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    // Read here rather than threaded in as a parameter: the header is the only
+    // place on this screen that wants it, and `loadProfile` is the cached copy
+    // the Settings screen already reads for the same field.
+    var ownBadge by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(uin) { ownBadge = session.loadProfile()?.badge }
 
     if (showStealthInfo) {
         // Two paragraphs with their own colours, so the bare sheet rather than
@@ -1942,6 +1947,26 @@ private fun HomeHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Left of the avatar, ahead of the identity block (founder, 06.09).
+            // It used to share the 30dp slot on the RIGHT of the nick with the
+            // pending-update mark, which put a route indicator inside the
+            // block that says who you are. It is not about you, it is about
+            // how your traffic leaves, so it leads the row instead.
+            //
+            // Honest shield: solid accent only when the route is VERIFIED to
+            // reach the backend; amber when the relays are engaged but not yet
+            // (or no longer) carrying traffic, so it can't claim a working
+            // relay route when the chain is dead ("щит есть, связи нет").
+            if (stealthActive) {
+                Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.Shield,
+                        stringResource(R.string.stealth_info_title),
+                        tint = if (routeVerified) chrome.accent else c.statusAway,
+                        modifier = Modifier.size(22.dp).clip(CircleShape).clickable { showStealthInfo = true },
+                    )
+                }
+            }
             Box {
                 // The flower must not claim ONLINE while the socket is down (report:
                 // all network toggles off -> flower green but no connectivity). Show
@@ -1994,7 +2019,14 @@ private fun HomeHeader(
                 // under it (founder: they should sit almost touching).
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenProfile).padding(horizontal = 6.dp, vertical = 4.dp),
             ) {
-                Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
+                    // Your own mark. It stays here even when you have chosen
+                    // not to wear it in public: the island still gave it to
+                    // you, and the setting is about everyone else, so your own
+                    // row is never blanked.
+                    BadgeMark(ownBadge, size = 13.dp)
+                }
                 Text("$uin", color = chrome.textMono, fontSize = 12.sp, lineHeight = 12.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
             }
             // Right of the nick/UIN: a status-width slot holding the shield
@@ -2026,19 +2058,11 @@ private fun HomeHeader(
                             .clickable { onUpdateBadge(up) },
                     )
                 }
-                if (stealthActive) {
-                    // Honest shield: solid accent only when the route is VERIFIED to
-                    // reach the backend; amber when the relays are engaged but not yet
-                    // (or no longer) carrying traffic, so it can't claim a working
-                    // relay route when the chain is dead ("щит есть, связи нет").
-                    Icon(
-                        Icons.Filled.Shield,
-                        stringResource(R.string.stealth_info_title),
-                        tint = if (routeVerified) chrome.accent else c.statusAway,
-                        modifier = Modifier.size(22.dp).clip(CircleShape).clickable { showStealthInfo = true },
-                    )
-                }
             }
+            // The counterweight for the shield that now leads the row. Only
+            // while the shield is actually there: with no shield the row is
+            // the width it always was, and the nick does not drift.
+            if (stealthActive) Spacer(Modifier.size(30.dp))
         }
 
         // Right — overflow menu.
