@@ -596,6 +596,10 @@
     <string name="pe_saved">Perfil salvo</string>
     <string name="pe_views_title">Visitas ao perfil</string>
     <string name="pe_views_desc">Pessoas que abriram seu perfil nos últimos 7 dias.</string>
+    <string name="pe_views_empty">Ninguém abriu seu perfil nos últimos 7 dias.</string>
+    <string name="pe_views_unknown">Não está nos seus contatos</string>
+    <string name="pe_views_note">Esta lista fica só neste aparelho e é montada com os avisos que outros clientes enviam ao abrir seu perfil. A ilha nunca a vê.</string>
+    <string name="ci_visit_notice">Essa pessoa pode ver que você abriu o perfil dela.</string>
     <string name="pe_nickname">Apelido</string>
     <string name="pe_status_message">Mensagem de status</string>
     <string name="pe_first_name">Primeiro nome</string>

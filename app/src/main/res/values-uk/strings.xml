@@ -596,6 +596,10 @@
     <string name="pe_saved">Профіль збережено</string>
     <string name="pe_views_title">Перегляди профілю</string>
     <string name="pe_views_desc">Люди, які відкривали твій профіль за останні 7 днів.</string>
+    <string name="pe_views_empty">За останні 7 днів твій профіль ніхто не відкривав.</string>
+    <string name="pe_views_unknown">Немає у твоїх контактах</string>
+    <string name="pe_views_note">Список зберігається лише на цьому пристрої та збирається із сигналів, які надсилають клієнти, коли відкривають твій профіль. Острів його не бачить.</string>
+    <string name="ci_visit_notice">Людина побачить, що ви відкривали її профіль.</string>
     <string name="pe_nickname">Нік</string>
     <string name="pe_status_message">Статус</string>
     <string name="pe_first_name">Ім\'я</string>

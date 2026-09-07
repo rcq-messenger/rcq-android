@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -108,12 +109,23 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     // since they aren't a contact and aren't on our island.
     var ciCardName by remember { mutableStateOf<String?>(null) }
     var ciCardStatus by remember { mutableStateOf<String?>(null) }
+    // Report #938: the card's photo opens full screen on a tap. Reset with the
+    // UIN so walking from one card to another cannot leave the viewer standing
+    // over the wrong person.
+    var showAvatar by remember(uin) { mutableStateOf(false) }
 
     // §5c: a cross-island peer's profile lives on ITS island — our own
     // /users/{uin}/info 404s. crossIslandHost is the existing contact's host, OR
     // (when opened from a cross-island GROUP member who isn't a contact yet) the
     // group's host. In both cases we render from the open card, never our island.
     val crossIslandHost = contact?.host ?: groupHost?.takeIf { !here }
+    // The blob a cross-island contact's picture lives in is on THEIR island and
+    // our media endpoint has never held it, so the card draws the glyph for
+    // them — which is why the id is gated here rather than at the avatar alone:
+    // the fullscreen viewer below must make exactly the same decision, or a tap
+    // would open an empty black screen for people who visibly have no photo.
+    val avatarMediaId = contact?.avatarMediaId?.takeIf { crossIslandHost == null }
+    val avatarMediaKey = contact?.avatarMediaKey
     // ⚠ "The island answered 404" is a different fact from "the island did not
     // answer", and this screen used to lose the difference: loadPeerProfile
     // returned null for both, the card fell back to "$uin", and a number nobody
@@ -182,8 +194,9 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 // Cross-island contacts keep the glyph: the blob lives on their
                 // island and presence does not cross either.
                 PersonAvatar(
-                    contact?.avatarMediaId?.takeIf { crossIslandHost == null }, contact?.avatarMediaKey,
+                    avatarMediaId, avatarMediaKey,
                     presence, session, 80.dp, animated = true, crossIsland = crossIslandHost != null,
+                    onPictureClick = { showAvatar = true },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(nickname, color = c.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -213,6 +226,24 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 }
                 sub?.let { Text(it, color = c.textSecondary, fontSize = 13.sp) }
                 statusMessage?.let { Text(it, color = c.textPrimary, fontSize = 14.sp, textAlign = TextAlign.Center) }
+                // ⚠⚠ THE OTHER HALF OF "PROFILE VIEWS", and it has to be here
+                // rather than only in the owner's list. Opening this screen
+                // fires a sealed `visit` ping (above, LaunchedEffect(uin)), and
+                // the person on the other side can now see a list of who looked
+                // and when. Until today nothing anywhere told the person doing
+                // the looking, which is a one-sided arrangement this app has no
+                // business shipping. The island learns nothing either way: the
+                // ping is end-to-end sealed and ephemeral.
+                //
+                // Only for a real profile on our own island: a cross-island
+                // card is fetched, not pinged, and a number that answers to
+                // nobody has no one to tell.
+                if (crossIslandHost == null && !notFound && uin != session.uin) {
+                    Text(
+                        stringResource(R.string.ci_visit_notice),
+                        color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -523,6 +554,29 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             }
             SheetGap()
             SheetActionRow(stringResource(R.string.common_close)) { showSafety = false }
+        }
+    }
+
+    if (showAvatar) {
+        // The same cachedImage/fetchImage pair PersonAvatar uses, so the bytes
+        // the avatar already decoded are normally sitting in memory and the
+        // viewer opens on the first frame instead of after a round trip.
+        // ⚠ No save and no share: this is somebody's face, not a picture they
+        // sent me. See `showActions` on the viewer.
+        val bytes by produceState<ByteArray?>(session.cachedImage(avatarMediaId), avatarMediaId, avatarMediaKey) {
+            value = if (!avatarMediaId.isNullOrEmpty() && !avatarMediaKey.isNullOrEmpty()) {
+                session.fetchImage(avatarMediaId, avatarMediaKey)
+            } else null
+        }
+        // Nothing to show yet (or nothing at all): stay closed rather than open
+        // a black rectangle. A tap can only reach here when a picture is drawn,
+        // so this is the fetch still in flight, not a dead end.
+        bytes?.let {
+            FullscreenImageViewer(
+                bytes = it,
+                showActions = false,
+                onDismiss = { showAvatar = false },
+            )
         }
     }
 }

@@ -18,7 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Same-viewer pings within [DEDUP_MS] collapse into one (unique view);
  * visits older than [PRUNE_MS] are dropped on every save. [recentViews] is
- * the rolling count within [WINDOW_MS] (7 days).
+ * the rolling count within [WINDOW_MS] (7 days), and [recentVisitors] is the
+ * same slice with the numbers still attached.
  *
  * Call [init] once from MainActivity.onCreate, then [bindAccount].
  */
@@ -33,6 +34,26 @@ object VisitStore {
 
     private val _recentViews = MutableStateFlow(0)
     val recentViews: StateFlow<Int> = _recentViews.asStateFlow()
+
+    /** One recorded view: who opened our profile, and when (epoch millis). */
+    data class Visit(val uin: Int, val atMillis: Long)
+
+    private val _recentVisitors = MutableStateFlow<List<Visit>>(emptyList())
+
+    /**
+     * The same views [recentViews] counts, newest first.
+     *
+     * The identities were always here: a visit ping is a sealed 1:1 envelope
+     * and [record] is handed its sender. Nothing ever asked the store for them,
+     * which is the whole of #939 - the profile row promised "people who opened
+     * your profile" and could only ever show a number.
+     *
+     * ⚠ This is a LOCAL tally and must stay one. Do not enrich a row here by
+     * asking the island who a number belongs to: that would hand the server the
+     * two facts the tally exists to withhold, that we keep it at all and whose
+     * numbers are in it. A name comes from the local roster or not at all.
+     */
+    val recentVisitors: StateFlow<List<Visit>> = _recentVisitors.asStateFlow()
 
     const val DEDUP_MS = 60L * 60 * 1000           // 1h unique-visitor window
     const val PRUNE_MS = 30L * 86_400 * 1000        // keep 30 days
@@ -63,17 +84,27 @@ object VisitStore {
         recompute()
     }
 
+    /**
+     * Re-age the 7-day window without waiting for a new ping.
+     *
+     * ⚠ [recompute] otherwise runs only on [bindAccount] and [record], so a
+     * process that has been alive for days still reports views that have since
+     * aged out of the window. Screens that show the count or the list call this
+     * as they open.
+     */
+    fun refresh() = recompute()
+
     /** Wipe the bound account's tally (burn). */
     fun wipe() {
         _visits.value = emptyList()
-        _recentViews.value = 0
+        recompute()
         if (::prefs.isInitialized && acct != null) prefs.edit().remove(key()).apply()
     }
 
     /** Wipe a specific (possibly non-active) account's tally (local delete). */
     fun wipeAccount(accountId: String) {
         if (::prefs.isInitialized) prefs.edit().remove("$accountId.$K_VISITS").apply()
-        if (accountId == acct) { _visits.value = emptyList(); _recentViews.value = 0 }
+        if (accountId == acct) { _visits.value = emptyList(); recompute() }
     }
 
     /** Lift the legacy unprefixed tally under [accountId]. Idempotent. */
@@ -86,9 +117,14 @@ object VisitStore {
 
     private fun key() = "$acct.$K_VISITS"
 
+    /** The count and the list are derived from the same slice in the same
+     *  place, so the number on the row and the people behind it cannot drift
+     *  apart. Sorting is cheap: a window this narrow holds a handful of rows. */
     private fun recompute() {
         val cutoff = System.currentTimeMillis() - WINDOW_MS
-        _recentViews.value = _visits.value.count { it.second >= cutoff }
+        val inWindow = _visits.value.filter { it.second >= cutoff }
+        _recentViews.value = inWindow.size
+        _recentVisitors.value = inWindow.sortedByDescending { it.second }.map { Visit(it.first, it.second) }
     }
 
     private fun persist() {
