@@ -1149,6 +1149,8 @@
     <string name="home_no_contacts_title">Nenhum contato seu ainda</string>
     <string name="home_no_contacts_body">Grupos são uma coisa, mas o RCQ é melhor com gente que você conhece.</string>
     <string name="pv_calls">Quem pode te ligar</string>
+    <string name="pv_badge">Exibir minha marca</string>
+    <string name="pv_badge_desc">A marca da ilha ao lado do seu nome. Se desativar, mais ninguém a vê; você continua vendo.</string>
     <string name="pv_calls_desc">As chamadas de quem estiver fora deste círculo são recusadas.</string>
     <string name="diag_audit_run">Verificação completa da rede</string>
     <string name="diag_audit_running">Verificando…</string>

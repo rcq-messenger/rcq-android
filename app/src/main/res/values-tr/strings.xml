@@ -1149,6 +1149,8 @@
     <string name="home_no_contacts_title">Henüz kendi kişin yok</string>
     <string name="home_no_contacts_body">Gruplar bir yana, RCQ tanıdığın insanlarla daha iyi.</string>
     <string name="pv_calls">Beni kimler arayabilir</string>
+    <string name="pv_badge">İşaretimi göster</string>
+    <string name="pv_badge_desc">Adınızın yanındaki ada işareti. Kapatırsanız başka kimse göremez; siz görmeye devam edersiniz.</string>
     <string name="pv_calls_desc">Bu çemberin dışında kalan herkesten gelen aramalar reddedilir.</string>
     <string name="diag_audit_run">Tam ağ denetimi</string>
     <string name="diag_audit_running">Kontrol ediliyor…</string>

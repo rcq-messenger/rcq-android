@@ -1598,6 +1598,10 @@ private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: 
     var receipts by remember { mutableStateOf(cached?.read_receipts_visibility ?: "everyone") }
     var callPolicy by remember { mutableStateOf(cached?.call_policy ?: "everyone") }
     var hofOptIn by remember { mutableStateOf(cached?.hof_opt_in ?: false) }
+    // The mark itself, so the row can show what it is talking about, and so
+    // the row can stay away entirely from people who have no mark.
+    var myBadge by remember { mutableStateOf(cached?.badge) }
+    var badgeHidden by remember { mutableStateOf(cached?.badge_hidden ?: false) }
     var hofAvatar by remember { mutableStateOf(cached?.hof_avatar) }   // data-URI or null
     var hofBusy by remember { mutableStateOf(false) }
     var hofError by remember { mutableStateOf<String?>(null) }
@@ -1635,6 +1639,8 @@ private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: 
             receipts = p.read_receipts_visibility ?: "everyone"
             callPolicy = p.call_policy ?: "everyone"
             hofOptIn = p.hof_opt_in ?: false
+            myBadge = p.badge
+            badgeHidden = p.badge_hidden ?: false
             hofAvatar = p.hof_avatar
         }
     }
@@ -1693,6 +1699,28 @@ private fun PrivacyScreen(session: Session, onOpenPinCodes: () -> Unit, onBack: 
             // offered it since; on Android the only answer to "a stranger is
             // calling me" was to leave the app.
             VisibilityPicker(stringResource(R.string.pv_calls), callPolicy, listOf("everyone", "contacts", "nobody"), stringResource(R.string.pv_calls_desc)) { callPolicy = it; save(RcqApi.UpdateMeBody(call_policy = it)) }
+
+            // Only for people who have a mark: a switch for hiding something
+            // you were never given is noise. Your own row always carries the
+            // mark whatever this says, so the row cannot hide itself.
+            if (myBadge != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(stringResource(R.string.pv_badge), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            BadgeMark(myBadge, size = 14.dp)
+                        }
+                        Text(stringResource(R.string.pv_badge_desc), color = c.textSecondary, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = !badgeHidden,
+                        onCheckedChange = { on ->
+                            badgeHidden = !on
+                            save(RcqApi.UpdateMeBody(badge_hidden = !on))
+                        },
+                    )
+                }
+            }
 
             // Block screenshots (device-local; FLAG_SECURE applied by MainActivity).
             Row(verticalAlignment = Alignment.CenterVertically) {
