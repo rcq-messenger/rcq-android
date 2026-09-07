@@ -1418,4 +1418,6 @@
     <string name="reg_invite_required">This island is closed: joining needs a code from its operator. Paste it below.</string>
     <string name="reg_invite_invalid">That code was not accepted. It may be used up, expired, or meant for another island.</string>
     <string name="ci_closed_island">This island is closed. To write to somebody there you need a link from them: a shared contact, or a message they sent you first.</string>
+    <string name="island_entry_price">Entry: %1$s</string>
+    <string name="island_entry_closed">Closed club</string>
 </resources>

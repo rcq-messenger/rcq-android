@@ -269,6 +269,22 @@ private fun IslandCard(island: IslandCatalog.Entry) {
             island.region?.let { "${island.host} · $it" } ?: island.host,
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
         )
+        // ⚠ What getting in costs, asked of the ISLAND rather than of the
+        // catalogue. servers.json is a file the team edits by hand and it
+        // would be stale the day after an operator changed a price — and a
+        // wrong price is worse than no price at all.
+        //
+        // ⚠ Only for a card the person has already opened. The comment above
+        // explains why this sheet does not talk to every island in the list on
+        // open: that would hand our address to five hosts nobody has chosen.
+        // One page, one island, one question.
+        val entry = islandEntry(island.host)
+        if (entry != null) {
+            Text(
+                entry, color = c.accent, fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
         // ⚠ A RESERVED box, not an optional block. Each page used to measure
         // its own height — two lines of description here, none there — so the
         // pager, and the sheet around it, re-measured on every swipe and the
@@ -287,4 +303,27 @@ private fun IslandCard(island: IslandCatalog.Entry) {
             }
         }
     }
+}
+
+/// What an island charges to get in, as a line for the picker, or null when
+/// there is nothing to say: an open island, or a closed one with no price.
+///
+/// A card that has never been opened asks nothing. The answer is remembered
+/// for the life of the sheet, so swiping back and forth does not re-ask.
+@Composable
+private fun islandEntry(host: String): String? {
+    val ctx = LocalContext.current
+    var line by remember(host) { mutableStateOf<String?>(null) }
+    LaunchedEffect(host) {
+        val caps = runCatching { RcqApi.serverInfoOf(host)?.capabilities }.getOrNull() ?: return@LaunchedEffect
+        if (!caps.closed_island) return@LaunchedEffect
+        val cents = caps.entry_price_cents
+        line = if (cents > 0) {
+            val price = if (cents % 100 == 0) "$" + (cents / 100) else "$" + "%.2f".format(cents / 100.0)
+            ctx.getString(R.string.island_entry_price, price)
+        } else {
+            ctx.getString(R.string.island_entry_closed)
+        }
+    }
+    return line
 }

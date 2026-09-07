@@ -1370,4 +1370,6 @@
     <string name="reg_invite_required">Острів закритий: щоб увійти, потрібен код від його оператора. Вставте його нижче.</string>
     <string name="reg_invite_invalid">Код не прийнято. Можливо, він уже використаний, минув або виданий для іншого острова.</string>
     <string name="ci_closed_island">Цей острів закритий. Щоб написати туди, потрібне посилання від самої людини: вона ділиться контактом або пише вам першою.</string>
+    <string name="island_entry_price">Вхід: %1$s</string>
+    <string name="island_entry_closed">Закритий клуб</string>
 </resources>
