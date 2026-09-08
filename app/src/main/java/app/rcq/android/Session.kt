@@ -10751,16 +10751,22 @@ class Session(context: Context) {
      *  messages never count. */
     private fun bumpUnreadIfInbound(msg: ChatMessage, thread: String) {
         if (msg.fromMe) return
+        // A row another device of mine has already read (its marker came
+        // first, see applyRemoteRead) is not unread here either. Same
+        // comparison the recount makes: sent after the marker counts, sent at
+        // or before it does not. Only the badge and the @-inbox are gated; the
+        // sound below is not, a backlog row is already silent there.
+        val readElsewhere = msg.sentAt <= LocalStores.readUpTo(thread)
         // Badge only counts for threads you're NOT looking at; the receive
         // SOUND plays for any inbound message that passes the notify gate —
         // including the open chat (iOS/Telegram behaviour). The old code
         // returned early for the active thread, so a tester sitting inside a
         // chat heard nothing.
         if (thread == activeThread) LocalStores.clearUnread(thread)
-        else LocalStores.bumpUnread(thread)
+        else if (!readElsewhere) LocalStores.bumpUnread(thread)
         // Home-row @ indicator (iOS parity, GROUP-ONLY): an inbound group message
         // that @mentions me in a thread I'm not looking at raises the mention inbox.
-        if (msg.groupId != null && !msg.fromMe && thread != activeThread && bodyMentionsMe(msg.body)) {
+        if (msg.groupId != null && !msg.fromMe && thread != activeThread && !readElsewhere && bodyMentionsMe(msg.body)) {
             LocalStores.markMention(LocalStores.groupThread(msg.groupId))
         }
         // Skip the receive sound for BACKLOG: a message pulled out of an
@@ -10921,6 +10927,12 @@ class Session(context: Context) {
      *  swallow it. The badge only ever shrinks, so a stale or out-of-order
      *  marker can never un-read a thread. */
     private fun applyRemoteRead(thread: String, at: Long, peer: Int? = null, gid: Int? = null) {
+        // ⚠ Written down BEFORE the early return below. For a group the rows
+        // arrive on a different feed than this marker and later (#951), so a
+        // badge of zero here does not mean there is nothing to read: it means
+        // the rows have not landed yet. The watermark is what stops them
+        // counting when they do.
+        LocalStores.noteRemoteRead(thread, at)
         val current = LocalStores.unreadOf(thread)
         if (current <= 0) return
         val rows = if (gid != null) _groupMessages.value[gid] ?: emptyList()

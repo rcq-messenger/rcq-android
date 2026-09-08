@@ -127,6 +127,18 @@ object LocalStores {
     private val _unread = MutableStateFlow<Map<String, Int>>(emptyMap())
     val unread: StateFlow<Map<String, Int>> = _unread.asStateFlow()
 
+    /** Per-thread "another device of mine read this thread up to here"
+     *  watermark, epoch millis, persisted. ⚠⚠ WHY IT EXISTS (#951): the read
+     *  marker from the PC rides the 1:1 queue, and the group's rows ride the
+     *  room log, and this app drains the queue FIRST at every wake. So the
+     *  marker arrived while the group's badge was still 0, the recount had
+     *  nothing to shrink and threw the marker away, and then the room log
+     *  landed and every one of those already-read rows bumped the badge. The
+     *  tester read everything on the PC and found every group unread on the
+     *  phone. The watermark survives the ordering: a row that lands later but
+     *  was sent before it does not count. */
+    @Volatile private var readUpTo: Map<String, Long> = emptyMap()
+
     /** ⚠⚠ The unread map is written from TWO threads: the ingest path bumps it
      *  off Dispatchers.IO (`Session.bumpUnreadIfInbound`, right after the row
      *  is inserted) while the UI clears it on the main thread when a chat
@@ -489,6 +501,9 @@ object LocalStores {
         _allowedStrangers.value = prefs.getStringSet(pk(K_STRANGER_ALLOW), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _unread.value = loadCounts(pk(K_UNREAD))
+        readUpTo = (prefs.getStringSet(pk(K_READ_UPTO), null) ?: emptySet()).mapNotNull { s ->
+            val i = s.lastIndexOf('='); if (i <= 0) null else s.substring(0, i) to (s.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)
+        }.toMap()
         loadRoomKeys()
         loadProfileKeys()
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
@@ -984,6 +999,21 @@ object LocalStores {
     // ── unread counters ──────────────────────────────────────────────
     fun unreadOf(thread: String): Int = _unread.value[thread] ?: 0
 
+    fun readUpTo(thread: String): Long = readUpTo[thread] ?: 0L
+
+    /** Remember that another device read [thread] up to [at]. Monotonic: a
+     *  stale or out-of-order marker can never move it back, the same rule the
+     *  badge itself follows. Durable, because it is written once per read
+     *  marker rather than once per message, and losing it is the bug again. */
+    fun noteRemoteRead(thread: String, at: Long) {
+        if (acct == null) return
+        synchronized(unreadLock) {
+            if (at <= (readUpTo[thread] ?: 0L)) return
+            readUpTo = readUpTo + (thread to at)
+            prefs.edit().putStringSet(pk(K_READ_UPTO), readUpTo.map { "${it.key}=${it.value}" }.toSet()).commit()
+        }
+    }
+
     fun bumpUnread(thread: String) {
         if (acct == null) return
         synchronized(unreadLock) {
@@ -1367,7 +1397,7 @@ object LocalStores {
     fun migrateLegacyToAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX).forEach { k ->
+        listOf(K_FAV, K_MUTE, K_ARCH, K_REMOVED, K_UNREAD, K_READ_UPTO, K_REACT_INBOX, K_REACTED_MSGS, K_MENTION_INBOX).forEach { k ->
             if (prefs.contains(k)) {
                 prefs.getStringSet(k, emptySet())?.let { e.putStringSet("$accountId.$k", it.toSet()) }
                 e.remove(k)
@@ -1587,6 +1617,7 @@ object LocalStores {
     private const val K_FONT_SCALE = "font_scale"
     private const val K_LOCK_GRACE = "lock_grace_seconds"
     private const val K_UNREAD = "unread"
+    private const val K_READ_UPTO = "read_upto"
     private const val K_GSKEYS = "gskeys"
     private const val K_ECONOMY = "economy_mode"
 
