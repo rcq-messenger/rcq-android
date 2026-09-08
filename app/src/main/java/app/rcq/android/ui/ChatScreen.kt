@@ -4424,11 +4424,10 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
         }
         AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo, onOpenAlbum)
         items.firstOrNull { it.body.isNotEmpty() }?.let { cap ->
-            EmoticonText(
-                cap.body, color = c.textPrimary, fontSize = 14.sp,
-                modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).background(if (first.fromMe) c.bubbleSelf else c.bubbleOther).padding(horizontal = 10.dp, vertical = 6.dp),
-                linksEnabled = linksEnabled,
-            )
+            // ⚠ The caption belongs to the item that CARRIES it, not to the
+            // tile the finger happened to land on: Edit has to open the text
+            // that exists.
+            MediaCaption(cap.body, first.fromMe, ALBUM_GRID_W, 12.dp, { onLongPress(cap) }, linksEnabled)
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -4455,7 +4454,7 @@ private fun AlbumGrid(
     onViewVideo: (VideoSource) -> Unit = {},
     onOpenAlbum: (Int) -> Unit = {},
 ) {
-    val maxW = 240.dp
+    val maxW = ALBUM_GRID_W
     val sp = 3.dp
     val half = (maxW - sp) / 2f
     val count = minOf(items.size, 4)
@@ -4719,11 +4718,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
         } else if (m.kind == "photo") {
             PhotoBubble(session, m, onLongPress, onViewImage)
             if (m.body.isNotEmpty()) {
-                EmoticonText(
-                    m.body, color = c.textPrimary, fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).background(if (m.fromMe) c.bubbleSelf else c.bubbleOther).padding(horizontal = 10.dp, vertical = 6.dp),
-                    linksEnabled = linksEnabled,
-                )
+                MediaCaption(m.body, m.fromMe, mediaBubbleMaxW(), 14.dp, onLongPress, linksEnabled)
             }
         } else if (m.kind == "poll") {
             // Retired ballot from an old peer. Takes no `session`: it makes no
@@ -4734,11 +4729,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
         } else if (m.kind == "video") {
             VideoBubble(session, m, onLongPress, onViewVideo)
             if (m.body.isNotEmpty()) {
-                EmoticonText(
-                    m.body, color = c.textPrimary, fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).background(if (m.fromMe) c.bubbleSelf else c.bubbleOther).padding(horizontal = 10.dp, vertical = 6.dp),
-                    linksEnabled = linksEnabled,
-                )
+                MediaCaption(m.body, m.fromMe, mediaBubbleMaxW(), 14.dp, onLongPress, linksEnabled)
             }
         } else if (m.kind == "voice") {
             VoiceBubble(session, m, onLongPress)
@@ -4868,6 +4859,9 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
 // capped, and a floor under both. Past the floor the picture IS cropped again,
 // on purpose — a sliver you cannot see anything in is worse than a crop.
 private val MEDIA_BUBBLE_MAX_W = 260.dp
+/** The album grid's own width. Its caption is capped to the same number so
+ *  the text can never be wider than the pictures above it. */
+private val ALBUM_GRID_W = 240.dp
 private val MEDIA_BUBBLE_MAX_H = 300.dp
 private val MEDIA_BUBBLE_MIN = 120.dp
 
@@ -4881,12 +4875,59 @@ private const val PHOTO_FALLBACK_RATIO = 1f
 private const val VIDEO_FALLBACK_RATIO = 16f / 9f
 
 /** Box (width to height) for media of aspect [ratio] = width / height. */
+/** A caption drawn as PART of its picture, not as a message beside it.
+ *
+ *  ⚠⚠ Three copies of the same four lines drew it before (photo, video and
+ *  album), each an `EmoticonText` with its own background, its own corners and
+ *  no gesture and no width cap at all. That produced all three halves of one
+ *  report (#954): a long comment ran wall to wall while the picture above it
+ *  stopped at 0.72 of the screen, the two read as two unrelated messages, and
+ *  a long press on the words did nothing because the only gesture in the pair
+ *  sat on the image. iOS and web have always wrapped both in one bubble that
+ *  carries the press.
+ *
+ *  [maxW] is the width the media itself took, so the text can never be wider
+ *  than the picture it belongs to, and [corner] matches that media's own
+ *  clip so no hairline of bubble colour shows at the corners.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MediaCaption(
+    text: String,
+    fromMe: Boolean,
+    maxW: Dp,
+    corner: Dp,
+    onLongPress: () -> Unit,
+    linksEnabled: Boolean = true,
+) {
+    val c = RcqTheme.colors
+    EmoticonText(
+        text, color = c.textPrimary, fontSize = 14.sp,
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .widthIn(max = maxW)
+            .clip(RoundedCornerShape(corner))
+            .background(if (fromMe) c.bubbleSelf else c.bubbleOther)
+            // The gesture goes OUTSIDE the padding so the whole bubble answers,
+            // not only the glyphs.
+            .combinedClickable(onClick = {}, onLongClick = onLongPress)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        linksEnabled = linksEnabled,
+    )
+}
+
+/** The width a media bubble may take. Its caption is capped to the same
+ *  number, so the two cannot drift apart. */
+@Composable
+private fun mediaBubbleMaxW(): Dp =
+    minOf(MEDIA_BUBBLE_MAX_W, (LocalConfiguration.current.screenWidthDp * 0.72f).dp)
+
 @Composable
 private fun mediaBubbleBox(ratio: Float): Pair<Dp, Dp> {
     // 0.72 of the screen, not the 0.86 a text bubble gets: a picture running
     // nearly edge to edge eats the gap that says who sent it, and left/right is
     // how you read that at a glance (tester #7, see MessageBubble).
-    val maxW = minOf(MEDIA_BUBBLE_MAX_W, (LocalConfiguration.current.screenWidthDp * 0.72f).dp)
+    val maxW = mediaBubbleMaxW()
     val r = ratio.takeIf { it.isFinite() && it > 0f }?.coerceIn(0.05f, 20f) ?: 1f
     var w = maxW
     var h = maxW / r

@@ -560,6 +560,12 @@ class Session(context: Context) {
     private val _groupMessages = MutableStateFlow<Map<Int, List<ChatMessage>>>(emptyMap())
     val groupMessages: StateFlow<Map<Int, List<ChatMessage>>> = _groupMessages.asStateFlow()
 
+    /** How many rows the queue re-served that the ratchet had already opened.
+     *  A handful per drain is the normal shape (the island queues what it also
+     *  delivers live); a number that climbs without bound means writes are
+     *  failing after a successful decrypt, which is otherwise invisible. */
+    private val duplicateIngests = java.util.concurrent.atomic.AtomicLong(0)
+
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
@@ -1667,7 +1673,31 @@ class Session(context: Context) {
             while (stillOn(ep)) {
                 delay(30_000)
                 if (!stillOn(ep)) return@launch
-                if (duressViewUp || _connected.value) continue
+                if (duressViewUp) continue
+                if (_connected.value) {
+                    // ⚠⚠ AND A SOCKET THAT ONLY BELIEVES IT IS ALIVE. The
+                    // branch above covers a socket that KNOWS it is down; the
+                    // case that kept losing messages is the other one. A
+                    // network switch (cellular <-> wifi) kills the connection
+                    // without a FIN, OkHttp's own ping takes up to ~40s to
+                    // notice, and until it does nothing here asks the island
+                    // for anything.
+                    //
+                    // That window is fatal for a CARBON specifically, and by
+                    // design: the island never pushes one (_NEVER_PUSH_TYPES
+                    // on the server), so there is no wake to fall back on. The
+                    // app is already in front of you, so no foreground event
+                    // fires either. Your own message from another device
+                    // simply never arrives, and the only cure is restarting
+                    // the app - exactly what #952 describes, network switch
+                    // and all.
+                    //
+                    // ensureAlive costs nothing when frames are flowing: it
+                    // returns immediately unless the socket has been silent
+                    // for longer than the window, and redials when it has.
+                    socket.ensureAlive(maxSilenceMs = 60_000)
+                    continue
+                }
                 runCatching { drainQueue() }
                 runCatching { drainGroupLog() }
             }
@@ -8586,9 +8616,15 @@ class Session(context: Context) {
             // drain, and after three drains it was WRITTEN OFF and acked away.
             // A row still waiting to be ingested at that moment goes with it.
             //
-            // `ingestGmsg` has had the rule right since the v=2 hardening and
-            // says so in as many words (see its getElse); the 1:1 path was
+            // `ingestGroup` has had the rule right since the v=2 hardening and
+            // says so in as many words (see its getOrElse); the 1:1 path was
             // simply missed. Same rule, same reason, same one line.
+            //
+            // ⚠ A duplicate now leaves no trace at all: it is not logged
+            // (logDecryptFailure returns early for it) and no longer books a
+            // strike. A write that fails SYSTEMATICALLY - a full disk, a
+            // corrupt database - would therefore pass silently, so count them.
+            if (it is DuplicateMessageException) duplicateIngests.incrementAndGet()
             why = if (it is DuplicateMessageException) null else it.javaClass.simpleName
         }
         return why
