@@ -1261,6 +1261,7 @@
         <item quantity="other">Отправляется %d файла…</item>
     </plurals>
     <string name="settings_sec_island">Этот остров</string>
+    <string name="settings_island_people">человек на этом острове</string>
     <string name="island_rules_title">Правила острова</string>
     <string name="how_title">Как это работает</string>
     <string name="how_q1">Кто может прочитать то, что я пишу?</string>

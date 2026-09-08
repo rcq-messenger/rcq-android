@@ -2259,6 +2259,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         MessageLongPressOverlay(
             session = session,
             m = m,
+            senderName = authorName(m),
             isSelf = isSelf,
             group = group,
             ownUin = ownUin,
@@ -3236,6 +3237,11 @@ private fun AttachSheet(
 private fun MessageLongPressOverlay(
     session: Session,
     m: ChatMessage,
+    /// Who wrote the held message, drawn over the stand-in. iOS has named it
+    /// since the overlay existed and Android did not, so the same gesture on
+    /// the same message in the same group answered "which message" on one
+    /// phone and "which message, from whom" on the other (founder, 08.09).
+    senderName: String,
     isSelf: Boolean,
     group: app.rcq.android.model.RcqGroup?,
     ownUin: Int,
@@ -3357,7 +3363,25 @@ private fun MessageLongPressOverlay(
                     }
                 }
                 // A compact stand-in for the pressed message, so the reader
-                // sees WHAT the menu acts on with the chat blurred behind.
+                // sees WHAT the menu acts on with the chat blurred behind, and
+                // the name of whoever wrote it over the top: in a busy group
+                // the bubble alone does not say who is about to be reported,
+                // replied to or blocked. Aligned to the side the bubble sits
+                // on, the way iOS draws it.
+                Column(
+                    horizontalAlignment = if (m.fromMe) Alignment.End else Alignment.Start,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                Text(
+                    senderName,
+                    color = c.accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    // A 30-character handle must not wrap to two lines and
+                    // push the action rows off a small screen.
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (m.kind == "text") {
                     Box(
                         Modifier
@@ -3400,6 +3424,7 @@ private fun MessageLongPressOverlay(
                             color = c.textPrimary, fontSize = 14.sp,
                         )
                     }
+                }
                 }
                 // The action rows: the exact Android set, order, conditions
                 // and callbacks the sheet had, just laid out as the iOS

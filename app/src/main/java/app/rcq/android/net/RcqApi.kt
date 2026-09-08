@@ -2389,6 +2389,22 @@ private class SealingBody(
         }.getOrNull()
     }
 
+    /** How many people live on [host]. Unauthenticated, because the island
+     *  publishes it: `/public/stats` is what the landing page counts with.
+     *
+     *  ⚠ THIS ISLAND, not RCQ. The number counts rows on the host it is asked,
+     *  so a self-hoster's dozen is a self-hoster's dozen. It belongs under the
+     *  island's own name for that reason and nowhere near an "About RCQ" title,
+     *  which is the move iOS made on 07.09. */
+    data class PublicStats(val user_count: Int = 0)
+
+    suspend fun islandPeople(host: String): Int? = withContext(Dispatchers.IO) {
+        runCatching {
+            RcqApi("https://$host", isPrimary = false)
+                .get("/public/stats", authed = false, PublicStats::class.java)
+        }.getOrNull()?.user_count?.takeIf { it > 0 }
+    }
+
         const val DEFAULT_HOST = "api.rcq.app"
         const val DEFAULT_BASE_URL = "https://$DEFAULT_HOST"
 

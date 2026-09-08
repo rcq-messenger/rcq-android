@@ -1402,4 +1402,21 @@
     <string name="invites_failed">Ada bir davet vermedi.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/sn</string>
+    <string name="backup_island_err_no_account">Bu adada anahtarınıza ait bir hesap yok, geçilecek bir yer de yok. Adayı kaldırıp yeniden ekleyin.</string>
+    <string name="backup_island_err_no_route">Adanın adresi bu ağda çözülmedi. Burada engelliyse RCQ rölelerini açıp yeniden deneyin.</string>
+    <string name="backup_island_err_said">Ada %1$s yanıtını verdi, geçiş gerçekleşmedi. Hiçbir şey değişmedi.</string>
+    <string name="file_read_failed">Bu dosya okunamadı. Başka birini deneyin ya da önce başka bir yere kopyalayın.</string>
+    <string name="gi_open">Açık grup</string>
+    <string name="group_join_body">Üye listesinde görüneceksiniz ve mesajlarını almaya başlayacaksınız.</string>
+    <string name="how_copy">Bu metni kopyala</string>
+    <string name="island_host_hint">sunucu adresi</string>
+    <string name="island_manual_entry">Bunun yerine adres gir</string>
+    <string name="island_manual_help">Varsayılan, herkese açık RCQ adasıdır. Bir kurumun adasını ya da kendi sunucunuzu gösterin.</string>
+    <string name="island_pick_title">Bir ada seçin</string>
+    <string name="island_reset_default">Varsayılana dön</string>
+    <string name="island_use">Bu adayı kullan</string>
+    <string name="media_load_failed">Yüklenemedi. Yeniden denemek için dokunun.</string>
+    <string name="room_return">Odaya dönmek için dokunun</string>
+    <string name="settings_island_people">bu adadaki kişi</string>
+    <string name="settings_sec_island">Bu ada</string>
 </resources>

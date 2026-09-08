@@ -1266,6 +1266,7 @@
         <item quantity="other">Sending %d files…</item>
     </plurals>
     <string name="settings_sec_island">This island</string>
+    <string name="settings_island_people">people on this island</string>
     <string name="island_rules_title">House rules</string>
     <string name="how_title">How this works</string>
     <string name="how_q1">Who can read what I send?</string>

@@ -875,6 +875,32 @@ private fun SettingsRoot(
                         )
                     },
                 ) { }
+                // ⚠ THIS ISLAND, not RCQ. `/public/stats` counts rows on the
+                // host it is asked, so under an "About RCQ" title a
+                // self-hoster's dozen would read as the size of the network.
+                // Here it sits under the island's own name and host, which is
+                // what it has always been counting (iOS did the same move on
+                // 07.09; the founder found the row missing here on 08.09).
+                //
+                // Absent, not zero, when the island did not answer: a headcount
+                // of 0 on an island you are demonstrably logged into is a lie,
+                // and a row that is simply not there is not.
+                val islandPeople by produceState<Int?>(initialValue = null, islandHost) {
+                    value = app.rcq.android.net.RcqApi.islandPeople(islandHost)
+                }
+                islandPeople?.let { people ->
+                    Divider()
+                    SettingsRow(
+                        Icons.Filled.Groups,
+                        stringResource(R.string.settings_island_people),
+                        // The whole number, grouped by the phone's locale, the
+                        // way iOS prints it with `.formatted()`. NOT
+                        // `compactCount`: "3.3K" is for a badge beside a name,
+                        // and this row has all the width it needs to say 3,351.
+                        value = java.text.NumberFormat.getIntegerInstance().format(people),
+                        chevron = false,
+                    ) { }
+                }
                 // How this island is trusted (design §5.3): through a
                 // certificate authority, or by the fingerprint pinned on this
                 // device, shown so it can be compared and copied as an

@@ -1406,4 +1406,21 @@
     <string name="invites_failed">Острів не видав запрошення.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/с</string>
+    <string name="backup_island_err_no_account">На цьому острові немає акаунта під ваш ключ, перемикатися нема на що. Приберіть острів і додайте заново.</string>
+    <string name="backup_island_err_no_route">Адреса острова не розв’язується в цій мережі. Якщо він тут заблокований, увімкніть релеї RCQ і спробуйте ще раз.</string>
+    <string name="backup_island_err_said">Острів відповів %1$s, тому перемикання не відбулося. Нічого не змінено.</string>
+    <string name="file_read_failed">Не вдалося прочитати цей файл. Спробуйте інший або спершу скопіюйте його в пам’ять телефона.</string>
+    <string name="gi_open">Відкрита група</string>
+    <string name="group_join_body">Ви з’явитеся у списку учасників і почнете отримувати її повідомлення.</string>
+    <string name="how_copy">Скопіювати цей текст</string>
+    <string name="island_host_hint">адреса сервера</string>
+    <string name="island_manual_entry">Ввести адресу вручну</string>
+    <string name="island_manual_help">За замовчуванням це спільний острів RCQ. Вкажіть острів організації або свій власний.</string>
+    <string name="island_pick_title">Виберіть острів</string>
+    <string name="island_reset_default">Повернути стандартний</string>
+    <string name="island_use">Вибрати цей острів</string>
+    <string name="media_load_failed">Не вдалося завантажити. Натисніть, щоб повторити.</string>
+    <string name="room_return">Натисніть, щоб повернутися до кімнати</string>
+    <string name="settings_island_people">людей на цьому острові</string>
+    <string name="settings_sec_island">Цей острів</string>
 </resources>

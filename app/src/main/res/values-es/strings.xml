@@ -1402,4 +1402,21 @@
     <string name="invites_failed">La isla no entregó ninguna invitación.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/s</string>
+    <string name="backup_island_err_no_account">Esta isla no tiene una cuenta para tu clave, así que no hay adónde cambiar. Quítala y añádela de nuevo.</string>
+    <string name="backup_island_err_no_route">La dirección de la isla no se resuelve en esta red. Si está bloqueada aquí, activa los relés de RCQ e inténtalo otra vez.</string>
+    <string name="backup_island_err_said">La isla respondió %1$s, así que el cambio no ocurrió. No cambió nada.</string>
+    <string name="file_read_failed">No se pudo leer ese archivo. Prueba con otro o cópialo antes a otro sitio.</string>
+    <string name="gi_open">Grupo abierto</string>
+    <string name="group_join_body">Aparecerás en su lista de miembros y empezarás a recibir sus mensajes.</string>
+    <string name="how_copy">Copiar este texto</string>
+    <string name="island_host_hint">dirección del servidor</string>
+    <string name="island_manual_entry">Escribir una dirección</string>
+    <string name="island_manual_help">Por defecto es la isla pública de RCQ. Apunta a la isla de una organización o a la tuya propia.</string>
+    <string name="island_pick_title">Elige una isla</string>
+    <string name="island_reset_default">Volver a la predeterminada</string>
+    <string name="island_use">Usar esta isla</string>
+    <string name="media_load_failed">No se pudo cargar. Toca para reintentar.</string>
+    <string name="room_return">Toca para volver a la sala</string>
+    <string name="settings_island_people">personas en esta isla</string>
+    <string name="settings_sec_island">Esta isla</string>
 </resources>

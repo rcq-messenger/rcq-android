@@ -1400,4 +1400,21 @@
     <string name="invites_failed">岛屿没有发出邀请。</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/秒</string>
+    <string name="backup_island_err_no_account">这座岛屿上没有对应你密钥的账号，无处可切。请移除它再重新添加。</string>
+    <string name="backup_island_err_no_route">这个网络无法解析该岛屿的地址。如果此处被屏蔽，请打开 RCQ 中继后重试。</string>
+    <string name="backup_island_err_said">岛屿返回了 %1$s，切换没有发生。什么都没有改变。</string>
+    <string name="file_read_failed">无法读取该文件。换一个，或者先把它复制到别处。</string>
+    <string name="gi_open">公开群组</string>
+    <string name="group_join_body">你会出现在成员列表里，并开始接收它的消息。</string>
+    <string name="how_copy">复制这段文字</string>
+    <string name="island_host_hint">服务器地址</string>
+    <string name="island_manual_entry">改为手动输入地址</string>
+    <string name="island_manual_help">默认是公共的 RCQ 岛屿。可以指向某个组织的岛屿，或你自己搭建的服务器。</string>
+    <string name="island_pick_title">选择一座岛屿</string>
+    <string name="island_reset_default">恢复默认</string>
+    <string name="island_use">使用这座岛屿</string>
+    <string name="media_load_failed">加载失败。点按重试。</string>
+    <string name="room_return">点按返回房间</string>
+    <string name="settings_island_people">这座岛屿上的人</string>
+    <string name="settings_sec_island">这座岛屿</string>
 </resources>
