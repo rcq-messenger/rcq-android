@@ -1380,7 +1380,7 @@
     <string name="reg_entry_required">进入这座岛屿需要付费。购买入场资格后，把拿到的代码粘贴在下方。</string>
     <string name="reg_invite_invalid">该代码未被接受。可能已被使用、已过期，或属于另一个岛屿。</string>
     <string name="ci_closed_island">这个岛屿是封闭的。要给那里的人写信，需要他本人给你的链接：他分享联系方式，或者先给你写信。</string>
-    <string name="island_entry_price">入场：%1$s</string>
+    <string name="island_entry_price">一次性 %1$s</string>
     <string name="island_entry_closed">封闭俱乐部</string>
     <string name="island_entry_buy">购买</string>
     <!-- Joining a closed island: the door, the code, and the counter of

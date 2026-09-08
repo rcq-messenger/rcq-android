@@ -1382,7 +1382,7 @@
     <string name="reg_entry_required">Bu adaya giriş ücretlidir. Girişi satın alın ve aldığınız kodu aşağıya yapıştırın.</string>
     <string name="reg_invite_invalid">Bu kod kabul edilmedi. Kullanılmış, süresi dolmuş veya başka bir adaya ait olabilir.</string>
     <string name="ci_closed_island">Bu ada kapalı. Oradaki birine yazmak için kişinin kendisinden bir bağlantı gerekir: kişiyi paylaşması ya da size önce yazması.</string>
-    <string name="island_entry_price">Giriş: %1$s</string>
+    <string name="island_entry_price">tek seferlik %1$s</string>
     <string name="island_entry_closed">Kapalı kulüp</string>
     <string name="island_entry_buy">satın al</string>
     <!-- Joining a closed island: the door, the code, and the counter of

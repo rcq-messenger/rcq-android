@@ -1382,7 +1382,7 @@
     <string name="reg_entry_required">La entrada a esta isla es de pago. Compra la entrada y pega abajo el código que recibas.</string>
     <string name="reg_invite_invalid">Ese código no fue aceptado. Puede estar usado, vencido o ser de otra isla.</string>
     <string name="ci_closed_island">Esta isla es cerrada. Para escribirle a alguien de ahí hace falta un enlace suyo: que comparta su contacto, o que te escriba primero.</string>
-    <string name="island_entry_price">Entrada: %1$s</string>
+    <string name="island_entry_price">%1$s una vez</string>
     <string name="island_entry_closed">Club cerrado</string>
     <string name="island_entry_buy">comprar</string>
     <!-- Joining a closed island: the door, the code, and the counter of

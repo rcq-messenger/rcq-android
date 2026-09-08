@@ -343,12 +343,27 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
         // fault the 44dp box below was built to end. The right slot is drawn
         // whether the island answered or not; the left one is its mirror, so
         // the name stays centred instead of sitting 24dp off to the left.
+        // ⚠⚠ EVERY RESERVED SIZE ON THIS CARD IS DERIVED FROM THE TEXT, not
+        // written in dp. The card's slots were 24dp and 44dp while the lines
+        // inside them were 11sp and 16sp, and sp grows with the reader's text
+        // size while dp does not: at the largest setting the door line was
+        // sliced through the middle, the description lost its second line, and
+        // the rules icon sat cramped against a title half again its size
+        // (founder, 08.09, with a screenshot). Same trap as #856/#894, where a
+        // screen's height was written in dp around text that was not.
+        //
+        // Deriving from `sp.toDp()` keeps the whole point of the fixed slots:
+        // every card computes the SAME number, so the pager still does not
+        // re-measure on a swipe (#736), and the number now follows the text.
+        val lineSlot = with(androidx.compose.ui.platform.LocalDensity.current) { 14.sp.toDp() }
+        val iconSlot = with(androidx.compose.ui.platform.LocalDensity.current) { 16.sp.toDp() * 1.5f }
+        val glyphSize = with(androidx.compose.ui.platform.LocalDensity.current) { 16.sp.toDp() * 0.94f }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Spacer(Modifier.size(24.dp))
+            Spacer(Modifier.size(iconSlot))
             Text(
                 name, color = c.textPrimary, fontSize = 16.sp, textAlign = TextAlign.Center,
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -359,7 +374,7 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
             // that opens an empty page is worse than no button at all.
             val rules = door?.rules
             Box(
-                Modifier.size(24.dp).then(
+                Modifier.size(iconSlot).then(
                     if (rules != null) {
                         Modifier.clip(CircleShape).clickable { onRules(name, rules) }
                     } else Modifier,
@@ -370,7 +385,7 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
                     Icons.Filled.Gavel,
                     contentDescription = stringResource(R.string.island_rules_title),
                     tint = c.accent,
-                    modifier = Modifier.size(15.dp),
+                    modifier = Modifier.size(glyphSize),
                 )
             }
         }
@@ -385,7 +400,9 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
         // то вниз, то вверх», #736). Every card now claims the same three
         // lines whether its island has anything to say or not.
         Spacer(Modifier.height(6.dp))
-        Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.TopCenter) {
+        // One door line plus two description lines, in whatever those three
+        // lines actually measure at this text size.
+        Box(Modifier.fillMaxWidth().height(lineSlot * 3 + 2.dp), contentAlignment = Alignment.TopCenter) {
             // ⚠⚠ The unreachable line lives INSIDE this box and TAKES THE PLACE
             // of the description. Not a row of its own, not a line above or
             // below: an extra line is a taller page, a taller page re-measures
@@ -413,7 +430,7 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
                 //
                 // 14dp and lineHeight 14sp on both texts: one door line plus two
                 // description lines is 42dp and fits the 44 the box promises.
-                Box(Modifier.height(14.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.height(lineSlot), contentAlignment = Alignment.Center) {
                     if (door != null) {
                         val buyUrl = door.buyUrl
                         val label = if (buyUrl != null) {

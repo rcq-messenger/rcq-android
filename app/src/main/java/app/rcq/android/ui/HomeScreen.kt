@@ -120,6 +120,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -2027,19 +2028,22 @@ private fun HomeHeader(
                 // includeFontPadding=false + tight line heights drop the built-in
                 // font leading that left a big gap between the nick and the UIN
                 // under it (founder: they should sit almost touching).
-                // ⚠ A FLOOR UNDER THE TARGET, not a decoration. This column is
-                // the way into your own profile, and it used to be exactly as
-                // wide as whatever was written in it: a short nick over a short
-                // number left a sliver between the flower and the badge that a
-                // finger could not find (#943). The floor only ever applies when
-                // the text is narrower than it, the nick is still capped at
-                // 150dp, and the column centres its own content, so nothing
-                // moves off centre.
+                // ⚠ THE TARGET IS GROWN WITH PADDING, NOT WITH A WIDTH FLOOR.
+                // #943 was a real complaint - a short nick over a short number
+                // left a sliver between the flower and the badge that a finger
+                // could not find - but the 132dp floor it was answered with
+                // centres its content, so a short nick sat in the middle of a
+                // wide empty column and the status flower was suddenly a
+                // centimetre away from the name it belongs to (founder, 08.09).
+                //
+                // Padding grows the same target without moving the text: 12dp
+                // either side and 10 above and below is a comfortable tap area
+                // on any phone, and the nick stays next to the flower whatever
+                // it says.
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onOpenProfile)
-                    .widthIn(min = 132.dp)
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))
@@ -2584,8 +2588,18 @@ private fun EmptyState(onAdd: () -> Unit, myUin: Int, session: Session, onOpenGr
         // Rooms to walk into, before anything about contacts: nobody arrives
         // with friends already here, and every new account used to be dropped
         // into one beta room for exactly this reason. Now it is a choice.
-        DiscoverGroupsRow(session, onOpenGroup)
-        StatusIcon(UserStatus.ONLINE, size = 44.dp)
+        //
+        // ⚠ ALSO under the search field in the Add window, and that is not a
+        // duplicate. This copy is for the first minute of an empty account; the
+        // other one is where it lives afterwards, because this whole screen
+        // disappears with the first contact added and used to take the only way
+        // to find a room with it (founder, 08.09).
+        // The 32dp this screen pads itself with is given back to the strip, so
+        // the cards run to the edges instead of being cut off short of them.
+        DiscoverGroupsRow(session, onOpenGroup, bleed = 32.dp)
+        // ⚠ No status flower over the title. The screen already says "no
+        // contacts yet" in words, and the glyph above that line was a picture
+        // of nothing in particular (founder, 08.09).
         Text(stringResource(R.string.home_empty_title), color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Text(stringResource(R.string.home_empty_body), color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
         CapsuleButton(stringResource(R.string.home_empty_cta), onClick = onAdd)
@@ -2609,7 +2623,7 @@ private fun EmptyState(onAdd: () -> Unit, myUin: Int, session: Session, onOpenGr
  *  island answered with something; an empty or failed answer draws nothing, so
  *  the screen never carries a heading over an empty strip. */
 @Composable
-private fun DiscoverGroupsRow(session: Session, onOpenGroup: (Int) -> Unit) {
+private fun DiscoverGroupsRow(session: Session, onOpenGroup: (Int) -> Unit, bleed: Dp = 0.dp) {
     val ctx = LocalContext.current
     val c = homeChrome()
     val scope = rememberCoroutineScope()
@@ -2622,9 +2636,23 @@ private fun DiscoverGroupsRow(session: Session, onOpenGroup: (Int) -> Unit) {
             stringResource(R.string.home_discover_title).uppercase(),
             color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium,
         )
+        // ⚠ The row is grown back out by [bleed] so it reaches the WINDOW'S
+        // edges through its parent's horizontal padding, and its own
+        // contentPadding puts the first card back on the text margin. Without
+        // this the cards were cut off short of the edge on both sides, which
+        // reads as a broken layout rather than as a strip you can scroll
+        // (founder, 08.09). Compose has no negative padding; measuring wider
+        // and placing left is the idiom.
+        val bleedPx = with(androidx.compose.ui.platform.LocalDensity.current) { bleed.roundToPx() }
         androidx.compose.foundation.lazy.LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = if (bleed > 0.dp) bleed else 2.dp),
+            modifier = if (bleedPx == 0) Modifier else Modifier.layout { measurable, constraints ->
+                val placeable = measurable.measure(
+                    constraints.copy(maxWidth = constraints.maxWidth + bleedPx * 2),
+                )
+                layout(placeable.width - bleedPx * 2, placeable.height) { placeable.place(-bleedPx, 0) }
+            },
         ) {
             items(rooms, key = { it.id }) { g ->
                 Column(
@@ -3239,6 +3267,15 @@ private fun AddContactDialog(
                             Text(stringResource(R.string.add_no_results), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
                         } else if (query.isEmpty()) {
                             Text(stringResource(R.string.add_search_prompt), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+                            // The rooms carousel, in the one window where
+                            // looking for people is what you came to do. It
+                            // used to live on the empty home screen alone, so
+                            // it vanished for good with the first contact
+                            // added; here it is always a tap away and it steps
+                            // aside the moment anything is typed, because this
+                            // whole branch is the empty-query one.
+                            SheetGap(4)
+                            DiscoverGroupsRow(session, onOpenGroup, bleed = 16.dp)
                         }
                     }
                 }

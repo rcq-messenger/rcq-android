@@ -1434,7 +1434,7 @@
     <string name="reg_entry_required">Entry to this island is paid. Buy entry, then paste the code you get below.</string>
     <string name="reg_invite_invalid">That code was not accepted. It may be used up, expired, or meant for another island.</string>
     <string name="ci_closed_island">This island is closed. To write to somebody there you need a link from them: a shared contact, or a message they sent you first.</string>
-    <string name="island_entry_price">Entry: %1$s</string>
+    <string name="island_entry_price">%1$s once</string>
     <string name="island_entry_closed">Closed club</string>
     <string name="island_entry_buy">buy</string>
     <!-- Joining a closed island: the door, the code, and the counter of
