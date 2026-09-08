@@ -1401,34 +1401,39 @@ class RcqApi(
     data class GroupPayload(val to_uin: Int, val payload: String)
     // Stage 2: `cls` mirrors the island's `_cls_for` for the group type (skdm /
     // sknack are critical, everything else content); an old island ignores it.
-    data class GroupSendBody(val group_id: Int, val envelope_type: String, val payloads: List<GroupPayload>, val cls: Int? = null)
+    /** An album's items share one random token and declare their count, so
+     *  the island's slowmode charges the album ONE slot instead of refusing
+     *  items 2..N with 429 (#950). Not the album id inside the envelope: the
+     *  island learns only that N posts belong together. */
+    data class Batch(val token: String, val size: Int)
+    data class GroupSendBody(val group_id: Int, val envelope_type: String, val payloads: List<GroupPayload>, val cls: Int? = null, val batch: String? = null, val batch_size: Int? = null)
 
     /** Group send: per-recipient fan-out (anonymous, like 1:1 sealed).
      *  [authed] attaches our bearer token — used ONLY for owner_only
      *  (broadcast) groups, where the server must verify the poster IS the
      *  owner. For normal 'all' groups it stays false so sealed sender keeps
      *  hiding which member sent the message. */
-    suspend fun sendGroupSealed(groupId: Int, payloads: List<GroupPayload>, envelopeType: String = "message", authed: Boolean = false): SendResponse =
+    suspend fun sendGroupSealed(groupId: Int, payloads: List<GroupPayload>, envelopeType: String = "message", authed: Boolean = false, batch: Batch? = null): SendResponse =
         withContext(Dispatchers.IO) {
             post(
                 "/messages/group-sealed",
-                gson.toJson(GroupSendBody(groupId, envelopeType, payloads, cls = SealedSender.messageClass(envelopeType))),
+                gson.toJson(GroupSendBody(groupId, envelopeType, payloads, cls = SealedSender.messageClass(envelopeType), batch = batch?.token, batch_size = batch?.size)),
                 authed = authed,
                 SendResponse::class.java,
             )
         }
 
-    data class GroupBroadcastBody(val group_id: Int, val envelope_type: String, val payload: String, val cls: Int? = null)
+    data class GroupBroadcastBody(val group_id: Int, val envelope_type: String, val payload: String, val cls: Int? = null, val batch: String? = null, val batch_size: Int? = null)
 
     /** Sender-keys encrypt-once group send: ONE ciphertext for the whole
      *  group. The server fans the same blob to every capable member. Always
      *  authed — the new endpoint enforces owner_only strictly (and an authed
      *  poster costs nothing for 'all' groups). */
-    suspend fun sendGroupBroadcast(groupId: Int, payload: String, envelopeType: String = "message"): SendResponse =
+    suspend fun sendGroupBroadcast(groupId: Int, payload: String, envelopeType: String = "message", batch: Batch? = null): SendResponse =
         withContext(Dispatchers.IO) {
             post(
                 "/messages/group-broadcast",
-                gson.toJson(GroupBroadcastBody(groupId, envelopeType, payload, cls = SealedSender.messageClass(envelopeType))),
+                gson.toJson(GroupBroadcastBody(groupId, envelopeType, payload, cls = SealedSender.messageClass(envelopeType), batch = batch?.token, batch_size = batch?.size)),
                 authed = true,
                 SendResponse::class.java,
             )
