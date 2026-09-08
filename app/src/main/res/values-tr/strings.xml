@@ -1397,4 +1397,6 @@
     <string name="invites_copy">Bağlantıyı kopyala</string>
     <string name="invites_once">Bir kez gösterilir. Ada kopyasını tutmaz: kopyalamadan kapatırsan davet boşa gider.</string>
     <string name="invites_failed">Ada bir davet vermedi.</string>
+    <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
+    <string name="file_download_speed">%s/sn</string>
 </resources>

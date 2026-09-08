@@ -7876,20 +7876,30 @@ class Session(context: Context) {
         class TooLargeLegacy(val bytes: Long) : MediaSource()
     }
 
-    /** How far the media currently being downloaded has got, `mediaId to
-     *  0f..1f`, or null when nothing is downloading. A 300 MB clip used to
-     *  fetch behind a bubble that showed absolutely nothing, which is half of
-     *  what "does not download" meant. */
-    private val _mediaDownload = MutableStateFlow<Pair<String, Float>?>(null)
-    val mediaDownload: StateFlow<Pair<String, Float>?> = _mediaDownload.asStateFlow()
+    /** What the media currently coming down looks like from outside: bytes so
+     *  far, the island's declared total (-1 when it did not say), and the pace
+     *  over the last three seconds (null until half a second of samples
+     *  exist). Null when nothing is downloading.
+     *
+     *  It used to be a bare `mediaId to 0f..1f`: enough for a ring, and the
+     *  ring was all the video bubble drew. A tester receiving a large FILE
+     *  asked for the speed (#901), and a document showed nothing at all while
+     *  it came down, so the flow now carries what a "12.3 MB / 48.1 MB ·
+     *  2.4 MB/s" line needs and the file bubble reads it too. */
+    class MediaDownload(val mediaId: String, val got: Long, val total: Long, val bytesPerSec: Long?) {
+        val fraction: Float? get() = if (total > 0) (got.toFloat() / total).coerceIn(0f, 1f) else null
+    }
+    private val _mediaDownload = MutableStateFlow<MediaDownload?>(null)
+    val mediaDownload: StateFlow<MediaDownload?> = _mediaDownload.asStateFlow()
 
     /**
      * Fetch a media blob in whatever shape it can actually be used in.
      *
      * Unlike [fetchImage] this never assumes the file fits: the download goes
-     * to disk as it arrives, and only then is the container inspected. Callers
-     * that can handle both shapes (the video path) use this; photo, voice and
-     * document bubbles are unchanged and still go through [fetchImage].
+     * to disk as it arrives, and only then is the container inspected. The
+     * video and the document bubbles use this (a document is the other thing
+     * that can be big, and the only way to show it coming down); photo and
+     * voice bubbles still go through [fetchImage].
      */
     suspend fun fetchMediaSource(
         mediaId: String,
@@ -7907,23 +7917,36 @@ class Session(context: Context) {
         val blobFile = cached ?: run {
             val dest = mediaBigFile(mediaId)
             val client = if (host != null) RcqApi("https://$host") else api
-            // Throttled to whole percents. The reader calls back every 64 KB,
-            // which for a 300 MB clip is five thousand writes to a flow the UI
-            // recomposes from; a bar cannot show more than a hundred positions
-            // anyway.
+            // Emitted on every whole percent OR every 250 ms, whichever comes
+            // first: the ring needs the former, the size and speed line the
+            // latter (one percent of a gigabyte is ten megabytes of silence).
+            // The reader calls back every 64 KB, and a flow the UI recomposes
+            // from must not see five thousand writes for one clip.
+            //
+            // Speed is bytes over a three-second window of (time, bytes)
+            // samples: neither the jitter of a single read nor the lag of a
+            // whole-transfer average.
+            val window = ArrayDeque<Pair<Long, Long>>()
             var lastPct = -1
+            var lastEmit = 0L
+            _mediaDownload.value = MediaDownload(mediaId, 0L, -1L, null)
             val ok = runCatching {
                 client.getBlobToFile(mediaId, dest, mediaDownloadCeilingBytes) { got, total ->
-                    if (total > 0) {
-                        val pct = ((got * 100) / total).toInt().coerceIn(0, 100)
-                        if (pct != lastPct) {
-                            lastPct = pct
-                            _mediaDownload.value = mediaId to pct / 100f
-                        }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    window.addLast(now to got)
+                    while (window.size > 1 && now - window.first().first > 3000L) window.removeFirst()
+                    val (t0, b0) = window.first()
+                    val speed = if (now - t0 >= 500L) (got - b0) * 1000L / (now - t0) else null
+                    val pct = if (total > 0) ((got * 100) / total).toInt() else -1
+                    if (pct != lastPct || now - lastEmit >= 250L) {
+                        lastPct = pct; lastEmit = now
+                        _mediaDownload.value = MediaDownload(mediaId, got, total, speed)
                     }
                 }
             }
-            _mediaDownload.value = null
+            // Only our own slot: two bubbles fetching at once must not clear
+            // each other's line.
+            _mediaDownload.update { if (it?.mediaId == mediaId) null else it }
             if (ok.isFailure) {
                 android.util.Log.w("RCQmedia", "streamed fetch of $mediaId failed", ok.exceptionOrNull())
                 return@withContext null
