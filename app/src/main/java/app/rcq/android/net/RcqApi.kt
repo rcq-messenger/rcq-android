@@ -1777,6 +1777,10 @@ class RcqApi(
          *  hand and which would be stale the day after a price changed. */
         val entry_price_cents: Int = 0,
         val entry_url: String = "",
+        /** How many accounts live on that island. 0 means the island did not
+         *  say (one older than the field, or one that has not counted yet), so
+         *  a card draws nothing rather than claiming an empty island. */
+        val user_count: Int = 0,
         val vault: Boolean = false,
         val vault_max_blob_bytes: Int = 0,
         val vault_max_slots: Int = 0,

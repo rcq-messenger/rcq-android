@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.rcq.android.BuildConfig
 import app.rcq.android.R
 import app.rcq.android.data.IslandCards
 import app.rcq.android.data.IslandCatalog
@@ -389,8 +390,23 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
                 )
             }
         }
+        // ⚠ The headcount rides on THIS line rather than taking one of its own.
+        // Every line on this card is measured (see the reserved box below), and
+        // an extra one would change the card's height, which is #736 all over
+        // again. The host line always exists and always has room.
+        //
+        // Absent until the island answers, and absent for an island older than
+        // the field: a card that says nothing is honest, a card that says 0 is
+        // not (founder, 09.09: a number makes a closed club read as a place).
+        val people = door?.people ?: 0
         Text(
-            island.region?.let { "${island.host} · $it" } ?: island.host,
+            buildString {
+                append(island.region?.let { "${island.host} · $it" } ?: island.host)
+                if (people > 0) {
+                    append(" · ")
+                    append(java.text.NumberFormat.getIntegerInstance().format(people))
+                }
+            },
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
         )
         // ⚠ A RESERVED box, not an optional block. Each page used to measure
@@ -499,6 +515,10 @@ internal class IslandDoor(
     /// that asked for itself would double the requests this deck already makes
     /// (one per opened card) for a string we have already been handed.
     val rules: String?,
+    /// How many people live there, or 0 when the island did not say. Carried
+    /// on the same reply as everything else here, for the same reason the
+    /// rules are (see above).
+    val people: Int = 0,
 )
 
 /// What the island says about its OWN door, or null while it has not answered.
@@ -542,10 +562,28 @@ private fun islandDoor(host: String): IslandDoor? {
         if (!closed) {
             door = IslandDoor(
                 ctx.getString(R.string.island_entry_open), closed = false, buyUrl = null, rules = rules,
+                people = caps.user_count,
             )
             return@LaunchedEffect
         }
-        val cents = caps.entry_price_cents
+        // ⚠⚠ IN THE PLAY BUILD, A PRICE ONLY FOR OUR OWN ISLAND, and this is a
+        // rule about Google rather than about taste. Entry to the flagship is
+        // something we will sell (through Play Billing when it lands), so
+        // naming its price is naming the price of something this app sells.
+        // Entry to somebody else's island is bought on their site, and a store
+        // build that prices a purchase it does not handle — and links out to
+        // it — is the shape both stores object to. iOS has drawn exactly this
+        // line since 07.09 (AddAccountSheet.label); this is its twin.
+        //
+        // The sideload build is unaffected: it shows every island's price and
+        // its buy link, because nobody's store rules apply to it.
+        //
+        // "Closed club" still shows for every closed island in both builds: it
+        // is not a price, it is the fact that tells a person they need a code,
+        // and without it the island looks broken rather than private.
+        val isOurs = host.equals(app.rcq.android.net.RcqApi.DEFAULT_HOST, ignoreCase = true)
+        val mayPrice = !BuildConfig.PLAY_STORE || isOurs
+        val cents = if (mayPrice) caps.entry_price_cents else 0
         val text = if (cents > 0) {
             val price = if (cents % 100 == 0) "$" + (cents / 100) else "$" + "%.2f".format(cents / 100.0)
             ctx.getString(R.string.island_entry_closed) + " · " + ctx.getString(R.string.island_entry_price, price)
@@ -554,8 +592,11 @@ private fun islandDoor(host: String): IslandDoor? {
         }
         // An island that set a price and no address gets the line without a
         // link, rather than a link somewhere we invented for it.
-        val url = caps.entry_url.trim().takeIf { it.startsWith("https://", ignoreCase = true) }
-        door = IslandDoor(text, closed = true, buyUrl = url, rules = rules)
+        // ⚠ And no link out of the store build at all, ours included: the price
+        // may be named there, the checkout may not be pointed at.
+        val url = caps.entry_url.trim()
+            .takeIf { !BuildConfig.PLAY_STORE && it.startsWith("https://", ignoreCase = true) }
+        door = IslandDoor(text, closed = true, buyUrl = url, rules = rules, people = caps.user_count)
     }
     return door
 }
