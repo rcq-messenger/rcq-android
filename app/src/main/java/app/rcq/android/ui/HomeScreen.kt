@@ -2027,7 +2027,19 @@ private fun HomeHeader(
                 // includeFontPadding=false + tight line heights drop the built-in
                 // font leading that left a big gap between the nick and the UIN
                 // under it (founder: they should sit almost touching).
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onOpenProfile).padding(horizontal = 6.dp, vertical = 4.dp),
+                // ⚠ A FLOOR UNDER THE TARGET, not a decoration. This column is
+                // the way into your own profile, and it used to be exactly as
+                // wide as whatever was written in it: a short nick over a short
+                // number left a sliver between the flower and the badge that a
+                // finger could not find (#943). The floor only ever applies when
+                // the text is narrower than it, the nick is still capped at
+                // 150dp, and the column centres its own content, so nothing
+                // moves off centre.
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onOpenProfile)
+                    .widthIn(min = 132.dp)
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(nickname, color = chrome.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)), modifier = Modifier.widthIn(max = 150.dp))

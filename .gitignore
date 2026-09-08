@@ -18,3 +18,7 @@ keystore.properties
 
 # Local release staging (large signed APKs — hosted at rcq.app/android/, not in git)
 release-v*/
+
+# Wrangler local cache: holds the Cloudflare account id and name of
+# whoever ran it. Never source.
+.wrangler/
