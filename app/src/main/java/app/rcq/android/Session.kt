@@ -5883,6 +5883,21 @@ class Session(context: Context) {
         return resp.new_uin
     }
 
+    /** What a failed take may be SHOWN as.
+     *
+     *  ⚠ A transport string is not a message to a person. `RcqApi.execute`
+     *  throws `IOException("HTTP <code>: <body>")`, and the screens print
+     *  `e.message` when they recognise nothing else, so an island that answered
+     *  500 put `HTTP 500: {"detail":"internal_error"}` on screen in red under
+     *  the person's own collection (founder, 08.09.2026). It says nothing, it
+     *  cannot be acted on, and it reads like the app broke rather than the
+     *  island. Anything with a status line in it is dropped here so the screen
+     *  falls back to its own sentence; a message the ISLAND wrote for a person
+     *  still comes through untouched.
+     */
+    private fun humanFailure(msg: String): String? =
+        if (msg.isBlank() || msg.startsWith("HTTP ") || msg.contains("\"detail\"")) null else msg
+
     /** Take [uin] from the UIN shop, moving this account onto it.
      *
      *  ⚠⚠ [switch] now defaults to TRUE, and false is refused by the island.
@@ -5915,7 +5930,7 @@ class Session(context: Context) {
                 msg.contains("collections_closed") -> PurchaseResult.Reserved
                 msg.contains("too_many_uins") -> PurchaseResult.TooMany
                 msg.contains("HTTP 409") -> PurchaseResult.Taken
-                else -> PurchaseResult.Other(msg)
+                else -> PurchaseResult.Other(humanFailure(msg))
             }
         }
         return applyTake(resp)
@@ -6038,7 +6053,8 @@ class Session(context: Context) {
         } catch (e: Exception) {
             endSelfMigration()
             val msg = e.message ?: ""
-            return if (msg.contains("HTTP 404")) PurchaseResult.NotOwned else PurchaseResult.Other(msg)
+            return if (msg.contains("HTTP 404")) PurchaseResult.NotOwned
+            else PurchaseResult.Other(humanFailure(msg))
         }
         return applyTake(resp)
     }
