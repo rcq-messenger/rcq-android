@@ -316,7 +316,7 @@ internal fun SectionHeader(
  * preview overlay, chat header, and group-info header.
  */
 @Composable
-internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, animated: Boolean = false) {
+internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, animated: Boolean = true) {
     GroupAvatarMedia(group?.avatarMediaId, group?.avatarMediaKey, session, size, glyphSize, host = group?.host, animated = animated)
 }
 
@@ -325,7 +325,7 @@ internal fun GroupAvatar(group: RcqGroup?, session: Session, size: Dp, glyphSize
  *  [animated]=true plays a GIF avatar (only used where ONE avatar is on screen,
  *  e.g. the chat header — list rows stay static first-frame to bound memory). */
 @Composable
-internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, host: String? = null, animated: Boolean = false) {
+internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size: Dp, glyphSize: Dp = size * 0.55f, host: String? = null, animated: Boolean = true) {
     val c = RcqTheme.colors
     val ctx = androidx.compose.ui.platform.LocalContext.current
     // Seeded from the memory cache rather than from null: see
@@ -373,8 +373,9 @@ internal fun GroupAvatarMedia(id: String?, key: String?, session: Session, size:
         contentAlignment = Alignment.Center,
     ) {
         when {
-            // Animated GIF avatar (chat header only) — pure-Java decoder, safe
-            // on every ROM; one instance so no list-wide churn.
+            // Animated GIF avatar — pure-Java decoder, safe on every ROM.
+            // Gated by the person's "Animated avatars" setting above, not by
+            // where it is drawn.
             animatableGif != null -> SafeAnimatedGif(animatableGif, Modifier.fillMaxSize())
             image != null -> Image(bitmap = image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             else -> Icon(Icons.Filled.Groups, null, tint = Color.White, modifier = Modifier.size(glyphSize))
@@ -403,7 +404,20 @@ internal fun PersonAvatar(
     session: Session,
     size: Dp,
     host: String? = null,
-    animated: Boolean = false,
+    /** ⚠⚠ TRUE by default since 08.09, and it used to be false.
+     *
+     *  A moving avatar was switched on at five call sites out of twenty, so a
+     *  GIF avatar moved in the chat header and in a profile card and sat still
+     *  in the contact list, the home header, the group carousel and every
+     *  sheet. iOS animates all of them, so the same account was alive on one
+     *  phone and frozen on the other (founder, 08.09).
+     *
+     *  The original reason for the opt-in was list churn, and it is answered by
+     *  the thing that already exists: the person's own "Animated avatars"
+     *  switch, which Economy mode turns off with everything else. That is the
+     *  gate below. A per-call-site default is not a performance policy, it is
+     *  nineteen chances to forget. */
+    animated: Boolean = true,
     crossIsland: Boolean = false,
     onStatusClick: (() -> Unit)? = null,
     /** Tap on the PICTURE itself, for a caller that can open it full screen
@@ -675,7 +689,7 @@ internal fun BadgeInfoSheet(kind: String, onDismiss: () -> Unit) {
         ),
         label = "alpha",
     )
-    androidx.compose.material3.ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgPrimary,
         dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle(color = c.divider) },

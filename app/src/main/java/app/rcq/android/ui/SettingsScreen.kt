@@ -1182,10 +1182,9 @@ private fun SettingsRoot(
                     .simpleVerticalScrollbar(aboutScroll, c.textSecondary),
             ) {
                 Text(stringResource(R.string.cs_about_version, appVersion(context)), color = c.textMono, fontSize = 13.sp)
-                Text(stringResource(R.string.cs_about_features), color = c.textSecondary, fontSize = 12.sp)
-                // "Open source" was a claim with nowhere to go. The repo is
-                // public, and the one place a person looks for it is the line
-                // that already says the version.
+                // ⚠ No "Open source." line above the link. It was a claim with
+                // nowhere to go, and the link directly under it already says
+                // the same thing and goes somewhere (founder, 08.09).
                 val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                 Text(
                     stringResource(R.string.cs_about_source),
@@ -1217,7 +1216,14 @@ private fun SettingsRoot(
                         modifier = Modifier.clickable { uriHandler.openUri("https://rcq.app/terms") },
                     )
                 }
-                Divider()
+                // ⚠ NO DIVIDER HERE. The `Divider()` in this file is the
+                // SETTINGS-ROW one: it carries `padding(start = 48.dp)` so it
+                // lines up with a row's text past its icon column. This sheet
+                // has no icon column, so the line started a centimetre in from
+                // the left and ran to the right edge, which is exactly the
+                // founder's "crooked line, and what is it even for" (08.09).
+                // A gap says the same thing and cannot be crooked.
+                SheetGap(4)
                 val active = downloadState as? app.rcq.android.net.UpdateChecker.DownloadState.Active
                 // The Play build updates through Play: no check here, or it says
                 // "latest" about a store it never asked.

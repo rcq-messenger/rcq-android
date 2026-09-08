@@ -60,6 +60,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -3183,7 +3185,7 @@ private fun AttachSheet(
     val refuseLinks = {
         android.widget.Toast.makeText(context, context.getString(R.string.chat_links_off), android.widget.Toast.LENGTH_SHORT).show()
     }
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
     ) {
@@ -4444,7 +4446,13 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
             ) {
                 SenderAvatar(senderAvatarId, senderAvatarKey, session, 15.dp)
                 Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                senderBadge?.let { Spacer(Modifier.width(3.dp)); BadgeMark(it, size = 11.dp) }
+                // ⚠ NO Spacer. This Row already arranges its children with
+                // `spacedBy(5.dp)`, and a Spacer is a CHILD: the gap between
+                // the nick and the mark came out 5 + 3 + 5 = 13dp, two and a
+                // half times the gap between the avatar and the nick, so the
+                // mark read as floating away from the name it belongs to
+                // (founder, 08.09; iOS spaces its HStack once and looks right).
+                senderBadge?.let { BadgeMark(it, size = 11.dp) }
             }
         }
         AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo, onOpenAlbum)
@@ -4735,7 +4743,13 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 // a picture: without one the line stays what it always was.
                 SenderAvatar(senderAvatarId, senderAvatarKey, session, 15.dp)
                 Text(senderName, color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                senderBadge?.let { Spacer(Modifier.width(3.dp)); BadgeMark(it, size = 11.dp) }
+                // ⚠ NO Spacer. This Row already arranges its children with
+                // `spacedBy(5.dp)`, and a Spacer is a CHILD: the gap between
+                // the nick and the mark came out 5 + 3 + 5 = 13dp, two and a
+                // half times the gap between the avatar and the nick, so the
+                // mark read as floating away from the name it belongs to
+                // (founder, 08.09; iOS spaces its HStack once and looks right).
+                senderBadge?.let { BadgeMark(it, size = 11.dp) }
             }
         }
         if (groupLinkId != null) {
@@ -4781,18 +4795,34 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     ) {
                         SenderAvatar(senderAvatarId, senderAvatarKey, session, 16.dp)
                         Text(senderName, color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        senderBadge?.let { Spacer(Modifier.width(3.dp)); BadgeMark(it, size = 12.dp) }
+                        // See the note above: the Row's own `spacedBy` is the
+                        // whole gap, a Spacer on top of it is a third one.
+                        senderBadge?.let { BadgeMark(it, size = 12.dp) }
                     }
                 }
                 if (m.replyToSnippet != null) {
                     val tappable = m.replyToId != null && onTapReply != null
-                    Column(
-                        Modifier.padding(bottom = 4.dp).clip(RoundedCornerShape(6.dp)).background(c.accent.copy(alpha = 0.14f))
+                    // ⚠ A BAR DOWN THE LEADING EDGE, not a tint alone. The tint
+                    // is 14% accent, which on a coloured bubble is a barely
+                    // different shade of the same colour: people were reading
+                    // the quote as the first two lines of the message and
+                    // answering the wrong thing (founder, 08.09 - "people do
+                    // not understand quotes; WhatsApp colours them"). The bar
+                    // is the part every messenger has in common and the part
+                    // that survives a dark theme, a coloured bubble and a
+                    // colour-blind reader, because it is a SHAPE.
+                    Row(
+                        Modifier.padding(bottom = 4.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(c.accent.copy(alpha = 0.14f))
                             .then(if (tappable) Modifier.clickable { onTapReply!!.invoke(m.replyToId!!) } else Modifier)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .height(IntrinsicSize.Min),
                     ) {
-                        Text(replyAuthorOverride ?: m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        Text(m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(Modifier.width(3.dp).fillMaxHeight().background(c.accent))
+                        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Text(replyAuthorOverride ?: m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text(m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 // #2: collapse a very long body to ~14 lines with "Показать

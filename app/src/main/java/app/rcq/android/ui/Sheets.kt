@@ -62,7 +62,7 @@ fun RcqSheet(
     content: @Composable () -> Unit,
 ) {
     val c = RcqTheme.colors
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
         sheetState = rememberRcqSheetState(),

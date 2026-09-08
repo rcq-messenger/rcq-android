@@ -79,14 +79,23 @@
              pictures until a restart. That is the whole of #831's "фотки
              пришли получателю, но отправитель их не видит".
              singleTask keeps one instance and routes the share through
-             onNewIntent, which this activity already handles. -->
+             onNewIntent, which this activity already handles.
+
+             ⚠ windowSoftInputMode carries stateUnchanged, not just
+             adjustResize. Without it the system decides the keyboard's state
+             when this activity comes back to the front, and it decides to
+             restore it: put the cursor in the composer, swipe the keyboard
+             away, switch apps, come back, and the keyboard is up again over
+             the chat you wanted to read (report #953, vss, 08.09). The field
+             still has focus and a tap still opens the keyboard; the system
+             simply stops opening it on our behalf. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:theme="@style/Theme.RCQ"
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout|uiMode|density"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize|stateUnchanged">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

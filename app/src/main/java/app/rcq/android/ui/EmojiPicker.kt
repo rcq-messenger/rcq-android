@@ -97,7 +97,7 @@ internal fun EmojiPickerDialog(onDismiss: () -> Unit) {
     // hardcodes bgSecondary and wraps its content in a scroller of its own,
     // and this window needs bgPrimary plus a grid that scrolls itself. The
     // state and the insets are the two mandatory house pieces (#542/#543/#546).
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberRcqSheetState(),
         contentWindowInsets = rcqSheetInsets,

@@ -2965,7 +2965,7 @@ private fun AddContactDialog(
     // The reverted attempt is not in the tree on purpose: half-working code on
     // a surface this fragile is worse than none. `skipPartiallyExpanded` is
     // still not the answer, because the half-open opening position IS #524.
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
     ) {
@@ -3386,7 +3386,7 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
     // ⚠ A sheet is a window of its own and does not move for the keyboard by
     // itself — see [rememberRcqSheetState] / [rcqSheetInsets] in Sheets.kt for
     // why both of these are mandatory on anything that takes typing.
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
         sheetState = rememberRcqSheetState(),
@@ -3618,7 +3618,7 @@ private fun CreateGroupDialog(contacts: List<Contact>, onCreate: (String, List<C
     // The outer scroll is what keeps "Create" reachable once the keyboard has
     // taken half the screen; the member list keeps its own (capped) scroll, and
     // hands the gesture on when it runs out.
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
         sheetState = rememberRcqSheetState(),
@@ -3681,7 +3681,7 @@ internal fun ReportDialog(name: String, onSubmit: (String) -> Unit, onDismiss: (
     // ⚠ Sheet state + insets: see [rememberRcqSheetState] / [rcqSheetInsets].
     // This is a report — prose, several lines of it — so it is exactly the sheet
     // that used to sink a line at a time as the reason re-wrapped (#546).
-    ModalBottomSheet(
+    RcqModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = c.bgSecondary,
         sheetState = rememberRcqSheetState(),
