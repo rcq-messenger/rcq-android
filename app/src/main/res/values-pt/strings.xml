@@ -904,6 +904,7 @@
     <string name="chat_retry">Tentar de novo</string>
     <string name="chat_delete_all">Apagar para todos</string>
     <string name="chat_delete_me">Apagar para mim</string>
+    <string name="chat_deleted">Mensagem apagada</string>
     <string name="chat_edit_title">Editar mensagem</string>
     <string name="chat_edited">editada</string>
     <string name="chat_cross_island_pending">Esta pessoa está em outra ilha. Sua primeira mensagem chega lá como um pedido de conexão: nem mensagens nem chamadas passam até ela aceitar.</string>

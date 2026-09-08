@@ -904,6 +904,7 @@
     <string name="chat_retry">Tekrar dene</string>
     <string name="chat_delete_all">Herkesten sil</string>
     <string name="chat_delete_me">Bende sil</string>
+    <string name="chat_deleted">Mesaj silindi</string>
     <string name="chat_edit_title">Mesajı düzenle</string>
     <string name="chat_edited">düzenlendi</string>
     <string name="chat_cross_island_pending">Bu kişi başka bir adada. İlk mesajın oraya bağlanma isteği olarak ulaşır: kabul edene kadar ne mesaj ne arama geçer.</string>

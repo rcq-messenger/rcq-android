@@ -940,6 +940,7 @@
     <string name="chat_retry">Retry</string>
     <string name="chat_delete_all">Delete for everyone</string>
     <string name="chat_delete_me">Delete for me</string>
+    <string name="chat_deleted">Message deleted</string>
     <string name="chat_edit_title">Edit message</string>
     <string name="chat_edited">edited</string>
     <string name="chat_cross_island_pending">This person is on another island. Your first message arrives there as a request to connect: neither messages nor calls go through until they accept it.</string>

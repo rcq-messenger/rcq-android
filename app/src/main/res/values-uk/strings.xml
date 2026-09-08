@@ -904,6 +904,7 @@
     <string name="chat_retry">Повторити</string>
     <string name="chat_delete_all">Видалити в усіх</string>
     <string name="chat_delete_me">Видалити в себе</string>
+    <string name="chat_deleted">Повідомлення видалено</string>
     <string name="chat_edit_title">Редагування повідомлення</string>
     <string name="chat_edited">змінено</string>
     <string name="chat_cross_island_pending">Ця людина на іншому острові. Твоє перше повідомлення приходить туди як запит на листування: ні повідомлення, ні дзвінки не пройдуть, поки вона його не прийме.</string>

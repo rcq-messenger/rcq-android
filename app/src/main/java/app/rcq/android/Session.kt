@@ -5999,6 +5999,28 @@ class Session(context: Context) {
         return if (added) RestoreInsert.ADDED else RestoreInsert.ALREADY_HERE
     }
 
+    /** Which of these message ids this device has a DELETE on record for.
+     *
+     *  ⚠ Reads `deleted_ids`, the hidden row `MessageDb.delete` leaves behind so
+     *  a redelivered copy is not filed as a new unread one (#415). That table is
+     *  the only memory a deleted message leaves here, and it is exactly what a
+     *  reply quote needs: a quote carries a COPY of the words in
+     *  `reply_snippet` on the replying row, so deleting the original leaves its
+     *  text alive in every quote of it, which is the one place it survived the
+     *  delete (report #947, vss).
+     *
+     *  An id that is absent means this device never had that message, which is
+     *  NOT the same as deleted: those quotes keep their snippet.
+     *
+     *  Off the main thread: one indexed lookup per id, and the caller asks only
+     *  about ids a loaded thread actually quotes. */
+    suspend fun deletedAmong(ids: Collection<String>): Set<String> {
+        if (ids.isEmpty()) return emptySet()
+        return withContext(Dispatchers.IO) {
+            ids.filterTo(mutableSetOf()) { runCatching { db.isDeleted(it) }.getOrDefault(false) }
+        }
+    }
+
     /** Re-seed the in-memory threads from the database.
      *
      *  ⚠ The chat screens do not read the database, they read the flows below,

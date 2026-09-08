@@ -904,6 +904,7 @@
     <string name="chat_retry">Reintentar</string>
     <string name="chat_delete_all">Eliminar para todos</string>
     <string name="chat_delete_me">Eliminar para mí</string>
+    <string name="chat_deleted">Mensaje eliminado</string>
     <string name="chat_edit_title">Editar el mensaje</string>
     <string name="chat_edited">editado</string>
     <string name="chat_cross_island_pending">Esta persona está en otra isla. Tu primer mensaje llega allí como una solicitud para conectar: ni los mensajes ni las llamadas pasan hasta que la acepte.</string>

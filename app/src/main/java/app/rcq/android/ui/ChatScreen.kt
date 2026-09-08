@@ -571,6 +571,21 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
     }
     val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
+    // ⚠ WHICH QUOTED MESSAGES ARE GONE. A reply carries a COPY of the words in
+    // `reply_snippet` on the replying row, so deleting the original leaves its
+    // text alive in every quote of it — the one place it survived the delete
+    // (report #947, vss). The only memory a deleted message leaves on this
+    // device is its id in `deleted_ids`, the hidden row that stops a
+    // redelivered copy being filed as new (#415), so that is what this asks.
+    //
+    // Ids the loaded thread still HAS are answered from the thread itself and
+    // never reach the database; an id that is in neither means this device
+    // never had that message, which is not the same as deleted, and those
+    // quotes keep their snippet.
+    val quotedGone = remember(messages) { messages.mapNotNull { it.replyToId }.toSet() - messages.mapTo(HashSet()) { it.id } }
+    val deletedQuoted by produceState(initialValue = emptySet<String>(), quotedGone) {
+        value = runCatching { session.deletedAmong(quotedGone) }.getOrDefault(emptySet())
+    }
     // Where reading stopped last time (founder batch item 13a, iOS parity):
     // (rows-from-end, first-visible pixel offset), or null when the thread was
     // last left at the bottom. The unread divider WINS over it; from-the-END
@@ -1821,6 +1836,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 senderAvatarId = senderPic?.avatarMediaId,
                                 senderAvatarKey = senderPic?.avatarMediaKey,
                                 replyAuthorOverride = if (row.replyMine) youLabel else null,
+                                replyTargetDeleted = m.replyToId != null && m.replyToId in deletedQuoted,
                                 onRetry = { scope.launch { runCatching { session.resend(m) } } },
                                 onLongPress = { actionMsg = m },
                                 onOpenGroup = onOpenGroup,
@@ -4694,7 +4710,7 @@ private fun SwipeToReply(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, linksEnabled: Boolean = true) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, replyTargetDeleted: Boolean = false, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -4821,7 +4837,19 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                         Box(Modifier.width(3.dp).fillMaxHeight().background(c.accent))
                         Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Text(replyAuthorOverride ?: m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Text(m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (replyTargetDeleted) {
+                                // Italic and nothing else: the words are gone
+                                // from the chat, and this quote was the one
+                                // place they survived it.
+                                Text(
+                                    stringResource(R.string.chat_deleted),
+                                    color = c.textSecondary, fontSize = 12.sp,
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            } else {
+                                Text(m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }

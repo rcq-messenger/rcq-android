@@ -904,6 +904,7 @@
     <string name="chat_retry">重试</string>
     <string name="chat_delete_all">为所有人删除</string>
     <string name="chat_delete_me">仅为我删除</string>
+    <string name="chat_deleted">消息已删除</string>
     <string name="chat_edit_title">编辑消息</string>
     <string name="chat_edited">已编辑</string>
     <string name="chat_cross_island_pending">这个人在另一个岛上。你的第一条消息会作为好友请求送达那里：在对方接受之前，消息和通话都无法接通。</string>
