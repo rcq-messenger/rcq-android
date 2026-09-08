@@ -1447,4 +1447,6 @@
     <string name="invites_copy">Copy the link</string>
     <string name="invites_once">Shown once. The island keeps no copy of it: close this without copying and the invite is spent on nothing.</string>
     <string name="invites_failed">The island did not give out an invite.</string>
+    <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
+    <string name="file_download_speed">%s/s</string>
 </resources>

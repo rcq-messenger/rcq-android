@@ -1395,4 +1395,6 @@
     <string name="invites_copy">复制链接</string>
     <string name="invites_once">只显示一次。岛屿不保留副本：不复制就关闭，这个邀请就白白用掉了。</string>
     <string name="invites_failed">岛屿没有发出邀请。</string>
+    <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
+    <string name="file_download_speed">%s/秒</string>
 </resources>

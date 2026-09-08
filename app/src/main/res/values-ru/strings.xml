@@ -1442,4 +1442,6 @@
     <string name="invites_copy">Скопировать ссылку</string>
     <string name="invites_once">Показывается один раз. Остров копию не хранит: закроете, не скопировав, и приглашение потрачено впустую.</string>
     <string name="invites_failed">Остров не выдал приглашение.</string>
+    <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
+    <string name="file_download_speed">%s/с</string>
 </resources>

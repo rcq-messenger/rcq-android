@@ -1401,4 +1401,6 @@
     <string name="invites_copy">Скопіювати посилання</string>
     <string name="invites_once">Показується один раз. Острів копії не зберігає: закриєте, не скопіювавши, і запрошення витрачено намарно.</string>
     <string name="invites_failed">Острів не видав запрошення.</string>
+    <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
+    <string name="file_download_speed">%s/с</string>
 </resources>

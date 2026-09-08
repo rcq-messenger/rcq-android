@@ -5571,11 +5571,39 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
     val isCurrent = AudioPlayer.playingId == m.id
     val loading = AudioPlayer.loadingId == m.id
 
+    // ⚠ Through the streamed path, not [Session.fetchImage]: that is the one
+    // that writes to disk as it arrives and feeds [Session.mediaDownload], so
+    // a document coming down can be SEEN coming down. A tester receiving a
+    // large file asked how fast it was going (#901); until now the row did
+    // nothing at all until the bytes were in, and nothing at all if they
+    // never came.
+    val download by session.mediaDownload.collectAsState()
+    val dl = download?.takeIf { it.mediaId == m.mediaId }
+    var fetching by remember(m.id) { mutableStateOf(false) }
+    // Busy while THIS tap runs, or while the session says the blob is coming
+    // down: a row scrolled away and back loses `fetching`, not the flow.
+    val busy = fetching || dl != null
+    val failToast = stringResource(R.string.media_fetch_failed)
+    /** The document as a plaintext writer, whatever shape it came in; null
+     *  after a toast when it could not be fetched. */
+    suspend fun fetchWriter(): ((java.io.OutputStream) -> Boolean)? {
+        val mid = m.mediaId ?: return null
+        val key = m.mediaKey ?: return null
+        fetching = true
+        val src = try {
+            session.fetchMediaSource(mid, key, m.groupId?.let { session.groupHost(it) })
+        } finally {
+            fetching = false
+        }
+        return when (src) {
+            is Session.MediaSource.InMemory -> { out -> out.write(src.bytes); true }
+            is Session.MediaSource.Streamed -> { out -> app.rcq.android.crypto.MediaStream.streamTo(src.file, src.key, out) }
+            else -> { android.widget.Toast.makeText(context, failToast, android.widget.Toast.LENGTH_LONG).show(); null }
+        }
+    }
     val openExternally = {
-        val mid = m.mediaId; val key = m.mediaKey
-        if (mid != null && key != null) scope.launch {
-            val bytes = session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) })
-            if (bytes != null) openFile(context, bytes, m.fileName ?: "file", m.fileMime ?: "application/octet-stream")
+        if (!busy) scope.launch {
+            fetchWriter()?.let { openFile(context, it, m.fileName ?: "file", m.fileMime ?: "application/octet-stream") }
         }
         Unit
     }
@@ -5641,6 +5669,12 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
                     )
                 }
             }
+        } else if (busy) {
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                val f = dl?.fraction
+                if (f != null) CircularProgressIndicator(progress = { f }, color = c.accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                else CircularProgressIndicator(color = c.accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+            }
         } else {
             Icon(Icons.Filled.Description, null, tint = c.accent, modifier = Modifier.size(24.dp))
         }
@@ -5684,6 +5718,19 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
                         fontSize = 11.sp,
                     )
                 }
+            } else if (dl != null) {
+                // "12.3 MB / 48.1 MB · 2.4 MB/s" while it comes down. The
+                // total is what the island declared, or the row's own size
+                // when it did not; the speed appears once half a second of
+                // samples exist and is a three-second average, so it reads as
+                // a number rather than a flicker.
+                val total = if (dl.total > 0) dl.total else (m.fileSize ?: 0L)
+                val speed = dl.bytesPerSec
+                val line = buildString {
+                    append(formatFileSize(dl.got)); append(" / "); append(formatFileSize(total))
+                    if (speed != null) { append(" · "); append(stringResource(R.string.file_download_speed, formatFileSize(speed))) }
+                }
+                Text(line, color = c.textSecondary, fontSize = 11.sp)
             } else {
                 Text(formatFileSize(m.fileSize ?: 0L), color = c.textSecondary, fontSize = 11.sp)
             }
@@ -5760,7 +5807,7 @@ private fun VideoBubble(session: Session, m: ChatMessage, onLongPress: () -> Uni
     // that it started, and how far it has got.
     var fetching by remember(m.id) { mutableStateOf(false) }
     val download by session.mediaDownload.collectAsState()
-    val progress = download?.takeIf { it.first == m.mediaId }?.second
+    val progress = download?.takeIf { it.mediaId == m.mediaId }?.fraction
     var revealed by remember(m.id) { mutableStateOf(false) }
     val hidden = m.spoiler && !revealed
     val thumbBmp = remember(m.id) {

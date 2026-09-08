@@ -1397,4 +1397,6 @@
     <string name="invites_copy">Copiar o link</string>
     <string name="invites_once">Aparece uma única vez. A ilha não guarda cópia: se fechar sem copiar, o convite foi gasto à toa.</string>
     <string name="invites_failed">A ilha não entregou nenhum convite.</string>
+    <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
+    <string name="file_download_speed">%s/s</string>
 </resources>
