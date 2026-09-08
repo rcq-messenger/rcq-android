@@ -95,12 +95,23 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
     var selling by remember { mutableStateOf(false) }
     val genericMsg = stringResource(R.string.uin_shop_error_generic)
 
+    // ⚠ A transport string is not a message to a person. Every failure below
+    // used to print `Throwable.message`, which for an island answering 500 is
+    // the literal `HTTP 500: {"detail":"internal_error"}` — shown in red under
+    // the person's own collection (founder, 08.09.2026). It says nothing they
+    // can act on and reads like the app broke. A sentence the ISLAND wrote for
+    // a person still comes through; anything carrying a status line does not.
+    fun shown(e: Throwable): String {
+        val m = e.message.orEmpty()
+        return if (m.isBlank() || m.startsWith("HTTP ") || m.contains("\"detail\"")) genericMsg else m
+    }
+
     suspend fun reload() {
         loading = true
         error = null
         runCatching { session.myUins() }
             .onSuccess { data = it }
-            .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+            .onFailure { error = shown(it) }
         loading = false
     }
 
@@ -110,7 +121,7 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
         releasing = uin
         scope.launch {
             runCatching { session.releaseUin(uin) }
-                .onFailure { error = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+                .onFailure { error = shown(it) }
             releasing = null
             // Reload rather than dropping the row locally: the server is the
             // one that knows whether the release actually happened.
@@ -128,7 +139,7 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
             // reason is kept and put back.
             var failure: String? = null
             runCatching { session.unlistUin(uin) }
-                .onFailure { failure = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+                .onFailure { failure = shown(it) }
             reload()
             failure?.let { error = it }
         }
@@ -145,7 +156,7 @@ fun MyUinsScreen(session: Session, onBack: () -> Unit, onActivated: (Int) -> Uni
         scope.launch {
             var failure: String? = null
             runCatching { session.listUin(target, cents, wallet) }
-                .onFailure { failure = it.message?.takeIf { m -> m.isNotBlank() } ?: genericMsg }
+                .onFailure { failure = shown(it) }
             selling = false
             // ⚠ The sheet stays open on a refusal. Closing it discarded what
             // the person typed and said nothing, so the only way to learn the
