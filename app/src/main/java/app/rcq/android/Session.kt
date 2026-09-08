@@ -8575,7 +8575,21 @@ class Session(context: Context) {
             }
         }.onFailure {
             logDecryptFailure(payloadB64, it)
-            why = it.javaClass.simpleName
+            // ⚠⚠ A DUPLICATE IS DONE, NOT FAILED, and this line is why messages
+            // kept disappearing (#952, and the same complaint before it). The
+            // island deposits every 1:1 message in the queue AND pushes it down
+            // the live socket; the socket path ingests it and acks nothing (only
+            // the drain acks), so the very next drain re-serves that row, the
+            // ratchet says "I have opened this one" with DuplicateMessageException,
+            // and this counted it as a failure. The row was then never acked, the
+            // cursor pinned below it, every row behind it was re-served on every
+            // drain, and after three drains it was WRITTEN OFF and acked away.
+            // A row still waiting to be ingested at that moment goes with it.
+            //
+            // `ingestGmsg` has had the rule right since the v=2 hardening and
+            // says so in as many words (see its getElse); the 1:1 path was
+            // simply missed. Same rule, same reason, same one line.
+            why = if (it is DuplicateMessageException) null else it.javaClass.simpleName
         }
         return why
     }
