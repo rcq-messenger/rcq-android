@@ -660,7 +660,23 @@ private fun RcqApp(session: Session) {
                 NotificationOpen.pending.value = null
                 return@LaunchedEffect
             }
-            if (acct.id != app.rcq.android.data.AccountManager.activeId.value) {
+            // ⚠ A GROUP the active account is ALSO in opens in the active
+            // account, no switch. Two of this phone's accounts in one room
+            // get two wakes for every message, and tapping the one addressed
+            // to the background account used to flip the whole app onto that
+            // account; a person reading as Vasya was thrown into Petya's seat
+            // by whichever notification landed higher (#949). The room is the
+            // same room, so the tap only ever needs to open it. Same island
+            // only: a group id is the island's, and the same number on another
+            // island is a different room.
+            // A flagship account stores no host at all (null), the same way
+            // Session falls back to the default: compare the resolved names, or
+            // every flagship pair would read as two different islands.
+            val sameIsland = (app.rcq.android.data.SecureStore(context, acct.id).serverHost
+                ?: app.rcq.android.net.RcqApi.DEFAULT_HOST) == session.islandHost()
+            val activeHasRoom = req.groupId != null && sameIsland &&
+                session.groups.value.any { it.id == req.groupId }
+            if (acct.id != app.rcq.android.data.AccountManager.activeId.value && !activeHasRoom) {
                 switchAccount(acct.id)
                 return@LaunchedEffect
             }
