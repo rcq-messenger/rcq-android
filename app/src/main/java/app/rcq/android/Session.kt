@@ -4927,7 +4927,7 @@ class Session(context: Context) {
         sendGroupEnvelope(groupId, env, env.id, text, kind = "text", replyTo = replyTo)
     }
 
-    suspend fun sendGroupPhoto(groupId: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
+    suspend fun sendGroupPhoto(groupId: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null) {
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
@@ -4935,7 +4935,7 @@ class Session(context: Context) {
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, jpeg)
         val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl)
-        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId)
+        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId, batch = batch)
     }
 
     /** Create a group poll: register the structural shape server-side (gets a
@@ -4983,8 +4983,7 @@ class Session(context: Context) {
         lat: Double? = null,
         lng: Double? = null,
         spoiler: Boolean = false,
-        albumId: String? = null,
-    ) {
+        albumId: String? = null, batch: RcqApi.Batch? = null) {
         val me = store.uin ?: return
         // The sender's own copy dies with the recipients' — read off the very
         // envelope going out, so the room's timer cannot be honoured on every
@@ -5004,12 +5003,12 @@ class Session(context: Context) {
                 expiresAt = expiryFor(ttl, ts, now),
             )
         )
-        fanOutGroup(groupId, env, id)
+        fanOutGroup(groupId, env, id, batch)
     }
 
     /** Encrypt [env] once per member (skipping self) and POST the fan-out;
      *  flips the local bubble's delivery state. Shared by send + resend. */
-    private suspend fun fanOutGroup(groupId: Int, env: Envelope, id: String) = withContext(Dispatchers.IO) {
+    private suspend fun fanOutGroup(groupId: Int, env: Envelope, id: String, batch: RcqApi.Batch? = null) = withContext(Dispatchers.IO) {
         // Same rule as the 1:1 path: a duress session puts nothing on the wire
         // and shows no failure for it. A seeded decoy has no groups today, so
         // this is unreachable — and it is here anyway, because "the decoy has
@@ -5060,7 +5059,7 @@ class Session(context: Context) {
                     }
                     if (skdmPayloads.isNotEmpty()) runCatching { ctx.api.sendGroupSealed(ctx.gid, skdmPayloads, envelopeType = "skdm") }
                 }
-                resp = withRetry { ctx.api.sendGroupBroadcast(ctx.gid, gmsg) }
+                resp = withRetry { ctx.api.sendGroupBroadcast(ctx.gid, gmsg, batch = batch) }
                 // Ratchet + mark distributed only after the broadcast lands.
                 SenderKeyStore.markDistributed(me, ctx.gid, skdmTargets.map { it.uin })
                 SenderKeyStore.advanceOwn(me, ctx.gid)
@@ -5086,7 +5085,7 @@ class Session(context: Context) {
                             }.getOrNull()
                         }
                         if (legacyPayloads.isNotEmpty()) {
-                            runCatching { withRetry { ctx.api.sendGroupSealed(ctx.gid, legacyPayloads, authed = group.postPolicy == "owner_only") } }
+                            runCatching { withRetry { ctx.api.sendGroupSealed(ctx.gid, legacyPayloads, authed = group.postPolicy == "owner_only", batch = batch) } }
                                 .onFailure { android.util.Log.w("RCQgroup", "group $groupId: legacy fan-out failed for ${legacyPayloads.size} member(s)", it) }
                         }
                     }
@@ -5099,7 +5098,7 @@ class Session(context: Context) {
                     }.getOrElse { skipped++; null }
                 }
                 resp = if (payloads.isEmpty()) RcqApi.SendResponse(delivered = false)
-                    else withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, authed = group.postPolicy == "owner_only") }
+                    else withRetry { ctx.api.sendGroupSealed(ctx.gid, payloads, authed = group.postPolicy == "owner_only", batch = batch) }
             }
             if (skipped > 0) android.util.Log.w("RCQgroup", "group $groupId: skipped $skipped member(s) with an unusable identity key")
             updateGroupMsgState(groupId, id, if (resp.delivered) DeliveryState.DELIVERED else DeliveryState.SENT)
@@ -6550,7 +6549,7 @@ class Session(context: Context) {
     }
 
     /** Group video: encrypt once, fan out per member. */
-    suspend fun sendGroupVideo(groupId: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null) {
+    suspend fun sendGroupVideo(groupId: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null) {
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -6558,7 +6557,7 @@ class Session(context: Context) {
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
         val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl)
-        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId)
+        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, batch = batch)
     }
 
     /** Share a geographic point (no blob, just coordinates in the envelope). */
@@ -8078,13 +8077,14 @@ class Session(context: Context) {
         caption: String?,
         spoiler: Boolean = false,
         albumId: String? = null,
+        batch: RcqApi.Batch? = null,
     ) {
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadStreamedForGroup(groupId, openSource, plainLen, key)
         val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl)
-        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId)
+        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, batch = batch)
     }
 
     fun sendTyping(toUin: Int, active: Boolean) {

@@ -862,6 +862,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // absent, with nothing said. Same hole #473 closed for a single picture.
         if (uris.isNotEmpty()) session.sendMediaDetached("album", uris.size) { oneDone ->
             val albumId = if (uris.size > 1) java.util.UUID.randomUUID().toString().uppercase() else null
+            // ⚠ One token for the whole album, so the island's slowmode charges it
+            // ONE slot: without it item 1 bought the slot and items 2..N came back
+            // 429, which is exactly "I cannot send several pictures into a group,
+            // I have to send them one at a time" (#950).
+            val batch = albumId?.let { app.rcq.android.net.RcqApi.Batch(java.util.UUID.randomUUID().toString(), uris.size) }
             var failed = 0
             for (uri in uris) {
                 try {
@@ -869,11 +874,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (mime.startsWith("video/")) {
                         val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                         if (v == null) { failed += 1; continue }
-                        sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId)
+                        sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch)
                     } else {
                         val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
                         if (data == null) { failed += 1; continue }
-                        if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
+                        if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch)
                         else session.sendPhoto(peer!!, data, null, albumId = albumId)
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -948,6 +953,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 return@collect
             }
             val albumId = if (uris.size > 1 && allMedia) java.util.UUID.randomUUID().toString().uppercase() else null
+            // Same token rule as the picker above (#950).
+            val batch = albumId?.let { app.rcq.android.net.RcqApi.Batch(java.util.UUID.randomUUID().toString(), uris.size) }
             // Detached from this screen for the same reasons as the paperclip
             // batch above: the strip, surviving the user leaving, and a word
             // when something fails (#691, #473).
@@ -960,12 +967,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             mime.startsWith("video/") -> {
                                 val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                                 if (v == null) { failed += 1; continue }
-                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId)
+                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch)
                             }
                             mime.startsWith("image/") -> {
                                 val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
                                 if (data == null) { failed += 1; continue }
-                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId)
+                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch)
                                 else session.sendPhoto(peer!!, data, null, albumId = albumId)
                             }
                             else -> {
@@ -6116,6 +6123,7 @@ private suspend fun sendPickedVideo(
     caption: String?,
     spoiler: Boolean = false,
     albumId: String? = null,
+    batch: app.rcq.android.net.RcqApi.Batch? = null,
 ) {
     if (session.needsStreamedSend(v.sizeBytes)) {
         // A fresh stream per attempt: the route ladder can run the upload again
@@ -6124,14 +6132,14 @@ private suspend fun sendPickedVideo(
             context.contentResolver.openInputStream(v.uri)
                 ?: throw java.io.IOException("cannot read ${v.uri}")
         }
-        if (isGroup) session.sendGroupVideoStreamed(groupId!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+        if (isGroup) session.sendGroupVideoStreamed(groupId!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, batch = batch)
         else session.sendVideoStreamed(peer!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
         return
     }
     val bytes = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(v.uri)?.use { it.readBytes() }
     } ?: throw java.io.IOException("cannot read ${v.uri}")
-    if (isGroup) session.sendGroupVideo(groupId!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+    if (isGroup) session.sendGroupVideo(groupId!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, batch = batch)
     else session.sendVideo(peer!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
 }
 
