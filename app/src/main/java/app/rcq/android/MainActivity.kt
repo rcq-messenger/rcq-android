@@ -1599,11 +1599,18 @@ private fun Registering() {
  *  during onboarding, and the sheet over Home when an EXISTING account adds
  *  another. One reading of the wire, so the two cannot drift into telling the
  *  same person two different things about the same refusal. */
-private class JoinRefusal(val needsCode: Boolean, val badCode: Boolean)
+private class JoinRefusal(val needsCode: Boolean, val badCode: Boolean, val paid: Boolean)
 
 private fun joinRefusal(message: String) = JoinRefusal(
-    needsCode = message.contains("invite_required") || message.contains("invite_invalid"),
+    // ⚠ TWO CODES, ONE DOOR. A closed island answers `invite_required`; an
+    // island whose policy is "paid" answers `entry_required` instead. Matching
+    // only the first left the paid case falling through to `else -> message`,
+    // which is the raw `HTTP 403: {"detail":...}` this function exists to
+    // replace, with no code field armed to type into.
+    needsCode = message.contains("invite_required") || message.contains("invite_invalid") ||
+        message.contains("entry_required"),
     badCode = message.contains("invite_invalid"),
+    paid = message.contains("entry_required"),
 )
 
 /** The sentence to put under the title for a refusal, in the island's terms
@@ -1613,6 +1620,7 @@ private fun joinRefusalText(message: String): String {
     val r = joinRefusal(message)
     return when {
         r.badCode -> stringResource(R.string.reg_invite_invalid)
+        r.paid -> stringResource(R.string.reg_entry_required)
         r.needsCode -> stringResource(R.string.reg_invite_required)
         else -> message
     }

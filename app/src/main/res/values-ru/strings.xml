@@ -1418,11 +1418,14 @@
     <string name="badge_desc_official">Официальный аккаунт, подтверждён этим островом: его команда или источник, за который остров отвечает.</string>
     <string name="badge_desc_tester">Тестер. Участвовал в тестировании и помогал находить, что сломано.</string>
     <string name="badge_desc_special">Выдан этим островом за впечатляющий вклад.</string>
+    <string name="badge_resident">Резидент</string>
+    <string name="badge_desc_resident">Вы оплатили вход на этот остров, значит вы здесь живёте.</string>
     <string name="badge_desc_unknown">Знак, выданный этим островом.</string>
     <string name="home_discover_join_failed">Не удалось вступить, попробуйте ещё раз.</string>
     <string name="cs_move_footer_play">Остров выберет вам новый случайный номер. Контакты, группы, ключи и история чатов сохраняются.</string>
     <string name="reg_invite_label">Код доступа</string>
     <string name="reg_invite_required">Остров закрытый: чтобы войти, нужен код от его оператора. Вставьте его ниже.</string>
+    <string name="reg_entry_required">Вход на этот остров платный. Купите вход и вставьте полученный код ниже.</string>
     <string name="reg_invite_invalid">Код не принят. Возможно, он уже использован, истёк или выдан для другого острова.</string>
     <string name="ci_closed_island">Этот остров закрытый. Чтобы написать туда, нужна ссылка от самого человека: он делится контактом или пишет вам первым.</string>
     <string name="island_entry_price">Вход: %1$s</string>

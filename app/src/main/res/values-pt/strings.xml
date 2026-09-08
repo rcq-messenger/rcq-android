@@ -1372,11 +1372,14 @@
     <string name="badge_desc_official">Conta oficial, confirmada por esta ilha: a equipe dela ou uma fonte pela qual a ilha responde.</string>
     <string name="badge_desc_tester">Testador. Participou dos testes e ajudou a encontrar o que estava quebrado.</string>
     <string name="badge_desc_special">Concedida por esta ilha por uma contribuição excepcional.</string>
+    <string name="badge_resident">Residente</string>
+    <string name="badge_desc_resident">Você pagou para entrar nesta ilha, então mora aqui.</string>
     <string name="badge_desc_unknown">Uma marca concedida por esta ilha.</string>
     <string name="home_discover_join_failed">Não foi possível entrar, tente novamente.</string>
     <string name="cs_move_footer_play">A ilha escolhe um novo número aleatório para você. Contatos, grupos, chaves e histórico são mantidos.</string>
     <string name="reg_invite_label">Código de acesso</string>
     <string name="reg_invite_required">A ilha é fechada: para entrar é preciso um código do operador dela. Cole-o abaixo.</string>
+    <string name="reg_entry_required">A entrada nesta ilha é paga. Compre a entrada e cole abaixo o código que receber.</string>
     <string name="reg_invite_invalid">Esse código não foi aceito. Pode estar usado, expirado ou ser de outra ilha.</string>
     <string name="ci_closed_island">Esta ilha é fechada. Para escrever a alguém de lá é preciso um link da própria pessoa: ela compartilha o contato, ou escreve para você primeiro.</string>
     <string name="island_entry_price">Entrada: %1$s</string>

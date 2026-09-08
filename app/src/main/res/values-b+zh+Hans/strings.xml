@@ -1370,11 +1370,14 @@
     <string name="badge_desc_official">官方账号，由本岛屿确认：本岛团队或本岛担保的来源。</string>
     <string name="badge_desc_tester">测试者。参与了测试，帮助发现问题。</string>
     <string name="badge_desc_special">由本岛屿因杰出贡献而授予。</string>
+    <string name="badge_resident">居民</string>
+    <string name="badge_desc_resident">你付费加入了这座岛屿，所以你住在这里。</string>
     <string name="badge_desc_unknown">由本岛授予的标记。</string>
     <string name="home_discover_join_failed">无法加入，请重试。</string>
     <string name="cs_move_footer_play">岛屿会为你随机选择一个新号码。联系人、群组、密钥和聊天记录都会保留。</string>
     <string name="reg_invite_label">访问码</string>
     <string name="reg_invite_required">岛屿是封闭的：加入需要岛主提供的代码。请粘贴在下方。</string>
+    <string name="reg_entry_required">进入这座岛屿需要付费。购买入场资格后，把拿到的代码粘贴在下方。</string>
     <string name="reg_invite_invalid">该代码未被接受。可能已被使用、已过期，或属于另一个岛屿。</string>
     <string name="ci_closed_island">这个岛屿是封闭的。要给那里的人写信，需要他本人给你的链接：他分享联系方式，或者先给你写信。</string>
     <string name="island_entry_price">入场：%1$s</string>

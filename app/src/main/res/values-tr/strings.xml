@@ -1372,11 +1372,14 @@
     <string name="badge_desc_official">Resmi hesap, bu ada tarafından onaylanmış: adanın ekibi veya adanın kefil olduğu bir kaynak.</string>
     <string name="badge_desc_tester">Test kullanıcısı. Testlere katıldı ve bozuk olanı bulmaya yardım etti.</string>
     <string name="badge_desc_special">Bu ada tarafından olağanüstü katkı için verildi.</string>
+    <string name="badge_resident">Sakin</string>
+    <string name="badge_desc_resident">Bu adaya girmek için ödeme yaptın, yani burada yaşıyorsun.</string>
     <string name="badge_desc_unknown">Bu adanın verdiği bir işaret.</string>
     <string name="home_discover_join_failed">Katılamadı, tekrar deneyin.</string>
     <string name="cs_move_footer_play">Ada size yeni bir rastgele numara seçer. Kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur.</string>
     <string name="reg_invite_label">Erişim kodu</string>
     <string name="reg_invite_required">Ada kapalı: girmek için işletmecisinden bir kod gerekiyor. Aşağıya yapıştırın.</string>
+    <string name="reg_entry_required">Bu adaya giriş ücretlidir. Girişi satın alın ve aldığınız kodu aşağıya yapıştırın.</string>
     <string name="reg_invite_invalid">Bu kod kabul edilmedi. Kullanılmış, süresi dolmuş veya başka bir adaya ait olabilir.</string>
     <string name="ci_closed_island">Bu ada kapalı. Oradaki birine yazmak için kişinin kendisinden bir bağlantı gerekir: kişiyi paylaşması ya da size önce yazması.</string>
     <string name="island_entry_price">Giriş: %1$s</string>

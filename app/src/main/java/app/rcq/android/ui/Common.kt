@@ -592,6 +592,11 @@ internal fun badgeTintOf(kind: String, fallback: Color): Color = when (kind) {
     "official" -> Color(0xFF3B9EE8)
     "tester" -> Color(0xFFE0A21B)
     "special" -> Color(0xFFE05068)
+    // ⚠⚠ The one kind the ISLAND grants by itself: /auth/register writes it the
+    // moment an entry voucher verifies, so somebody who has just paid to get in
+    // wore a mark no client knew - drawn in the neutral fallback and named by
+    // its raw slug. Orange, clearly apart from tester's amber.
+    "resident" -> Color(0xFFF97316)
     else -> fallback
 }
 
@@ -631,6 +636,7 @@ internal fun badgeLabel(kind: String): String {
         "official" -> stringResource(R.string.badge_official)
         "tester" -> stringResource(R.string.badge_tester)
         "special" -> stringResource(R.string.badge_special)
+        "resident" -> stringResource(R.string.badge_resident)
         else -> kind
     }
 }
@@ -642,6 +648,7 @@ private fun badgeDescription(kind: String): String {
         "official" -> stringResource(R.string.badge_desc_official)
         "tester" -> stringResource(R.string.badge_desc_tester)
         "special" -> stringResource(R.string.badge_desc_special)
+        "resident" -> stringResource(R.string.badge_desc_resident)
         else -> stringResource(R.string.badge_desc_unknown)
     }
 }

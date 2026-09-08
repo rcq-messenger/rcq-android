@@ -515,7 +515,13 @@ private fun islandDoor(host: String): IslandDoor? {
         val info = runCatching { RcqApi.serverInfoOf(host) }.getOrNull() ?: return@LaunchedEffect
         val caps = info.capabilities
         val rules = info.welcome.trim().takeIf { it.isNotBlank() }
-        val closed = caps.closed_island || caps.registration_policy.equals("invite", ignoreCase = true)
+        // ⚠ "paid" belongs here. There are three shut policies on the server
+        // (`registration_policy`: open, invite, paid) and this line listed two,
+        // so an island that charges for entry without also sealing its
+        // directory was drawn as OPEN and then refused the registration it had
+        // just invited.
+        val closed = caps.closed_island ||
+            !caps.registration_policy.equals("open", ignoreCase = true)
         if (!closed) {
             door = IslandDoor(
                 ctx.getString(R.string.island_entry_open), closed = false, buyUrl = null, rules = rules,
@@ -554,5 +560,10 @@ private fun islandDoor(host: String): IslandDoor? {
 /// answer when the island is unreachable.
 internal suspend fun islandRefusesRegistration(host: String): Boolean? {
     val caps = runCatching { RcqApi.serverInfoOf(host)?.capabilities }.getOrNull() ?: return null
-    return caps.closed_island || caps.registration_policy.equals("invite", ignoreCase = true)
+    // ⚠ THE POLICY ALONE, mirroring `auth.register`: it refuses on
+    // `registration_policy in ("invite", "paid")` and nothing else. Reading
+    // `closed_island` here asked for a code on an island that would have taken
+    // the registration without one, and missing "paid" let somebody spend a try
+    // on an island that was always going to refuse it.
+    return !caps.registration_policy.equals("open", ignoreCase = true)
 }
