@@ -27,9 +27,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,7 +50,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -398,15 +404,40 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
         // Absent until the island answers, and absent for an island older than
         // the field: a card that says nothing is honest, a card that says 0 is
         // not (founder, 09.09: a number makes a closed club read as a place).
+        //
+        // ⚠ A GLYPH IN FRONT OF THE NUMBER. A bare "· 2,649" beside a price
+        // reads as a second price (founder, 09.09: "what is 2649?"); the little
+        // two-person mark says which number is money and which is people, in
+        // every language and without spending a word. Inline in the same line
+        // rather than a Row, so the host can still take the whole width when
+        // there is no count to draw.
         val people = door?.people ?: 0
+        val crowdGlyph = "crowd"
         Text(
-            buildString {
+            buildAnnotatedString {
                 append(island.region?.let { "${island.host} · $it" } ?: island.host)
                 if (people > 0) {
                     append(" · ")
-                    append(java.text.NumberFormat.getIntegerInstance().format(people))
+                    appendInlineContent(crowdGlyph, "@")
+                    append(" " + java.text.NumberFormat.getIntegerInstance().format(people))
                 }
             },
+            inlineContent = mapOf(
+                crowdGlyph to InlineTextContent(
+                    Placeholder(
+                        width = 13.sp,
+                        height = 12.sp,
+                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                    ),
+                ) {
+                    Icon(
+                        Icons.Filled.People,
+                        contentDescription = null,
+                        tint = c.textSecondary,
+                        modifier = Modifier.size(12.dp),
+                    )
+                },
+            ),
             color = c.textSecondary, fontSize = 12.sp, textAlign = TextAlign.Center,
         )
         // ⚠ A RESERVED box, not an optional block. Each page used to measure

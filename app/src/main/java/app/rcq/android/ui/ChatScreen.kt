@@ -5810,7 +5810,7 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
             Icon(Icons.Filled.Description, null, tint = c.accent, modifier = Modifier.size(24.dp))
         }
         Column {
-            Text(m.fileName ?: "file", color = c.textPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            FileNameText(m.fileName ?: "file", c.textPrimary, 14.sp)
             if (playable && isCurrent && AudioPlayer.durationMs > 0) {
                 val dur = AudioPlayer.durationMs
                 val pos = AudioPlayer.positionMs
@@ -5866,6 +5866,40 @@ private fun FileBubble(session: Session, m: ChatMessage, onLongPress: () -> Unit
                 Text(formatFileSize(m.fileSize ?: 0L), color = c.textSecondary, fontSize = 11.sp)
             }
         }
+    }
+}
+
+/// A filename on one line, with the EXTENSION PROTECTED FROM THE ELLIPSIS.
+///
+/// ⚠ A single `Text(maxLines = 1, overflow = Ellipsis)` clips the tail, which
+/// is precisely the four characters that say what the file is: report #962,
+/// "if the name of a file I receive is too long, I cannot see its suffix
+/// type". Two boxes instead of one: the stem is weighted (so it takes the
+/// ellipsis and nothing else does) and the extension is unweighted, so Compose
+/// measures it first and always gives it room.
+///
+/// ⚠ A dot alone does not make an extension. "meeting notes v1.2 final" would
+/// otherwise pin " final" to the right of the row and shorten the name to
+/// protect a word. The tail has to look like a suffix: short, and no spaces.
+@Composable
+private fun FileNameText(name: String, color: androidx.compose.ui.graphics.Color, fontSize: androidx.compose.ui.unit.TextUnit) {
+    val dot = name.lastIndexOf('.')
+    val ext = if (dot > 0 && dot < name.length - 1) name.substring(dot) else ""
+    val keep = ext.length in 2..9 && ext.none { it.isWhitespace() }
+    if (!keep) {
+        Text(name, color = color, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            name.substring(0, dot),
+            color = color,
+            fontSize = fontSize,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(ext, color = color, fontSize = fontSize, maxLines = 1)
     }
 }
 
