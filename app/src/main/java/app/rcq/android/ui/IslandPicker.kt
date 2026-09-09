@@ -363,6 +363,12 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
         // every card computes the SAME number, so the pager still does not
         // re-measure on a swipe (#736), and the number now follows the text.
         val lineSlot = with(androidx.compose.ui.platform.LocalDensity.current) { 14.sp.toDp() }
+        /// The air between the door line and the island's own words. They read
+        /// as one paragraph without it: a price runs straight into a sentence
+        /// about hosting (founder, 09.09). ⚠ Whatever this is, the reserved box
+        /// below adds the SAME amount, so the card's height does not move and
+        /// #736 stays fixed.
+        val doorGap = 6.dp
         val iconSlot = with(androidx.compose.ui.platform.LocalDensity.current) { 16.sp.toDp() * 1.5f }
         val glyphSize = with(androidx.compose.ui.platform.LocalDensity.current) { 16.sp.toDp() * 0.94f }
         Row(
@@ -449,7 +455,7 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
         Spacer(Modifier.height(6.dp))
         // One door line plus two description lines, in whatever those three
         // lines actually measure at this text size.
-        Box(Modifier.fillMaxWidth().height(lineSlot * 3 + 2.dp), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxWidth().height(lineSlot * 3 + 2.dp + doorGap), contentAlignment = Alignment.TopCenter) {
             // ⚠⚠ The unreachable line lives INSIDE this box and TAKES THE PLACE
             // of the description. Not a row of its own, not a line above or
             // below: an extra line is a taller page, a taller page re-measures
@@ -517,6 +523,11 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
                         )
                     }
                 }
+                // ⚠ ALWAYS, not only when there is a description. The whole
+                // point of the box above is that every card is the same height,
+                // and a gap that appears for some islands and not others is the
+                // twitch it was built to stop.
+                Spacer(Modifier.height(doorGap))
                 island.description?.takeIf { it.isNotBlank() }?.let {
                     Text(
                         it, color = c.textSecondary, fontSize = 11.sp, lineHeight = 14.sp,
