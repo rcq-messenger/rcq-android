@@ -1866,6 +1866,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                     if (isGroup) groupId?.let { g -> scope.launch { runCatching { session.ensureRoster(g, refresh = true) } } }
                                 },
                                 linksEnabled = rowLinksEnabled(linksOff, group, m),
+                                continues = !row.showSender,
+                                continued = row.continued,
                             )
                             }
                         }
@@ -4310,12 +4312,20 @@ private sealed interface ChatRow {
     // showSender: first message of a consecutive run from the same sender in a
     // group (WA/TG style — the name appears once, not on every bubble). A date
     // or unread divider resets the run.
+    // continued: the NEXT row belongs to the same run. With showSender (which
+    // is "this row STARTS a run") it says where a bubble sits inside its run,
+    // which is what the tighter gap and the flattened corner are drawn from
+    // (#958, founder 12.09). Set in one backward pass at the end of
+    // buildChatRows rather than by looking ahead in the main loop: the answer
+    // is "does the row after me exist and not start its own run", and after
+    // the list is built that is one lookup instead of a second scan of the
+    // album/divider logic.
     // replyMine: this message quotes one of MY OWN messages, so the quote shows
     // "You" to ME — but the wire carries the real nick, so OTHERS see the nick.
     @androidx.compose.runtime.Immutable
-    data class Single(val m: ChatMessage, val showSender: Boolean = true, val replyMine: Boolean = false) : ChatRow
+    data class Single(val m: ChatMessage, val showSender: Boolean = true, val replyMine: Boolean = false, val continued: Boolean = false) : ChatRow
     @androidx.compose.runtime.Immutable
-    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true, val ordinal: Int = 0) : ChatRow
+    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true, val ordinal: Int = 0, val continued: Boolean = false) : ChatRow
     /** A day separator between messages of different calendar dates (iOS parity). */
     data class DateLabel(val label: String, val key: Long) : ChatRow
     /** The "unread messages" marker, placed before the first unread message. */
@@ -4399,18 +4409,29 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
     for (mm in msgs) mineById[mm.id] = mm.fromMe
     var lastDay = Long.MIN_VALUE
     var unreadDone = firstUnreadIndex < 0
-    // Track the previous content row's sender so a run of messages from the same
+    // Track the previous content row's author so a run of messages from the same
     // person shows the name only once (reset by any divider below).
-    var runSender: Int? = Int.MIN_VALUE  // sentinel: first row always shows
+    //
+    // ⚠ THE KEY CARRIES `fromMe`, NOT THE UIN ALONE. In a 1:1 chat neither side
+    // is stamped with a uin (only group messages are, Session.kt), so a uin-only
+    // key made the whole conversation one run: harmless while the only thing
+    // keyed on it was a group's sender name, but the gap and the corner below
+    // would then have merged MY bubbles with the other person's.
+    var runKey: String? = null  // no message can produce null, so the first row always starts a run
     val albumRuns = HashMap<String, Int>()  // rows already cut from each album, for a unique key
     var i = 0
     while (i < msgs.size) {
         val m = msgs[i]
         val day = dayKeyOf(m.sentAt)
-        if (day != lastDay) { out.add(ChatRow.DateLabel(dayLabelOf(m.sentAt), day)); lastDay = day; runSender = Int.MIN_VALUE }
-        if (!unreadDone && i == firstUnreadIndex) { out.add(ChatRow.Unread); unreadDone = true; runSender = Int.MIN_VALUE }
-        val showSender = m.senderUin != runSender
-        runSender = m.senderUin
+        if (day != lastDay) { out.add(ChatRow.DateLabel(dayLabelOf(m.sentAt), day)); lastDay = day; runKey = null }
+        if (!unreadDone && i == firstUnreadIndex) { out.add(ChatRow.Unread); unreadDone = true; runKey = null }
+        // A call notice and a system line are not bubbles and are drawn by
+        // their own rows, so they neither join a run nor continue one: they
+        // break it, the way a divider does.
+        val standalone = m.kind == "call" || m.kind == "system"
+        val key = if (standalone) null else if (m.fromMe) "me" else "u" + (m.senderUin ?: 0)
+        val showSender = standalone || key != runKey
+        runKey = key
 
         val alb = m.albumId
         if (alb != null && (m.kind == "photo" || m.kind == "video")) {
@@ -4431,6 +4452,22 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
         }
         val replyMine = m.replyToId?.let { mineById[it] } ?: false
         out.add(ChatRow.Single(m, showSender, replyMine)); i++
+    }
+    // Who is continued by the row below. A divider between two messages of the
+    // same person already reset the run, so the row under it starts one and
+    // this answers "false" without knowing anything about dividers.
+    for (k in out.indices) {
+        val nextSameRun = when (val next = out.getOrNull(k + 1)) {
+            is ChatRow.Single -> !next.showSender
+            is ChatRow.Album -> !next.showSender
+            else -> false
+        }
+        if (!nextSameRun) continue
+        when (val row = out[k]) {
+            is ChatRow.Single -> out[k] = row.copy(continued = true)
+            is ChatRow.Album -> out[k] = row.copy(continued = true)
+            else -> {}
+        }
     }
     return out
 }
@@ -4760,9 +4797,38 @@ private fun SwipeToReply(
     }
 }
 
+/**
+ * The corners of a text bubble, given where it sits in a run of messages from
+ * one person (#958, founder 12.09).
+ *
+ * Only the two corners on the AUTHOR'S OWN SIDE are squared off: the right for
+ * my messages, the left for theirs. A bubble whose neighbour above is from the
+ * same person loses the top one, one whose neighbour below is loses the
+ * bottom, so a run reads as a single column with a flat spine instead of five
+ * separate cards. The far side stays round the whole way down, because
+ * bubbles differ in width and squaring a corner that has nothing next to it
+ * just looks like a rendering mistake.
+ *
+ * 5dp rather than 0: a hard corner against a 14dp one reads as a glitch on a
+ * small screen, and Signal, Telegram and WhatsApp all keep a couple of points
+ * there for the same reason.
+ *
+ * ⚠ Text bubbles only. Photos, video, voice, files, polls and locations draw
+ * their own shapes in their own composables, and a run of those is rare
+ * enough that carrying this through all of them would be more code than it is
+ * worth. They keep their 14dp corners and only pick up the tighter gap above.
+ */
+private fun runShape(fromMe: Boolean, continues: Boolean, continued: Boolean): RoundedCornerShape {
+    val big = 14.dp
+    val top = if (continues) 5.dp else big
+    val bottom = if (continued) 5.dp else big
+    return if (fromMe) RoundedCornerShape(topStart = big, topEnd = top, bottomEnd = bottom, bottomStart = big)
+    else RoundedCornerShape(topStart = top, topEnd = big, bottomEnd = big, bottomStart = bottom)
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Boolean)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, replyTargetDeleted: Boolean = false, linksEnabled: Boolean = true) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Boolean)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, replyTargetDeleted: Boolean = false, linksEnabled: Boolean = true, continues: Boolean = false, continued: Boolean = false) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -4795,7 +4861,17 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(if (highlighted) c.accent.copy(alpha = 0.24f) else Color.Transparent)
-            .padding(vertical = 3.dp, horizontal = 2.dp),
+            // ⚠ HALF THE GAP INSIDE A RUN, the full gap between two people
+            // (#958). The list itself spaces rows 6dp apart and each bubble
+            // adds 3dp of its own above and below, so two messages from
+            // different people stay 12dp apart while two from the same person
+            // come to 6dp. Dropping the row spacing instead would have moved
+            // the date and unread dividers too, and they are not part of this.
+            .padding(
+                top = if (continues) 0.dp else 3.dp,
+                bottom = if (continued) 0.dp else 3.dp,
+                start = 2.dp, end = 2.dp,
+            ),
         horizontalAlignment = if (m.fromMe) Alignment.End else Alignment.Start,
     ) {
         // Media/voice/file/poll/location/relay keep the sender name ABOVE the
@@ -4848,7 +4924,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
             Column(
                 Modifier
                     .widthIn(max = maxW)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(runShape(m.fromMe, continues, continued))
                     .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
                     .combinedClickable(onClick = { if (failed) onRetry() }, onLongClick = onLongPress)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
