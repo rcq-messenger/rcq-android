@@ -1,8 +1,5 @@
 package app.rcq.android.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -31,160 +27,90 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.drawscope.scale
+import app.rcq.android.BuildConfig
 import app.rcq.android.R
-import app.rcq.android.data.UinInvoices
+import app.rcq.android.data.EntryInvoices
+import app.rcq.android.net.RcqApi
 import app.rcq.android.net.TillApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Paying for a number, in one sheet.
+ * Paying for ENTRY (residency) to an island, in one sheet: [UinCheckoutSheet]
+ * with the island where the number was.
  *
- * The shape follows what the money actually needs: pick a chain, send an EXACT
- * amount to an address, wait. No account to create, no card form, no redirect —
- * the amount is what identifies the payment, so the whole checkout is two values
- * and a clock.
+ * ⚠⚠ THE TILL IS THE ISLAND'S OWN, named on its /server/info as `till_url`,
+ * and this sheet is never drawn for an island that names none. There is no
+ * built-in fallback: the flagship's till compiled in would take a
+ * self-hoster's customer's money for an account on somebody else's island,
+ * and a Worker has no refund path. The price and the wallet on the invoice
+ * are the island's too: the till asks the island for both, per invoice, so
+ * what the picker quoted is what is charged and the money lands with the
+ * operator who is selling.
  *
- * ⚠ THE QR IS BEHIND A TAP, not on screen by default (founder, 03.09). The
- * person is almost always paying from this same phone, where a code is a picture
- * standing between them and the address they need to copy. It earns its place
- * only when there is a second device to scan with, so it is offered rather than
- * imposed.
+ * Under the pay controls, every time: who is selling and what can be given
+ * back. On the flagship the seller is the RCQ team and the policy is at
+ * rcq.app/terms#refunds; on a self-hosted island the OPERATOR is the seller,
+ * their `terms_url` is opened when they set one, and when they did not the
+ * sheet says refunds are their decision. Never rcq.app's terms for somebody
+ * else's sale.
  *
- * ⚠⚠ This sheet never touches the island and never sees a token. It hands its
- * caller a signed voucher and stops; redeeming is the shop's job.
- */
-
-// ── the coins, drawn ────────────────────────────────────────────────────
-//
-// ⚠ Vector paths rather than downloaded images. A payment picker is the last
-// place to fetch an icon from somebody else's server: that request says "this
-// person is about to pay, right now, from this address", which is exactly what
-// the rest of this app works not to emit.
-private const val USDT_PATH =
-    "M13.42 10.62v-1.6h3.66V6.58H6.93v2.44h3.66v1.6C7.6 10.76 5.36 11.35 5.36 12.06" +
-        "c0 .7 2.24 1.3 5.23 1.44v4.62h2.83v-4.62c2.98-.14 5.22-.74 5.22-1.44" +
-        "c0-.71-2.24-1.3-5.22-1.44Zm0 2.44v-.01c-.08 0-.47.03-1.35.03-.7 0-1.2-.02-1.38-.03v.01" +
-        "c-2.4-.11-4.19-.53-4.19-1.03 0-.5 1.79-.92 4.19-1.03v1.63c.18.01.7.04 1.39.04" +
-        ".84 0 1.26-.03 1.34-.04v-1.63c2.39.11 4.18.53 4.18 1.03 0 .5-1.79.92-4.18 1.03Z"
-private const val TON_PATH =
-    "M16.94 6.5H7.06c-1.02 0-1.67 1.1-1.16 1.99l5.22 9.06c.22.39.78.39 1 0l5.22-9.06" +
-        "c.51-.89-.14-1.99-1.16-1.99h-.24Zm-5.42 8.4L10.4 12.6 8.06 8.68a.29.29 0 0 1 .25-.44h3.21v6.66Z" +
-        "m4.16-6.22-2.34 3.92-1.12 2.3V8.24h3.21c.24 0 .38.24.25.44Z"
-
-@Composable
-internal fun CoinMark(chain: String, size: androidx.compose.ui.unit.Dp = 26.dp) {
-    val spec = when (chain) {
-        "tron" -> Color(0xFF26A17B) to USDT_PATH
-        "ton" -> Color(0xFF0098EA) to TON_PATH
-        else -> return
-    }
-    val path = remember(chain) { PathParser().parsePathString(spec.second).toPath() }
-    Canvas(Modifier.size(size)) {
-        drawCircle(spec.first)
-        // The paths are authored on a 24x24 grid; scale to whatever the caller
-        // asked for rather than hard-coding a size into the geometry.
-        scale(this.size.width / 24f, this.size.height / 24f, pivot = androidx.compose.ui.geometry.Offset.Zero) {
-            drawPath(path, Color.White)
-        }
-    }
-}
-
-@Composable
-internal fun CopyRow(label: String, value: String, mono: Boolean = true) {
-    val c = RcqTheme.colors
-    val ctx = LocalContext.current
-    var copied by remember { mutableStateOf(false) }
-    LaunchedEffect(copied) {
-        if (copied) { delay(1600); copied = false }
-    }
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(c.bgPrimary)
-            .clickable {
-                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText(label, value))
-                copied = true
-            }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, color = c.textSecondary, fontSize = 11.sp)
-            Text(
-                stringResource(if (copied) R.string.uin_pay_copied else R.string.uin_pay_copy),
-                color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-            )
-        }
-        Text(
-            value,
-            color = c.textPrimary,
-            fontSize = 14.sp,
-            fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
-            modifier = Modifier.padding(top = 3.dp),
-        )
-    }
-}
-
-/**
- * @param resumeId an invoice this device already opened for [uin]. ⚠ Passing it
- *   is what stops a closed app from stranding somebody mid-payment: without it
- *   the sheet would offer to create a second invoice for a number the first one
- *   is holding, and the till would answer "taken" — by its own reservation.
- * @param onPaid handed the signed voucher and the invoice id. The caller
- *   redeems; this sheet has no idea what an island is.
+ * ⚠⚠ SIDELOAD ONLY. The Play flavour never draws this sheet or the button
+ * that opens it ([EntryBuyButton]): a store build that takes crypto for a
+ * purchase the store does not handle is the shape both stores object to.
+ * The Play build keeps the flagship's price as a fact and nothing more.
+ *
+ * This sheet never touches the island and never sees a token. It hands its
+ * caller the signed access code and stops; the code sheets paste it into the
+ * field, the residency row in Settings spends it on the account already here.
  */
 @Composable
-fun UinCheckoutSheet(
-    uin: Int,
+fun EntryCheckoutSheet(
+    host: String,
+    islandName: String,
     priceDisplay: String,
-    /** The till of the island selling this number, from its own quote.
-     *
-     *  ⚠⚠ Passed in rather than assumed, because a till serves ONE island.
-     *  Paying the built-in address for a number on somebody else's island
-     *  sends real money where the number is not, and nothing undoes it. Null
-     *  only for an island too old to name one, which can only be ours. */
-    checkoutUrl: String?,
+    tillUrl: String,
+    termsUrl: String,
     resumeId: String?,
     onPaid: (voucher: String, invoiceId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val c = RcqTheme.colors
+    val ctx = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     var chains by remember { mutableStateOf<List<TillApi.Chain>>(emptyList()) }
-    var invoice by remember { mutableStateOf<TillApi.Invoice?>(null) }
+    var invoice by remember { mutableStateOf<TillApi.EntryInvoice?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showQr by remember { mutableStateOf(false) }
     var left by remember { mutableStateOf(0L) }
     val handed = remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val flagship = host.equals(RcqApi.DEFAULT_HOST, ignoreCase = true)
 
     val unreachable = stringResource(R.string.uin_pay_error_unreachable)
-    val takenMsg = stringResource(R.string.uin_pay_error_taken)
+    val notForSale = stringResource(R.string.entry_pay_not_for_sale)
     val busyMsg = stringResource(R.string.uin_pay_error_busy)
     val genericMsg = stringResource(R.string.uin_pay_error_generic)
 
     fun say(code: String) = when (code) {
-        "uin_taken" -> takenMsg
+        "entry_not_for_sale", "bad_host", "island_no_wallet", "no_till" -> notForSale
         "too_busy" -> busyMsg
-        "not_for_sale" -> genericMsg
         else -> if (code.startsWith("http_")) genericMsg else unreachable
     }
 
-    // Pick up where a previous visit left off, or ask what we can be paid in.
+    LaunchedEffect(Unit) { EntryInvoices.init(ctx) }
+
     LaunchedEffect(resumeId) {
         if (resumeId != null) {
-            runCatching { TillApi.invoice(resumeId, checkoutUrl) }
+            runCatching { TillApi.entryInvoice(resumeId, tillUrl) }
                 .onSuccess { inv ->
                     invoice = inv
                     if (inv.status == "paid" && !inv.voucher.isNullOrBlank() && !handed.value) {
@@ -194,23 +120,23 @@ fun UinCheckoutSheet(
                 }
                 .onFailure { error = unreachable }
         } else {
-            runCatching { TillApi.prices(checkoutUrl) }
-                .onSuccess { chains = it.chains }
-                .onFailure { error = unreachable }
+            runCatching { TillApi.entryQuote(host, tillUrl) }
+                .onSuccess { q ->
+                    // The ISLAND's answer, through its till: a price of zero
+                    // is "not on sale", whatever the picker said a minute ago.
+                    if (q.price_cents <= 0 || q.chains.isEmpty()) error = notForSale
+                    chains = q.chains
+                }
+                .onFailure { e -> error = say((e as? TillApi.TillException)?.code ?: "offline") }
         }
     }
 
-    // Poll while an invoice is open. ⚠ The voucher is handed up exactly once:
-    // the till keeps returning it, and redeeming twice is a refusal, not a
-    // second number.
+    // Poll while an invoice is open; the voucher is handed up exactly once.
     LaunchedEffect(invoice?.id) {
         val id = invoice?.id ?: return@LaunchedEffect
         while (invoice?.status != "paid") {
-            // The chains we take confirm in seconds (TON) or about a minute
-            // (TRON), and the till's own watcher runs once a minute, so
-            // anything faster is asking a question that cannot have changed.
             delay(6000)
-            val fresh = runCatching { TillApi.invoice(id, checkoutUrl) }.getOrNull() ?: continue
+            val fresh = runCatching { TillApi.entryInvoice(id, tillUrl) }.getOrNull() ?: continue
             invoice = fresh
             if (fresh.status == "paid" && !fresh.voucher.isNullOrBlank() && !handed.value) {
                 handed.value = true
@@ -228,23 +154,62 @@ fun UinCheckoutSheet(
         }
     }
 
+    // Who sells and what comes back, beside every control that takes money.
+    @Composable
+    fun Legal() {
+        Column(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                if (flagship) stringResource(R.string.entry_pay_seller_rcq)
+                else stringResource(R.string.entry_pay_seller_operator, islandName.ifBlank { host }, host),
+                color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+            )
+            Text(
+                stringResource(R.string.entry_pay_refund),
+                color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+            )
+            if (termsUrl.startsWith("http", ignoreCase = true)) {
+                Text(
+                    stringResource(R.string.entry_pay_refund_link),
+                    color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { runCatching { uriHandler.openUri(termsUrl) } }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            } else {
+                Text(
+                    stringResource(R.string.entry_pay_refund_operator),
+                    color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+
     RcqSheet(onDismiss = onDismiss) {
         Column(
             Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(uin.toString(), color = c.textPrimary, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-            Text(priceDisplay, color = c.textSecondary, fontSize = 15.sp)
+            Text(
+                stringResource(R.string.entry_pay_title, islandName.ifBlank { host }),
+                color = c.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Text(host, color = c.textSecondary, fontSize = 12.sp)
+            Text(priceDisplay, color = c.textPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
 
             val inv = invoice
             when {
                 inv != null && inv.status == "paid" -> {
                     Text(
-                        stringResource(R.string.uin_pay_received),
+                        stringResource(R.string.entry_pay_paid),
                         color = c.textSecondary, fontSize = 14.sp, textAlign = TextAlign.Center,
                     )
-                    CircularProgressIndicator(color = c.accent, modifier = Modifier.size(22.dp))
                 }
 
                 inv != null -> {
@@ -254,8 +219,6 @@ fun UinCheckoutSheet(
                     )
                     CopyRow(stringResource(R.string.uin_pay_amount), inv.amount)
                     CopyRow(stringResource(R.string.uin_pay_address), inv.address)
-
-                    // ⚠ Offered, not imposed — see the file comment.
                     if (!showQr) {
                         Text(
                             stringResource(R.string.uin_pay_show_qr),
@@ -288,16 +251,12 @@ fun UinCheckoutSheet(
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                         )
                     }
-
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (left > 0) {
                             CircularProgressIndicator(color = c.textSecondary, modifier = Modifier.size(14.dp))
                             Text(
-                                stringResource(
-                                    R.string.uin_pay_waiting,
-                                    "%02d:%02d".format(left / 60, left % 60),
-                                ),
+                                stringResource(R.string.uin_pay_waiting, "%02d:%02d".format(left / 60, left % 60)),
                                 color = c.textSecondary, fontSize = 13.sp,
                             )
                         } else {
@@ -309,6 +268,7 @@ fun UinCheckoutSheet(
                         stringResource(R.string.uin_pay_exact),
                         color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
                     )
+                    Legal()
                 }
 
                 else -> {
@@ -324,14 +284,13 @@ fun UinCheckoutSheet(
                                 .clickable(enabled = !busy) {
                                     busy = true; error = null
                                     scope.launch {
-                                        runCatching { TillApi.createInvoice(uin, ch.id, checkoutUrl) }
+                                        runCatching { TillApi.createEntryInvoice(host, ch.id, tillUrl) }
                                             .onSuccess { inv ->
-                                                // ⚠⚠ Written down BEFORE anything
-                                                // else can fail. An invoice this
-                                                // device cannot find again is
-                                                // money that cannot be accounted
-                                                // for.
-                                                UinInvoices.remember(inv.id, inv.uin, inv.chain, checkoutUrl)
+                                                // Written down BEFORE anything else
+                                                // can fail: an invoice this device
+                                                // cannot find again is money that
+                                                // cannot be accounted for.
+                                                EntryInvoices.remember(inv.id, inv.host, inv.chain, tillUrl)
                                                 invoice = inv
                                             }
                                             .onFailure { e ->
@@ -345,11 +304,11 @@ fun UinCheckoutSheet(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             CoinMark(ch.id)
-                            Text(ch.label, color = c.textPrimary, fontSize = 15.sp,
-                                 fontWeight = FontWeight.SemiBold)
+                            Text(ch.label, color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                     if (busy) CircularProgressIndicator(color = c.accent, modifier = Modifier.size(22.dp))
+                    Legal()
                 }
             }
 
@@ -362,15 +321,75 @@ fun UinCheckoutSheet(
 }
 
 /**
- * Wallets read `ton://` links; a bare address is what every wallet understands
- * when it does not. ⚠ The amount rides in the link where the scheme has a place
- * for it and is ALWAYS shown as text too: a wallet that ignored the parameter
- * would otherwise send a figure that matches nothing.
+ * "Buy entry · $15" for the sheets that ask for a code, and the sheet behind
+ * it. Asks the island for its door itself, so both callers stay one line;
+ * draws NOTHING unless the island sells entry, names a till, and this is the
+ * sideload build (see [EntryCheckoutSheet]). On open it also sweeps this
+ * device's entry invoices for [host]: a payment that landed while nobody
+ * was looking is handed to [onCode] like a fresh one, which is what it is.
+ *
+ * ⚠ [info] may be passed by a caller that already has the island's answer;
+ * without it the island is asked once here.
  */
-internal fun payUri(chain: String, address: String, amount: String): String =
-    if (chain == "ton") {
-        val nano = runCatching { (amount.toDouble() * 1_000_000_000L).toLong() }.getOrDefault(0L)
-        "ton://transfer/$address?amount=$nano"
-    } else {
-        address
+@Composable
+internal fun EntryBuyButton(
+    host: String,
+    info: RcqApi.ServerInfoResponse? = null,
+    onCode: (String) -> Unit,
+) {
+    if (BuildConfig.PLAY_STORE) return
+    val c = RcqTheme.colors
+    val ctx = LocalContext.current
+    var fetched by remember(host) { mutableStateOf(info) }
+    var open by remember { mutableStateOf(false) }
+    var resume by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(host) {
+        EntryInvoices.init(ctx)
+        if (fetched == null) fetched = runCatching { RcqApi.serverInfoOf(host) }.getOrNull()
+        val caps = fetched?.capabilities ?: return@LaunchedEffect
+        val till = caps.till_url.trim()
+        if (!till.startsWith("https://", ignoreCase = true)) return@LaunchedEffect
+        // A payment that landed while nobody was looking.
+        for (stored in EntryInvoices.all().filter { it.host.equals(host, ignoreCase = true) }) {
+            val inv = runCatching { TillApi.entryInvoice(stored.id, stored.tillUrl.ifBlank { till }) }.getOrNull() ?: continue
+            if (inv.status == "paid" && !inv.voucher.isNullOrBlank()) {
+                EntryInvoices.forget(inv.id)
+                onCode(inv.voucher)
+                return@LaunchedEffect
+            }
+            if (inv.status == "expired") EntryInvoices.forget(inv.id)
+        }
     }
+    val caps = fetched?.capabilities ?: return
+    val till = caps.till_url.trim().takeIf { it.startsWith("https://", ignoreCase = true) } ?: return
+    val cents = caps.entry_price_cents
+    if (cents <= 0) return
+    val price = if (cents % 100 == 0) "$" + (cents / 100) else "$" + "%.2f".format(cents / 100.0)
+    Text(
+        stringResource(R.string.entry_buy, price),
+        color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable {
+                resume = EntryInvoices.forHost(host)?.id
+                open = true
+            }
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+    )
+    if (open) {
+        EntryCheckoutSheet(
+            host = host,
+            islandName = fetched?.name?.trim().orEmpty(),
+            priceDisplay = stringResource(R.string.island_entry_price, price),
+            tillUrl = till,
+            termsUrl = caps.terms_url.trim(),
+            resumeId = resume,
+            onPaid = { voucher, id ->
+                EntryInvoices.forget(id)
+                open = false
+                onCode(voucher)
+            },
+            onDismiss = { open = false },
+        )
+    }
+}

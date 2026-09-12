@@ -96,6 +96,47 @@ object TillApi {
     /** A refusal the person can be told about, by the till's own word. */
     class TillException(val code: String) : IOException(code)
 
+    /** What entry to an island costs and which chains its till takes for it.
+     *  `price_cents == 0` is "not on sale": no island answering the till, or
+     *  no price set by its operator. */
+    data class EntryQuote(
+        val host: String = "",
+        val price_cents: Int = 0,
+        val chains: List<Chain> = emptyList(),
+    )
+
+    /** An invoice for ENTRY (residency) rather than a number: [Invoice] minus
+     *  the number plus the island it is for. The voucher it ends in is
+     *  redeemed at registration or, for an account already here, at
+     *  `POST /residency/redeem`. */
+    data class EntryInvoice(
+        val id: String = "",
+        val host: String = "",
+        val chain: String = "",
+        val chain_label: String = "",
+        val address: String = "",
+        val amount: String = "",
+        val usd: Double = 0.0,
+        val confirmations: Int = 1,
+        val expires_at: Long = 0,
+        val status: String = "pending",
+        val paid_at: Long? = null,
+        val voucher: String? = null,
+    )
+
+    /** The till for ENTRY, and only the one the island named. ⚠⚠ NO FALLBACK,
+     *  unlike [base]: numbers needed [BUILT_IN] for islands too old to name a
+     *  till, and it took a header (`X-RCQ-Checkout`) to keep that from sending
+     *  a self-hoster's customer to pay us. Entry was born after islands could
+     *  name their till, so an island that names none simply sells nothing in
+     *  the app, and a caller with an empty address gets a refusal here rather
+     *  than an invoice from the wrong till. */
+    private fun entryBase(tillUrl: String): String {
+        val named = tillUrl.trim().trimEnd('/')
+        if (!named.startsWith("https://", ignoreCase = true)) throw TillException("no_till")
+        return named
+    }
+
     private inline fun <reified T> call(req: Request): T {
         http().newCall(req).execute().use { r ->
             val body = r.body?.string().orEmpty()
@@ -133,4 +174,27 @@ object TillApi {
         withContext(Dispatchers.IO) {
             call(Request.Builder().url("${base(checkoutUrl)}/v1/uin/invoice/$id").get().build())
         }
+
+    // ── entry (residency), at the island's OWN till and nowhere else ──
+
+    /** The price the ISLAND publishes and the chains its operator takes; the
+     *  till asks the island, signed, and keeps the answer a minute. */
+    suspend fun entryQuote(host: String, tillUrl: String): EntryQuote = withContext(Dispatchers.IO) {
+        val b = entryBase(tillUrl)
+        call(Request.Builder().url("$b/v1/entry/quote?host=${java.net.URLEncoder.encode(host, "UTF-8")}").get().build())
+    }
+
+    /** Write an invoice for entry to [host]. The address on it is the island
+     *  operator's wallet, handed to the till per invoice by the island itself. */
+    suspend fun createEntryInvoice(host: String, chain: String, tillUrl: String): EntryInvoice =
+        withContext(Dispatchers.IO) {
+            val b = entryBase(tillUrl)
+            val body = gson.toJson(mapOf("host" to host, "chain" to chain)).toRequestBody(JSON)
+            call(Request.Builder().url("$b/v1/entry/invoice").post(body).build())
+        }
+
+    suspend fun entryInvoice(id: String, tillUrl: String): EntryInvoice = withContext(Dispatchers.IO) {
+        val b = entryBase(tillUrl)
+        call(Request.Builder().url("$b/v1/entry/invoice/$id").get().build())
+    }
 }

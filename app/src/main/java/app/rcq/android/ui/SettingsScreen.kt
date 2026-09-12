@@ -930,6 +930,7 @@ private fun SettingsRoot(
                 ResidencyRow(
                     session = session,
                     host = islandHost,
+                    islandName = islandName,
                     caps = islandInfo?.capabilities,
                     profile = ownProfile,
                 ) { profileTick++; invitesTick++ }
@@ -4690,6 +4691,9 @@ private fun ResidentInvitesRow(
 private fun ResidencyRow(
     session: Session,
     host: String,
+    /// The island's own name, for the checkout's title; null when it has not
+    /// answered, and the sheet then says the host.
+    islandName: String?,
     caps: app.rcq.android.net.RcqApi.ServerCapabilities?,
     profile: app.rcq.android.net.RcqApi.MeProfile?,
     onRedeemed: () -> Unit,
@@ -4723,8 +4727,16 @@ private fun ResidencyRow(
     } else null
     val buyUrl = caps?.entry_url?.trim()
         ?.takeIf { !BuildConfig.PLAY_STORE && it.startsWith("https://", ignoreCase = true) }
+    // The gateway inside the app (founder item 2, 12.09): only when the
+    // island names its own till, and never in the Play build. The code it
+    // ends in is spent on THIS account straight away, since the person is
+    // signed in; a refusal leaves it in the field so nothing is lost.
+    val tillUrl = caps?.till_url?.trim()
+        ?.takeIf { !BuildConfig.PLAY_STORE && it.startsWith("https://", ignoreCase = true) }
 
     var open by remember { mutableStateOf(false) }
+    var checkout by remember { mutableStateOf(false) }
+    var resume by remember { mutableStateOf<String?>(null) }
     SettingsRow(
         Icons.Filled.Verified,
         stringResource(R.string.residency_title),
@@ -4742,7 +4754,20 @@ private fun ResidencyRow(
                     color = c.textPrimary, fontSize = 15.sp,
                 )
                 Text(stringResource(R.string.residency_body), color = c.textSecondary, fontSize = 12.sp)
-                if (buyUrl != null) {
+                if (tillUrl != null && price != null) {
+                    Text(
+                        stringResource(R.string.residency_buy_here, price),
+                        color = c.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                app.rcq.android.data.EntryInvoices.init(context)
+                                resume = app.rcq.android.data.EntryInvoices.forHost(host)?.id
+                                checkout = true
+                            }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                    )
+                } else if (buyUrl != null) {
                     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                     Text(
                         stringResource(R.string.residency_buy, buyUrl.removePrefix("https://").substringBefore('/')),
@@ -4807,6 +4832,43 @@ private fun ResidencyRow(
                     Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
             }
+        }
+        if (checkout && tillUrl != null && price != null) {
+            EntryCheckoutSheet(
+                host = host,
+                islandName = islandName?.trim().orEmpty(),
+                priceDisplay = stringResource(R.string.island_entry_price, price),
+                tillUrl = tillUrl,
+                termsUrl = caps?.terms_url?.trim().orEmpty(),
+                resumeId = resume,
+                onPaid = { voucher, id ->
+                    checkout = false
+                    scope.launch {
+                        when (val r = session.redeemResidency(voucher)) {
+                            is Session.ResidencyRedeem.Done -> {
+                                app.rcq.android.data.EntryInvoices.forget(id)
+                                open = false
+                                Toast.makeText(context, context.getString(R.string.residency_done), Toast.LENGTH_SHORT).show()
+                                onRedeemed()
+                            }
+                            is Session.ResidencyRedeem.Refused -> {
+                                // The code from a PAID invoice must not vanish
+                                // with the sheet: it sits in the field for a
+                                // second try, and the invoice stays remembered.
+                                code = voucher
+                                errorRes = when (r.code) {
+                                    "already_resident" -> { onRedeemed(); R.string.residency_already }
+                                    "voucher_spent" -> R.string.residency_code_spent
+                                    "sales_disabled" -> R.string.residency_not_sold
+                                    else -> R.string.reg_invite_invalid
+                                }
+                            }
+                            Session.ResidencyRedeem.Failed -> { code = voucher; errorRes = R.string.residency_failed }
+                        }
+                    }
+                },
+                onDismiss = { checkout = false },
+            )
         }
     }
 }

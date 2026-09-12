@@ -1465,6 +1465,16 @@
     <string name="residency_code_spent">Этот код уже использован.</string>
     <string name="residency_not_sold">Этот остров не продаёт резидентство.</string>
     <string name="residency_failed">Остров не принял код. Попробуйте ещё раз.</string>
+    <string name="entry_buy">Купить вход · %1$s</string>
+    <string name="residency_buy_here">Купить · %1$s</string>
+    <string name="entry_pay_title">Резидентство на %1$s</string>
+    <string name="entry_pay_seller_rcq">Продавец: команда RCQ.</string>
+    <string name="entry_pay_seller_operator">Продавец: %1$s (%2$s), оператор этого острова.</string>
+    <string name="entry_pay_refund">Разовая оплата, не подписка: пока код не использован, деньги можно вернуть, а после погашения возвращать уже нечего. Сумма считается по курсу на момент счёта; движение курса между оплатой и возвратом не компенсируется.</string>
+    <string name="entry_pay_refund_link">Правила возврата</string>
+    <string name="entry_pay_refund_operator">Возврат решает оператор: спросите его до оплаты.</string>
+    <string name="entry_pay_not_for_sale">Сейчас вход на этот остров не продаётся.</string>
+    <string name="entry_pay_paid">Оплачено. Ваш код доступа готов.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/с</string>
 </resources>

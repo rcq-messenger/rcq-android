@@ -1470,6 +1470,19 @@
     <string name="residency_code_spent">That code has already been used.</string>
     <string name="residency_not_sold">This island does not sell residency.</string>
     <string name="residency_failed">The island did not accept it. Try again.</string>
+    <!-- The crypto gateway inside the app, sideload only (founder item 2, 12.09).
+         The till is the island's own; the seller and the refund terms sit under
+         the pay controls. -->
+    <string name="entry_buy">Buy entry · %1$s</string>
+    <string name="residency_buy_here">Buy · %1$s</string>
+    <string name="entry_pay_title">Residency on %1$s</string>
+    <string name="entry_pay_seller_rcq">Sold by the RCQ team.</string>
+    <string name="entry_pay_seller_operator">Sold by %1$s (%2$s), the operator of this island.</string>
+    <string name="entry_pay_refund">One-off, not a subscription: refundable while the code is unused, and once it has been redeemed there is nothing left to return. The amount is quoted at the rate of the moment; the rate moving between payment and refund is not compensated.</string>
+    <string name="entry_pay_refund_link">Refund policy</string>
+    <string name="entry_pay_refund_operator">Refunds are the operator’s decision: ask them before paying.</string>
+    <string name="entry_pay_not_for_sale">Entry to this island is not on sale right now.</string>
+    <string name="entry_pay_paid">Paid. Your access code is ready.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/s</string>
 </resources>

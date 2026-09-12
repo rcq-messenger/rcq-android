@@ -3171,6 +3171,7 @@ class Session(context: Context) {
             // file, which a wipe that erased everything around it would have
             // left sitting on disk.
             app.rcq.android.data.UinInvoices.wipeAll(appCtx)
+            app.rcq.android.data.EntryInvoices.wipeAll(appCtx)
         }
         // The install id lived in its own prefs file that nothing above touches,
         // and the island keeps it next to the uin. Left alone, the number this

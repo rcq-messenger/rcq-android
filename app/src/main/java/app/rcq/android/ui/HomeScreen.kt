@@ -3467,6 +3467,10 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
                 )
                 Text(pendingClosed, color = c.textSecondary, fontSize = 13.sp)
                 Text(stringResource(R.string.reg_invite_required), color = c.textSecondary, fontSize = 13.sp)
+                // The crypto gateway inside the app, when the island sells
+                // entry and names its own till (founder item 2, 12.09).
+                // Sideload only; draws nothing otherwise.
+                EntryBuyButton(pendingClosed) { invite = it.trim() }
                 RcqField(
                     value = invite,
                     onValueChange = { invite = it.trim() },

@@ -357,9 +357,13 @@ private fun ClosedIslandCodeSheet(host: String, onJoin: (String) -> Unit, onDism
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(host, color = c.textPrimary, fontSize = 14.sp)
             Text(stringResource(R.string.reg_invite_required), color = c.textSecondary, fontSize = 13.sp)
+            // Where the code comes from, when the island sells it and names
+            // its own till (founder item 2, 12.09): the crypto gateway inside
+            // the app. Sideload only; the button draws nothing otherwise.
+            EntryBuyButton(host) { code = it.take(4096).trim() }
             RcqField(
                 value = code,
-                onValueChange = { code = it.take(128).trim() },
+                onValueChange = { code = it.take(4096).trim() },
                 placeholder = stringResource(R.string.reg_invite_label),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),

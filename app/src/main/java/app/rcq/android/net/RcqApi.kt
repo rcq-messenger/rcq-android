@@ -1808,6 +1808,19 @@ class RcqApi(
          *  hand and which would be stale the day after a price changed. */
         val entry_price_cents: Int = 0,
         val entry_url: String = "",
+        /** This island's OWN till (checkout), https only, "" when it names
+         *  none. ⚠⚠ THE ONE RULE OF THE IN-APP GATEWAY: entry is bought inside
+         *  the app ONLY when the island names this. There is no built-in
+         *  fallback for entry, ever: the flagship's till compiled into the
+         *  client would take a self-hoster's customer's money for an account
+         *  on somebody else's island (the X-RCQ-Checkout trap the number shop
+         *  had to patch around). */
+        val till_url: String = "",
+        /** The operator's own terms and refund page, when they name one.
+         *  Linked beside the payment; "" means the sheet says instead that
+         *  refunds are the operator's decision. The RCQ team's terms cover
+         *  the flagship only and are never linked for somebody else's sale. */
+        val terms_url: String = "",
         /** How many accounts live on that island. 0 means the island did not
          *  say (one older than the field, or one that has not counted yet), so
          *  a card draws nothing rather than claiming an empty island. */
