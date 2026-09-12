@@ -360,7 +360,7 @@ private fun ClosedIslandCodeSheet(host: String, onJoin: (String) -> Unit, onDism
             // Where the code comes from, when the island sells it and names
             // its own till (founder item 2, 12.09): the crypto gateway inside
             // the app. Sideload only; the button draws nothing otherwise.
-            EntryBuyButton(host) { code = it.take(4096).trim() }
+            EntryBuyButton(host) { bought -> if (code.isBlank()) code = bought.take(4096).trim() }
             RcqField(
                 value = code,
                 onValueChange = { code = it.take(4096).trim() },

@@ -64,6 +64,32 @@ object EntryInvoices {
         prefs?.edit()?.putString(KEY, gson.toJson(all().filter { it.id != id }))?.apply()
     }
 
+    /** Which invoice a voucher came out of, for as long as this process lives.
+     *
+     *  ⚠ THE CODE TRAVELS WITHOUT ITS ID. It is handed to a text field and
+     *  spent on the island a screen or two later, so the two ends have to be
+     *  paired somewhere. Dropping the row where the code is handed over
+     *  strands a buyer whose join then fails; dropping every row for the
+     *  island once an account appears there would take an invoice that was
+     *  paid for and never spent. Only the invoice whose voucher the island
+     *  actually accepted is forgotten. A killed process loses the pairing and
+     *  keeps the row, which is the harmless way round: the till re-serves a
+     *  voucher by id for ever. */
+    private val fromInvoice = mutableMapOf<String, String>()
+
+    /** ⚠ Keyed on the TRIMMED code, because that is what the fields keep: the
+     *  sheet hands over `inv.voucher` and every caller stores `it.trim()`, so
+     *  keying on the raw string would file the pair under one spelling and
+     *  look it up under another, and the row would never be dropped. */
+    fun handed(voucher: String, id: String) {
+        fromInvoice[voucher.trim()] = id
+    }
+
+    /** The island took this code, so the invoice behind it is finished with. */
+    fun spent(voucher: String) {
+        fromInvoice.remove(voucher.trim())?.let { forget(it) }
+    }
+
     /** The open invoice for this island, if this device has one: what turns a
      *  second tap on "buy" into "finish paying". */
     fun forHost(host: String): Open? = all().firstOrNull { it.host.equals(host, ignoreCase = true) }

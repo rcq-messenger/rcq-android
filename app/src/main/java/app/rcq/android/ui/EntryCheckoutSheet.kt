@@ -353,7 +353,13 @@ internal fun EntryBuyButton(
         for (stored in EntryInvoices.all().filter { it.host.equals(host, ignoreCase = true) }) {
             val inv = runCatching { TillApi.entryInvoice(stored.id, stored.tillUrl.ifBlank { till }) }.getOrNull() ?: continue
             if (inv.status == "paid" && !inv.voucher.isNullOrBlank()) {
-                EntryInvoices.forget(inv.id)
+                // ⚠⚠ THE ROW STAYS UNTIL THE CODE IS SPENT. Forgetting it here
+                // threw away the only way back to a voucher that is merely
+                // sitting in a text field: the sheet dragged down, the join
+                // refused, the process killed, and a paid buyer had nothing,
+                // while the till would have re-served it for ever. It is
+                // dropped where the account appears ([EntryInvoices.spent]).
+                EntryInvoices.handed(inv.voucher, inv.id)
                 onCode(inv.voucher)
                 return@LaunchedEffect
             }
@@ -385,7 +391,8 @@ internal fun EntryBuyButton(
             termsUrl = caps.terms_url.trim(),
             resumeId = resume,
             onPaid = { voucher, id ->
-                EntryInvoices.forget(id)
+                // Paired, not forgotten, for the reason the sweep above gives.
+                EntryInvoices.handed(voucher, id)
                 open = false
                 onCode(voucher)
             },

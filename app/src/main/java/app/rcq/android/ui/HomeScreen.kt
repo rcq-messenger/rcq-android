@@ -3470,7 +3470,7 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
                 // The crypto gateway inside the app, when the island sells
                 // entry and names its own till (founder item 2, 12.09).
                 // Sideload only; draws nothing otherwise.
-                EntryBuyButton(pendingClosed) { invite = it.trim() }
+                EntryBuyButton(pendingClosed) { code -> if (invite.isBlank()) invite = code.trim() }
                 RcqField(
                     value = invite,
                     onValueChange = { invite = it.trim() },
@@ -3577,6 +3577,38 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(stringResource(R.string.csrv_invite_hint), color = c.textSecondary, fontSize = 11.sp)
+            // ⚠ THE GATEWAY BELONGS HERE MOST OF ALL. The deck branch above
+            // has it, but a self-hosted island is reached by typing its address
+            // here: it is in nobody's catalogue. And a paid island refuses this
+            // very form with "buy entry, then paste the access code you get
+            // below", which there was no way to do from this branch. Same guard
+            // as everywhere else: [EntryBuyButton] draws nothing unless the
+            // island names its own till, and nothing at all in the Play build.
+            // The address is read the way this branch's own submit reads it,
+            // and only once there is one to read.
+            // ⚠⚠ `inspect(commit = false)`, never `adopt`. Adopting PINS a
+            // certificate, and this runs while somebody is still typing: every
+            // keystroke would have written a pin for a half-typed host. The
+            // non-committing read is what IslandTrust offers a form for
+            // exactly this reason; the submit below still adopts, once.
+            //
+            // ⚠ And settled before it is used, because the button asks the
+            // island about itself: keyed straight off `host` it fired a
+            // /server/info at every prefix of what was being typed.
+            var entryHost by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(host) {
+                entryHost = null
+                if (host.isBlank()) return@LaunchedEffect
+                kotlinx.coroutines.delay(600)
+                entryHost = (app.rcq.android.net.IslandTrust.inspect(host, commit = false)
+                    as? app.rcq.android.net.IslandTrust.Entry.Ok)?.hostPort
+            }
+            entryHost?.let { h ->
+                // Only into an empty field: the sweep inside the button hands
+                // back a code that was paid for earlier, and it must not
+                // overwrite one the person is typing.
+                EntryBuyButton(h) { code -> if (invite.isBlank()) invite = code.trim() }
+            }
             err?.let { Text(it, color = c.statusBusy, fontSize = 12.sp) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss) {

@@ -1451,11 +1451,16 @@
     <string name="invites_failed">Остров не выдал код доступа.</string>
     <!-- Residency on an existing account, and the smaller drip for accounts
          that were here before it existed (founder item 5, 12.09). The
-         voucher used to be accepted at registration only. -->
-    <string name="invites_free_line">Вы были здесь до резидентства: остров всё равно даёт вам коды доступа для раздачи, по одному в месяц.</string>
+         voucher used to be accepted at registration only.
+         No number and no period in this copy: how many access codes a resident
+         gets and how often is the operator's setting (resident_invites_total /
+         _period_days), it is not published anywhere a client can read, and an
+         island may hand out none at all. The counter and the date above the
+         line come off the wire; the words must not contradict them. -->
+    <string name="invites_free_line">Вы были здесь до резидентства: остров всё равно даёт вам коды доступа для раздачи.</string>
     <string name="residency_title">Резидентство</string>
     <string name="residency_since">Резидент с %1$s</string>
-    <string name="residency_body">Один платёж, один раз. Резидент получает коды доступа для раздачи, по одному в месяц, и носит знак острова.</string>
+    <string name="residency_body">Один платёж, один раз. Резидент носит знак острова и раздаёт коды доступа, которые остров даёт резидентам.</string>
     <string name="residency_buy">Купить на %1$s</string>
     <string name="residency_have_code">У меня есть код доступа</string>
     <string name="residency_redeem">Активировать</string>

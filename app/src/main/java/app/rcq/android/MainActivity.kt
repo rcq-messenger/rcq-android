@@ -575,7 +575,14 @@ private fun RcqApp(session: Session) {
         scope.launch {
             state = try {
                 UiState.Registered(session.registerNewAccount("user-${(1000..9999).random()}", server, invite))
-                    .also { phraseNudge = true }
+                    .also {
+                        phraseNudge = true
+                        // The island took the code, so a BOUGHT one is finally
+                        // spent: until this moment its invoice is the only way
+                        // back to it, and the entry sheet no longer drops it at
+                        // hand-off (see [EntryInvoices.spent]).
+                        invite?.let { code -> app.rcq.android.data.EntryInvoices.spent(code) }
+                    }
             } catch (e: Exception) {
                 UiState.Failed(e.message ?: "Registration failed")
             }
@@ -600,7 +607,11 @@ private fun RcqApp(session: Session) {
         state = UiState.Registering
         scope.launch {
             state = try {
-                UiState.Registered(session.registerNewAccount("user-${(1000..9999).random()}", server, invite))
+                val uin = session.registerNewAccount("user-${(1000..9999).random()}", server, invite)
+                // Same as [register]: the invoice behind a bought code is let
+                // go only now that the account it paid for exists.
+                invite?.let { app.rcq.android.data.EntryInvoices.spent(it) }
+                UiState.Registered(uin)
             } catch (e: Exception) {
                 // ⚠ The refusal goes to a SHEET with a code field, not to a
                 // Toast. A Toast carrying `HTTP 403: {"detail":{"code":
@@ -1032,6 +1043,7 @@ private fun RcqApp(session: Session) {
             s is UiState.Registering -> Registering()
             s is UiState.Failed -> Failed(
                 s.message,
+                host = lastRegisterServer ?: RcqApi.DEFAULT_HOST,
                 onRetry = { retryRegister() },
                 onRetryWithInvite = { code -> register(lastRegisterServer, code) },
                 // Back to the deck. Nothing was created (registration is
@@ -1636,6 +1648,9 @@ private fun joinRefusalText(message: String): String =
 @Composable
 private fun Failed(
     message: String,
+    /// The island that refused, for the gateway below. Blank keeps the screen
+    /// exactly as it was.
+    host: String = "",
     onRetry: () -> Unit,
     onRetryWithInvite: ((String) -> Unit)? = null,
     /// ⚠⚠ A WAY OUT, AND IT IS NOT OPTIONAL IN PRACTICE. This screen used to
@@ -1677,9 +1692,28 @@ private fun Failed(
             // label, on the first screen a new user ever sees going wrong —
             // "the sheet looks cheap next to the rest of the app" (founder,
             // item 2 of 06.09). See [RcqField] for the house rule.
+            // ⚠⚠ 4096, THE ISLAND'S OWN BODY LIMIT, not a word's length. An
+            // operator's code is short, but a PAID one is a signed blob of
+            // some 300 characters, and this is the very screen that tells the
+            // buyer to paste it (`reg_entry_required`). At 128 it was cut
+            // mid-signature and came back "not accepted" for ever, with no
+            // hint that the field had eaten half of it. Same cap as the
+            // onboarding sheet and the residency row.
+            // ⚠ THE WAY TO GET THE THING THIS SCREEN IS ASKING FOR. On a paid
+            // island the sentence above says "buy entry, then paste the access
+            // code you get below", and until now there was nothing here to buy
+            // it with. The button also sweeps this device's paid invoices, so
+            // somebody whose join failed AFTER paying gets their code handed
+            // back instead of retyping it. Draws nothing off a paid island,
+            // and nothing at all in the Play build.
+            if (host.isNotBlank()) {
+                app.rcq.android.ui.EntryBuyButton(host) { bought ->
+                    if (invite.isBlank()) invite = bought.take(4096).trim()
+                }
+            }
             app.rcq.android.ui.RcqField(
                 value = invite,
-                onValueChange = { invite = it.take(128) },
+                onValueChange = { invite = it.take(4096) },
                 placeholder = stringResource(R.string.reg_invite_label),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -1731,9 +1765,17 @@ private fun AddAccountFailedSheet(
             Text(host, color = c.textPrimary, fontSize = 14.sp)
             Text(joinRefusalText(message), color = c.textSecondary, fontSize = 13.sp)
             if (r.needsCode) {
+                // Same gateway as the full-screen [Failed]: this sheet is the
+                // other place a buyer is told to paste a code they have no way
+                // to obtain from here.
+                app.rcq.android.ui.EntryBuyButton(host) { bought ->
+                    if (invite.isBlank()) invite = bought.take(4096).trim()
+                }
+                // 4096 for the reason the full-screen [Failed] says: a bought
+                // code is a signed blob, and a truncated one is refused for ever.
                 app.rcq.android.ui.RcqField(
                     value = invite,
-                    onValueChange = { invite = it.take(128) },
+                    onValueChange = { invite = it.take(4096) },
                     placeholder = stringResource(R.string.reg_invite_label),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),

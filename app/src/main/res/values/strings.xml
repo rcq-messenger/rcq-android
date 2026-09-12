@@ -1456,11 +1456,16 @@
     <string name="invites_failed">The island did not give out an access code.</string>
     <!-- Residency on an existing account, and the smaller drip for accounts
          that were here before it existed (founder item 5, 12.09). The
-         voucher used to be accepted at registration only. -->
-    <string name="invites_free_line">You were here before residency: the island still gives you access codes to hand out, one a month.</string>
+         voucher used to be accepted at registration only.
+         No number and no period in this copy: how many access codes a resident
+         gets and how often is the operator's setting (resident_invites_total /
+         _period_days), it is not published anywhere a client can read, and an
+         island may hand out none at all. The counter and the date above the
+         line come off the wire; the words must not contradict them. -->
+    <string name="invites_free_line">You were here before residency: the island still gives you access codes to hand out.</string>
     <string name="residency_title">Residency</string>
     <string name="residency_since">Resident since %1$s</string>
-    <string name="residency_body">One payment, once. A resident gets access codes to hand out, one a month, and wears the island\'s mark.</string>
+    <string name="residency_body">One payment, once. A resident wears the island\'s mark, and hands out the access codes this island gives its residents.</string>
     <string name="residency_buy">Buy on %1$s</string>
     <string name="residency_have_code">I have an access code</string>
     <string name="residency_redeem">Activate</string>
