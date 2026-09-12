@@ -148,7 +148,7 @@
     <string name="update_failed">Download failed. Tap to retry.</string>
     <string name="join_server_title">Join server</string>
     <string name="join_server_body">Create a new account on %1$s?</string>
-    <string name="join_server_invite">Using an invite link</string>
+    <string name="join_server_invite">Using the access code from the link</string>
     <string name="join_server_join">Join</string>
     <string name="weblink_title">Connect to web?</string>
     <string name="weblink_body">This will log the website in as your account so you can chat from a browser. Only continue if you opened this from the QR code on chat.rcq.app yourself.</string>
@@ -768,7 +768,7 @@
     <string name="csrv_current">CURRENT SERVER</string>
     <string name="csrv_host">Server host</string>
     <string name="csrv_invite">Access code (optional)</string>
-    <string name="csrv_invite_hint">Only needed for a closed island. It is the code its operator gave you, or the one you got when you paid for entry. Leave blank for an open island.</string>
+    <string name="csrv_invite_hint">Only needed for a closed island. It is the access code its operator gave you, or the one you got when you paid for entry. Leave blank for an open island.</string>
     <string name="csrv_warning">This adds a new account on that server. Your current account stays on this device with all its chats and contacts; switch between them from the account menu.</string>
     <string name="csrv_reset_btn">Add a public-server account</string>
     <string name="csrv_switching">Adding…</string>
@@ -1433,9 +1433,9 @@
     <string name="home_discover_join_failed">Couldn\'t join, try again.</string>
     <string name="cs_move_footer_play">The island picks a fresh random number for you. Contacts, groups, keys and chat history are all kept.</string>
     <string name="reg_invite_label">Access code</string>
-    <string name="reg_invite_required">This island is closed: joining needs a code from its operator. Paste it below.</string>
-    <string name="reg_entry_required">Entry to this island is paid. Buy entry, then paste the code you get below.</string>
-    <string name="reg_invite_invalid">That code was not accepted. It may be used up, expired, or meant for another island.</string>
+    <string name="reg_invite_required">This island is closed: joining needs an access code from its operator. Paste it below.</string>
+    <string name="reg_entry_required">Entry to this island is paid. Buy entry, then paste the access code you get below.</string>
+    <string name="reg_invite_invalid">That access code was not accepted. It may be used up, expired, or meant for another island.</string>
     <string name="ci_closed_island">This island is closed. To write to somebody there you need a link from them: a shared contact, or a message they sent you first.</string>
     <string name="island_entry_price">%1$s once</string>
     <string name="island_entry_closed">Closed club</string>
@@ -1445,29 +1445,29 @@
     <string name="island_entry_open">Open island</string>
     <string name="join_closed_title">Closed island</string>
     <string name="join_checking_island">Asking the island…</string>
-    <string name="invites_title">Invites to hand out</string>
+    <string name="invites_title">Access codes to hand out</string>
     <string name="invites_count">%1$d of %2$d left</string>
     <string name="invites_next">The next one arrives on %1$s.</string>
     <string name="invites_all">You are holding all of them.</string>
-    <string name="invites_mint">Create an invite</string>
+    <string name="invites_mint">Create an access code</string>
     <string name="invites_minting">Creating…</string>
     <string name="invites_copy">Copy the link</string>
-    <string name="invites_once">Shown once. The island keeps no copy of it: close this without copying and the invite is spent on nothing.</string>
-    <string name="invites_failed">The island did not give out an invite.</string>
+    <string name="invites_once">Shown once. The island keeps no copy of it: close this without copying and the access code is spent on nothing.</string>
+    <string name="invites_failed">The island did not give out an access code.</string>
     <!-- Residency on an existing account, and the smaller drip for accounts
          that were here before it existed (founder item 5, 12.09). The
          voucher used to be accepted at registration only. -->
-    <string name="invites_free_line">You were here before residency: the island still gives you invites, one a month.</string>
+    <string name="invites_free_line">You were here before residency: the island still gives you access codes to hand out, one a month.</string>
     <string name="residency_title">Residency</string>
     <string name="residency_since">Resident since %1$s</string>
-    <string name="residency_body">One payment, once. A resident gets invites to hand out, one a month, and wears the island\'s mark.</string>
+    <string name="residency_body">One payment, once. A resident gets access codes to hand out, one a month, and wears the island\'s mark.</string>
     <string name="residency_buy">Buy on %1$s</string>
-    <string name="residency_have_code">I have a code</string>
+    <string name="residency_have_code">I have an access code</string>
     <string name="residency_redeem">Activate</string>
     <string name="residency_redeeming">Checking…</string>
     <string name="residency_done">You live here now.</string>
     <string name="residency_already">This account is already a resident.</string>
-    <string name="residency_code_spent">That code has already been used.</string>
+    <string name="residency_code_spent">That access code has already been used.</string>
     <string name="residency_not_sold">This island does not sell residency.</string>
     <string name="residency_failed">The island did not accept it. Try again.</string>
     <!-- The crypto gateway inside the app, sideload only (founder item 2, 12.09).
@@ -1478,7 +1478,7 @@
     <string name="entry_pay_title">Residency on %1$s</string>
     <string name="entry_pay_seller_rcq">Sold by the RCQ team.</string>
     <string name="entry_pay_seller_operator">Sold by %1$s (%2$s), the operator of this island.</string>
-    <string name="entry_pay_refund">One-off, not a subscription: refundable while the code is unused, and once it has been redeemed there is nothing left to return. The amount is quoted at the rate of the moment; the rate moving between payment and refund is not compensated.</string>
+    <string name="entry_pay_refund">One-off, not a subscription: refundable while the access code is unused, and once it has been redeemed there is nothing left to return. The amount is quoted at the rate of the moment; the rate moving between payment and refund is not compensated.</string>
     <string name="entry_pay_refund_link">Refund policy</string>
     <string name="entry_pay_refund_operator">Refunds are the operator’s decision: ask them before paying.</string>
     <string name="entry_pay_not_for_sale">Entry to this island is not on sale right now.</string>

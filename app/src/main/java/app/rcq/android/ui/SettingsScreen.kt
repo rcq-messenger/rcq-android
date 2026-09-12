@@ -302,7 +302,7 @@ private fun SettingsFind.row(): SettingsFindRow = when (this) {
         // The resident-invite counter lives inside this anchor's block, so its
         // words belong here: searching "приглашения" must land on the island
         // section, not only on "invite a friend" over in About.
-        "island server rules welcome resident invites остров сервер правила приветствие приглашения резидент")
+        "island server rules welcome resident invites invite access code codes остров сервер правила приветствие приглашения код доступа коды резидент")
     SettingsFind.CLEAR_HISTORY -> SettingsFindRow(this, Icons.Filled.DeleteSweep, R.string.settings_row_clear_history, R.string.settings_sec_history, null,
         "clear history delete messages очистить историю удалить сообщения переписку")
     SettingsFind.UIN_SHOP -> SettingsFindRow(this, Icons.Filled.Sell, R.string.settings_row_uin_shop, R.string.settings_sec_account, SettingsRoute.UIN_SHOP,
@@ -4622,7 +4622,7 @@ private fun ResidentInvitesRow(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable {
                             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cm.setPrimaryClip(ClipData.newPlainText("RCQ invite", link))
+                            cm.setPrimaryClip(ClipData.newPlainText("RCQ access code", link))
                             Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
                         }.padding(vertical = 6.dp, horizontal = 4.dp),
                     ) {

@@ -134,7 +134,7 @@
     <string name="update_failed">Не вдалося завантажити. Натисни, щоб повторити.</string>
     <string name="join_server_title">Приєднатися до сервера</string>
     <string name="join_server_body">Створити новий акаунт на %1$s?</string>
-    <string name="join_server_invite">За посиланням-запрошенням</string>
+    <string name="join_server_invite">З кодом доступу з посилання</string>
     <string name="join_server_join">Приєднатися</string>
     <string name="weblink_title">Підключити веб?</string>
     <string name="weblink_body">Сайт увійде під твоїм акаунтом, щоб ти міг спілкуватися з браузера. Продовжуй, лише якщо ти сам відкрив це з QR-коду на chat.rcq.app.</string>
@@ -738,7 +738,7 @@
     <string name="csrv_current">ПОТОЧНИЙ СЕРВЕР</string>
     <string name="csrv_host">Хост сервера</string>
     <string name="csrv_invite">Код доступу (необовʼязково)</string>
-    <string name="csrv_invite_hint">Потрібен лише для закритого острова. Це код, який видав його оператор, або той, що ви отримали під час оплати входу. Для відкритого залиште порожнім.</string>
+    <string name="csrv_invite_hint">Потрібен лише для закритого острова. Це код доступу, який видав його оператор, або той, що ви отримали під час оплати входу. Для відкритого залиште порожнім.</string>
     <string name="csrv_warning">Це додає новий акаунт на тому сервері. Твій нинішній акаунт лишається на цьому пристрої з усіма чатами і контактами; перемикатися між ними можна в меню акаунта.</string>
     <string name="csrv_reset_btn">Додати акаунт на публічному сервері</string>
     <string name="csrv_switching">Додаємо…</string>
@@ -1383,9 +1383,9 @@
     <string name="home_discover_join_failed">Не вдалося вступити, спробуйте ще раз.</string>
     <string name="cs_move_footer_play">Острів вибере вам новий випадковий номер. Контакти, групи, ключі й історія чатів зберігаються.</string>
     <string name="reg_invite_label">Код доступу</string>
-    <string name="reg_invite_required">Острів закритий: щоб увійти, потрібен код від його оператора. Вставте його нижче.</string>
-    <string name="reg_entry_required">Вхід на цей острів платний. Купіть вхід і вставте отриманий код нижче.</string>
-    <string name="reg_invite_invalid">Код не прийнято. Можливо, він уже використаний, минув або виданий для іншого острова.</string>
+    <string name="reg_invite_required">Острів закритий: щоб увійти, потрібен код доступу від його оператора. Вставте його нижче.</string>
+    <string name="reg_entry_required">Вхід на цей острів платний. Купіть вхід і вставте отриманий код доступу нижче.</string>
+    <string name="reg_invite_invalid">Код доступу не прийнято. Можливо, він уже використаний, минув або виданий для іншого острова.</string>
     <string name="ci_closed_island">Цей острів закритий. Щоб написати туди, потрібне посилання від самої людини: вона ділиться контактом або пише вам першою.</string>
     <string name="island_entry_price">%1$s разово</string>
     <string name="island_entry_closed">Закритий клуб</string>
@@ -1396,15 +1396,15 @@
     <string name="island_entry_open">Відкритий острів</string>
     <string name="join_closed_title">Закритий острів</string>
     <string name="join_checking_island">Питаємо острів…</string>
-    <string name="invites_title">Запрошення</string>
+    <string name="invites_title">Коди доступу</string>
     <string name="invites_count">Лишилося %1$d з %2$d</string>
-    <string name="invites_next">Наступне надійде %1$s.</string>
+    <string name="invites_next">Наступний надійде %1$s.</string>
     <string name="invites_all">У вас на руках усі.</string>
-    <string name="invites_mint">Створити запрошення</string>
+    <string name="invites_mint">Створити код доступу</string>
     <string name="invites_minting">Створюємо…</string>
     <string name="invites_copy">Скопіювати посилання</string>
-    <string name="invites_once">Показується один раз. Острів копії не зберігає: закриєте, не скопіювавши, і запрошення витрачено намарно.</string>
-    <string name="invites_failed">Острів не видав запрошення.</string>
+    <string name="invites_once">Показується один раз. Острів копії не зберігає: закриєте, не скопіювавши, і код доступу витрачено намарно.</string>
+    <string name="invites_failed">Острів не видав код доступу.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/с</string>
     <string name="backup_island_err_no_account">На цьому острові немає акаунта під ваш ключ, перемикатися нема на що. Приберіть острів і додайте заново.</string>

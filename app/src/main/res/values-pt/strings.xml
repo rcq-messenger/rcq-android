@@ -134,7 +134,7 @@
     <string name="update_failed">O download falhou. Toque para tentar de novo.</string>
     <string name="join_server_title">Entrar no servidor</string>
     <string name="join_server_body">Criar uma conta nova em %1$s?</string>
-    <string name="join_server_invite">Usando um link de convite</string>
+    <string name="join_server_invite">Usando o código de acesso do link</string>
     <string name="join_server_join">Entrar</string>
     <string name="weblink_title">Conectar à web?</string>
     <string name="weblink_body">Isto deixa o site entrar como a sua conta, para você conversar pelo navegador. Só continue se você mesmo abriu isto pelo código QR em chat.rcq.app.</string>
@@ -738,7 +738,7 @@
     <string name="csrv_current">SERVIDOR ATUAL</string>
     <string name="csrv_host">Host do servidor</string>
     <string name="csrv_invite">Código de acesso (opcional)</string>
-    <string name="csrv_invite_hint">Só é preciso numa ilha fechada. É o código que o operador dela lhe deu, ou o que você recebeu ao pagar a entrada. Numa ilha aberta deixe vazio.</string>
+    <string name="csrv_invite_hint">Só é preciso numa ilha fechada. É o código de acesso que o operador dela lhe deu, ou o que você recebeu ao pagar a entrada. Numa ilha aberta deixe vazio.</string>
     <string name="csrv_warning">Isto adiciona uma conta nova naquele servidor. Sua conta atual continua neste aparelho com todas as conversas e contatos; alterne entre elas pelo menu de contas.</string>
     <string name="csrv_reset_btn">Adicionar conta no servidor público</string>
     <string name="csrv_switching">Adicionando…</string>
@@ -1379,9 +1379,9 @@
     <string name="home_discover_join_failed">Não foi possível entrar, tente novamente.</string>
     <string name="cs_move_footer_play">A ilha escolhe um novo número aleatório para você. Contatos, grupos, chaves e histórico são mantidos.</string>
     <string name="reg_invite_label">Código de acesso</string>
-    <string name="reg_invite_required">A ilha é fechada: para entrar é preciso um código do operador dela. Cole-o abaixo.</string>
-    <string name="reg_entry_required">A entrada nesta ilha é paga. Compre a entrada e cole abaixo o código que receber.</string>
-    <string name="reg_invite_invalid">Esse código não foi aceito. Pode estar usado, expirado ou ser de outra ilha.</string>
+    <string name="reg_invite_required">A ilha é fechada: para entrar é preciso um código de acesso do operador dela. Cole-o abaixo.</string>
+    <string name="reg_entry_required">A entrada nesta ilha é paga. Compre a entrada e cole abaixo o código de acesso que receber.</string>
+    <string name="reg_invite_invalid">Esse código de acesso não foi aceito. Pode estar usado, expirado ou ser de outra ilha.</string>
     <string name="ci_closed_island">Esta ilha é fechada. Para escrever a alguém de lá é preciso um link da própria pessoa: ela compartilha o contato, ou escreve para você primeiro.</string>
     <string name="island_entry_price">%1$s uma vez</string>
     <string name="island_entry_closed">Clube fechado</string>
@@ -1392,15 +1392,15 @@
     <string name="island_entry_open">Ilha aberta</string>
     <string name="join_closed_title">Ilha fechada</string>
     <string name="join_checking_island">Perguntando à ilha…</string>
-    <string name="invites_title">Convites para distribuir</string>
+    <string name="invites_title">Códigos de acesso para distribuir</string>
     <string name="invites_count">Restam %1$d de %2$d</string>
     <string name="invites_next">O próximo chega em %1$s.</string>
     <string name="invites_all">Você está com todos.</string>
-    <string name="invites_mint">Criar um convite</string>
+    <string name="invites_mint">Criar um código de acesso</string>
     <string name="invites_minting">Criando…</string>
     <string name="invites_copy">Copiar o link</string>
-    <string name="invites_once">Aparece uma única vez. A ilha não guarda cópia: se fechar sem copiar, o convite foi gasto à toa.</string>
-    <string name="invites_failed">A ilha não entregou nenhum convite.</string>
+    <string name="invites_once">Aparece uma única vez. A ilha não guarda cópia: se fechar sem copiar, o código de acesso foi gasto à toa.</string>
+    <string name="invites_failed">A ilha não entregou nenhum código de acesso.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/s</string>
     <string name="backup_island_err_no_account">Esta ilha não tem uma conta para a sua chave, então não há para onde mudar. Remova-a e adicione de novo.</string>

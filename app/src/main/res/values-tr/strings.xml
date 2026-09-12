@@ -134,7 +134,7 @@
     <string name="update_failed">İndirme başarısız. Tekrar denemek için dokun.</string>
     <string name="join_server_title">Sunucuya katıl</string>
     <string name="join_server_body">%1$s üzerinde yeni bir hesap oluşturulsun mu?</string>
-    <string name="join_server_invite">Davet bağlantısıyla</string>
+    <string name="join_server_invite">Bağlantıdaki erişim koduyla</string>
     <string name="join_server_join">Katıl</string>
     <string name="weblink_title">Web\'e bağlanılsın mı?</string>
     <string name="weblink_body">Bu, tarayıcıdan sohbet edebilmen için siteyi senin hesabınla oturum açtırır. Yalnızca chat.rcq.app üzerindeki QR kodunu kendin açtıysan devam et.</string>
@@ -738,7 +738,7 @@
     <string name="csrv_current">ŞİMDİKİ SUNUCU</string>
     <string name="csrv_host">Sunucu adresi</string>
     <string name="csrv_invite">Erişim kodu (isteğe bağlı)</string>
-    <string name="csrv_invite_hint">Yalnızca kapalı bir ada için gerekir. Adanın işletmecisinin verdiği kod ya da girişi öderken aldığın kod. Açık bir adada boş bırak.</string>
+    <string name="csrv_invite_hint">Yalnızca kapalı bir ada için gerekir. Adanın işletmecisinin verdiği erişim kodu ya da girişi öderken aldığın kod. Açık bir adada boş bırak.</string>
     <string name="csrv_warning">Bu, o sunucuda yeni bir hesap ekler. Şimdiki hesabın bütün sohbetleri ve kişileriyle bu cihazda kalır; aralarında hesap menüsünden geçebilirsin.</string>
     <string name="csrv_reset_btn">Herkese açık sunucuda hesap ekle</string>
     <string name="csrv_switching">Ekleniyor…</string>
@@ -1379,9 +1379,9 @@
     <string name="home_discover_join_failed">Katılamadı, tekrar deneyin.</string>
     <string name="cs_move_footer_play">Ada size yeni bir rastgele numara seçer. Kişiler, gruplar, anahtarlar ve sohbet geçmişi korunur.</string>
     <string name="reg_invite_label">Erişim kodu</string>
-    <string name="reg_invite_required">Ada kapalı: girmek için işletmecisinden bir kod gerekiyor. Aşağıya yapıştırın.</string>
-    <string name="reg_entry_required">Bu adaya giriş ücretlidir. Girişi satın alın ve aldığınız kodu aşağıya yapıştırın.</string>
-    <string name="reg_invite_invalid">Bu kod kabul edilmedi. Kullanılmış, süresi dolmuş veya başka bir adaya ait olabilir.</string>
+    <string name="reg_invite_required">Ada kapalı: girmek için işletmecisinden bir erişim kodu gerekiyor. Aşağıya yapıştırın.</string>
+    <string name="reg_entry_required">Bu adaya giriş ücretlidir. Girişi satın alın ve aldığınız erişim kodunu aşağıya yapıştırın.</string>
+    <string name="reg_invite_invalid">Bu erişim kodu kabul edilmedi. Kullanılmış, süresi dolmuş veya başka bir adaya ait olabilir.</string>
     <string name="ci_closed_island">Bu ada kapalı. Oradaki birine yazmak için kişinin kendisinden bir bağlantı gerekir: kişiyi paylaşması ya da size önce yazması.</string>
     <string name="island_entry_price">tek seferlik %1$s</string>
     <string name="island_entry_closed">Kapalı kulüp</string>
@@ -1392,15 +1392,15 @@
     <string name="island_entry_open">Açık ada</string>
     <string name="join_closed_title">Kapalı ada</string>
     <string name="join_checking_island">Adaya soruluyor…</string>
-    <string name="invites_title">Dağıtacağın davetler</string>
-    <string name="invites_count">%2$d davetten %1$d tanesi kaldı</string>
+    <string name="invites_title">Dağıtacağın erişim kodları</string>
+    <string name="invites_count">%2$d erişim kodundan %1$d tanesi kaldı</string>
     <string name="invites_next">Bir sonraki %1$s tarihinde geliyor.</string>
     <string name="invites_all">Hepsi elinde.</string>
-    <string name="invites_mint">Davet oluştur</string>
+    <string name="invites_mint">Erişim kodu oluştur</string>
     <string name="invites_minting">Oluşturuluyor…</string>
     <string name="invites_copy">Bağlantıyı kopyala</string>
-    <string name="invites_once">Bir kez gösterilir. Ada kopyasını tutmaz: kopyalamadan kapatırsan davet boşa gider.</string>
-    <string name="invites_failed">Ada bir davet vermedi.</string>
+    <string name="invites_once">Bir kez gösterilir. Ada kopyasını tutmaz: kopyalamadan kapatırsan erişim kodu boşa gider.</string>
+    <string name="invites_failed">Ada bir erişim kodu vermedi.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/sn</string>
     <string name="backup_island_err_no_account">Bu adada anahtarınıza ait bir hesap yok, geçilecek bir yer de yok. Adayı kaldırıp yeniden ekleyin.</string>
