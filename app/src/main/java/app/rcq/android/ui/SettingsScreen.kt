@@ -3603,13 +3603,28 @@ private fun CustomServerScreen(session: Session, onBack: () -> Unit, onSwitched:
     fun applySwitch(input: String?, inviteCode: String?) {
         switching = true
         scope.launch {
-            val newUin = runCatching { session.registerNewAccount("user-${(1000..9999).random()}", input, inviteCode) }.getOrNull()
+            val attempt = runCatching {
+                session.registerNewAccount("user-${(1000..9999).random()}", input, inviteCode)
+            }
             switching = false
+            val newUin = attempt.getOrNull()
             if (newUin != null) {
                 Toast.makeText(context, context.getString(R.string.csrv_connected, session.currentServer), Toast.LENGTH_LONG).show()
                 onSwitched(newUin)
             } else {
-                Toast.makeText(context, context.getString(R.string.csrv_unreachable), Toast.LENGTH_LONG).show()
+                // ⚠ THE ISLAND'S OWN REFUSAL, NOT "unreachable". This screen has
+                // a code field, and a wrong code answers 403 from a server that
+                // is plainly reachable — telling the person their network is
+                // broken sent them to check the wifi over a typo (founder,
+                // 12.09). Every other place that registers already says this;
+                // this one threw the reason away with `.getOrNull()`.
+                val refusal = attempt.exceptionOrNull()?.message
+                    ?.let { app.rcq.android.joinRefusalRes(it) }
+                Toast.makeText(
+                    context,
+                    context.getString(refusal ?: R.string.csrv_unreachable),
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }

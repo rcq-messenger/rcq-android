@@ -1613,18 +1613,25 @@ private fun joinRefusal(message: String) = JoinRefusal(
     paid = message.contains("entry_required"),
 )
 
+/** The same refusal as a string resource, for the callers that are not inside
+ *  a composition: a coroutine raising a Toast cannot call `stringResource`.
+ *  Null when the island said something this does not recognise, and then its
+ *  own words are the better message. */
+internal fun joinRefusalRes(message: String): Int? {
+    val r = joinRefusal(message)
+    return when {
+        r.badCode -> R.string.reg_invite_invalid
+        r.paid -> R.string.reg_entry_required
+        r.needsCode -> R.string.reg_invite_required
+        else -> null
+    }
+}
+
 /** The sentence to put under the title for a refusal, in the island's terms
  *  when it named one and in its own words when it did not. */
 @Composable
-private fun joinRefusalText(message: String): String {
-    val r = joinRefusal(message)
-    return when {
-        r.badCode -> stringResource(R.string.reg_invite_invalid)
-        r.paid -> stringResource(R.string.reg_entry_required)
-        r.needsCode -> stringResource(R.string.reg_invite_required)
-        else -> message
-    }
-}
+private fun joinRefusalText(message: String): String =
+    joinRefusalRes(message)?.let { stringResource(it) } ?: message
 
 @Composable
 private fun Failed(
