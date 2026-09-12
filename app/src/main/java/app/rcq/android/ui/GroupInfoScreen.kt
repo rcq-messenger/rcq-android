@@ -768,7 +768,9 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 Text(stringResource(R.string.gi_all_in), color = c.textSecondary)
             } else {
                 LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                    items(candidates, key = { it.uin }) { ct ->
+                    // Contacts are the one list here that spans islands, and two
+                    // people on two islands may share a number.
+                    items(candidates, key = { "${it.uin}@${it.host ?: ""}" }) { ct ->
                         Row(
                             Modifier.fillMaxWidth().clickable {
                                 scope.launch {

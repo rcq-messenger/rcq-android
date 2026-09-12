@@ -6267,10 +6267,32 @@ class Session(context: Context) {
      */
     private suspend fun outgoingGuestCard(): String? {
         if (!closedIsland) return null
-        return GuestCardStore.shareableCard { hash ->
-            kotlinx.coroutines.runBlocking { api.addGuestCard(hash) }
+        // ⚠⚠ OFF THE MAIN THREAD, or the send button freezes the app. The
+        // composer launches sendText on the Main dispatcher, and this used to
+        // call `runBlocking { api.addGuestCard(hash) }` right there: a POST that
+        // took a dead keep-alive after idle parked the UI thread for up to the
+        // call timeout, Android put up its own "RCQ isn't responding / Wait"
+        // dialog, and when the request finally returned the send went through
+        // instantly. That is report #967 word for word ("press Wait and it
+        // sends"), and it started the day the flagship was closed for hours
+        // and every phone cached closed_island=true.
+        //
+        // ⚠ And one failed mint does not get retried on every send: a card
+        // that could not be registered is not worth a network wait per
+        // message. Sixty seconds between attempts; the message goes without a
+        // card meanwhile, exactly as it did before cards existed.
+        val now = System.currentTimeMillis()
+        if (now - guestCardMintFailedAt < 60_000) return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            GuestCardStore.shareableCard { hash ->
+                kotlinx.coroutines.runBlocking { api.addGuestCard(hash) }
+            }.also { if (it == null) guestCardMintFailedAt = System.currentTimeMillis() }
         }
     }
+
+    /** When the last guest-card mint failed, so the next sends do not each
+     *  wait on the island for a card it already refused once. */
+    @Volatile private var guestCardMintFailedAt = 0L
 
     /** In-chat bridge sharing: hand [toUin] a relay descriptor from your known
      *  pool so they can route through it when their own relays are blocked
@@ -9078,8 +9100,14 @@ class Session(context: Context) {
         // anybody has ever held up to a camera, for a door that is not locked.
         // It is also the moment the card is first created, so an open island
         // never registers one at all.
-        val card = if (!closedIsland) null else GuestCardStore.shareableCard { hash ->
-            kotlinx.coroutines.runBlocking { api.addGuestCard(hash) }
+        // ⚠ NEVER MINTED HERE. This runs inside a composable's `remember` on
+        // the Main thread (HomeScreen), and a mint is a network round trip:
+        // the same runBlocking that froze the send button (#967) would freeze
+        // the QR screen. The card that exists is used; if none exists yet, one
+        // is minted in the background and the NEXT opening carries it. A QR
+        // without a card still works on an open island, which is most of them.
+        val card = if (!closedIsland) null else GuestCardStore.myCards().firstOrNull()?.card.also {
+            if (it == null) scope.launch { outgoingGuestCard() }
         }
         return RcqFederation.buildContactQr(a, sk, card = card) to
             RcqFederation.buildContactLink(a, sk, card = card)

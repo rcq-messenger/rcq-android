@@ -29,6 +29,9 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -1353,7 +1356,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // defeated strong skipping — one receipt or reaction repainted every bubble
     // on screen. The handler only needs the rows that exist at TAP time.
     val rowsForJump by rememberUpdatedState(rows)
-    val onTapReply: (String) -> Unit = remember(target) {
+    // Answers whether it could jump. A quote whose target is not in the loaded
+    // rows used to do nothing at all on tap; now the bubble opens the quote in
+    // place instead (founder item 3), and it needs to know which happened.
+    val onTapReply: (String) -> Boolean = remember(target) {
         { rid ->
             val idx = rowsForJump.indexOfFirst { r ->
                 (r is ChatRow.Single && r.m.id == rid) || (r is ChatRow.Album && r.items.any { it.id == rid })
@@ -1367,6 +1373,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 highlightId = rid
                 scope.launch { kotlinx.coroutines.delay(1400); if (highlightId == rid) highlightId = null }
             }
+            idx >= 0
         }
     }
 
@@ -2144,13 +2151,27 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             if (slices.active) Modifier.wallpaperSlice(slices, veil = c.bgPrimary.copy(alpha = bottomVeil))
             else Modifier,
         ) {
+        // The iPhone's strip shows the whole quote; this one showed two lines
+        // and a tap did nothing (#964). A tap opens it now; the bar grows with
+        // the text, and ChromeGrowthEffect keeps the newest message pinned.
+        var replyStripOpen by remember(replyTarget?.id) { mutableStateOf(false) }
         replyTarget?.let { rt ->
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
-                Box(Modifier.width(3.dp).height(34.dp).clip(RoundedCornerShape(2.dp)).background(c.accent))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+                    .clickable { replyStripOpen = !replyStripOpen }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .animateContentSize()
+                    .height(IntrinsicSize.Min),
+            ) {
+                Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(c.accent))
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(authorName(rt), color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Text(previewOf(rt, context), color = c.textSecondary, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        previewOf(rt, context), color = c.textSecondary, fontSize = 12.sp,
+                        maxLines = if (replyStripOpen) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 Icon(Icons.Filled.Close, stringResource(R.string.chat_cancel_reply), tint = c.textSecondary, modifier = Modifier.clickable { replyTarget = null }.padding(8.dp).size(18.dp))
             }
@@ -2841,7 +2862,17 @@ private fun Composer(
             }
             if (event == Lifecycle.Event.ON_RESUME && hadComposerFocus) {
                 hadComposerFocus = false
+                // ⚠⚠ THE CARET COMES BACK. THE KEYBOARD DOES NOT. Focusing a
+                // text field is an explicit showSoftInput, and the manifest's
+                // stateUnchanged (0.184, #953) only governs what the SYSTEM
+                // does at window focus: it never stops a show the app asked
+                // for itself. So this one line undid that fix for anyone who
+                // had hidden the keyboard with the caret still in the field
+                // (#963, "I do not see the effect"). Hiding in the same handler
+                // folds the two commands into one restartInput with no show:
+                // the draft keeps its caret, and the keyboard waits for a tap.
                 runCatching { focusRequester.requestFocus() }
+                keyboard?.hide()
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -3651,6 +3682,22 @@ private fun previewOf(m: ChatMessage, context: android.content.Context): String 
     else -> previewOfKind(m, context)
 }
 
+/// How much of a quoted message rides in the reply. Was 100 characters cut
+/// mid-word with no ellipsis, while iPhone composed against 280 and the web
+/// against 220, so the same reply read three different ways on three phones
+/// and Android's was the one that lost the point of the sentence (founder
+/// item 3, #964). One number for all three clients now; the envelope has no
+/// cap this comes near, and a code point is never split.
+private const val QUOTE_MAX = 280
+
+private fun quoteTrim(raw: String): String {
+    if (raw.codePointCount(0, raw.length) <= QUOTE_MAX) return raw
+    val end = raw.offsetByCodePoints(0, QUOTE_MAX)
+    val cut = raw.substring(0, end)
+    val sp = cut.lastIndexOf(' ')
+    return (if (sp > end / 2) cut.substring(0, sp) else cut).trimEnd() + "\u2026"
+}
+
 private fun previewOfKind(m: ChatMessage, context: android.content.Context): String = when (m.kind) {
     "photo" -> context.getString(R.string.chat_prev_photo)
     "file" -> m.fileName ?: context.getString(R.string.chat_prev_file)
@@ -3659,10 +3706,10 @@ private fun previewOfKind(m: ChatMessage, context: android.content.Context): Str
     "location" -> context.getString(R.string.chat_prev_location)
     // Polls are gone, but an old peer's ballot is still a message with a
     // question in it, and quoting it must say what it was rather than a blank.
-    "poll" -> app.rcq.android.model.PollContent.fromJson(m.body)?.question?.take(100)
+    "poll" -> app.rcq.android.model.PollContent.fromJson(m.body)?.question?.let(::quoteTrim)
         ?: context.getString(R.string.poll_removed_title)
     "relay" -> context.getString(R.string.relay_share_title)
-    else -> m.body.take(100)
+    else -> quoteTrim(m.body)
 }
 
 /** Scrolls [listState] to the last item when the soft keyboard opens, so the
@@ -4715,7 +4762,7 @@ private fun SwipeToReply(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Unit)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, replyTargetDeleted: Boolean = false, linksEnabled: Boolean = true) {
+private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onRetry: () -> Unit, onLongPress: () -> Unit, onOpenGroup: (Int) -> Unit = {}, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, mentionNick: ((Int) -> String?)? = null, onMentionClick: ((Int) -> Unit)? = null, mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = null, highlighted: Boolean = false, onTapReply: ((String) -> Boolean)? = null, onSenderClick: (() -> Unit)? = null, onShowReactors: (ChatMessage) -> Unit = {}, replyAuthorOverride: String? = null, replyTargetDeleted: Boolean = false, linksEnabled: Boolean = true) {
     val c = RcqTheme.colors
     val failed = m.state == DeliveryState.FAILED
     // When a chat wallpaper is set, the time/ticks row sits on the wallpaper
@@ -4832,11 +4879,24 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     // is the part every messenger has in common and the part
                     // that survives a dark theme, a coloured bubble and a
                     // colour-blind reader, because it is a SHAPE.
+                    // Opened in place when the original is not on screen to
+                    // jump to. The quote carries up to 280 characters of it and
+                    // one line showed a dozen; a tap that scrolled nowhere was
+                    // the only other thing on offer (founder item 3, #964).
+                    var quoteExpanded by remember(m.id) { mutableStateOf(false) }
+                    val quoteCd = stringResource(if (quoteExpanded) R.string.chat_quote_collapse_cd else R.string.chat_quote_expand_cd)
                     Row(
                         Modifier.padding(bottom = 4.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(c.accent.copy(alpha = 0.14f))
-                            .then(if (tappable) Modifier.clickable { onTapReply!!.invoke(m.replyToId!!) } else Modifier)
+                            .then(
+                                if (tappable) Modifier.clickable {
+                                    if (!onTapReply!!.invoke(m.replyToId!!)) quoteExpanded = !quoteExpanded
+                                } else if (!replyTargetDeleted) Modifier.clickable { quoteExpanded = !quoteExpanded }
+                                else Modifier,
+                            )
+                            .semantics { contentDescription = quoteCd }
+                            .animateContentSize()
                             .height(IntrinsicSize.Min),
                     ) {
                         Box(Modifier.width(3.dp).fillMaxHeight().background(c.accent))
@@ -4853,7 +4913,11 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 )
                             } else {
-                                Text(m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp,
+                                    maxLines = if (quoteExpanded) Int.MAX_VALUE else 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     }

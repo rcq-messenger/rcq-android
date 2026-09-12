@@ -154,6 +154,13 @@ fun GroupMember.rosterTier(ownerUin: Int): Int = when {
  *  strings on every one of the ~n log n comparisons. */
 fun orderedRoster(members: List<GroupMember>, ownerUin: Int): List<GroupMember> =
     members
+        // ⚠ ONE ROW PER NUMBER. The screen keys its list on the uin, and Compose
+        // treats a repeated key as fatal, so an island that listed somebody
+        // twice (is2 did, after a number move: report #973) crashed the member
+        // list on open. iOS and the web merely drew the person twice. The
+        // island is being taught not to do it; the list no longer depends on
+        // that lesson having been learned.
+        .distinctBy { it.uin }
         .map { m -> Triple(m.rosterTier(ownerUin), m.nickname.lowercase(), m) }
         .sortedWith(compareBy({ it.first }, { it.second }, { it.third.uin }))
         .map { it.third }

@@ -920,6 +920,8 @@
     <string name="chat_a_message">Message</string>
     <string name="chat_report">Report</string>
     <string name="chat_reply">Reply</string>
+    <string name="chat_quote_expand_cd">Show the whole quote</string>
+    <string name="chat_quote_collapse_cd">Collapse the quote</string>
     <string name="chat_copy">Copy</string>
     <string name="media_share">Share</string>
     <string name="media_save">Save</string>
