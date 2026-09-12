@@ -3489,7 +3489,12 @@ private fun MessageLongPressOverlay(
                             },
                         )
                     }
-                    if (m.kind == "text") {
+                    // #971: a caption is text too. This was gated on the KIND
+                    // being text, so a photo with two paragraphs under it had
+                    // no Copy at all, while Edit two lines down had known since
+                    // #739 that the caption lives in `body`. The gate is now the
+                    // only thing that matters: is there anything to copy.
+                    if (m.body.isNotBlank() && m.kind != "call" && m.kind != "system") {
                         add(
                             MsgOverlayItem(stringResource(R.string.chat_copy), Icons.Filled.ContentCopy) {
                                 val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
