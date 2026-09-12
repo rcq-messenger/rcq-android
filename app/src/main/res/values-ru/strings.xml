@@ -1449,6 +1449,22 @@
     <string name="invites_copy">Скопировать ссылку</string>
     <string name="invites_once">Показывается один раз. Остров копию не хранит: закроете, не скопировав, и приглашение потрачено впустую.</string>
     <string name="invites_failed">Остров не выдал приглашение.</string>
+    <!-- Residency on an existing account, and the smaller drip for accounts
+         that were here before it existed (founder item 5, 12.09). The
+         voucher used to be accepted at registration only. -->
+    <string name="invites_free_line">Вы были здесь до резидентства: остров всё равно даёт вам приглашения, по одному в месяц.</string>
+    <string name="residency_title">Резидентство</string>
+    <string name="residency_since">Резидент с %1$s</string>
+    <string name="residency_body">Один платёж, один раз. Резидент получает приглашения, по одному в месяц, и носит знак острова.</string>
+    <string name="residency_buy">Купить на %1$s</string>
+    <string name="residency_have_code">У меня есть код</string>
+    <string name="residency_redeem">Активировать</string>
+    <string name="residency_redeeming">Проверяем…</string>
+    <string name="residency_done">Теперь вы здесь живёте.</string>
+    <string name="residency_already">Этот аккаунт уже резидент.</string>
+    <string name="residency_code_spent">Этот код уже использован.</string>
+    <string name="residency_not_sold">Этот остров не продаёт резидентство.</string>
+    <string name="residency_failed">Остров не принял код. Попробуйте ещё раз.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/с</string>
 </resources>

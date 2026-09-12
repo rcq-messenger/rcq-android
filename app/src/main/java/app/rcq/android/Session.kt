@@ -128,6 +128,14 @@ private val SEALED_WS_TYPES = setOf(
     "call",
 )
 
+/** Every code `POST /residency/redeem` can refuse with, in the order the
+ *  island checks them. Only consulted when the body did not parse as the
+ *  usual `{"detail": {"code": ...}}`; see [Session.redeemResidency]. */
+private val KNOWN_RESIDENCY_CODES = listOf(
+    "already_resident", "voucher_spent", "suspended", "sales_disabled",
+    "voucher_other_island", "voucher_expired", "bad_signature",
+)
+
 /**
  * The app's single coordinator: identity, REST, WebSocket, encrypted
  * storage, local message DB, and crypto. Exposes observable state
@@ -3760,6 +3768,35 @@ class Session(context: Context) {
      *  caller owns the only copy of that link from here on. */
     suspend fun mintResidentInvite(): RcqApi.MintedInvite? =
         runCatching { api.mintInvite() }.getOrNull()
+
+    /** The outcome of spending an entry voucher on THIS account (founder item
+     *  5, 12.09). Three cases because they are three different sentences:
+     *  [Refused] carries the island's code so the sheet can tell "already a
+     *  resident" from "that code was used up" from "wrong island", [Failed] is
+     *  the network or a body nothing could read, and only [Failed] is worth
+     *  retrying with the same code. */
+    sealed class ResidencyRedeem {
+        data class Done(val out: RcqApi.ResidencyRedeemed) : ResidencyRedeem()
+        data class Refused(val code: String?) : ResidencyRedeem()
+        object Failed : ResidencyRedeem()
+    }
+
+    suspend fun redeemResidency(voucher: String): ResidencyRedeem =
+        runCatching { api.redeemResidency(voucher) }.fold(
+            onSuccess = { ResidencyRedeem.Done(it) },
+            onFailure = { e ->
+                val r = RcqApi.refusalOf(e.message)
+                val status = r.status
+                if (status == null || status !in 400..499) return@fold ResidencyRedeem.Failed
+                // The endpoint answers `{"detail": {"code": ...}}` like the rest
+                // of the island, which [refusalOf] reads. A code nested any
+                // other way is still in the text, and the join screen matches
+                // the same way (MainActivity.joinRefusal), so fall back to it
+                // rather than losing the sentence.
+                val code = r.code ?: KNOWN_RESIDENCY_CODES.firstOrNull { e.message?.contains(it) == true }
+                ResidencyRedeem.Refused(code)
+            },
+        )
 
     /** The outcome of taking one of my own reports off my own list. Three
      *  cases, because they are three different sentences: [Refused] is the

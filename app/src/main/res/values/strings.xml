@@ -1454,6 +1454,22 @@
     <string name="invites_copy">Copy the link</string>
     <string name="invites_once">Shown once. The island keeps no copy of it: close this without copying and the invite is spent on nothing.</string>
     <string name="invites_failed">The island did not give out an invite.</string>
+    <!-- Residency on an existing account, and the smaller drip for accounts
+         that were here before it existed (founder item 5, 12.09). The
+         voucher used to be accepted at registration only. -->
+    <string name="invites_free_line">You were here before residency: the island still gives you invites, one a month.</string>
+    <string name="residency_title">Residency</string>
+    <string name="residency_since">Resident since %1$s</string>
+    <string name="residency_body">One payment, once. A resident gets invites to hand out, one a month, and wears the island\'s mark.</string>
+    <string name="residency_buy">Buy on %1$s</string>
+    <string name="residency_have_code">I have a code</string>
+    <string name="residency_redeem">Activate</string>
+    <string name="residency_redeeming">Checking…</string>
+    <string name="residency_done">You live here now.</string>
+    <string name="residency_already">This account is already a resident.</string>
+    <string name="residency_code_spent">That code has already been used.</string>
+    <string name="residency_not_sold">This island does not sell residency.</string>
+    <string name="residency_failed">The island did not accept it. Try again.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/s</string>
 </resources>

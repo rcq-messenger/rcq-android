@@ -721,6 +721,12 @@ class RcqApi(
         val remaining: Int = 0,
         /** ISO-8601, or null when this account already holds the lot. */
         val next_at: String? = null,
+        /** Where the allowance comes from: `resident` for somebody who paid,
+         *  `free` for an account that was here before residency existed and
+         *  gets a smaller drip (founder item 5, 12.09). Empty from an island
+         *  older than the field, and the counter draws the same either way;
+         *  the only thing keyed on it is one line of copy in the sheet. */
+        val kind: String = "",
     )
 
     /** ⚠⚠ [code] and [link] come back ONCE. The island stores only the hash, so
@@ -743,6 +749,31 @@ class RcqApi(
         // Empty object rather than no body: the endpoint takes no payload, and
         // a POST with no body at all is the one shape some proxies rewrite.
         post("/invites", "{}", authed = true, MintedInvite::class.java)
+    }
+
+    // ── residency bought on an EXISTING account (POST /residency/redeem) ──
+    // Until founder item 5 (12.09) an entry voucher was accepted by exactly
+    // one path, registration, so somebody already here for free had no way to
+    // become a resident short of a new account. The voucher is bound to the
+    // host, not to an account, which is what makes this a single round trip.
+
+    private data class RedeemResidencyBody(val voucher: String)
+
+    /** What the island answers once the voucher is spent on this account. The
+     *  mark is granted server-side; [invites] is the same shape `GET /invites`
+     *  returns, so the counter redraws off this without a second call. */
+    data class ResidencyRedeemed(
+        val resident_since: String? = null,
+        val badge: String? = null,
+        val badges_earned: List<String> = emptyList(),
+        val invites: ResidentInvites? = null,
+    )
+
+    /** Refusals carry a code: `already_resident` and `voucher_spent` (409),
+     *  `suspended`, `voucher_other_island`, `voucher_expired`, `bad_signature`
+     *  (403), `sales_disabled` (404). See [refusalOf]. */
+    suspend fun redeemResidency(voucher: String): ResidencyRedeemed = withContext(Dispatchers.IO) {
+        post("/residency/redeem", gson.toJson(RedeemResidencyBody(voucher)), authed = true, ResidencyRedeemed::class.java)
     }
 
     // ── random chat (anonymous time-boxed 1:1 with a stranger) ───────
@@ -1933,6 +1964,15 @@ class RcqApi(
         // it wears. Empty on an island that predates the set, and on anybody
         // holding one mark or none.
         val badges_earned: List<String> = emptyList(),
+        // Owner-only, ISO-8601: when this account became a resident, null for
+        // everybody who did not pay. Until founder item 5 (12.09) the owner
+        // could only infer it from `badges_earned`; the residency row reads
+        // this and falls back to the mark on an island older than the field.
+        val resident_since: String? = null,
+        // Owner-only: `voucher` | `invite` | `open`, null on a row older than
+        // the column. Carried for parity with the wire, nothing branches on
+        // it yet.
+        val entered_via: String? = null,
         val read_receipts_visibility: String? = null,
         /** everyone | contacts | nobody. The one policy the server has always
          *  enforced and this client could never set: a person being called by

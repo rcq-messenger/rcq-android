@@ -12,6 +12,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.activity.result.contract.ActivityResultContracts
@@ -531,6 +532,16 @@ private fun SettingsRoot(
             if (retired) app.rcq.android.data.LocalStores.markPresenceRetired()
         }
     }
+    // The own profile, seeded from the cache so the mark does not load in
+    // front of the person every time, and re-read on [profileTick]: buying
+    // residency below (founder item 5, 12.09) grants the mark server-side, and
+    // both the header and the residency row must show it without a relaunch.
+    // [invitesTick] does the same for the invites counter, which the purchase
+    // changes too.
+    var ownProfile by remember(uin) { mutableStateOf(session.cachedProfile()) }
+    var profileTick by remember { mutableIntStateOf(0) }
+    var invitesTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(uin, profileTick) { session.loadProfile()?.let { ownProfile = it } }
     var confirmBurn by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var confirmMigrate by remember { mutableStateOf(false) }
@@ -700,13 +711,12 @@ private fun SettingsRoot(
                 val ownAv by session.ownAvatar.collectAsState()
                 PersonAvatar(ownAv?.first, ownAv?.second, ownStatus, session, 44.dp)
                 // The island's mark on the person looking (founder, 05.09),
-                // read with the own profile once per screen.
-                var ownBadge by remember { mutableStateOf<String?>(null) }
-                androidx.compose.runtime.LaunchedEffect(uin) { ownBadge = session.loadProfile()?.badge }
+                // off the own profile hoisted above so a residency bought on
+                // this screen shows up here at once.
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(session.nickname, color = c.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        BadgeMark(ownBadge, size = 15.dp)
+                        BadgeMark(ownProfile?.badge, size = 15.dp)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("$uin", color = c.textMono, fontSize = 13.sp)
@@ -913,10 +923,17 @@ private fun SettingsRoot(
                         showIslandRules = true
                     }
                 }
-                // How many people this resident may still bring in. Here rather
-                // than under "About", because an allowance is a fact about THIS
-                // island and moves with the account when it moves.
-                ResidentInvitesRow(session)
+                // Residency, and the invites it pays for, one under the other
+                // (founder item 5, 12.09). Here rather than under "About",
+                // because both are facts about THIS island and move with the
+                // account when it moves.
+                ResidencyRow(
+                    session = session,
+                    host = islandHost,
+                    caps = islandInfo?.capabilities,
+                    profile = ownProfile,
+                ) { profileTick++; invitesTick++ }
+                ResidentInvitesRow(session, invitesTick)
                 if (showIslandRules && islandRules != null) {
                     RcqSheet(onDismiss = { showIslandRules = false }, title = islandName ?: islandHost) {
                         Text(
@@ -4528,12 +4545,18 @@ private val serverInfoCache = mutableMapOf<String, app.rcq.android.net.RcqApi.Se
  * dead network answers nothing. Neither is a fact worth a row.
  */
 @Composable
-private fun ResidentInvitesRow(session: Session) {
+private fun ResidentInvitesRow(
+    session: Session,
+    /// Bumped by the residency row above when a voucher is redeemed: the
+    /// counter goes from nothing to a full allowance in that one round trip,
+    /// and a row that read once per screen kept drawing nothing.
+    tick: Int = 0,
+) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var quota by remember(session.uin) { mutableStateOf<app.rcq.android.net.RcqApi.ResidentInvites?>(null) }
-    LaunchedEffect(session.uin) { quota = session.residentInvites() }
+    LaunchedEffect(session.uin, tick) { quota = session.residentInvites() }
     val q = quota ?: return
     if (!q.enabled || !q.eligible) return
 
@@ -4564,6 +4587,13 @@ private fun ResidentInvitesRow(session: Session) {
                 Text(
                     q.next_at?.let { stringResource(R.string.invites_next, formatInviteDate(it)) }
                         ?: stringResource(R.string.invites_all),
+                    color = c.textSecondary, fontSize = 12.sp,
+                )
+                // An account that was here before residency existed gets a
+                // smaller drip (founder item 5, 12.09). The counter is the
+                // same; this one line is what says why it is there.
+                if (q.kind == "free") Text(
+                    stringResource(R.string.invites_free_line),
                     color = c.textSecondary, fontSize = 12.sp,
                 )
                 if (mintFailed) Text(
@@ -4625,6 +4655,156 @@ private fun ResidentInvitesRow(session: Session) {
                 }
                 TextButton(onClick = { open = false }, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.common_done), color = c.accent)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Residency on the island section, beside the invites it pays for (founder
+ * item 5, 12.09).
+ *
+ * Three states and only two of them draw. A resident sees the date they became
+ * one, and nothing to tap: the fact is the whole row. Somebody who is not, on
+ * an island that sells entry (`entry_price_cents > 0`), sees the price and a
+ * sheet with one field, because until now an entry voucher was accepted by
+ * registration alone, and a person already here for free had no door to
+ * residency short of a second account. Everybody else, which is everybody on
+ * an open island, gets no row: an offer that cannot be taken up is a question
+ * ("why is this here"), not a setting.
+ *
+ * ⚠⚠ IN THE PLAY BUILD, A PRICE ONLY FOR OUR OWN ISLAND AND NO LINK AT ALL:
+ * the line IslandPicker draws, for the reason it gives. Naming the price of
+ * something the app sells is allowed; pointing at a checkout the store does
+ * not handle is not. The sideload build names every island's price and links
+ * to its `entry_url`.
+ *
+ * `resident_since` is the answer and the mark is the fallback, for an island
+ * that grants residency (a voucher at registration, the admin panel) but is
+ * older than the field. The mark itself is granted server-side on redeem;
+ * [onRedeemed] re-reads the own profile and the invites counter so both
+ * change without a relaunch.
+ */
+@Composable
+private fun ResidencyRow(
+    session: Session,
+    host: String,
+    caps: app.rcq.android.net.RcqApi.ServerCapabilities?,
+    profile: app.rcq.android.net.RcqApi.MeProfile?,
+    onRedeemed: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val p = profile ?: return
+    val since = p.resident_since
+    val resident = since != null || p.badge == "resident" || "resident" in p.badges_earned
+    val cents = caps?.entry_price_cents ?: 0
+    if (!resident && cents <= 0) return
+
+    Divider()
+    if (resident) {
+        SettingsRow(
+            Icons.Filled.Verified,
+            since?.let { stringResource(R.string.residency_since, formatInviteDate(it)) }
+                ?: stringResource(R.string.badge_resident),
+            chevron = false,
+        ) { }
+        return
+    }
+
+    val isOurs = host.equals(app.rcq.android.net.RcqApi.DEFAULT_HOST, ignoreCase = true)
+    val mayPrice = !BuildConfig.PLAY_STORE || isOurs
+    // Whole dollars lose the ".00": a club that costs fifteen dollars should
+    // say fifteen dollars. Same arithmetic as IslandPicker.
+    val price = if (mayPrice) {
+        if (cents % 100 == 0) "$" + (cents / 100) else "$" + "%.2f".format(cents / 100.0)
+    } else null
+    val buyUrl = caps?.entry_url?.trim()
+        ?.takeIf { !BuildConfig.PLAY_STORE && it.startsWith("https://", ignoreCase = true) }
+
+    var open by remember { mutableStateOf(false) }
+    SettingsRow(
+        Icons.Filled.Verified,
+        stringResource(R.string.residency_title),
+        value = price?.let { stringResource(R.string.island_entry_price, it) },
+    ) { open = true }
+
+    if (open) {
+        var code by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        var errorRes by remember { mutableStateOf<Int?>(null) }
+        RcqSheet(onDismiss = { open = false }, title = stringResource(R.string.residency_title)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (price != null) Text(
+                    stringResource(R.string.island_entry_price, price),
+                    color = c.textPrimary, fontSize = 15.sp,
+                )
+                Text(stringResource(R.string.residency_body), color = c.textSecondary, fontSize = 12.sp)
+                if (buyUrl != null) {
+                    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                    Text(
+                        stringResource(R.string.residency_buy, buyUrl.removePrefix("https://").substringBefore('/')),
+                        color = c.accent, fontSize = 14.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { runCatching { uriHandler.openUri(buyUrl) } }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                    )
+                }
+                SheetGap(4)
+                Text(
+                    stringResource(R.string.residency_have_code),
+                    color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                )
+                // The voucher is a signed blob, not a word: the island caps the
+                // body at 4096 and refuses anything under 16, so the field
+                // takes what the island takes and no more.
+                RcqField(
+                    value = code,
+                    onValueChange = { code = it.take(4096); errorRes = null },
+                    placeholder = stringResource(R.string.reg_invite_label),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                errorRes?.let { Text(stringResource(it), color = Color(0xFFE5484D), fontSize = 12.sp) }
+                CapsuleButton(
+                    stringResource(if (busy) R.string.residency_redeeming else R.string.residency_redeem),
+                    enabled = !busy && code.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    busy = true; errorRes = null
+                    scope.launch {
+                        val r = session.redeemResidency(code.trim())
+                        busy = false
+                        when (r) {
+                            is Session.ResidencyRedeem.Done -> {
+                                open = false
+                                Toast.makeText(context, context.getString(R.string.residency_done), Toast.LENGTH_SHORT).show()
+                                onRedeemed()
+                            }
+                            is Session.ResidencyRedeem.Refused -> {
+                                errorRes = when (r.code) {
+                                    // Refused BEFORE the voucher is touched, so
+                                    // the code is still good: the row below is
+                                    // simply stale, and re-reading fixes it.
+                                    "already_resident" -> { onRedeemed(); R.string.residency_already }
+                                    "voucher_spent" -> R.string.residency_code_spent
+                                    "sales_disabled" -> R.string.residency_not_sold
+                                    "suspended" -> R.string.residency_failed
+                                    // Every VoucherError the island names, and any
+                                    // it adds later: wrong island, expired, a
+                                    // signature that does not check out.
+                                    else -> R.string.reg_invite_invalid
+                                }
+                            }
+                            Session.ResidencyRedeem.Failed -> errorRes = R.string.residency_failed
+                        }
+                    }
+                }
+                TextButton(onClick = { open = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.common_cancel), color = c.textSecondary)
                 }
             }
         }
