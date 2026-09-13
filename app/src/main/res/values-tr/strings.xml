@@ -718,13 +718,14 @@
     <string name="snd_message_desc">Yeni mesajı duyur: uygulama açıkken bir ses, kapalıyken bildirim.</string>
     <string name="snd_presence_title">Kişi çevrimiçi / çevrimdışı</string>
     <string name="snd_presence_desc">«Herkes» her kişi için ses çalar. «Favoriler» yalnızca yıldızladığın kişiler için çalar. «Kapalı» hiç çalmaz.</string>
-    <string name="snd_volume_title">Uygulama içi ses düzeyi</string>
-    <string name="snd_volume_desc">Açık uygulamanın çaldığı sesi sistem düzeyine göre ölçekler. Bildirimin kendisinin ne kadar yüksek olacağını biz değil Android belirler.</string>
+    <string name="snd_volume_title">RCQ ses düzeyi</string>
+    <string name="snd_volume_desc">RCQ’nun mesajlar için çaldığı sesleri ölçekler: açık uygulamada ve bildirimde mesaj sesi, cevapsız çağrılar, kişi çevrimiçi ve çevrimdışı sesleri. Telefonun bildirim düzeyinden kısık olabilir, yüksek olamaz: o düzey Android’in. Sıfırda bu sesler susar. Gelen çağrı bunlardan biri değil: burada ne yazarsa yazsın telefonun zil sesi düzeyinde çalar.</string>
+    <string name="snd_volume_legacy">Bu düzey, kaydırıcı yalnızca açık uygulama için geçerliyken ayarlanmıştı. Kaydırıcıyı oynatana kadar bildirim telefonun düzeyinde kalır.</string>
     <string name="snd_presence_all">Herkes</string>
     <string name="snd_presence_favorites">Favoriler</string>
     <string name="snd_presence_off">Kapalı</string>
-    <string name="snd_system_channel">Bildirim sesi ve ses düzeyi</string>
-    <string name="snd_footer">Açık uygulama kendi sesini çalar; arka plandayken aynı ses sistem bildirimi olarak gelir. İkisi de bildirim ses düzeyine bağlıdır ve sessiz, titreşim ile Rahatsız etmeyin modlarında susar. Yukarıdaki kaydırıcı sesimizi ancak sistem düzeyinin altına indirebilir; o düzeyin kendisi bildirim ayarlarından değişir. Sohbet başına susturma (ana ekranda bir sohbete uzun basarak) ikisini birden susturur.</string>
+    <string name="snd_system_channel">Android bildirim ayarları</string>
+    <string name="snd_footer">Açık uygulama kendi sesini çalar; arka plandayken aynı ses sistem bildirimi olarak gelir ve onu da RCQ çalar, böylece kaydırıcı ikisini birden kapsar. Telefonun bildirim düzeyi üst sınırdır ve ses tuşlarıyla değişir. İkisi de sessiz ve titreşim modlarında ve telefon görüşmesi sırasında susar. Rahatsız etmeyin modunda da susarlar, o bildirime bir istisna tanımış olsanız bile: Rahatsız etmeyin’den Android yalnızca kendi seslerini geçirir ve RCQ, bir mesajın geçip geçmeyeceğini anlamak için Rahatsız etmeyin kurallarınızı okuyamaz. Sesin bizim olup olmadığı yukarıdaki Android ayarlarında belirlenir: o bildirime kendi sesini verirseniz, «Yok» derseniz ya da sessize alırsanız sesi Android geri alır ve kaydırıcı yalnızca açık uygulama için kalır. Orada bu sürümden önce seçilmiş bir ses ya da bir kilit ekranı ayarı da aynısını yapar, kalıcı olarak, çünkü RCQ bunları kendi kanalına kopyalayamaz. Bir Rahatsız etmeyin istisnası ya da engellenmiş bir kanal da geri alana kadar aynısını yapar; geri alırsanız RCQ sesi bir sonraki açılışta üstlenir. Sohbet başına susturma (ana ekranda bir sohbete uzun basarak) ikisini birden susturur.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Çeviriler yavaş yavaş ekleniyor. Çevrilmemiş metinler İngilizce görünür.</string>
     <string name="notif_push">Anlık bildirimler</string>
@@ -1058,7 +1059,7 @@
     <string name="push_service_channel">Arka plan bağlantısı</string>
     <string name="push_service_channel_desc">RCQ arka plan teslim bağlantısını tutarken gösterilen kalıcı uyarı. Bu kanalı kapatmak uyarıyı gizler; teslim çalışmayı sürdürür.</string>
     <string name="push_service_hide">Gizle</string>
-    <string name="push_channel_messages_desc">Yeni mesaj bildirimleri</string>
+    <string name="push_channel_messages_desc">Yeni mesaj bildirimleri. Bunların sesini RCQ kendisi çalar, bu yüzden kanalın kendi sesi yoktur; düzeyi RCQ’nun ses ayarları ekranında.</string>
     <string name="push_new_message">Yeni mesaj</string>
     <string name="push_new_group_message">Yeni grup mesajı</string>
     <string name="push_kind_screenshot">Ekran görüntüsü</string>

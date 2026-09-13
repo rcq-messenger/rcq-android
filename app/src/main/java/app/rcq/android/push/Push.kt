@@ -42,10 +42,42 @@ import org.unifiedpush.android.connector.UnifiedPush
  * when the app opens and drains the offline queue.
  */
 object Push {
-    // v2 because a channel's sound cannot be changed after it exists: the
-    // original "rcq_messages" was created soundless and installs kept the
-    // system default. Deleted on first run of this build (see ensureChannels).
-    const val CHANNEL_MESSAGES = "rcq_messages_v2"
+    /** New messages, and the channel this build posts them on.
+     *
+     *  ⚠⚠ The THIRD id for one channel, and the reason each time is the same:
+     *  a channel's SOUND is frozen the moment it exists. An app may rename a
+     *  channel, describe it again and lower its importance, and that is the end
+     *  of the list, so changing the sound means a new id and the old one
+     *  deleted. "rcq_messages" was created soundless and inherited the system
+     *  chime. v2 fixed that by carrying our own tone. v3 carries a SILENT one,
+     *  because a tone Android plays is a tone Android sets the loudness of, and
+     *  #978 is what that is like with the volume slider at 5%: "по выходу из
+     *  настроек орет на полную хотя выставил 5". RCQ plays the tone itself now,
+     *  at the level the slider asks for
+     *  ([app.rcq.android.media.SoundService.soundMessageNotification]).
+     *
+     *  ⚠ ONE channel, not two. An earlier cut of #978 kept v2 and added a
+     *  silent twin beside it, posting to whichever suited the moment. It cannot
+     *  be made to work: the twin has to mirror every field of a channel the
+     *  person can edit at any time, the mirror can only be taken once (Android
+     *  resurrects a deleted channel's fields), lock-screen visibility cannot be
+     *  mirrored at all, and the person can edit EITHER row, so "they diverged"
+     *  never says which one they meant. With one channel every one of those
+     *  fields is simply theirs and Android honours it; the only thing this file
+     *  still asks about is whether they want a sound here at all ([ownsToneOn]).
+     *
+     *  ⚠ "Silent" here does NOT mean `setSound(null, null)`. See
+     *  [createMessageChannel]: a null sound would cost a phone in vibrate mode
+     *  its buzz. */
+    const val CHANNEL_MESSAGES = "rcq_messages_v3"
+    /** The pre-#978 message channel: our tone, played by Android, at Android's
+     *  level.
+     *
+     *  ⚠ Still the LIVE channel on installs [migrateMessageChannel] refuses to
+     *  move, so unlike [CHANNEL_MESSAGES_LEGACY] this is not a tombstone and is
+     *  never deleted unconditionally. */
+    private const val CHANNEL_MESSAGES_V2 = "rcq_messages_v2"
+    /** The first message channel, soundless and long gone. Deleted on sight. */
     private const val CHANNEL_MESSAGES_LEGACY = "rcq_messages"
     const val CHANNEL_CALLS = "rcq_calls"
     const val CHANNEL_CALLS_RING = "rcq_calls_ring"
@@ -209,33 +241,10 @@ object Push {
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-        // The message channel carries OUR tone, not the phone's default one.
-        // Reported: with the app closed or the screen locked the system chime
-        // played instead of the "о-оу" everyone expects, because the channel was
-        // created without a sound and Android then uses the default. A channel's
-        // sound is immutable after creation, so correcting it needs a NEW id and
-        // the old one deleted, otherwise every existing install keeps the wrong
-        // sound forever.
+        // The first message channel was created soundless, so installs kept the
+        // system chime instead of the "о-оу" everyone expects. Long gone.
         nm.deleteNotificationChannel(CHANNEL_MESSAGES_LEGACY)
-        if (nm.getNotificationChannel(CHANNEL_MESSAGES) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_MESSAGES,
-                    ctx.getString(R.string.push_channel_messages),
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    description = ctx.getString(R.string.push_channel_messages_desc)
-                    val tone = android.net.Uri.parse(
-                        "android.resource://${ctx.packageName}/${R.raw.snd_message}",
-                    )
-                    val attrs = android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                    setSound(tone, attrs)
-                },
-            )
-        }
+        migrateMessageChannel(ctx, nm)
         if (nm.getNotificationChannel(CHANNEL_CALLS) == null) {
             nm.createNotificationChannel(
                 // High importance so a full-screen-intent fires; silent because
@@ -305,6 +314,341 @@ object Push {
                 },
             )
         }
+    }
+
+    /** The parts of the message [NotificationChannel] the #978 decisions read.
+     *
+     *  A data class so both decisions below are pure functions and can be pinned
+     *  down in a JVM test. FOUR fields, and the list is closed rather than
+     *  merely short: these are the ones that answer "does this person want a
+     *  sound here, and may it be heard now". Everything else a channel carries,
+     *  the lock screen, the dot, the banner, the vibration and its pattern, the
+     *  light, is about how the notification LOOKS or FEELS, and since #978 posts
+     *  on the person's own channel rather than on a copy of it, Android honours
+     *  all of that without this file having an opinion. The twin design needed
+     *  every one of them and grew a new one each review round. */
+    internal data class ChannelFacts(
+        val importance: Int,
+        val soundAuthority: String?,
+        val lockscreenVisibility: Int,
+        val bypassesDnd: Boolean,
+    )
+
+    /** What a newly created channel's lock-screen visibility is, whatever we
+     *  ask for. This is NotificationManager.VISIBILITY_NO_OVERRIDE, written out
+     *  because that constant is @hide: it is not in android.jar, and it is the
+     *  -1000 dumpsys prints for a channel nobody has touched.
+     *
+     *  ⚠⚠ An app CANNOT set this field. NotificationChannel.setLockscreenVisibility
+     *  is documented "Only modifiable by the system and notification ranker",
+     *  and PreferencesHelper.createNotificationChannel overwrites an app-supplied
+     *  value with the package's own. Measured on the API 35 emulator: a channel
+     *  created asking for VISIBILITY_SECRET read back -1000, while setShowBadge
+     *  and enableVibration on the same channel came back exactly as asked. That
+     *  is the single hardest fact in this whole fix, and it is why
+     *  [mayMoveMessageChannel] REFUSES to move somebody whose lock screen is set
+     *  rather than trying to carry the setting across. */
+    private const val NEW_CHANNEL_VISIBILITY = -1000
+
+    private fun factsOf(ch: NotificationChannel) = ChannelFacts(
+        importance = ch.importance,
+        soundAuthority = ch.sound?.authority,
+        lockscreenVisibility = ch.lockscreenVisibility,
+        bypassesDnd = ch.canBypassDnd(),
+    )
+
+    /** Whether an install still on [CHANNEL_MESSAGES_V2] may be moved to
+     *  [CHANNEL_MESSAGES], which means deleting v2.
+     *
+     *  ⚠⚠ This is the cost of the #978 design, stated where it happens. Moving
+     *  an install throws away everything on v2 that an app cannot put on a new
+     *  channel, so the answer is NO whenever v2 holds such a thing, and those
+     *  installs keep today's behaviour with today's bug. The three:
+     *
+     *  - A SOUND they picked themselves, or "None". Carrying a ringtone across
+     *    is not possible (the uri the picker handed the system is not one we
+     *    hold a read grant for) and would be wrong anyway: whichever they chose,
+     *    the answer to "what does a message sound like" stopped being ours, and
+     *    "None" is a request for silence that a channel of ours would break.
+     *  - A LOCK-SCREEN VALUE that is not the default. See
+     *    [NEW_CHANNEL_VISIBILITY]: it cannot be reproduced, and moving somebody
+     *    who asked for "Don't show notifications at all" would put message text
+     *    back on the lock screen of an app that ships a panic PIN. Asking for
+     *    less exposure must never produce more.
+     *
+     *    ⚠ "They set it" is the likely reading and not a certain one:
+     *    PreferencesHelper.createNotificationChannel stamps the PACKAGE's
+     *    visibility preference onto every channel it creates (dexdump, offset
+     *    018a), so a non-default value on v2 can come from a package- or
+     *    device-level setting nobody touched on the channel screen, and a v3
+     *    created for them would have been given the same value anyway. Those
+     *    installs are refused the fix for nothing. It fails safe (they keep
+     *    today's behaviour, bug included) and we cannot tell the two apart, so
+     *    it stays as it is with the doubt written down.
+     *  - An OVERRIDE of Do Not Disturb. `setBypassDnd` needs notification-policy
+     *    access this app does not have, so a channel they allowed through DND
+     *    would quietly stop coming through.
+     *
+     *    ⚠ Since [ownsToneOn] stopped playing a tone under any filter, this
+     *    refusal is also the ONLY place a DND override still produces a sound:
+     *    such an install stays on v2, where Android plays the channel's own
+     *    sound and is exempt from the AppOps mute our tone is not. Keeping it
+     *    here is now load-bearing rather than merely cautious.
+     *
+     *  ⚠ And IMPORTANCE_NONE, which is different in kind: a channel the person
+     *  BLOCKED. An app can create a channel at any importance it likes, and a
+     *  blocked one makes no sound and shows nothing, so there is nothing for
+     *  #978 to fix there and no reason to take the risk of a new channel
+     *  arriving unblocked. Every other importance carries over
+     *  ([createMessageChannel]), which is what makes "Silent" and "Pop on
+     *  screen: off" survive the move.
+     *
+     *  ⚠ Not a one-way door in the code: this is asked again on every start
+     *  while v3 does not exist, so undoing the customisation gets the fix on the
+     *  next process start rather than never. Only TWO of the four can actually
+     *  be undone, though, and the footer copy says so: a DND override can be
+     *  switched back off and a blocked channel unblocked, while Android's own
+     *  sound picker offers the ringtone list plus "Default notification sound"
+     *  and "None" and cannot offer an android.resource:// uri of ours, so a
+     *  changed sound has no way back, and neither does the lock-screen value
+     *  once it is off the default. */
+    internal fun mayMoveMessageChannel(v2: ChannelFacts, ourAuthority: String): Boolean {
+        if (v2.soundAuthority != ourAuthority) return false
+        if (v2.lockscreenVisibility != NEW_CHANNEL_VISIBILITY) return false
+        if (v2.bypassesDnd) return false
+        if (v2.importance <= NotificationManager.IMPORTANCE_NONE) return false
+        return true
+    }
+
+    /** Whether the tone for a notification about to be posted on [channelId] is
+     *  RCQ's to play (#978).
+     *
+     *  Pure, so all of it is pinned down in a JVM test. [facts] are that
+     *  channel's, [ourAuthority] our own package name, [dndOn] whether any Do
+     *  Not Disturb filter is active.
+     *
+     *  ⚠ The sound AUTHORITY, not the uri. Ours is
+     *  `android.resource://app.rcq.android/<R.raw.snd_silence>` and that
+     *  resource id changes between builds, so comparing whole uris would read
+     *  every install that upgraded as "the user changed the sound". The
+     *  authority is stable, and the system's sound picker cannot offer one of
+     *  our raw resources, so a sound published by our own package can only be
+     *  one we set. */
+    internal fun ownsToneOn(
+        channelId: String,
+        facts: ChannelFacts,
+        ourAuthority: String,
+        dndOn: Boolean,
+    ): Boolean {
+        // An install [mayMoveMessageChannel] refused to move still posts on v2,
+        // whose sound Android plays for us. Playing ours on top would be two
+        // chimes for one message.
+        if (channelId != CHANNEL_MESSAGES) return false
+        // Blocked, Silent or Minimised. Android is making no noise for this
+        // channel, and a silence the person asked for is not ours to fill in.
+        // IMPORTANCE_DEFAULT is deliberately INCLUDED: turning Android's
+        // per-channel "Silent" back off lands on DEFAULT, with "Pop on screen"
+        // as the separate switch that reaches HIGH, and that person changed
+        // nothing about sound. They keep the tone, and the missing banner is
+        // simply what their own channel's importance means, with no
+        // per-notification trickery needed to arrange it.
+        if (facts.importance < NotificationManager.IMPORTANCE_DEFAULT) return false
+        // They gave the channel a sound of their own, or set it to None. Either
+        // way snd_message is not the answer any more, and Android is already
+        // playing whatever is.
+        if (facts.soundAuthority != ourAuthority) return false
+        // ⚠⚠ Do Not Disturb: ANY filter, and the channel's bypass bit is not
+        // consulted. Both halves of that are corrections of what this comment
+        // used to claim, and both are worth the space.
+        //
+        // WHAT IT USED TO SAY, and why it was false: "the system mutes a
+        // non-bypassing channel completely". It does not. post() sets
+        // CATEGORY_MESSAGE, and a message record is judged by the DND POLICY,
+        // not by the channel bit. ZenModeFiltering.shouldIntercept (dexdump of
+        // classes2.dex out of /system/framework/services.jar, pulled off the
+        // running API 35 image) asks isMessage(record) at offset 014a, then
+        // policy.allowMessages() at 0150, then the audience at 0160, and
+        // canRecordBypassDnd at 0063 is a SEPARATE, earlier way through. So
+        // somebody on priority-only DND with "Messages: Anyone" was never
+        // intercepted, and the system played snd_message for them.
+        //
+        // WHAT WE CAN READ AND WHAT WE CANNOT. getCurrentInterruptionFilter()
+        // needs no special access and answers ALL / PRIORITY / NONE / ALARMS.
+        // getNotificationPolicy(), the only thing that would say whether
+        // messages are allowed and from whom, needs ACCESS_NOTIFICATION_POLICY,
+        // a special access granted from a system screen that also hands the
+        // holder the power to REWRITE somebody's Do Not Disturb. That is not a
+        // reasonable price for deciding how loud a chime is, so we will not ask
+        // for it. Under PRIORITY we therefore cannot know what Android would
+        // have done, and we do not guess: a messenger that guesses wrong either
+        // shouts into a silence somebody asked for or says nothing when they
+        // asked to be reached. We take the quiet error and disclose it.
+        //
+        // WHY THE OVERRIDE BUYS NOTHING EITHER, which is the part that sounds
+        // wrong until you look: the override is about the NOTIFICATION, and
+        // since v3 the tone is app audio. ZenModeHelper.applyRestrictions (same
+        // dexdump: offset 0049 makes muteNotifications true for mZenMode != 0,
+        // offsets 00b1-00bb pass it for every SUPPRESSIBLE_NOTIFICATION usage,
+        // and the (ZZI) overload at 0004-000e hands AppOpsManager.setRestriction
+        // OP_PLAY_AUDIO=28 with only mPriorityOnlyDndExemptPackages spared)
+        // restricts an app's own USAGE_NOTIFICATION playback under ANY zen mode.
+        // RCQ is not on that list; the system, which plays a channel's sound,
+        // is. So a tone of ours during DND is muted by the platform whatever
+        // this function returns, and returning true would only be a promise
+        // somebody else breaks.
+        //
+        // ⚠ THE COST, stated here and in the Sounds footer in all seven
+        // locales, because four rounds of this fix did not state it: somebody
+        // with priority-only DND and "Messages: Anyone", or a channel they
+        // granted "Override Do Not Disturb", HEARD the message before v3 and
+        // hears nothing now while a filter is on. One channel has no second one
+        // to hand that case back to, and this is the one thing a channel sound
+        // could do that an app-played tone cannot. Existing installs holding an
+        // override are the one population spared, and not by accident:
+        // [mayMoveMessageChannel] refuses to move them, so they stay on v2 where
+        // Android still plays the sound itself.
+        //
+        // ⚠ NOT OBSERVED. The AppOps mute above is read out of this platform's
+        // bytecode, not heard: no audio comes out of the emulator, and there was
+        // no install to listen on. If it is ever measured and the tone turns out
+        // to be audible under an override, the honest shape is
+        // `if (dndOn && !facts.bypassesDnd) return false` with THIS comment
+        // rewritten, not the old one restored.
+        if (dndOn) return false
+        return true
+    }
+
+    /** Settle which channel this install's messages arrive on. Called from
+     *  [ensureChannels], so on every process start, and cheap after the first.
+     *
+     *  ⚠ The delete comes after the create, and the delete runs again whenever
+     *  v3 already exists: a process killed between the two steps would
+     *  otherwise leave a dead "Messages" row in Android's settings forever. */
+    private fun migrateMessageChannel(ctx: Context, nm: NotificationManager) {
+        if (nm.getNotificationChannel(CHANNEL_MESSAGES) != null) {
+            nm.deleteNotificationChannel(CHANNEL_MESSAGES_V2)
+            return
+        }
+        val v2 = nm.getNotificationChannel(CHANNEL_MESSAGES_V2)
+        if (v2 == null) {
+            // A fresh install, or one that has already moved and had v2 deleted.
+            createMessageChannel(ctx, nm, from = null)
+            return
+        }
+        if (!mayMoveMessageChannel(factsOf(v2), ctx.packageName)) return
+        createMessageChannel(ctx, nm, from = v2)
+        // ⚠ This also cancels whatever is showing on v2, so an upgrade that
+        // moves an install clears unread message notifications out of the shade.
+        // One time, per install; the messages themselves are untouched and the
+        // next one posts normally.
+        nm.deleteNotificationChannel(CHANNEL_MESSAGES_V2)
+    }
+
+    /** Create [CHANNEL_MESSAGES], carrying over what [from] had.
+     *
+     *  ⚠⚠ `setSound(silence)` and NOT `setSound(null, null)`, which is the
+     *  obvious way to write "this channel has no sound of its own" and which
+     *  would cost a phone in VIBRATE mode its buzz for every message. Read out
+     *  of this platform's own NotificationAttentionHelper.buzzBeepBlinkLocked
+     *  (dexdump of /system/framework/services.jar off the API 35 image, offsets
+     *  00a2 to 00df): the fallback vibration a vibrate-ringer phone gives a
+     *  notification whose channel does not vibrate is created only when
+     *  `record.getSound()` is non-null and not Uri.EMPTY, the ringer is
+     *  RINGER_MODE_VIBRATE and the stream's volume is 0. RCQ's message channel
+     *  has never vibrated (it does not call enableVibration), so that fallback
+     *  IS the buzz that a pocketed phone gives for a message, and a null sound
+     *  removes it silently. 50ms of PCM zeroes keeps all four conditions exactly
+     *  as they are today: Android "plays" this, works the vibration out the same
+     *  way, and our own tone goes on top at the level the slider asks for.
+     *
+     *  ⚠ What carries from [from]: importance (so Silent and "Pop on screen:
+     *  off" and any level between survive), vibration and its pattern, the
+     *  notification dot, the light and its colour. What cannot, and is why
+     *  [mayMoveMessageChannel] refuses those installs instead: the sound, the
+     *  lock screen, the DND override.
+     *
+     *  ⚠ One known drift, worth a line because it is silent: PreferencesHelper
+     *  forces setShowBadge(false) on a channel created while the PACKAGE's
+     *  notification dot is off. An install in that state moves with the dot off
+     *  even if v2 had it on. Nothing is visible while the package dot is off, so
+     *  it only shows if they turn that back on later, and the channel's own dot
+     *  switch puts it right. */
+    private fun createMessageChannel(ctx: Context, nm: NotificationManager, from: NotificationChannel?) {
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_MESSAGES,
+                ctx.getString(R.string.push_channel_messages),
+                from?.importance ?: NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = ctx.getString(R.string.push_channel_messages_desc)
+                val silence = android.net.Uri.parse(
+                    "android.resource://${ctx.packageName}/${R.raw.snd_silence}",
+                )
+                val attrs = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                setSound(silence, attrs)
+                if (from != null) {
+                    // Pattern first: setVibrationPattern(non-empty) turns
+                    // vibration on by itself, so enableVibration has to have the
+                    // last word.
+                    setVibrationPattern(from.vibrationPattern)
+                    enableVibration(from.shouldVibrate())
+                    setShowBadge(from.canShowBadge())
+                    enableLights(from.shouldShowLights())
+                    lightColor = from.lightColor
+                }
+            },
+        )
+    }
+
+    /** The channel this install's messages, missed calls and notices go on.
+     *
+     *  [CHANNEL_MESSAGES] for everybody [migrateMessageChannel] could move, v2
+     *  for the rest. Read rather than remembered, because the answer can change
+     *  under us: the same person can undo the customisation that held them back
+     *  and be moved on the next process start. */
+    private fun messageChannelId(ctx: Context): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_MESSAGES
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return CHANNEL_MESSAGES
+        return if (nm.getNotificationChannel(CHANNEL_MESSAGES) != null) {
+            CHANNEL_MESSAGES
+        } else {
+            CHANNEL_MESSAGES_V2
+        }
+    }
+
+    /** Everything about the SHADE that has to be true before RCQ sounds a
+     *  notification itself instead of leaving it to the channel (#978).
+     *
+     *  ⚠⚠ ALL of it runs before the sound, because the sound is a sound. The
+     *  first cut of this fix asked the other order and chimed for people who had
+     *  switched RCQ's notifications OFF: [showLocalMessage] checks
+     *  [NotificationManagerCompat.areNotificationsEnabled] before it calls
+     *  [post], but the WAKE path ([showMessage], from [RcqPushService]) does
+     *  not. It posts and lets the system drop the notify(). A tone before that
+     *  drop turns a blocked app into an audible one: a chime from a backgrounded
+     *  app with nothing in the shade to explain it.
+     *
+     *  ⚠ [SoundService] asks the rest (the ringer, a telephony call, RCQ's own
+     *  switches, the level, the burst window). The split is by who can see what:
+     *  only this side can read the channel, only that side can make a noise. */
+    private fun mayPlayOurTone(ctx: Context, channelId: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        if (channelId != CHANNEL_MESSAGES) return false
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return false
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return false
+        val ch = nm.getNotificationChannel(channelId) ?: return false
+        // Anything other than "no filter" counts as DND, including the UNKNOWN
+        // the platform answers when it cannot say: the same rule
+        // SoundService.systemWantsSilence has always used for the in-app tone,
+        // kept identical here so there is one answer to "is the phone quiet" in
+        // this codebase rather than two.
+        val dndOn = runCatching {
+            nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL
+        }.getOrDefault(true)
+        return ownsToneOn(channelId, factsOf(ch), ctx.packageName, dndOn)
     }
 
     /** Show/refresh "still sending N files", with a bar when we know how far.
@@ -686,22 +1030,44 @@ object Push {
         }
     }
 
-    /** Open the system settings page for the MESSAGE channel.
+    /** Open Android's own settings page for the MESSAGE channel.
      *
-     *  This is the only place the loudness of a message notification can
-     *  actually be changed: Android owns the notification stream and an app
-     *  cannot set, read or scale it from the outside. #545 is what happens
-     *  without this door — a slider in our settings looked like it set that
-     *  volume, and the person concluded the push "always plays at full volume
-     *  regardless". Our slider now says what it really scales (the tone the
-     *  open app plays) and this row goes where the other half lives. */
+     *  ⚠ What is actually on the other side of this row, driven on the API 35
+     *  emulator rather than assumed: Show notifications, Silent/Default, Pop on
+     *  screen, Sound, Vibration, Show notification dot, Override Do Not Disturb.
+     *  There is NO volume control there. The notification stream's level is set
+     *  with the volume keys or in Settings > Sound & vibration, and the Sounds
+     *  footer says so; an earlier version of this comment and of that footer both
+     *  pointed at this screen for it, which is wrong and was the shape of #545's
+     *  disappointment ("звук пуш-уведомления всегда проигрывается на полной
+     *  громкости") in the first place.
+     *
+     *  ⚠ And since v3 the last row on that screen buys no sound: see the Do Not
+     *  Disturb block in [ownsToneOn] for why an override cannot carry an
+     *  app-played tone past a filter.
+     *
+     *  ⚠ Nor is it true that an app "cannot read or set" that level:
+     *  AudioManager.getStreamVolume and setStreamVolume are both public and
+     *  unrestricted (setStreamVolume only throws when the change would toggle Do
+     *  Not Disturb). RCQ deliberately does neither. It is the phone's setting for
+     *  every app at once, and a messenger quietly moving it is worse than a
+     *  messenger that is too loud. What an app genuinely cannot do is scale the
+     *  system's own playback of a channel sound, which is why #978 is fixed by
+     *  playing the tone ourselves instead.
+     *
+     *  What this screen DOES own since #978 is whether the tone is ours at all:
+     *  a sound picked here, or "None", or Silent, and the message tone goes back
+     *  to being Android's exactly as it was before ([ownsToneOn]). */
     fun openMessageChannelSettings(ctx: Context) {
         ensureChannels(ctx)
         runCatching {
             ctx.startActivity(
                 Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                     .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL_MESSAGES)
+                    // Whichever channel this install actually posts on: an
+                    // install [migrateMessageChannel] left on v2 must not be sent
+                    // to a channel it does not have.
+                    .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, messageChannelId(ctx))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         }.onFailure {
@@ -1140,7 +1506,54 @@ object Push {
         val settingsQuiet = !app.rcq.android.data.LocalStores.soundMasterOn() ||
             !app.rcq.android.data.LocalStores.soundMessagesOn()
         val quiet = forceQuiet || burstQuiet || foregroundQuiet || settingsQuiet
-        val notif = NotificationCompat.Builder(ctx, CHANNEL_MESSAGES)
+        // The volume slider, on the half of the tone it never used to reach
+        // (#978). A channel's loudness is Android's and cannot be scaled, so
+        // since v3 the channel's own sound is silence and the tone is ours to
+        // play, at the level the person chose. Same wav, same notification
+        // stream, one number governing both halves at last.
+        //
+        // ⚠ The TONE COMES AFTER THE NOTIFY, below, and the ordering is measured
+        // rather than aesthetic: preparing a player takes about 100ms on a woken
+        // process and once took 865ms of eight cold wakes on the API 35 emulator
+        // (the media stack warming up). Sounding first would spend that before the
+        // row and the banner exist. Announced first, sounded a moment later, is
+        // what a phone does anyway.
+        //
+        // ⚠⚠ That delay no longer lands on THIS thread, and the correction
+        // matters because this comment used to say it did ("all of it on the
+        // thread that delivered the message") and treat the ordering as the
+        // whole fix. It was not: for a push-woken message this thread is the
+        // app's MAIN thread, and 865ms of it is a stall whichever side of the
+        // notify it happens on. SoundService.toneThread is where the media stack
+        // runs now; what is left here is a preference read, two binder calls and
+        // a stamp.
+        //
+        // ⚠⚠ NOT ALL OF THESE ARE MESSAGES. [openDevices] is the security notice
+        // whose own comment three screens up is about not letting ordinary
+        // traffic overwrite it ("a new device connected to this account"), and
+        // [openReports] is a moderator's reply to an abuse report. They post on
+        // the same channel they always have, so they need the same tone, but not
+        // the same THROTTLE: a device-connect notice landing a second after a
+        // message must not be swallowed as a duplicate of it. Hence two clocks.
+        //
+        // An earlier cut kept these on the old channel instead, which left the
+        // person who filed #978 hearing the full-volume chime they reported for
+        // the reply to their own report.
+        val channel = messageChannelId(ctx)
+        // ⚠ [setSilent] is driven by `quiet` and by nothing this fix added. What
+        // it does on O+ is make the notification a group child with
+        // GROUP_ALERT_SUMMARY, which suppresses the heads-up banner AND the
+        // vibration along with the sound, so it can only ever mean "no alert at
+        // all". That is exactly what every one of `quiet`'s cases wants (a
+        // duplicate wake, the app already in front, sounds switched off) and it
+        // is what they have always had.
+        //
+        // ⚠⚠ An earlier cut of #978 used it for a second purpose: to suppress
+        // the banner on a channel whose importance was higher than the person's
+        // own. It took their vibration with it, silently, for the exact
+        // population it was meant to help. With one channel the question does not
+        // arise: the banner is whatever their own channel's importance says.
+        val notif = NotificationCompat.Builder(ctx, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
@@ -1150,12 +1563,25 @@ object Push {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             // ⚠ setOnlyAlertOnce is NOT enough on its own: it suppresses the
             // alert only while the previous notification is still showing, and
-            // a tap (autoCancel) or an in-app read takes it down — after which
+            // a tap (autoCancel) or an in-app read takes it down, after which
             // the duplicate posts as "new" and rings. setSilent is absolute.
             .setSilent(quiet)
             .setOnlyAlertOnce(quiet)
             .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(id, notif) }
+        val posted = runCatching { NotificationManagerCompat.from(ctx).notify(id, notif) }.isSuccess
+        // ⚠ Only for a notification that actually went up. The channel makes no
+        // sound of its own any more, so this call IS the alert, and an alert with
+        // nothing in the shade behind it is a chime from a backgrounded app that
+        // the person cannot trace. [mayPlayOurTone] has already asked whether
+        // notifications are enabled at all; this is the same rule for the rarer
+        // case where the notify itself failed.
+        if (posted && !quiet && mayPlayOurTone(ctx, channel)) {
+            if (openDevices || openReports) {
+                app.rcq.android.media.SoundService.soundNoticeNotification(ctx)
+            } else {
+                app.rcq.android.media.SoundService.soundMessageNotification(ctx)
+            }
+        }
     }
 
     /** Last time each notification id made a sound, for burst coalescing. */
@@ -1725,12 +2151,20 @@ object Push {
      *  opening the app. Reported as "если я пропустил аудио или видео звонок,
      *  то должен быть пуш о пропущенном звонке".
      *
-     *  On the messages channel deliberately — the ringing channels either ring
+     *  On the messages channel deliberately: the ringing channels either ring
      *  or are silent, and neither is right for something that already stopped
      *  happening. Tapping opens the caller's chat, where the missed-call row is.
      */
     fun showMissedCall(ctx: Context, peerUin: Int, nickname: String, video: Boolean) {
         ensureChannels(ctx)
+        // ⚠⚠ #978 is HERE too, and being on the messages channel is why. This
+        // notification carries the message tone at whatever level Android
+        // decides, so a phone with the slider at 5% still went "aou" at full
+        // volume for a missed call: "по выходу из настроек орет на полную хотя
+        // выставил 5", word for word, from a path the first cut of the fix never
+        // touched. Same two steps [post] takes, in the same order.
+        val masterOff = !app.rcq.android.data.LocalStores.soundMasterOn()
+        val channel = messageChannelId(ctx)
         val tap = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             data = android.net.Uri.parse("rcq://notif/missed/$peerUin")
@@ -1740,7 +2174,7 @@ object Push {
             ctx, "missed:$peerUin".hashCode(), tap,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notif = NotificationCompat.Builder(ctx, CHANNEL_MESSAGES)
+        val notif = NotificationCompat.Builder(ctx, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(nickname)
             .setContentText(
@@ -1752,19 +2186,30 @@ object Push {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(pi)
-            // ⚠ The tone lives on the CHANNEL, so the system plays it and no
-            // in-app flag is consulted on the way: with every sound switched off
-            // a missed call still went "aou" (#890). setSilent is the only lever
-            // that reaches a channel sound per-notification.
+            // ⚠ On a channel whose tone Android plays, no in-app flag is
+            // consulted on the way: with every sound switched off a missed call
+            // still went "aou" (#890), and setSilent is the only lever that
+            // reaches a channel sound per-notification. Still needed on v3, whose
+            // sound is silence: what it suppresses there is the banner and the
+            // buzz, which is what "all sounds off" has always done here.
             //
             // Gated on the master switch alone. A missed call is not a message,
             // so "message sounds: off" deliberately does NOT silence it; someone
             // who wants that turns the master off, and a separate call-sound
             // setting is the founder's call (the same report asks for one).
-            .setSilent(!app.rcq.android.data.LocalStores.soundMasterOn())
+            .setSilent(masterOff)
             .build()
-        runCatching {
+        val posted = runCatching {
             NotificationManagerCompat.from(ctx).notify("missed:$peerUin".hashCode(), notif)
+        }.isSuccess
+        // ⚠ soundMissedCallNotification, not soundMessageNotification: a missed
+        // call is deliberately audible with "message sounds" switched off (#890,
+        // and the setSilent above has always read the master switch alone). The
+        // tone THROTTLE is shared with real messages, because it is the same wav
+        // on the same stream and two overlapping copies of it is what the throttle
+        // exists to prevent. After the notify for the reason [post] gives.
+        if (posted && !masterOff && mayPlayOurTone(ctx, channel)) {
+            app.rcq.android.media.SoundService.soundMissedCallNotification(ctx)
         }
     }
 

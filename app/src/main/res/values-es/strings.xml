@@ -718,13 +718,14 @@
     <string name="snd_message_desc">Avisar de un mensaje nuevo: un tono con la app abierta, una notificación cuando no lo está.</string>
     <string name="snd_presence_title">Contacto conectado / desconectado</string>
     <string name="snd_presence_desc">«Todos» suena con cualquier contacto. «Favoritos» suena solo con la gente que marcaste. «Apagado» no suena nunca.</string>
-    <string name="snd_volume_title">Volumen del tono dentro de la app</string>
-    <string name="snd_volume_desc">Ajusta el tono que suena con la app abierta respecto al nivel del sistema. El volumen de la notificación en sí lo decide Android, no nosotros.</string>
+    <string name="snd_volume_title">Volumen de los tonos de RCQ</string>
+    <string name="snd_volume_desc">Ajusta los tonos que RCQ toca para los mensajes: el tono de mensaje con la app abierta y en la notificación, las llamadas perdidas y los avisos de contacto conectado y desconectado. Más bajo que el nivel de notificaciones del teléfono, nunca más alto: ese nivel es de Android. En cero esos tonos se callan. Una llamada entrante no es uno de ellos: suena al volumen del tono de llamada del teléfono, diga lo que diga este control.</string>
+    <string name="snd_volume_legacy">Este nivel se fijó cuando el control solo valía para la app abierta. La notificación mantiene el nivel del teléfono hasta que muevas el control.</string>
     <string name="snd_presence_all">Todos</string>
     <string name="snd_presence_favorites">Favoritos</string>
     <string name="snd_presence_off">Apagado</string>
-    <string name="snd_system_channel">Sonido y volumen de la notificación</string>
-    <string name="snd_footer">La app abierta toca su propio tono; en segundo plano el mismo tono llega como notificación del sistema. Los dos van con el volumen de notificaciones y se callan en los modos silencio, vibración y No molestar. El control de arriba solo puede bajar nuestro tono por debajo del nivel del sistema; ese nivel se cambia en los ajustes de notificaciones. Silenciar un chat concreto (mantén pulsado el chat en la pantalla principal) calla los dos.</string>
+    <string name="snd_system_channel">Ajustes de notificación de Android</string>
+    <string name="snd_footer">La app abierta toca su propio tono; en segundo plano el mismo tono llega como notificación del sistema, y ese también lo toca RCQ, así que el control vale para los dos. El nivel de notificaciones del teléfono es el techo y se cambia con las teclas de volumen. Los dos se callan en los modos silencio y vibración y durante una llamada telefónica. En No molestar también se callan, incluso si le diste una excepción a esa notificación: por No molestar Android solo deja pasar sus propios sonidos, y RCQ no puede leer tus reglas de No molestar para saber si un mensaje habría pasado. Si el tono es nuestro o no se decide en los ajustes de Android de arriba: dale a esa notificación un sonido propio, o elige «Ninguno» o el modo silencioso, y Android recupera el tono y el control queda solo para la app abierta. Un sonido o un ajuste de pantalla de bloqueo elegidos allí antes de esta versión hacen lo mismo, y para siempre, porque RCQ no puede copiarlos a un canal propio. Una excepción a No molestar o un canal bloqueado hacen lo mismo hasta que lo deshagas, y entonces RCQ recupera el tono en el siguiente arranque. Silenciar un chat concreto (mantén pulsado el chat en la pantalla principal) calla los dos.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Las traducciones llegan poco a poco. Lo que no esté traducido se muestra en inglés.</string>
     <string name="notif_push">Notificaciones push</string>
@@ -1058,7 +1059,7 @@
     <string name="push_service_channel">Conexión en segundo plano</string>
     <string name="push_service_channel_desc">El aviso permanente que se muestra mientras RCQ mantiene la conexión de entrega en segundo plano. Desactivar este canal oculta el aviso; la entrega sigue funcionando.</string>
     <string name="push_service_hide">Ocultar</string>
-    <string name="push_channel_messages_desc">Notificaciones de mensajes nuevos</string>
+    <string name="push_channel_messages_desc">Notificaciones de mensajes nuevos. RCQ toca su tono por su cuenta, así que este canal no tiene sonido propio; el volumen está en la pantalla de sonidos de RCQ.</string>
     <string name="push_new_message">Mensaje nuevo</string>
     <string name="push_new_group_message">Mensaje nuevo en un grupo</string>
     <string name="push_kind_screenshot">Captura de pantalla</string>

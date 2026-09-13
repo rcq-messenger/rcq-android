@@ -2700,6 +2700,11 @@ private fun SoundsScreen(onBack: () -> Unit) {
     val msgOn by LocalStores.soundMessages.collectAsState()
     val presenceMode by LocalStores.presenceSound.collectAsState()
     val volume by LocalStores.soundVolume.collectAsState()
+    // False only on an install that stored a level before the slider reached the
+    // notification's tone (#978). The row below says so while it is true, because
+    // a slider that claims to set the notification's volume and does not is the
+    // report we are answering.
+    val volumeCoversShade by LocalStores.soundVolumeForShade.collectAsState()
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_sounds), onBack)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2720,10 +2725,21 @@ private fun SoundsScreen(onBack: () -> Unit) {
                     Text(stringResource(R.string.snd_presence_desc), color = c.textSecondary, fontSize = 11.sp)
                 }
             }
-            // Scale factor for the tone the OPEN app plays — say so. The
-            // loudness of the notification itself is Android's, and the row
-            // below goes to where that lives. Releasing the thumb plays the
-            // message tone so the level is audible while choosing it.
+            // ONE scale factor for every tone RCQ plays FOR A MESSAGE since
+            // #978: the open app's, the notification's (whose channel is silent
+            // now, so this number is the whole answer) and the presence chimes,
+            // which ride the same knob and are named in the description because
+            // of it. The phone's notification level is still the ceiling.
+            //
+            // ⚠ "For a message" and not "every tone", which is what this comment
+            // and the description both used to claim: the INCOMING CALL RINGTONE
+            // is RCQ's to play too (Ringer.startIncoming, the phone's default
+            // ringtone on a loop) and this knob does not touch it, nor does the
+            // master switch. Somebody who sets zero to make their phone quiet is
+            // still rung at the ringtone volume, so the description says so
+            // rather than leaving it to be discovered. Releasing the
+            // thumb plays the message tone so the level is audible while choosing
+            // it.
             SettingsGroup {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2738,6 +2754,13 @@ private fun SoundsScreen(onBack: () -> Unit) {
                         colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent),
                     )
                     Text(stringResource(R.string.snd_volume_desc), color = c.textSecondary, fontSize = 11.sp)
+                    // The migration, said out loud for the only people it applies
+                    // to. It disappears the moment the slider is moved, which is
+                    // also the moment the sentence stops being true.
+                    if (!volumeCoversShade) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(stringResource(R.string.snd_volume_legacy), color = c.accent, fontSize = 11.sp)
+                    }
                 }
             }
             SettingsGroup {

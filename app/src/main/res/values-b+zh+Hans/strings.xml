@@ -718,13 +718,14 @@
     <string name="snd_message_desc">提示新消息：应用打开时播放提示音，未打开时发送通知。</string>
     <string name="snd_presence_title">联系人上线 / 下线</string>
     <string name="snd_presence_desc">「全部」对任何联系人都播放提示音，「收藏」只对你标了星标的人播放，「关闭」则从不播放。</string>
-    <string name="snd_volume_title">应用内提示音音量</string>
-    <string name="snd_volume_desc">把应用打开时播放的提示音相对系统音量缩放。通知本身有多响由 Android 决定，不由我们决定。</string>
+    <string name="snd_volume_title">RCQ 提示音音量</string>
+    <string name="snd_volume_desc">缩放 RCQ 为消息播放的提示音：应用打开时和通知里的消息提示音、未接来电，以及联系人上线和下线的提示音。只能比手机的通知音量更轻，不能更响：那个音量由 Android 决定。为零时这些提示音都不响。来电不在其中：无论这里怎么设置，它都按手机的铃声音量响铃。</string>
+    <string name="snd_volume_legacy">这个音量是在滑块只管应用打开时设置的。在你移动滑块之前，通知仍按手机的音量播放。</string>
     <string name="snd_presence_all">全部</string>
     <string name="snd_presence_favorites">收藏</string>
     <string name="snd_presence_off">关闭</string>
-    <string name="snd_system_channel">通知声音与音量</string>
-    <string name="snd_footer">应用打开时播放自己的提示音；应用在后台时，同一个提示音以系统通知的形式到达。两者都跟随通知音量，并在静音、振动和勿扰模式下保持安静。上面的滑块只能把我们的提示音调得比系统音量更轻；系统音量本身要在通知设置里改。单个聊天的静音（在主屏幕长按聊天）会同时关掉两者。</string>
+    <string name="snd_system_channel">Android 通知设置</string>
+    <string name="snd_footer">应用打开时播放自己的提示音；应用在后台时，同一个提示音以系统通知的形式到达，这一个也由 RCQ 播放，所以滑块同时管得到两者。手机的通知音量是上限，用音量键调整。两者都在静音和振动模式下、以及通话过程中保持安静。在勿扰模式下也同样安静，即使你为该通知设置了例外：勿扰只放行 Android 自己的声音，而 RCQ 无法读取你的勿扰规则，判断消息本来是否会被放行。提示音到底是不是我们的，由上面的 Android 设置决定：给该通知设置自己的声音、选择“无”或把它设为静音，提示音就交回 Android，滑块之后只管应用打开时。在那里于本版本之前选过的自定义声音或锁屏设置也一样，而且是永久的，因为 RCQ 无法把它们复制到自己的渠道上。勿扰例外或被关掉的渠道同样如此，直到你撤销为止；撤销之后，RCQ 会在下次启动时接回提示音。单个聊天的静音（在主屏幕长按聊天）会同时关掉两者。</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">翻译会逐步推出。未翻译的文字会回退到英文。</string>
     <string name="notif_push">推送通知</string>
@@ -1058,7 +1059,7 @@
     <string name="push_service_channel">后台连接</string>
     <string name="push_service_channel_desc">RCQ 保持后台投递连接期间显示的常驻通知。关闭此渠道会隐藏该通知，投递仍会继续。</string>
     <string name="push_service_hide">隐藏</string>
-    <string name="push_channel_messages_desc">新消息通知</string>
+    <string name="push_channel_messages_desc">新消息通知。这些提示音由 RCQ 自己播放，因此该渠道本身没有声音；音量在 RCQ 的声音设置里。</string>
     <string name="push_new_message">新消息</string>
     <string name="push_new_group_message">群组新消息</string>
     <string name="push_kind_screenshot">截屏</string>

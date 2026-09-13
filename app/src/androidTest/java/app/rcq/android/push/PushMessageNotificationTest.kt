@@ -150,8 +150,13 @@ class PushMessageNotificationTest {
      *  do with wakes. */
     private fun assertNothingPosted() {
         Thread.sleep(750)
+        // ⚠ By PREFIX, not by [Push.CHANNEL_MESSAGES]. Since #978 the message
+        // channel's id is rcq_messages_v3 on installs Push could move off the
+        // pre-#978 rcq_messages_v2 and still v2 on the ones it could not, and an
+        // "assert nothing posted" that filtered on the wrong id would PASS by
+        // looking in an empty place.
         val onMessageChannel = nm.activeNotifications
-            .filter { it.notification.channelId == Push.CHANNEL_MESSAGES }
+            .filter { it.notification.channelId.orEmpty().startsWith("rcq_messages") }
         assertEquals(
             "no message notification should be posted, got " +
                 onMessageChannel.map { it.notification.extras.getString("android.title") },

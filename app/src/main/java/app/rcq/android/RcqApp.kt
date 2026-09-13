@@ -51,6 +51,14 @@ class RcqApp : Application() {
         // account's bearer token in the request that follows.
         app.rcq.android.net.IslandTrust.init(this)
         app.rcq.android.push.Push.ensureChannels(this)
+        // ⚠ NO SoundService.init here, deliberately, even though since #978 the
+        // notification's tone is RCQ's to play on every process start including
+        // headless push wakes. Building a SoundPool starts native decode threads
+        // and the sample would not be READY in time anyway; the notification tone
+        // uses MediaPlayer for exactly that reason and needs nothing initialised.
+        // See SoundService.playOnce. The in-app tone still gets its pool from
+        // MainActivity.onCreate, where there is a window to hear it in.
+
         // If this device distributes its own pushes, make sure the socket is up.
         // The service is START_STICKY, but a force-stop (or a background start
         // the system refused) leaves it down until something asks again.

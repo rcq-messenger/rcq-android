@@ -233,11 +233,39 @@ object LocalStores {
     val animateAvatars: StateFlow<Boolean> = _animateAvatars.asStateFlow()
     val swipeReplySide: StateFlow<SwipeReplySide> = _swipeReplySide.asStateFlow()
     val soundMaster: StateFlow<Boolean> = _soundMaster.asStateFlow()
-    // Scale factor for the in-app tone, 0f..1f. NOT an absolute level: the
-    // tone rides the notification stream and only the system sets how loud
-    // that is (see SoundService).
+    // Scale factor for OUR tone, 0f..1f. NOT an absolute level: the tone rides
+    // the notification stream and only the system sets how loud that is (see
+    // SoundService).
     private val _soundVolume = MutableStateFlow(1f)
     val soundVolume: StateFlow<Float> = _soundVolume.asStateFlow()
+
+    /** Whether the stored [soundVolume] was chosen while the slider ALSO
+     *  governed the notification's tone (#978), rather than only the tone the
+     *  open app plays.
+     *
+     *  ⚠⚠ The whole of the #978 migration, and it defers EVERY level it
+     *  inherits, not only zero. Before #978 this slider was labelled "In-app
+     *  tone volume" and its description said in so many words that the loudness
+     *  of a notification belongs to Android. So every number stored under that
+     *  label is an answer to a different question, and reading them under the new
+     *  one puts words in people's mouths: "the chime is too loud while I am
+     *  reading" becomes "my phone barely announces messages" at 15%, and "no
+     *  chime while I am looking at the app" becomes "my phone never announces
+     *  one" at 0. A messenger that quietly stops being audible has failed at its
+     *  one job, and an upgrade is not a thing people re-read their settings after.
+     *
+     *  So until the slider is next MOVED, an inherited level governs the open app
+     *  only and the notification keeps the phone's level, which is exactly what
+     *  both did before the upgrade. What it costs: somebody who set 5% a month
+     *  ago and upgrades for this fix has to move the slider once to get it, and
+     *  the Sounds screen says so in a line of copy shown only while it is true
+     *  (snd_volume_legacy). That is a visible, one-gesture cost, against a silent
+     *  one nobody would connect to an update.
+     *
+     *  ⚠ True for a fresh install, where there is nothing to inherit: see
+     *  [init]'s default of `!prefs.contains(K_SND_VOL)`. */
+    private val _soundVolumeForShade = MutableStateFlow(true)
+    val soundVolumeForShade: StateFlow<Boolean> = _soundVolumeForShade.asStateFlow()
 
     private val _soundMessages = MutableStateFlow(true)
     val soundMessages: StateFlow<Boolean> = _soundMessages.asStateFlow()
@@ -413,6 +441,11 @@ object LocalStores {
         }.getOrNull()
             ?: if (prefs.getBoolean(K_SND_PRES, true)) PresenceSoundMode.ALL else PresenceSoundMode.OFF
         _soundVolume.value = prefs.getFloat(K_SND_VOL, 1f).coerceIn(0f, 1f)
+        // A level this install has never written is not an inherited one: a
+        // fresh install starts at 1f, where the question does not arise. Only a
+        // value already on disk with no marker beside it predates #978's
+        // meaning (see [_soundVolumeForShade]).
+        _soundVolumeForShade.value = prefs.getBoolean(K_SND_VOL_SHADE, !prefs.contains(K_SND_VOL))
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
         _pushNudgeDismissed.value = prefs.getBoolean(K_PUSH_NUDGE_DISMISSED, false)
         // Stored as comma-joined asset names (asset names never contain commas).
@@ -921,10 +954,32 @@ object LocalStores {
             .apply()
     }
     fun soundVolumeLevel() = _soundVolume.value
+
+    /** See [_soundVolumeForShade]: false for a level inherited from before the
+     *  slider reached the notification's tone. */
+    fun soundVolumeChosenForShade() = _soundVolumeForShade.value
+
     fun setSoundVolume(v: Float) {
         val clamped = v.coerceIn(0f, 1f)
+        // ⚠⚠ The marker flips on a MOVE, never on a touch. Compose's Slider fires
+        // onValueChange on press, not only on movement, so without this an
+        // upgraded install could end the migration's deferral by opening the
+        // Sounds screen, putting a finger on the thumb and lifting it again: at an
+        // inherited zero that is every message notification on the phone going
+        // silent because somebody looked at the screen. The deferral is meant to
+        // end on a fresh CHOICE, and a press that leaves the number where it was
+        // is not one.
+        val moved = clamped != _soundVolume.value
+        if (!moved && _soundVolumeForShade.value) return
         _soundVolume.value = clamped
-        prefs.edit().putFloat(K_SND_VOL, clamped).apply()
+        val edit = prefs.edit().putFloat(K_SND_VOL, clamped)
+        if (moved) {
+            // Chosen under the label that says the slider covers the notification
+            // too, so from here on that is what the number means.
+            _soundVolumeForShade.value = true
+            edit.putBoolean(K_SND_VOL_SHADE, true)
+        }
+        edit.apply()
     }
 
     fun screenSecurityOn() = _screenSecurity.value
@@ -1650,6 +1705,7 @@ object LocalStores {
     private const val K_SND_PRES = "sound_presence"          // legacy boolean
     private const val K_SND_PRES_MODE = "sound_presence_mode" // ALL/FAVORITES/OFF
     private const val K_SND_VOL = "sound_volume"
+    private const val K_SND_VOL_SHADE = "sound_volume_covers_shade" // see _soundVolumeForShade
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PUSH_NUDGE_DISMISSED = "push_nudge_dismissed"
     private const val K_PRES_WIN = "presence_window"

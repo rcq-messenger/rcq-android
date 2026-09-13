@@ -718,13 +718,14 @@
     <string name="snd_message_desc">Avisar de uma mensagem nova: um sinal com o app aberto, uma notificação quando ele não está.</string>
     <string name="snd_presence_title">Contato online / offline</string>
     <string name="snd_presence_desc">«Todos» toca para qualquer contato. «Favoritos» toca só para quem você marcou. «Desligado» nunca toca.</string>
-    <string name="snd_volume_title">Volume do sinal dentro do app</string>
-    <string name="snd_volume_desc">Ajusta o sinal que o app toca aberto em relação ao nível do sistema. O volume da notificação em si é decidido pelo Android, não por nós.</string>
+    <string name="snd_volume_title">Volume dos sinais do RCQ</string>
+    <string name="snd_volume_desc">Ajusta os sinais que o RCQ toca para mensagens: o sinal de mensagem com o app aberto e na notificação, as chamadas perdidas e os avisos de contato online e offline. Mais baixo que o nível de notificação do telefone, nunca mais alto: esse nível é do Android. Em zero esses sinais ficam mudos. Uma chamada recebida não é um deles: ela toca no volume do toque do telefone, seja qual for este ajuste.</string>
+    <string name="snd_volume_legacy">Este nível foi definido quando o controle valia só para o app aberto. A notificação mantém o nível do telefone até você mover o controle.</string>
     <string name="snd_presence_all">Todos</string>
     <string name="snd_presence_favorites">Favoritos</string>
     <string name="snd_presence_off">Desligado</string>
-    <string name="snd_system_channel">Som e volume da notificação</string>
-    <string name="snd_footer">O app aberto toca o próprio sinal; em segundo plano o mesmo sinal chega como notificação do sistema. Os dois seguem o volume de notificações e ficam quietos nos modos silencioso, vibrar e Não perturbe. O controle acima só consegue deixar o nosso sinal mais baixo que o nível do sistema; esse nível muda nas configurações de notificação. Silenciar uma conversa (toque longo na tela inicial) cala os dois.</string>
+    <string name="snd_system_channel">Configurações de notificação do Android</string>
+    <string name="snd_footer">O app aberto toca o próprio sinal; em segundo plano o mesmo sinal chega como notificação do sistema, e esse também é tocado pelo RCQ, então o controle vale para os dois. O nível de notificação do telefone é o teto e muda com as teclas de volume. Os dois ficam quietos nos modos silencioso e vibrar e durante uma chamada telefônica. No Não perturbe também ficam quietos, mesmo que você tenha dado uma exceção a essa notificação: pelo Não perturbe o Android só deixa passar os próprios sons, e o RCQ não pode ler suas regras do Não perturbe para saber se uma mensagem teria passado. Se o sinal é nosso ou não se decide nas configurações do Android acima: dê a essa notificação um som próprio, ou escolha «Nenhum» ou o modo silencioso, e o Android retoma o sinal e o controle passa a valer só para o app aberto. Um som ou uma configuração de tela de bloqueio escolhidos ali antes desta versão fazem o mesmo, e para sempre, porque o RCQ não pode copiá-los para um canal próprio. Uma exceção ao Não perturbe ou um canal bloqueado fazem o mesmo até você desfazer, e então o RCQ retoma o sinal na próxima inicialização. Silenciar uma conversa (toque longo na tela inicial) cala os dois.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">As traduções saem aos poucos. O que faltar aparece em inglês.</string>
     <string name="notif_push">Notificações push</string>
@@ -1058,7 +1059,7 @@
     <string name="push_service_channel">Conexão em segundo plano</string>
     <string name="push_service_channel_desc">O aviso permanente mostrado enquanto o RCQ mantém a conexão de entrega em segundo plano. Desligar este canal esconde o aviso; a entrega continua funcionando.</string>
     <string name="push_service_hide">Esconder</string>
-    <string name="push_channel_messages_desc">Notificações de mensagem nova</string>
+    <string name="push_channel_messages_desc">Notificações de mensagem nova. O RCQ toca o sinal delas por conta própria, então este canal não tem som próprio; o volume está na tela de sons do RCQ.</string>
     <string name="push_new_message">Nova mensagem</string>
     <string name="push_new_group_message">Nova mensagem no grupo</string>
     <string name="push_kind_screenshot">Captura de tela</string>
