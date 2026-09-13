@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,7 +47,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import app.rcq.android.R
 import app.rcq.android.media.AudioPlayer
 import kotlinx.coroutines.delay
@@ -165,10 +165,15 @@ internal fun FullscreenVideoViewer(
     // touch; a View inside `AndroidView` does not. Closing is the X's job.
     Dialog(
         onDismissRequest = onDismiss,
-        // Edge to edge on every Android (see the album pager): the controls
-        // are placed by the bar's real height.
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false),
+        // Edge to edge on every Android, and the whole display in every
+        // orientation: see viewerDialogProperties (MediaViewerChrome.kt) for
+        // why that is not the flag it looks like it should be. #979 named the
+        // picture viewer and the player in one breath ("без разницы видео или
+        // картинка") because both windows were sized the same wrong way.
+        properties = viewerDialogProperties(dismissOnClickOutside = false),
     ) {
+        // ⚠ First, before anything draws: #979. See viewerDialogProperties.
+        PinViewerWindowToScreen()
         // #656: playback used to obey the normal screen timeout, so a clip
         // longer than it went dark mid-watch. Same helper the call screen uses.
         KeepScreenOn()
@@ -410,8 +415,13 @@ internal fun FullscreenVideoViewer(
                                 listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f)),
                             ),
                         )
-                        // `navigationBarsPadding()` is zero inside a Dialog; the
-                        // activity's window knows the bar's real height.
+                        // ⚠ BOTH: this window's own idea of the bar plus
+                        // whatever of it the window did not know about, which
+                        // always sum to the real height. See the album
+                        // counter's note (ChatScreen.kt) for why one alone is
+                        // not enough. The gradient above stays full bleed:
+                        // these paddings move the controls, not the scrim.
+                        .navigationBarsPadding()
                         .padding(bottom = activityNavigationBarBottom())
                         .padding(horizontal = 16.dp, vertical = 20.dp),
                 ) {

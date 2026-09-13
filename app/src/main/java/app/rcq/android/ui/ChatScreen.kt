@@ -36,8 +36,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -45,7 +43,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,7 +52,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -5385,7 +5381,9 @@ private fun AlbumPagerViewer(
     // Edge to edge on every Android, not only where the system forces it
     // (15+): the counter below is placed by the bar's real height, and that
     // is only right when the content is under the bar everywhere.
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = viewerDialogProperties()) {
+        // ⚠ First, before anything draws: #979. See viewerDialogProperties.
+        PinViewerWindowToScreen()
         // Item 9(b): one auto-hide timer and one fade for the whole album, the
         // same shared pair the video player uses (MediaViewerChrome.kt). Pinned
         // while a save or share is fetching, so the spinner that replaces the
@@ -5475,14 +5473,12 @@ private fun AlbumPagerViewer(
                     val bytes by produceState<ByteArray?>(initialValue = loaded[m.id], m.id, attempt) {
                         if (value == null) { tried = false; value = bytesOf(m); tried = true }
                     }
-                    var scale by remember(m.id) { mutableStateOf(1f) }
-                    var offset by remember(m.id) { mutableStateOf(Offset.Zero) }
-                    val transform = rememberTransformableState { zoomChange, panChange, _ ->
-                        scale = (scale * zoomChange).coerceIn(1f, 5f)
-                        offset = if (scale > 1f) offset + panChange else Offset.Zero
-                    }
+                    val zoom = rememberViewerZoom(m.id)
                     Box(
-                        // Toggles the controls; see the video page above.
+                        // Toggles the controls; see the video page above. The
+                        // picture itself carries its own tap (a double tap has
+                        // to reach it), so this one only ever fires on a page
+                        // with nothing drawn on it yet.
                         Modifier.fillMaxSize().clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -5498,26 +5494,16 @@ private fun AlbumPagerViewer(
                             )
                             b == null -> CircularProgressIndicator(color = RcqTheme.colors.accent)
                             b.isGif() -> SafeAnimatedGif(b, Modifier.fillMaxWidth())
+                            // ⚠ Seen with my own eyes: with a plain
+                            // transformable() the pager never turned a page.
+                            // Any drag past touch slop is a pan to it, consumed
+                            // before the pager sees it. At scale 1 there is
+                            // nothing to pan, so ZoomableImage hands the drag
+                            // on: one finger turns pages, two fingers zoom, a
+                            // double tap fills the screen, and a zoomed picture
+                            // pans instead of flipping.
                             else -> rememberSampledBitmap(b, maxPx = 2560)?.let { img ->
-                                Image(
-                                    bitmap = img,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.fillMaxSize()
-                                        // ⚠ Seen with my own eyes: with a plain
-                                        // transformable() the pager never turned a
-                                        // page. Any drag past touch slop is a pan to
-                                        // it, consumed before the pager sees it. At
-                                        // scale 1 there is nothing to pan, so the
-                                        // drag is handed on: one finger turns pages,
-                                        // two fingers zoom, and a zoomed picture pans
-                                        // instead of flipping.
-                                        .transformable(transform, canPan = { scale > 1f })
-                                        .graphicsLayer(
-                                            scaleX = scale, scaleY = scale,
-                                            translationX = offset.x, translationY = offset.y,
-                                        ),
-                                )
+                                ZoomableImage(img, zoom, Modifier.fillMaxSize()) { chrome.toggle() }
                             }
                         }
                     }
@@ -5583,10 +5569,18 @@ private fun AlbumPagerViewer(
                     Text(
                         "${pager.currentPage + 1} / ${items.size}",
                         color = Color.White, fontSize = 13.sp,
-                        // The dialog is laid out under the system bar and its own
-                        // insets read zero (see activityNavigationBarBottom): the
-                        // bar's real height plus a margin, whatever kind of bar.
-                        modifier = Modifier.padding(bottom = activityNavigationBarBottom() + 16.dp)
+                        // ⚠ BOTH, and neither alone. This window is laid out
+                        // under the bar; whether it is also TOLD how tall the
+                        // bar is varies (PinViewerWindowToScreen asks for the
+                        // insets, older Androids and other hosts may still
+                        // report zero). navigationBarsPadding is whatever this
+                        // window knows, activityNavigationBarBottom is the rest
+                        // of it from the activity, and the two always sum to
+                        // the bar's real height. #704 is the counter sitting
+                        // behind a three-button bar when that sum was short.
+                        modifier = Modifier
+                            .navigationBarsPadding()
+                            .padding(bottom = activityNavigationBarBottom() + 16.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.Black.copy(alpha = 0.5f))
                             .padding(horizontal = 10.dp, vertical = 4.dp),
@@ -5627,19 +5621,16 @@ internal fun FullscreenImageViewer(
     showActions: Boolean = true,
     onDismiss: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        var scale by remember { mutableStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
-        val transform = rememberTransformableState { zoomChange, panChange, _ ->
-            scale = (scale * zoomChange).coerceIn(1f, 5f)
-            offset = if (scale > 1f) offset + panChange else Offset.Zero
-        }
+    Dialog(onDismissRequest = onDismiss, properties = viewerDialogProperties()) {
+        // ⚠ First, before anything draws: #979. See viewerDialogProperties.
+        PinViewerWindowToScreen()
+        val zoom = rememberViewerZoom(bytes)
         // The shared timer and fade (MediaViewerChrome.kt), the same pair the
         // album pager and the video player use. Pinned while the photo is
         // zoomed in: someone working at 4x is reading the picture, not watching
         // it, and losing the close button mid-inspection is exactly the moment
         // they want it.
-        val chrome = rememberViewerChrome(pinned = scale > 1f)
+        val chrome = rememberViewerChrome(pinned = zoom.zoomed)
         val dismissDrag = rememberViewerDismiss()
         Box(
             Modifier
@@ -5652,7 +5643,7 @@ internal fun FullscreenImageViewer(
                 )
                 // Off while zoomed: that drag is a pan across the picture, and
                 // reaching its bottom edge must not throw the viewer away.
-                .viewerSwipeToDismiss(dismissDrag, enabled = scale <= 1f, onDismiss = onDismiss),
+                .viewerSwipeToDismiss(dismissDrag, enabled = !zoom.zoomed, onDismiss = onDismiss),
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -5669,19 +5660,10 @@ internal fun FullscreenImageViewer(
                     // 5x pinch-zoom) so opening a big photo never stalls the UI.
                     val image = rememberSampledBitmap(bytes, maxPx = 2560)
                     if (image != null) {
-                        Image(
-                            bitmap = image,
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                // ⚠ `canPan` matches the album pager, and here it
-                                // is what lets the swipe-down through: without it
-                                // transformable eats every drag at any zoom, and
-                                // the close gesture never reaches the box above.
-                                .transformable(transform, canPan = { scale > 1f })
-                                .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                        )
+                        // Fit, pinch, clamped pan and a double tap to fill the
+                        // screen: all four in one place (MediaViewerChrome.kt)
+                        // so the album pager cannot drift away from it.
+                        ZoomableImage(image, zoom, Modifier.fillMaxSize()) { chrome.toggle() }
                     }
                 }
             }

@@ -5,10 +5,16 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -29,14 +36,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -295,5 +309,263 @@ internal fun Modifier.viewerSwipeToDismiss(
             // rest the event still belongs to whatever is underneath.
             if (state.dragPx > 0f) change.consume()
         }
+    }
+}
+
+// ── The window a full-screen viewer lives in ─────────────────────────
+
+/// Properties for a viewer's `Dialog`, and the ONLY ones any of the three
+/// should use.
+///
+/// ⚠⚠ `usePlatformDefaultWidth = true` is not a typo, and it is the whole of
+/// report #979's landscape screenshot. The obvious-looking `false` does not
+/// mean "fill the screen": Compose's own DialogLayout then measures the content
+/// against `Configuration.screenWidthDp / screenHeightDp` and, on every layout
+/// pass, writes THAT MANY PIXELS back into the window as a fixed size with
+/// gravity CENTER. Two things go wrong with it.
+///
+/// A configuration that has not caught up with a rotation, which is what the
+/// activity handling `configChanges` itself buys us, hands the dialog the
+/// PORTRAIT numbers while the display is already landscape, and the result is a
+/// portrait-shaped black box floating in the middle of a landscape screen with
+/// the chat visible either side of it. That is the picture the reporter sent,
+/// pixel for pixel: the box measured 1080 wide on a 2400-wide screen.
+///
+/// And even when the numbers are right, "as many pixels as the screen has" is
+/// not the same instruction as "as big as the window is". Seen on the
+/// emulator, where the landscape picture was pushed down by the status bar and
+/// its bottom edge fell off the screen.
+///
+/// With `true`, DialogLayout leaves the window alone and measures against the
+/// window's real size, so [PinViewerWindowToScreen] below can say MATCH_PARENT
+/// once and have WindowManager re-resolve it against the actual display on
+/// every rotation, for ever.
+///
+/// `decorFitsSystemWindows = false` goes with it. It buys two things: on API
+/// 31+ Compose picks a theme whose dialogs are not floating, and the decor
+/// stops padding our content for the bars. It does NOT by itself make the
+/// WINDOW cover them, which is [PinViewerWindowToScreen]'s other half. Every
+/// control inside adds the bars back by hand, which all three viewers do.
+internal fun viewerDialogProperties(dismissOnClickOutside: Boolean = true) = DialogProperties(
+    usePlatformDefaultWidth = true,
+    decorFitsSystemWindows = false,
+    dismissOnClickOutside = dismissOnClickOutside,
+)
+
+/// Pin the hosting dialog window to the whole display. Call it as the first
+/// thing inside a viewer's `Dialog { }`.
+///
+/// MATCH_PARENT rather than any number we could compute: a number is a snapshot
+/// of one orientation and this window outlives rotations. Gravity TOP|START so
+/// there is nothing to centre: a window the size of the screen has no slack to
+/// be centred in, and CENTER is exactly what turned a stale size into a box
+/// hovering in the middle of the screen.
+///
+/// ⚠⚠ MATCH_PARENT alone is not the whole display, and this cost an hour.
+/// "Parent" for a window WITHOUT `FLAG_LAYOUT_IN_SCREEN` is the content frame,
+/// which is the display minus the system bars, so the picture came back inset
+/// by the status bar at the top and the gesture bar at the bottom, with two
+/// grey bands where a black viewer should be. An Activity's window is born with
+/// that flag, which is why `enableEdgeToEdge` is all MainActivity ever needed;
+/// a Dialog's window is not. `LAYOUT_INSET_DECOR` is its other half: it keeps
+/// the real bar insets being REPORTED to a window that now sits under them,
+/// which is what `statusBarsPadding` on every control in here is reading, and
+/// what activityNavigationBarBottom (ActivityExt.kt) is comparing against.
+///
+/// The contrast enforcement goes too. Android 15 paints its own translucent
+/// grey behind the bars for anyone who does not say otherwise, and grey stripes
+/// across a photograph are the thing the black ground exists to avoid.
+///
+/// The cutout mode is the same one MainActivity declares. Without it a phone
+/// with a notch letterboxes this window away from the notch in landscape, which
+/// is a black bar down one side of every picture on exactly the phones people
+/// hold sideways to look at one.
+// FLAG_LAYOUT_INSET_DECOR and the contrast switches are marked deprecated in
+// favour of setDecorFitsSystemWindows, which Compose already calls and which by
+// itself leaves this window inside the content frame (see above). Until that is
+// not true any more, these are the instruments that work.
+@Suppress("DEPRECATION")
+@Composable
+internal fun PinViewerWindowToScreen() {
+    val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+    DisposableEffect(window) {
+        window?.let {
+            val lp = it.attributes
+            lp.width = android.view.WindowManager.LayoutParams.MATCH_PARENT
+            lp.height = android.view.WindowManager.LayoutParams.MATCH_PARENT
+            lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            lp.flags = lp.flags or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+            // ⚠ And the flags above are still not enough on their own. A window
+            // also carries a set of inset types it wants to be FITTED to, which
+            // defaults to the bars; LAYOUT_IN_SCREEN drops the status bar from
+            // it and leaves the navigation bar, so the picture stopped one
+            // gesture bar short of the bottom of the screen and its centre sat
+            // 34px high. Fit nothing: this is a black ground with a picture on
+            // it, and every control on top adds the bars back itself.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                lp.fitInsetsTypes = 0
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                lp.layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
+            it.attributes = lp
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                it.isStatusBarContrastEnforced = false
+                it.isNavigationBarContrastEnforced = false
+            }
+            if (android.os.Build.VERSION.SDK_INT < 35) {
+                it.statusBarColor = android.graphics.Color.TRANSPARENT
+                it.navigationBarColor = android.graphics.Color.TRANSPARENT
+            }
+        }
+        onDispose {}
+    }
+}
+
+// ── Zoom ─────────────────────────────────────────────────────────────
+
+/// Smallest zoom ceiling, whatever the picture is. Five times the fitted size
+/// is what the viewer has always offered and is plenty for a photograph.
+private const val VIEWER_ZOOM_MIN_CEILING = 5f
+
+/// Anything below this counts as "the whole picture is on screen": a float
+/// that came back from a pinch is never exactly 1.
+private const val VIEWER_ZOOM_EPSILON = 1.001f
+
+/// How far a double tap goes when the picture already fills the screen, i.e.
+/// when "fill the screen" is no zoom at all and the tap would otherwise do
+/// nothing.
+private const val VIEWER_ZOOM_DOUBLE_TAP_MIN = 2.5f
+
+/// Where a picture has been zoomed and panned to.
+///
+/// Hoisted out of the image on purpose: the viewer around it has to know. The
+/// swipe-down-to-close turns off while [zoomed] (a pan that reaches the bottom
+/// of the picture must not throw the viewer away), the album pager stops
+/// turning pages, and the chrome pins itself so the close button cannot fade
+/// out from under someone reading at 4x.
+@Stable
+internal class ViewerZoomState {
+    /// Multiplier ON TOP of fit-to-screen, never an absolute scale: 1 means the
+    /// whole picture is visible, whatever shape it is.
+    var scale: Float by mutableFloatStateOf(1f)
+        internal set
+
+    /// Pan, in screen px, applied after the scale.
+    var offset: Offset by mutableStateOf(Offset.Zero)
+        internal set
+
+    val zoomed: Boolean get() = scale > VIEWER_ZOOM_EPSILON
+
+    internal fun reset() {
+        scale = 1f
+        offset = Offset.Zero
+    }
+}
+
+@Composable
+internal fun rememberViewerZoom(key: Any? = Unit): ViewerZoomState = remember(key) { ViewerZoomState() }
+
+/// A picture that fills the viewer, pinches to zoom, drags to pan and answers a
+/// DOUBLE TAP.
+///
+/// The double tap is report #979's other half. A 2560x1440 desktop screenshot
+/// fitted to a portrait phone is a 1080x607 strip with two thirds of the screen
+/// black above and below it, and at that size nothing on it can be read. That
+/// is the correct answer to "show me all of it" and a useless one to "let me
+/// look at it", and until now the only way across was a two-finger pinch nobody
+/// is told about. A double tap now jumps straight to the zoom that makes the
+/// picture COVER the screen. For a wide picture on a tall phone that is the
+/// height, so the strip becomes a full screen you pan sideways, and a second
+/// double tap comes back.
+///
+/// ⚠ The pan is clamped, which the old free-running offset was not: a drag
+/// could carry the picture clean off the screen and leave a black rectangle
+/// with no gesture that brings it back.
+///
+/// ⚠ `onTap` is handled HERE and not by a `clickable` on the ground behind.
+/// The image fills the viewer (the black margins are inside its own bounds), so
+/// a parent's clickable never sees a tap, and a bare `detectTapGestures` with
+/// only a double-tap handler would swallow the single one.
+// `canPan` on transformable is still experimental; the same opt-in the callers
+// carry, for the same modifier.
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun ZoomableImage(
+    bitmap: ImageBitmap,
+    zoom: ViewerZoomState,
+    modifier: Modifier = Modifier,
+    onTap: () -> Unit = {},
+) {
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        val boxW = constraints.maxWidth.toFloat()
+        val boxH = constraints.maxHeight.toFloat()
+        if (boxW <= 0f || boxH <= 0f || bitmap.width <= 0 || bitmap.height <= 0) return@BoxWithConstraints
+        // What ContentScale.Fit below will do, said in numbers so the gestures
+        // can reason about the picture that is actually on the glass.
+        val fit = minOf(boxW / bitmap.width, boxH / bitmap.height)
+        val fittedW = bitmap.width * fit
+        val fittedH = bitmap.height * fit
+        // The zoom that turns the fitted picture into a full screen. 1 for a
+        // picture the same shape as the phone, ~3 for a 16:9 screenshot held
+        // upright, which is the case the report is about.
+        val cover = maxOf(boxW / fittedW, boxH / fittedH).coerceAtLeast(1f)
+        val maxScale = maxOf(VIEWER_ZOOM_MIN_CEILING, cover * 2f)
+
+        // A rotation changes every number above, so whatever the picture was
+        // panned to means nothing any more: start from the whole picture again
+        // rather than from a corner of the old one.
+        LaunchedEffect(bitmap, boxW, boxH) { zoom.reset() }
+
+        fun clamp(o: Offset, s: Float): Offset {
+            val slackX = ((fittedW * s - boxW) / 2f).coerceAtLeast(0f)
+            val slackY = ((fittedH * s - boxH) / 2f).coerceAtLeast(0f)
+            return Offset(o.x.coerceIn(-slackX, slackX), o.y.coerceIn(-slackY, slackY))
+        }
+
+        val transform = rememberTransformableState { zoomChange, panChange, _ ->
+            val next = (zoom.scale * zoomChange).coerceIn(1f, maxScale)
+            zoom.scale = next
+            zoom.offset = if (next > VIEWER_ZOOM_EPSILON) clamp(zoom.offset + panChange, next) else Offset.Zero
+        }
+
+        Image(
+            bitmap = bitmap,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(bitmap, maxScale, boxW, boxH) {
+                    detectTapGestures(
+                        onTap = { onTap() },
+                        onDoubleTap = { at ->
+                            if (zoom.zoomed) {
+                                zoom.reset()
+                            } else {
+                                val target = maxOf(cover, VIEWER_ZOOM_DOUBLE_TAP_MIN).coerceAtMost(maxScale)
+                                // Keep what is under the finger under the
+                                // finger: the layer scales about its centre, so
+                                // the point tapped moves by (centre - tap) *
+                                // (scale - 1) and this cancels it.
+                                val centre = Offset(boxW / 2f, boxH / 2f)
+                                zoom.scale = target
+                                zoom.offset = clamp((centre - at) * (target - 1f), target)
+                            }
+                        },
+                    )
+                }
+                // ⚠ `canPan` matches the album pager, and here it is what lets
+                // the swipe-down through: without it transformable eats every
+                // drag at any zoom, and the close gesture never reaches the box
+                // above.
+                .transformable(transform, canPan = { zoom.zoomed })
+                .graphicsLayer(
+                    scaleX = zoom.scale, scaleY = zoom.scale,
+                    translationX = zoom.offset.x, translationY = zoom.offset.y,
+                ),
+        )
     }
 }
