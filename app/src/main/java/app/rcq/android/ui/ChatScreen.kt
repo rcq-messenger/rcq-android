@@ -747,7 +747,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val youLabel = stringResource(R.string.chat_you)
     fun authorName(m: ChatMessage): String = when {
         m.fromMe -> youLabel
-        isGroup -> group?.memberName(m.senderUin ?: 0) ?: "${m.senderUin}"
+        isGroup -> session.memberDisplayName(group, m.senderUin ?: 0, messages)
         else -> session.contactName(peer ?: 0)
     }
     // The sender's roster row, for the picture that goes beside their nick.
@@ -758,7 +758,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // needs no separate lookup.
     fun wireAuthorName(m: ChatMessage): String = when {
         m.fromMe -> session.nickname ?: youLabel
-        isGroup -> group?.memberName(m.senderUin ?: 0) ?: "${m.senderUin}"
+        isGroup -> session.memberWireName(group, m.senderUin ?: 0, messages)
         else -> session.contactWireName(peer ?: 0)
     }
     fun authorMember(m: ChatMessage): app.rcq.android.model.GroupMember? =
@@ -2427,7 +2427,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         Text("${entries.size}", color = c.textSecondary, fontSize = 14.sp)
                     }
                     entries.forEach { (uin, _) ->
-                        val name = group?.memberName(uin) ?: session.contactName(uin)
+                        val name = if (group != null) session.memberDisplayName(group, uin, messages) else session.contactName(uin)
                         // The picture, not just the name. Every other list of
                         // people in the app carries one, and this is the list
                         // where "who was that" is the entire question. The
@@ -3317,7 +3317,7 @@ private fun MessageLongPressOverlay(
         var reportMsg by remember { mutableStateOf<ChatMessage?>(null) }
         reportMsg?.let { rm ->
             val target = if (group != null) rm.senderUin ?: 0 else (rm.senderUin ?: rm.peerUin ?: 0)
-            val who = if (group != null) group.memberName(target) ?: "$target"
+            val who = if (group != null) session.memberDisplayName(group, target, emptyList())
                       else session.contactName(target)
             ReportDialog(
                 name = who,

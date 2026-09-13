@@ -98,6 +98,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.execSQL(CALL_ID_INDEX_DDL)
         db.execSQL(DELETED_IDS_DDL)
         db.execSQL(DECOY_CONTACTS_DDL)
+        db.execSQL(MEMBER_NAMES_DDL)
     }
 
     private fun upgrade(db: SQLiteDatabase, oldVersion: Int) {
@@ -153,6 +154,10 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
             db.execSQL("ALTER TABLE messages ADD COLUMN call_id TEXT")
             db.execSQL(CALL_ID_INDEX_DDL)
         }
+        // 20: last-known group member names (#982). Starts empty and fills on
+        // the next roster fetch; a member who left before the upgrade stays a
+        // number unless a quote in the chat still names them.
+        if (oldVersion < 20) db.execSQL(MEMBER_NAMES_DDL)
     }
 
     // ── decoy roster (only ever populated in the DECOY store) ────────────
@@ -183,6 +188,45 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         db.execSQL("DELETE FROM messages")
         db.execSQL("DELETE FROM deleted_ids")
         db.execSQL("DELETE FROM decoy_contacts")
+        db.execSQL("DELETE FROM member_names")
+    }
+
+    // ── last-known group member names (#982) ─────────────────────────────
+    //
+    // In here, not in prefs, for the reason the decoy roster above is: prefs
+    // open without the PIN, and a list of who used to be in which room is
+    // exactly the record a seized phone should not hand over. Sealed with the
+    // history it labels, gone with the file.
+
+    fun memberNames(): Map<MemberNameCache.Key, Map<Int, String>> {
+        val out = HashMap<MemberNameCache.Key, HashMap<Int, String>>()
+        db.rawQuery("SELECT host, group_id, uin, nickname FROM member_names", null).use { c ->
+            while (c.moveToNext()) {
+                out.getOrPut(MemberNameCache.Key(c.getString(0), c.getInt(1))) { HashMap() }[c.getInt(2)] = c.getString(3)
+            }
+        }
+        return out
+    }
+
+    /** Upsert only the names that changed, in one transaction. */
+    fun putMemberNames(host: String, groupId: Int, names: Map<Int, String>) {
+        if (names.isEmpty()) return
+        db.beginTransaction()
+        try {
+            names.forEach { (uin, nick) ->
+                db.execSQL(
+                    "INSERT OR REPLACE INTO member_names (host, group_id, uin, nickname) VALUES (?, ?, ?, ?)",
+                    arrayOf<Any>(host, groupId, uin, nick),
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun forgetMemberNames(host: String, groupId: Int) {
+        db.execSQL("DELETE FROM member_names WHERE host = ? AND group_id = ?", arrayOf<Any>(host, groupId))
     }
 
     /** Delete every message whose disappearing-message TTL has elapsed and
@@ -301,6 +345,8 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
 
     fun wipe() {
         db.execSQL("DELETE FROM messages")
+        // The names only exist to label this history (#982).
+        db.execSQL("DELETE FROM member_names")
     }
 
     /** Delete one message AND remember that we did.
@@ -424,7 +470,13 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 19
+        const val VERSION = 20
+
+        /** Last-known group member names (#982), keyed like the cache in
+         *  memory: island host (lowercase) + local group id + uin. */
+        private const val MEMBER_NAMES_DDL =
+            "CREATE TABLE IF NOT EXISTS member_names (host TEXT NOT NULL, group_id INTEGER NOT NULL, " +
+                "uin INTEGER NOT NULL, nickname TEXT NOT NULL, PRIMARY KEY (host, group_id, uin))"
 
         /** Partial on purpose: `call_id` is NULL on everything that is not a
          *  call summary, which is all but a handful of rows, and SQLite would

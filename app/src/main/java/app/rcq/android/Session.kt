@@ -1507,6 +1507,7 @@ class Session(context: Context) {
         // FIRST, before a single field moves: everything already in flight is
         // now working for the previous account. See [accountEpoch].
         accountEpoch++
+        memberNames.clear()
         calls.teardown()   // drop any in-flight call before the identity swaps
         audioRooms.teardown()
         nearby.teardown()
@@ -2881,6 +2882,8 @@ class Session(context: Context) {
         // lets the next unlock start a second copy of every one of them, and
         // only a changed epoch retires the first.
         accountEpoch++
+        // Before the close: waits out a name write that is still running.
+        memberNames.clear()
         if (::db.isInitialized) { db.close() }
         started = false
         everConnected = false
@@ -3197,6 +3200,7 @@ class Session(context: Context) {
         synchronized(callOutbox) { callOutbox.clear() }
         _contacts.value = emptyList(); _pending.value = emptyList(); _outgoing.value = emptyList(); _messages.value = emptyMap()
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _devices.value = null
+        memberNames.clear()
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
     }
 
@@ -3505,6 +3509,7 @@ class Session(context: Context) {
         decoySessionNickname = PanicPinService.decoySessionNickname() ?: DecoyStore.randomNickname()
         // Everything the real session had in memory goes, before a single
         // frame of the duress view is drawn.
+        memberNames.clear()
         _contacts.value = emptyList()
         _pending.value = emptyList()
         _outgoing.value = emptyList()
@@ -3612,6 +3617,8 @@ class Session(context: Context) {
     /** Wipe local message history (both 1:1 and group threads) without
      *  touching the account. Mirrors iOS "Clear history". */
     fun clearHistory() {
+        // First: waits out a name write that would land after the wipe.
+        memberNames.clear()
         db.wipe()
         _messages.value = emptyMap()
         _groupMessages.value = emptyMap()
@@ -4202,6 +4209,8 @@ class Session(context: Context) {
             }.getOrElse { emptyList() }
         }
         if (!stillOn(ep)) return
+        // Foreign rooms come WITH their roster; the own list does not (#982).
+        foreign.forEach(::rememberMemberNames)
         _groups.value = (own + foreign).distinctBy { it.id }.sortedByDescending { it.createdAt ?: 0L }
         // Persist the roster so groups are reachable offline (report #7).
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
@@ -4224,10 +4233,12 @@ class Session(context: Context) {
         // group we just created.
         if (me != null && g.members.isNotEmpty() && g.members.none { it.uin == me }) {
             _groups.value = _groups.value.filterNot { it.id == g.id }
+            forgetMemberNames(g.host, g.id)
             return
         }
         _groups.value = (_groups.value.filterNot { it.id == g.id } + g)
             .sortedByDescending { it.createdAt ?: 0L }
+        rememberMemberNames(g)
     }
 
     /** Move the crown on a locally-held group, for the COMPACT
@@ -4424,6 +4435,7 @@ class Session(context: Context) {
             members = full.members, memberCount = full.memberCount, ownerUin = full.ownerUin,
         )
         _groups.value = _groups.value.map { if (it.id == id) merged else it }
+        rememberMemberNames(merged)
         // #650: the fetch/parse above already runs on IO inside RcqApi, but this
         // disk snapshot serializes EVERY group, and a roster can carry 2000+
         // members with two base64 keys each. Callers sit on the main thread
@@ -4644,6 +4656,7 @@ class Session(context: Context) {
         if (ctx.myUin == 0) return
         val key = sectionKeyForGroupId(id)
         runCatching { ctx.api.leaveGroup(ctx.gid, ctx.myUin) }
+        forgetMemberNames(ctx.host, id)
         _groups.value = _groups.value.filterNot { it.id == id }
         forgetSectionMember(key)
     }
@@ -4652,6 +4665,7 @@ class Session(context: Context) {
         val ctx = groupCtx(id)
         val key = sectionKeyForGroupId(id)
         runCatching { ctx.api.deleteGroup(ctx.gid) }
+        forgetMemberNames(ctx.host, id)
         _groups.value = _groups.value.filterNot { it.id == id }
         forgetSectionMember(key)
     }
@@ -5551,6 +5565,8 @@ class Session(context: Context) {
      *  the account no longer exists and there is no server call left to make. */
     private suspend fun eraseActiveAccountLocally(burnedId: String?): Int? {
         socket.disconnect()
+        // Before the wipes: waits out a name write that would land after them.
+        memberNames.clear()
         // Read BEFORE the wipes below take the identity away: these two stores
         // are keyed by NUMBER, not by account id, so they cannot be swept from
         // `burnedId` afterwards.
@@ -10229,6 +10245,64 @@ class Session(context: Context) {
         return c?.nickname ?: "$uin"
     }
 
+    /** The last nickname each group member was seen with (#982). */
+    private val memberNames = app.rcq.android.data.MemberNameCache()
+
+    /** What to CALL a group member on screen: [resolveMemberName]'s chain, my
+     *  alias first. A member who left the room is gone from the roster, and
+     *  without the tiers after it every message they wrote was signed with
+     *  their number. [messages] is the chat's rows, for the quote tier. */
+    fun memberDisplayName(group: RcqGroup?, uin: Int, messages: List<ChatMessage>): String =
+        memberName(group, uin, messages, withAlias = true)
+
+    /** The same chain WITHOUT my alias, for the author label of an outgoing
+     *  quote. See [contactWireName]: it reaches the person it names. */
+    fun memberWireName(group: RcqGroup?, uin: Int, messages: List<ChatMessage>): String =
+        memberName(group, uin, messages, withAlias = false)
+
+    private fun memberName(group: RcqGroup?, uin: Int, messages: List<ChatMessage>, withAlias: Boolean): String {
+        val host = group?.host
+        return app.rcq.android.data.resolveMemberName(
+            uin = uin,
+            alias = if (withAlias) LocalStores.aliasFor(uin, host) else null,
+            rosterName = group?.members?.firstOrNull { it.uin == uin }?.nickname,
+            // ⚠ Never under duress: the store belongs to the real account.
+            lastKnown = if (group == null || AccountManager.isDecoyMode) null else memberNames.lookup(host, group.id, uin),
+            // Host-strict: `1234` here and `1234@is2` are two people.
+            contactNick = _contacts.value.firstOrNull { it.uin == uin && it.host.equals(host, ignoreCase = true) }?.nickname,
+            quotedAs = memberNames.quotedNames(messages)[uin],
+        )
+    }
+
+    /** Fold a fetched roster into [memberNames]. On [scope] (IO): a roster can
+     *  be two thousand rows, and the cache writes only names that changed. */
+    private fun rememberMemberNames(g: RcqGroup) {
+        if (g.members.isEmpty() || AccountManager.isDecoyMode) return
+        val gen = memberNames.generation()
+        scope.launch {
+            memberNames.record(gen, serverHost(), g.host, g.id, g.members.map { it.uin to it.nickname }) { key, changed ->
+                runCatching { db.putMemberNames(key.host, key.groupId, changed) }
+            }
+        }
+    }
+
+    /** This account is out of the group: its members' names go with it. */
+    private fun forgetMemberNames(host: String?, groupId: Int) {
+        val gen = memberNames.generation()
+        scope.launch {
+            memberNames.forget(gen, serverHost(), host, groupId) { key ->
+                runCatching { db.forgetMemberNames(key.host, key.groupId) }
+            }
+        }
+    }
+
+    /** Reload [memberNames] from the database just bound. Empty in a decoy
+     *  session, whichever file it opened. */
+    private fun loadMemberNames() {
+        if (AccountManager.isDecoyMode) { memberNames.clear(); return }
+        memberNames.load(serverHost(), runCatching { db.memberNames() }.getOrDefault(emptyMap()))
+    }
+
     /** Append a call-summary line to the 1:1 thread (kind="call"), so a
      *  finished/missed call shows in the chat history. Called by
      *  [CallController] on every call end. */
@@ -10440,7 +10514,10 @@ class Session(context: Context) {
                 }
             }
             "group_deleted" -> {
-                obj.get("group_id")?.asInt?.let { gid -> _groups.value = _groups.value.filterNot { it.id == gid } }
+                obj.get("group_id")?.asInt?.let { gid ->
+                    _groups.value = _groups.value.filterNot { it.id == gid }
+                    forgetMemberNames(null, gid)
+                }
             }
             // ⚠⚠ THE ACCOUNT MOVED, IT WAS NOT BURNED. Until 07.09 the island
             // sent `account_burned` here, and the owner's OTHER devices did
@@ -10560,6 +10637,8 @@ class Session(context: Context) {
         // already gone from the table, so it finds nothing expired and returns.
         // Same `now` for the partition and the delete, so the two agree exactly.
         val now = System.currentTimeMillis()
+        // Every bindDb is followed by this, so the names follow the database.
+        loadMemberNames()
         val all = db.all()
         val (doomed, live) = all.partition { it.expiresAt != null && it.expiresAt!! <= now }
         if (doomed.isNotEmpty()) db.deleteExpired(now)

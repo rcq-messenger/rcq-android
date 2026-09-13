@@ -1331,11 +1331,9 @@ internal fun HomeScreen(
                 avatar = { GroupAvatar(g, session, 24.dp) },
                 messages = groupMsgs[g.id] ?: emptyList(),
                 isGroup = true,
-                // Roster nick first (the name the room sees), contactName
-                // after: same order the chat's mention resolver uses. The
-                // roster may not be cached yet on the home screen; contactName
-                // still lands on a name or "#uin".
-                senderName = { u -> g.members.firstOrNull { it.uin == u }?.nickname ?: session.contactName(u) },
+                // The same chain as the name over a bubble in the chat (#982),
+                // so a member who left is not a number here either.
+                senderName = { u -> session.memberDisplayName(g, u, groupMsgs[g.id] ?: emptyList()) },
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
                     onClearThread = { clearGroupTarget = it }),
                 onDismiss = { previewGroup = null },
