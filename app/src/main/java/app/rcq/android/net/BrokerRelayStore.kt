@@ -95,7 +95,25 @@ object BrokerRelayStore {
      *  broken to the person who just pasted it. */
     fun setTenantKey(key: String?) {
         if (!isReady()) return
-        prefs.edit().putString(KEY_TENANT, key?.trim()?.takeIf { it.isNotEmpty() }).apply()
+        val clean = key?.trim()?.takeIf { it.isNotEmpty() }
+        val edit = prefs.edit().putString(KEY_TENANT, clean)
+        // A verdict belongs to the key it was given for. Left in place, an
+        // earlier "ok" was read back as THIS key's answer whenever the refresh
+        // that follows failed to reach the island, so a mistyped key pasted
+        // over a working one looked accepted.
+        edit.remove(KEY_VERDICT)
+        // Clearing the key drops the paid endpoints with it (as the desktop
+        // does): keeping them would go on routing through nodes the person no
+        // longer holds a key for, which is the state "remove" is meant to end.
+        if (clean == null) {
+            // The endpoints themselves too, not only their tags: the transport
+            // builds its pool from relays(), and a paid node left in that list
+            // would keep carrying traffic with nothing marking it as paid.
+            val paid = privateTags()
+            if (paid.isNotEmpty()) edit.putString(KEY, gson.toJson(relays().filterNot { it.tag in paid }))
+            edit.remove(KEY_PRIVATE)
+        }
+        edit.apply()
     }
 
     private val client = OkHttpClient.Builder()
@@ -105,9 +123,9 @@ object BrokerRelayStore {
         .proxy(Proxy.NO_PROXY)   // direct: the transport isn't up yet, and a blocked fetch just falls back
         .build()
 
-    /** Relays for the transport pool (cached from the last successful fetch). */
     /** What the broker made of the key we last sent: null (none sent, or never
-     *  asked), "ok", "unknown", "expired". */
+     *  asked), else one of [BrokerVerdict]: "ok", "unknown", "expired", or
+     *  "offline" when the island could not be asked (the key stays). */
     fun keyVerdict(): String? = if (!isReady()) null else prefs.getString(KEY_VERDICT, null)
 
     /** Tags of the endpoints this account pays for. */
@@ -133,28 +151,52 @@ object BrokerRelayStore {
 
     fun count(): Int = relays().size
 
-    /** Best-effort: pull a few bridges from the broker + cache them. No-op on any
-     *  network/parse failure (we keep whatever we had). Call off the main thread. */
+    /** One round trip to the broker: the HTTP status and body, or null when
+     *  the request never completed (no network, timeout, a thrown exception). */
+    private fun ask(key: String?): Pair<Int, String?>? = runCatching {
+        // Through the tunnel when it's up: a BLOCKED user can't reach
+        // api.rcq.app directly, so without this they NEVER receive broker
+        // bridges (incl. the community relays operators raise). Once a bundled
+        // relay carries the tunnel, the fetch rides it. Tradeoff: the broker
+        // then buckets by the relay IP, not the user IP (weaker anti-enum) —
+        // acceptable, since some bridges beats none. Unblocked: direct, per
+        // the NO_PROXY base client.
+        val fetchClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
+        // The paid key, when there is one, rides in Authorization — the
+        // broker adds that tenant's private endpoints to the ordinary
+        // answer. A header rather than a query parameter because proxies
+        // redact this one, and a relay key in an access log is the same
+        // mistake as a session token in one.
+        val req = Request.Builder().url("https://$BROKER_HOST/broker/bridges?n=$WANT").get()
+        key?.let { req.header("Authorization", "Bearer $it") }
+        fetchClient.newCall(req.build()).execute().use { resp -> resp.code to resp.body?.string() }
+    }.getOrNull()
+
+    /** Best-effort: pull a few bridges from the broker + cache them. On any
+     *  network failure the relays we had are kept. Call off the main thread.
+     *
+     *  ⚠ A failure is not silent about the KEY any more. It used to return
+     *  before writing anything, so whoever read [keyVerdict] next saw whatever
+     *  the previous ask had left: Settings read a stale "ok" as this key's
+     *  answer, or a null as "not one of ours" and deleted a good key because
+     *  the network was down. Now a key that could not be checked is marked
+     *  [BrokerVerdict.OFFLINE] and kept. */
     fun refresh() {
         if (!isReady()) return
+        val key = tenantKey()
+        val answer = ask(key)
+        val status = answer?.first
+        val body = answer?.second?.takeIf { status != null && status in 200..299 }
+        val verdict = BrokerVerdict.ofResponse(status, body, keySent = key != null)
+        if (body == null || verdict == BrokerVerdict.OFFLINE) {
+            // The island was not reached, or answered with something that is
+            // not about relays (a 5xx, the 30-a-minute rate limit as a 429).
+            // Relays untouched; only the key's verdict is written, and only
+            // when there is a key for it to be about.
+            if (key != null) prefs.edit().putString(KEY_VERDICT, verdict).apply()
+            return
+        }
         runCatching {
-            // Through the tunnel when it's up: a BLOCKED user can't reach
-            // api.rcq.app directly, so without this they NEVER receive broker
-            // bridges (incl. the community relays operators raise). Once a bundled
-            // relay carries the tunnel, the fetch rides it. Tradeoff: the broker
-            // then buckets by the relay IP, not the user IP (weaker anti-enum) —
-            // acceptable, since some bridges beats none. Unblocked: direct, per
-            // the NO_PROXY base client.
-            val fetchClient = SingBoxTransport.proxy()?.let { client.newBuilder().proxy(it).build() } ?: client
-            // The paid key, when there is one, rides in Authorization — the
-            // broker adds that tenant's private endpoints to the ordinary
-            // answer. A header rather than a query parameter because proxies
-            // redact this one, and a relay key in an access log is the same
-            // mistake as a session token in one.
-            val req = Request.Builder().url("https://$BROKER_HOST/broker/bridges?n=$WANT").get()
-            tenantKey()?.let { req.header("Authorization", "Bearer $it") }
-            val body = fetchClient.newCall(req.build())
-                .execute().use { resp -> if (resp.isSuccessful) resp.body?.string() else null } ?: return
             val root = JsonParser.parseString(body).asJsonObject
             val arr = root.getAsJsonArray("relays") ?: return
             val out = ArrayList<SingBoxTransport.Relay>()
@@ -173,12 +215,11 @@ object BrokerRelayStore {
                 // everybody gets, and lost it about as often as it won.
                 if (runCatching { obj.get("private")?.asBoolean }.getOrNull() == true) private.add(tag)
             }
-            // Whether the key was understood at all: null when we sent none,
-            // else ok | unknown | expired. Before this existed a mistyped key
-            // and a working one produced the same answer, so the app reported
-            // both as accepted.
-            val verdict = runCatching { root.get("key")?.takeIf { !it.isJsonNull }?.asString }.getOrNull()
-            // Replace the cache with the freshest set (empty list = broker had none).
+            // Replace the cache with the freshest set (empty list = broker had
+            // none). The verdict is the island's word on the key: null when
+            // we sent none, else ok | unknown | expired. Before this existed
+            // a mistyped key and a working one produced the same answer, so
+            // the app reported both as accepted.
             prefs.edit()
                 .putString(KEY, gson.toJson(out))
                 .putStringSet(KEY_TRUSTED, trusted)

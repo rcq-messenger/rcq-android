@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Play-flavour overrides, Russian. See values/strings.xml in this source set. -->
+<resources>
+    <string name="cs_burn_body">Это удаляет ваш аккаунт и все локальные данные. Номер, под которым вы отвечаете, вернётся в общий пул, а группы, которые вы создали, пропадут у всех участников. Отменить нельзя.</string>
+    <string name="my_uins_sell_wallet">Ваш адрес для выплаты</string>
+    <string name="my_uins_sell_bad_address">Адрес выглядит неверно. Проверьте его и попробуйте снова.</string>
+</resources>

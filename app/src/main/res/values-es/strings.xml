@@ -86,7 +86,7 @@
     <string name="home_menu_add_account">Añadir cuenta</string>
     <string name="home_menu_manage_accounts">Gestionar cuentas</string>
     <!-- Multi-account: add + manage -->
-    <string name="add_account_body">Crea una identidad anónima nueva junto a la que ya tienes. Deja el servidor en blanco para usar el público.</string>
+    <string name="add_account_body">Crea una identidad nueva junto a la que ya tienes. Deja el servidor en blanco para usar el público.</string>
     <string name="add_account_create">Crear</string>
     <string name="access_token_label">Clave de la pasarela (opcional)</string>
     <string name="access_token_hint">Solo si la isla se oculta tras una pasarela. No es el código de acceso de arriba.</string>
@@ -942,6 +942,9 @@
     <plurals name="relay_key_ok_body"><item quantity="one">Ya está en uso %1$d nodo tuyo. El pool compartido sigue como respaldo.</item><item quantity="other">Ya están en uso %1$d nodos tuyos. El pool compartido sigue como respaldo.</item></plurals>
     <string name="relay_key_active">Clave de acceso introducida</string>
     <string name="relay_key_remove">Quitar</string>
+    <string name="relay_key_ok_none">Clave aceptada. Todavía no tiene nodos propios asignados, así que de momento se usa el pool compartido.</string>
+    <string name="relay_key_offline_title">La isla no respondió</string>
+    <string name="relay_key_offline_body">No se pudo comprobar la clave: la isla no respondió. Se conserva y se volverá a comprobar cuando vuelva la conexión.</string>
     <string name="relay_import_ok">Relay añadido</string>
     <string name="relay_shared_section">Relays compartidos</string>
     <string name="relay_shared_empty">No hay relays compartidos. Un contacto puede enviarte uno en el chat, o pega un enlace aquí arriba.</string>

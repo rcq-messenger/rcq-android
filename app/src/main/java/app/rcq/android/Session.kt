@@ -67,6 +67,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -168,6 +169,8 @@ class Session(context: Context) {
     // instead. It rides Cloudflare's collateral-resistant IPs and proxies to
     // api.rcq.app, so a blocked user reaches the island WITHOUT a relay. serverHost()
     // stays the island identity (api.rcq.app) — this only changes the transport URL.
+    // Per ACCOUNT: reset in [rebindTo], because the front only leads to the
+    // flagship and a self-hosted account's walk never clears it by itself.
     private var frontHost: String? = null
     // Which host fronts the flagship comes from the signed config, so moving
     // off the apex is a config push rather than a release.
@@ -229,7 +232,10 @@ class Session(context: Context) {
      *  default) flags, and the first socket that comes up asks again. */
     @Volatile private var capsLiveHost: String? = null
     private val capsRefreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
-    private var api = newApi()
+    // Written on the main and IO threads, read on OkHttp's reader thread by the
+    // ownership check in connectAndSync: without the barrier that check could
+    // see a stale field and let a superseded socket keep feeding the session.
+    @Volatile private var api = newApi()
 
     /** The call relay's hostname, asked of the island.
      *
@@ -244,7 +250,7 @@ class Session(context: Context) {
             Regex("^turns?:([^:/?]+)").find(url)?.groupValues?.get(1)
         }
     }.getOrNull()
-    private var socket = newSocket()
+    @Volatile private var socket = newSocket()
     private fun newApi(): RcqApi =
         RcqApi("https://${apiHost()}", isPrimary = true, anonKeyLookup = { this@Session.anonKeyLookup }).apply {
             if (store.isRegistered) setToken(store.token)
@@ -259,6 +265,54 @@ class Session(context: Context) {
     private var signalStores = SignalStores(SignalStoreDb(appCtx, AccountManager.activeId.value ?: ""))
     private val gson = com.google.gson.Gson()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Parent of everything [start] launches for ONE account: the drain loops,
+     *  the route watchdog, the reaper, the mute collector and the connect
+     *  coroutine itself. Cancelled and replaced by [retireAccountJob].
+     *
+     *  ⚠⚠ Why a job and not only the epoch. [scope] lives as long as the
+     *  process and `started = false` is only read on the way IN to [start], so
+     *  every loop [start] launched kept running after a switch, and the next
+     *  [start] launched a second copy beside it: after three switches three or
+     *  four route watchdogs walked the ladder for the same phone. The epoch
+     *  guards stop a stale loop from WRITING, but only cancellation stops it
+     *  from probing, dialling and holding the ladder lock. */
+    private var accountJob: Job = SupervisorJob(scope.coroutineContext[Job])
+
+    /** [scope] with [accountJob] as the parent: what [start] launches from. */
+    private val accountScope: CoroutineScope get() = scope + accountJob
+
+    /** Cancel every coroutine of the account being left and hand [start] a
+     *  fresh parent. Called wherever the ground moves under [start]'s loops:
+     *  [rebindTo], [tearDownForLock], and [start] itself so a restart of the
+     *  same account ([applyMigration]) does not stack a second set either. */
+    private fun retireAccountJob() {
+        accountJob.cancel()
+        accountJob = SupervisorJob(scope.coroutineContext[Job])
+    }
+
+    /** One lock for every walk of the route ladder and every rebuild of the
+     *  transport, whoever asks: [start], the watchdog, the trust collector,
+     *  [setObfuscation], [setLocalProxy]. The transport is one sing-box for
+     *  the process and the socket is one field, so two of these interleaving
+     *  is how a tunnel got started for one island and the socket rebuilt for
+     *  another. */
+    private val ladderLock = Mutex()
+
+    /** THE way to swap the clients, everywhere. The old socket is disconnected
+     *  FIRST, then both objects are rebuilt on the current route.
+     *
+     *  ⚠⚠ `api = newApi(); socket = newSocket()` without the disconnect was
+     *  the shape at nine call sites, and each one orphaned a live socket: the
+     *  field moved on, the old socket kept `shouldStayConnected`, redialled
+     *  forever on its own backoff, and its onState/onEvent closures went on
+     *  writing this Session's `_connected` and feeding [handleEvent] for an
+     *  island that was no longer ours. Two sockets, two islands, one dot. */
+    private fun replaceClients() {
+        socket.disconnect()
+        api = newApi()
+        socket = newSocket()
+    }
 
     /** Which account this session is serving, as a number that changes on every
      *  [rebindTo].
@@ -1507,6 +1561,9 @@ class Session(context: Context) {
         // FIRST, before a single field moves: everything already in flight is
         // now working for the previous account. See [accountEpoch].
         accountEpoch++
+        // And the loops that WOULD keep working for it: the epoch stops them
+        // writing, the cancel stops them running. See [accountJob].
+        retireAccountJob()
         memberNames.clear()
         calls.teardown()   // drop any in-flight call before the identity swaps
         audioRooms.teardown()
@@ -1517,8 +1574,30 @@ class Session(context: Context) {
         if (::db.isInitialized) db.close()
         signalStores = SignalStores(SignalStoreDb(appCtx, accountId))
         bindPerAccountStores(accountId)
-        api = newApi()
-        socket = newSocket()
+        // ⚠⚠ BEFORE the clients are rebuilt: the front is a road to the
+        // FLAGSHIP, not to the account being bound, and nothing else ever
+        // clears it. [apiHost] feeds it into [newApi]/[newSocket] for every
+        // account, and a self-hosted island's own walk never touches it (the
+        // front branch is flagship-only, the relay gate wants it null). So a
+        // flagship account that had fallen to cdn.rcq.app on a blocked
+        // network handed the self-hosted account a socket dialling the front
+        // with the island's number and token: Cloudflare proxied it to the
+        // flagship, which refused the foreign JWT before accept, and the
+        // socket redialled that forever while every API call 401'd. That is
+        // the tester's "no connection to your island, messages come through
+        // the backup island". Cleared here, the next walk re-probes and sets
+        // it again for a flagship account, at the price of one direct probe.
+        frontHost = null
+        replaceClients()
+        // The outgoing account's outage clock and failover banner are ITS
+        // history, not the next account's. Carried over, a self-hosted island
+        // that had been down for a minute handed the flagship account a
+        // watchdog already past its re-ladder threshold, and "receiving via
+        // backup island" stayed on the screen for an account with no backup.
+        _connected.value = false
+        offlineSince = 0L
+        lastLadderAt = 0L
+        _receivingViaBackup.value = false
         peerIdentityCache.clear()
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
         noV2Peers.clear(); previewCache.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
@@ -1580,9 +1659,19 @@ class Session(context: Context) {
     fun start() {
         Session.live = this
         if (started) return
+        // ⚠ These two are for the SYNCHRONOUS work below only (the install
+        // claim, the phantom-backup scrub). The connect coroutine reads the
+        // store again after each of its own suspensions: captured here, they
+        // survived an account switch and dialled the new account's island
+        // with the old account's number and token.
         val uin = store.uin ?: return
         val token = store.token ?: return
         started = true
+        // A fresh parent for this account's loops. [rebindTo] has usually done
+        // this already; a restart of the same account ([applyMigration]) has
+        // not, and would otherwise stack a second set beside the first.
+        retireAccountJob()
+        val ep = epochNow()
         CrashReporter.crumb(appCtx, "session_start")
         claimInstallToken(token)
         watchUploadsOffScreen()
@@ -1644,17 +1733,19 @@ class Session(context: Context) {
         // Keep the server's push-suppression list in lock-step with the local
         // mute set: the StateFlow replays its current value on subscribe (one
         // reconcile after login — fixes mutes the server never learned about)
-        // and re-fires on every mute/unmute. Single collector per Session.
-        scope.launch { LocalStores.muted.collect { syncPushMutes() } }
+        // and re-fires on every mute/unmute. Single collector per ACCOUNT: it
+        // rides [accountJob], so a switch ends it instead of adding one.
+        accountScope.launch { LocalStores.muted.collect { syncPushMutes() } }
         // Multihoming v1: poll the backup-island mailboxes. Deliberately
         // independent of the primary socket — when the primary island is down,
         // this loop IS the delivery path.
-        scope.launch {
+        accountScope.launch {
             // ⚠ This loop is per ACCOUNT, not per app run. [start] runs again
             // after every switch and would otherwise leave the previous
             // account's loop ticking beside the new one forever, one more on
             // every switch, each draining somebody else's backup mailboxes.
-            val ep = epochNow()
+            // The job cancels it now; the epoch check stays as the guard
+            // against writing through a delay that returned before the cancel.
             while (stillOn(ep)) {
                 delay(30_000)
                 if (!stillOn(ep)) return@launch
@@ -1677,8 +1768,7 @@ class Session(context: Context) {
         //
         // Only while DISCONNECTED, so a healthy session pays nothing: with the
         // socket up, messages arrive over it and this loop does not run.
-        scope.launch {
-            val ep = epochNow()
+        accountScope.launch {
             while (stillOn(ep)) {
                 delay(30_000)
                 if (!stillOn(ep)) return@launch
@@ -1714,8 +1804,8 @@ class Session(context: Context) {
         // Disappearing-message reaper: expire messages whose TTL lapsed while a
         // chat is open. 10s cadence keeps a 1-minute timer visibly honest
         // without busy-waiting; the on-load sweep covers longer closed gaps.
-        scope.launch {
-            while (true) {
+        accountScope.launch {
+            while (isActive) {
                 delay(10_000)
                 runCatching { sweepExpiredMessages() }
             }
@@ -1727,15 +1817,19 @@ class Session(context: Context) {
         // transport so a blocked guard self-heals. DORMANT unless onion is on
         // (off by default), so it's a no-op for everyone until the O5 cohort
         // flip. Won't fire on plain single-hop (onionEnabled gate).
-        scope.launch {
+        accountScope.launch {
             val transport = app.rcq.android.net.SingBoxTransport
             var deadStreak = 0
-            while (true) {
+            while (isActive) {
                 delay(60_000)
-                // ⚠⚠ This coroutine is never cancelled — tearDownForLock()
-                // clears `started`, not the scope — so it keeps ticking through
-                // a lock and into a duress session, where every branch below
-                // would redial or re-route the REAL account. Sit it out.
+                // Cancelled with the account now (see [accountJob]); the epoch
+                // check covers the tick that was already past its delay when
+                // the switch happened.
+                if (!stillOn(ep)) return@launch
+                // ⚠⚠ tearDownForLock() retires the job, but a duress session
+                // is entered without one: this loop would tick through it, and
+                // every branch below would redial or re-route the REAL
+                // account. Sit it out.
                 if (duressViewUp) { deadStreak = 0; continue }
                 // Auto-engaged tunnel on a network that has since recovered: drop
                 // it. Until now it stayed up for the whole session ("the shield
@@ -1748,15 +1842,17 @@ class Session(context: Context) {
                 ) {
                     val directBack = withContext(Dispatchers.IO) { transport.probeDirect(serverHost()) } ==
                         app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+                    // The probe was a suspension: the account may have moved.
+                    if (!stillOn(ep)) return@launch
                     if (directBack) {
-                        withContext(Dispatchers.IO) { transport.stop() }
-                        socket.disconnect()
-                        api = newApi()
-                        socket = newSocket()
-                        _stealthActive.value = false
-                        _routeVerified.value = false
-                        app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
-                        store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+                        ladderLock.withLock {
+                            withContext(Dispatchers.IO) { transport.stop() }
+                            replaceClients()
+                            _stealthActive.value = false
+                            _routeVerified.value = false
+                            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                            store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+                        }
                         continue
                     }
                 }
@@ -1776,14 +1872,21 @@ class Session(context: Context) {
                 ) {
                     lastLadderAt = now
                     android.util.Log.i("RCQroute", "offline ${(now - down) / 1000}s — walking the route ladder again")
-                    val changed = runCatching { runRouteLadder() }.getOrDefault(false)
+                    val changed = runCatching { runRouteLadder(ep) }.getOrDefault(false)
+                    if (!stillOn(ep)) return@launch
                     android.util.Log.i("RCQroute", "ladder done, route changed=$changed front=$frontHost tunnel=${transport.isActive}")
                     if (changed) {
-                        socket.disconnect()
+                        // The ladder has already disconnected the old socket
+                        // and built a new, undialled one ([replaceClients]).
+                        // ⚠ There used to be a socket.disconnect() here, which
+                        // closed THAT fresh socket and left the old one alive;
+                        // and reconnectNow() on a fresh socket is a no-op (it
+                        // was never told to stay connected), so the only way
+                        // to bring a rebuilt socket up is to dial it.
                         app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
                         store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
                     } else {
-                        // Same route, but give the socket a nudge rather than
+                        // Same route, same socket: give it a nudge rather than
                         // waiting out the rest of its backoff.
                         socket.reconnectNow()
                     }
@@ -1792,23 +1895,30 @@ class Session(context: Context) {
                 if (!transport.isActive || !transport.onionMode()) { deadStreak = 0; continue }
                 val ok = withContext(Dispatchers.IO) { transport.probeCurrentRoute(serverHost()) } ==
                     app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+                if (!stillOn(ep)) return@launch
                 _routeVerified.value = ok   // keep the home shield honest for onion (never dropped)
                 if (ok) { deadStreak = 0; continue }
                 deadStreak++
                 if (deadStreak >= 2 && transport.rotateEntry()) {
                     deadStreak = 0
-                    withContext(Dispatchers.IO) {
-                        transport.stop()
-                        app.rcq.android.net.RelayConfigStore.prime(appCtx)
-                        transport.start()
+                    ladderLock.withLock {
+                        withContext(Dispatchers.IO) {
+                            transport.stop()
+                            app.rcq.android.net.RelayConfigStore.prime(appCtx)
+                            transport.start()
+                        }
+                        if (!stillOn(ep)) return@launch
+                        // Rebuilt AND dialled: the old shape rebuilt the socket
+                        // and called reconnectNow() on it, which does nothing
+                        // to a socket that was never connected, so a rotated
+                        // entry never actually carried the session.
+                        replaceClients()
+                        store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
                     }
-                    api = newApi()
-                    socket = newSocket()
-                    socket.reconnectNow()
                 }
             }
         }
-        scope.launch {
+        accountScope.launch {
             // Open the encrypted DB + load history OFF the main thread (this was
             // the ~1s synchronous block that delayed the first frame). Must run
             // before connectAndSync, the only ingest path that writes to db.
@@ -1827,6 +1937,21 @@ class Session(context: Context) {
                 }
             }
             CrashReporter.crumb(appCtx, "load_db")
+            // ⚠⚠ THE SWITCH-BACK BUG (self-hosted tester, 13.09). Everything
+            // from here on is guarded by the epoch, and it was not. On a
+            // relay-routed flagship the ladder below takes 15-45 s (two
+            // direct probes, a tunnel start, a route probe); switch back to
+            // the self-hosted island inside that window and this coroutine
+            // came back to a Session that had been re-pointed under it: it
+            // read the NEW account's host, rebuilt `socket` for it (orphaning
+            // the self-host socket that had just connected, which then
+            // redialled forever and kept writing `_connected`), and dialled
+            // that new socket with the OLD account's number and token, which
+            // the island refused with 403 before accept, forever. Two or
+            // three switches and the phone had one socket per island, none
+            // of them the right one: "realtime channel unavailable, messages
+            // come through the backup island". Only a force stop cleared it.
+            if (!stillOn(ep)) return@launch
             // The RCQ relays (obfuscated sing-box transport), engaged BEFORE
             // the socket/API connect so they ride the sing-box tunnel. Engage
             // when the user forced it on OR — the chicken-and-egg fix — when a
@@ -1835,8 +1960,12 @@ class Session(context: Context) {
             // probe succeeds and we connect directly as before (no transport,
             // no overhead). The blocking sing-box start runs here off the main
             // thread; api/socket are rebuilt so they capture the SOCKS proxy.
-            runRouteLadder()
-            connectAndSync(uin, token)
+            runRouteLadder(ep)
+            if (!stillOn(ep)) return@launch
+            // From the store, NOW: not the captures at the top of [start].
+            val u = store.uin ?: return@launch
+            val t = store.token ?: return@launch
+            connectAndSync(u, t)
             // The island refused at the trust layer comes back the moment the
             // person accepts at the banner: the ladder is walked again (it was
             // never walked while refused) and the API + socket are rebuilt,
@@ -1844,7 +1973,6 @@ class Session(context: Context) {
             // own state, so nothing in the accept path has to remember to
             // tell the session. Per account, like every loop here.
             launch {
-                val ep = epochNow()
                 var refused = app.rcq.android.net.IslandTrust.isRefused(serverHost())
                 app.rcq.android.net.IslandTrust.changed
                     .takeWhile { stillOn(ep) }
@@ -1852,13 +1980,13 @@ class Session(context: Context) {
                         val now = m.containsKey(app.rcq.android.net.IslandTrust.keyOf(serverHost()))
                         if (refused && !now && stillOn(ep)) {
                             android.util.Log.i("RCQroute", "${serverHost()} trusted again — reconnecting")
-                            withContext(Dispatchers.IO) { runCatching { runRouteLadder() } }
+                            withContext(Dispatchers.IO) { runCatching { runRouteLadder(ep) } }
                             if (!stillOn(ep)) return@collect
-                            socket.disconnect()
-                            api = newApi()
-                            socket = newSocket()
-                            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
-                            store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+                            ladderLock.withLock {
+                                replaceClients()
+                                app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                                store.uin?.let { uu -> store.token?.let { tt -> connectAndSync(uu, tt) } }
+                            }
                         }
                         refused = now
                     }
@@ -1896,25 +2024,30 @@ class Session(context: Context) {
     fun setObfuscation(on: Boolean) {
         val transport = app.rcq.android.net.SingBoxTransport
         transport.setEnabled(appCtx, on)
-        val uin = store.uin ?: return
-        val token = store.token ?: return
+        if (store.uin == null || store.token == null) return
+        val ep = epochNow()
         scope.launch {
-            if (on && !transport.isActive) {
-                app.rcq.android.net.RelayConfigStore.prime(appCtx)
-                transport.start()
-            } else if (!on && transport.isActive) {
-                transport.stop()
+            ladderLock.withLock {
+                if (on && !transport.isActive) {
+                    app.rcq.android.net.RelayConfigStore.prime(appCtx)
+                    transport.start()
+                } else if (!on && transport.isActive) {
+                    transport.stop()
+                }
+                // The transport is the device's and the toggle stands; the
+                // clients are the account's, and if it changed while the
+                // tunnel came up, its own start() builds them on this route.
+                if (!stillOn(ep)) return@launch
+                // Rebuild so the captured proxy matches the new transport state,
+                // then reconnect the live channel.
+                replaceClients()
+                _stealthActive.value = transport.isActive
+                _bypassManual.value = transport.isEnabled(appCtx)
+                _routeVerified.value = transport.isActive &&
+                    transport.probeCurrentRoute(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+                if (!stillOn(ep)) return@launch
+                store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
             }
-            // Rebuild so the captured proxy matches the new transport state,
-            // then reconnect the live channel.
-            socket.disconnect()
-            api = newApi()
-            socket = newSocket()
-            _stealthActive.value = transport.isActive
-            _bypassManual.value = transport.isEnabled(appCtx)
-            _routeVerified.value = transport.isActive &&
-                transport.probeCurrentRoute(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
-            connectAndSync(uin, token)
         }
     }
 
@@ -1934,22 +2067,26 @@ class Session(context: Context) {
             transport.setMode(appCtx, app.rcq.android.net.SingBoxTransport.Mode.RELAYS)
             transport.setEnabled(appCtx, false)
         }
-        val uin = store.uin ?: return
-        val token = store.token ?: return
+        if (store.uin == null || store.token == null) return
+        val ep = epochNow()
         scope.launch {
-            // Force a config rebuild (start() is a no-op if already active, so
-            // stop first when switching mode while engaged).
-            if (transport.isActive) transport.stop()
-            if (on) transport.start()
-            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
-            socket.disconnect()
-            api = newApi()
-            socket = newSocket()
-            _stealthActive.value = transport.isActive
-            _bypassManual.value = transport.isEnabled(appCtx)
-            _routeVerified.value = transport.isActive &&
-                transport.probeCurrentRoute(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
-            connectAndSync(uin, token)
+            ladderLock.withLock {
+                // Force a config rebuild (start() is a no-op if already active, so
+                // stop first when switching mode while engaged).
+                if (transport.isActive) transport.stop()
+                if (on) transport.start()
+                app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                // Same rule as [setObfuscation]: the proxy setting is the
+                // device's, the clients are the account's.
+                if (!stillOn(ep)) return@launch
+                replaceClients()
+                _stealthActive.value = transport.isActive
+                _bypassManual.value = transport.isEnabled(appCtx)
+                _routeVerified.value = transport.isActive &&
+                    transport.probeCurrentRoute(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+                if (!stillOn(ep)) return@launch
+                store.uin?.let { u -> store.token?.let { t -> connectAndSync(u, t) } }
+            }
         }
     }
 
@@ -1964,13 +2101,27 @@ class Session(context: Context) {
      *  retried the dead route with backoff until the user killed the app. From
      *  the outside that is "RCQ broke", while the relays sat there unused.
      *
-     *  Returns true when the route CHANGED (front engaged, tunnel started or
-     *  dropped), so the caller knows the socket has to be rebuilt.
+     *  Returns true when the caller has to DIAL AGAIN: the socket object was
+     *  replaced on the way (front engaged, tunnel started or dropped; every
+     *  one of those goes through [replaceClients], which leaves a fresh,
+     *  undialled socket behind), or the road changed under the one it has.
+     *
+     *  [ep] is the account this walk is for. Every probe is a blocking round
+     *  trip of up to 15 s, and after each one the epoch is checked: if the
+     *  account moved on meanwhile, the walk returns false without touching
+     *  `frontHost`, the clients or the transport. The new account's own walk
+     *  is queued on [ladderLock] right behind it.
      */
-    private suspend fun runRouteLadder(): Boolean {
-        val before = frontHost to app.rcq.android.net.SingBoxTransport.isActive
+    private suspend fun runRouteLadder(ep: Int): Boolean = ladderLock.withLock { walkRouteLadder(ep) }
+
+    /** The ladder proper. Only ever under [ladderLock], via [runRouteLadder]. */
+    private fun walkRouteLadder(ep: Int): Boolean {
         val transport = app.rcq.android.net.SingBoxTransport
+        val before = frontHost to transport.isActive
+        val sockBefore = socket
+        fun changed() = socket !== sockBefore || (frontHost to transport.isActive) != before
         val direct = transport.probeDirect(serverHost())
+        if (!stillOn(ep)) return false
         // The island answered and this device refused its certificate: the
         // banner is up and the person decides. Terminal for the ladder (design
         // §5.5): no front, no relay, no retry and no broker outcome, because a
@@ -1993,20 +2144,21 @@ class Session(context: Context) {
         // fallback (and the privacy path) if the front is also blocked. Skipped
         // under a forced relay/local-proxy and for custom islands (the front only
         // proxies the flagship).
-        if (!directOk && flagship && !transport.isEnabled(appCtx) && !transport.localProxyMode() &&
-            transport.probeDirect(FRONT_HOST) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
-        ) {
-            frontHost = FRONT_HOST
-            api = newApi()
-            socket = newSocket()
-            android.util.Log.i("RCQfront", "direct api blocked, CF front reachable — routing via $FRONT_HOST")
-            // The push socket is the one connection this branch does NOT fix by
-            // itself: it dials its own host, and this path deliberately runs
-            // with no relay, so it would keep retrying a blocked address while
-            // the API and the message socket both sail through the front. Kick
-            // it so it re-reads the subscribe host (a signed config naming
-            // `transport.push` moves it onto the front too).
-            app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+        if (!directOk && flagship && !transport.isEnabled(appCtx) && !transport.localProxyMode()) {
+            val frontOk = transport.probeDirect(FRONT_HOST) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+            if (!stillOn(ep)) return false
+            if (frontOk) {
+                frontHost = FRONT_HOST
+                replaceClients()
+                android.util.Log.i("RCQfront", "direct api blocked, CF front reachable — routing via $FRONT_HOST")
+                // The push socket is the one connection this branch does NOT fix by
+                // itself: it dials its own host, and this path deliberately runs
+                // with no relay, so it would keep retrying a blocked address while
+                // the API and the message socket both sail through the front. Kick
+                // it so it re-reads the subscribe host (a signed config naming
+                // `transport.push` moves it onto the front too).
+                app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+            }
         }
         // Engage the relay when the user forced it on, OR (auto-fallback) when
         // direct is unreachable AND the front didn't take over — UNLESS the user
@@ -2020,9 +2172,13 @@ class Session(context: Context) {
             // Use the freshest known relay list (last verified payload off
             // disk) before building the transport; bundled if none yet.
             app.rcq.android.net.RelayConfigStore.prime(appCtx)
-            if (transport.start()) {
-                api = newApi()
-                socket = newSocket()
+            val tunnelUp = transport.start()
+            // A tunnel that came up for an account we no longer serve is
+            // left standing: the next walk sees `isActive` and judges it
+            // (kept if it carries, dropped for direct if not).
+            if (!stillOn(ep)) return false
+            if (tunnelUp) {
+                replaceClients()
                 // The push socket dials at app start, a beat before this
                 // engages; leaving it pinned to the direct route means the
                 // one connection that still has to work on a censored
@@ -2071,6 +2227,7 @@ class Session(context: Context) {
             // actually carries traffic (read-only /health through the proxy; safe
             // for onion too — it does NOT tear the chain down).
             val route = transport.probeCurrentRoute(serverHost())
+            if (!stillOn(ep)) return false
             // Refused THROUGH the tunnel: the island answered with a
             // certificate this device does not trust. Same terminal case as
             // the direct refusal above; the tunnel stays as the person left it.
@@ -2079,40 +2236,44 @@ class Session(context: Context) {
                 _stealthActive.value = transport.isActive
                 _bypassManual.value = transport.isEnabled(appCtx)
                 _routeVerified.value = false
-                return (frontHost to app.rcq.android.net.SingBoxTransport.isActive) != before
+                return changed()
             }
             routeOk = route == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
             // DIRECT fallback only when droppable: tunnel up but dead AND direct
             // works -> drop. NEVER under a local proxy (Tor-leak rule) nor an
             // explicit onion opt-in (preserve chosen metadata-resistance).
             val droppable = !routeOk && !transport.localProxyMode() && !transport.isOnionOptIn(appCtx)
-            if (droppable && transport.probeDirect(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE) {
-                android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
-                fallbackTaken = "fell_to_direct"
-                transport.stop()
-                api = newApi()
-                socket = newSocket()
-            } else if (droppable && flagship &&
-                transport.probeDirect(FRONT_HOST) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
-            ) {
-                // Tunnel dead AND direct dead — the state where this install has
-                // nothing left. The front was skipped on the way in because the
-                // relays were engaged, and that is right while they work:
-                // a relay hides the user's address from the island, the front
-                // does not. But an engaged tunnel that carries nothing is not
-                // privacy, it is an app that does not open, and the front is
-                // the one path still standing when both the island's address
-                // and the relays are blocked while Cloudflare is not.
-                //
-                // Same gating as the direct fallback above: never under the
-                // user's own local proxy, never under an explicit onion opt-in.
-                android.util.Log.i("RCQfront", "tunnel and direct both dead — routing via $FRONT_HOST")
-                fallbackTaken = "fell_to_front"
-                transport.stop()
-                frontHost = FRONT_HOST
-                api = newApi()
-                socket = newSocket()
-                app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+            if (droppable) {
+                val directNow = transport.probeDirect(serverHost()) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+                if (!stillOn(ep)) return false
+                if (directNow) {
+                    android.util.Log.i("RCQsingbox", "tunnel unreachable, direct works — falling back to direct")
+                    fallbackTaken = "fell_to_direct"
+                    transport.stop()
+                    replaceClients()
+                } else if (flagship) {
+                    val frontNow = transport.probeDirect(FRONT_HOST) == app.rcq.android.net.SingBoxTransport.Reachability.REACHABLE
+                    if (!stillOn(ep)) return false
+                    if (frontNow) {
+                        // Tunnel dead AND direct dead — the state where this install has
+                        // nothing left. The front was skipped on the way in because the
+                        // relays were engaged, and that is right while they work:
+                        // a relay hides the user's address from the island, the front
+                        // does not. But an engaged tunnel that carries nothing is not
+                        // privacy, it is an app that does not open, and the front is
+                        // the one path still standing when both the island's address
+                        // and the relays are blocked while Cloudflare is not.
+                        //
+                        // Same gating as the direct fallback above: never under the
+                        // user's own local proxy, never under an explicit onion opt-in.
+                        android.util.Log.i("RCQfront", "tunnel and direct both dead — routing via $FRONT_HOST")
+                        fallbackTaken = "fell_to_front"
+                        transport.stop()
+                        frontHost = FRONT_HOST
+                        replaceClients()
+                        app.rcq.android.push.embedded.EmbeddedDistributor.reconnectNow(appCtx)
+                    }
+                }
             }
         }
         // What this network let us do, for the island's per-region counters.
@@ -2132,7 +2293,7 @@ class Session(context: Context) {
         _stealthActive.value = transport.isActive
         _bypassManual.value = transport.isEnabled(appCtx)
         _routeVerified.value = transport.isActive && routeOk
-        return (frontHost to app.rcq.android.net.SingBoxTransport.isActive) != before
+        return changed()
     }
 
     private fun connectAndSync(uin: Int, token: String) {
@@ -2143,11 +2304,22 @@ class Session(context: Context) {
         // The reachable caller is not the user — it is the route watchdog in
         // start(), whose coroutine outlives the lock.
         if (duressViewUp) return
-        socket.connect(
+        // ⚠⚠ The socket THIS call dials, held so its callbacks can tell whether
+        // they still speak for the Session. [replaceClients] moves the field
+        // on, but OkHttp delivers the old socket's close (and, for a socket
+        // that was orphaned rather than closed, every reconnect it makes)
+        // AFTER that: a superseded socket must not write `_connected`, feed
+        // [handleEvent] with another island's frames or start a burn probe.
+        // The last line of defence behind the epoch guards, and the one that
+        // holds even if a future call site forgets them.
+        val dialled = socket
+        val owned = app.rcq.android.net.SocketOwnership<RcqSocket> { socket }
+        dialled.connect(
             uin = uin,
             token = token,
-            onEvent = ::handleEvent,
+            onEvent = { type, obj -> if (owned.stillOwns(dialled)) handleEvent(type, obj) },
             onState = { up ->
+                if (!owned.stillOwns(dialled)) return@connect
                 // `|| duressViewUp`: entering a migrated decoy disconnects the
                 // real socket, and OkHttp delivers that onClosed a few
                 // milliseconds later — after startDecoySession has already set
@@ -2246,7 +2418,7 @@ class Session(context: Context) {
                     calls.prewarmRelayPath()
                 }
             },
-            onAuthRejected = ::onSocketAuthRejected,
+            onAuthRejected = { if (owned.stillOwns(dialled)) onSocketAuthRejected() },
         )
         syncGraph()
     }
@@ -2878,10 +3050,10 @@ class Session(context: Context) {
         // DELETED mail that was never written anywhere. With the default grace
         // of zero that happens on every trip to the home screen.
         //
-        // The bump also stops the loops accumulating: `started = false` below
-        // lets the next unlock start a second copy of every one of them, and
-        // only a changed epoch retires the first.
+        // The bump also stops the loops WRITING; the job retirement stops them
+        // running, so the next unlock's start() launches the only set.
         accountEpoch++
+        retireAccountJob()
         // Before the close: waits out a name write that is still running.
         memberNames.clear()
         if (::db.isInitialized) { db.close() }
@@ -5632,6 +5804,10 @@ class Session(context: Context) {
             start()
             store.uin
         } else {
+            // No account to rebind to, so [rebindTo] does not run and the
+            // front the burned account may have fallen to would sit here
+            // until the next sign-in. Same reset as there.
+            frontHost = null
             LocalStores.bindAccount(null)
             app.rcq.android.data.VisitStore.bindAccount(null)
             CrossIslandStore.bindAccount(null)
@@ -11465,6 +11641,24 @@ class Session(context: Context) {
         @Volatile
         var live: Session? = null
             private set
+
+        /** The ONE Session of this process, built on first ask and handed to
+         *  every Activity after that.
+         *
+         *  ⚠⚠ MainActivity used to build a new Session in every onCreate and
+         *  never tore one down. The push socket service keeps the process
+         *  alive, so a swipe-away and relaunch built a second Session beside
+         *  the first: two sockets for one account (the island evicts one with
+         *  4000, it redials, evicts the other), two network callbacks, two
+         *  sets of loops. Only a force stop cleared it, which is why "restart
+         *  with clearing the cache" was the tester's cure. The state a Session
+         *  holds is the process's (application context, per-account stores),
+         *  not the Activity's, so there is nothing to rebuild. */
+        @Volatile
+        private var instance: Session? = null
+
+        fun obtain(context: Context): Session =
+            instance ?: synchronized(this) { instance ?: Session(context).also { instance = it } }
 
         /** How long the socket must stay down before the route ladder is walked
          *  again. Longer than the socket's own max backoff (30s) so ordinary

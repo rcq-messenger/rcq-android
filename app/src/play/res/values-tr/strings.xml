@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Play-flavour overrides, Turkish. See values/strings.xml in this source set. -->
+<resources>
+    <string name="cs_burn_body">Bu, hesabını ve bütün yerel verini siler. Şu anda kullandığın numara havuza geri döner ve kurduğun gruplar içindeki herkes için kaybolur. Geri alınamaz.</string>
+    <string name="my_uins_sell_wallet">Ödeme alacağın adres</string>
+    <string name="my_uins_sell_bad_address">Bu adres doğru görünmüyor. Kontrol edip tekrar dene.</string>
+</resources>

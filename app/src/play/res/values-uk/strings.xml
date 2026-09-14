@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Play-flavour overrides, Ukrainian. See values/strings.xml in this source set. -->
+<resources>
+    <string name="cs_burn_body">Це видаляє твій акаунт і всі локальні дані. Номер, під яким ти відповідаєш, повернеться до спільного пулу, а групи, які ти створив, пропадуть в усіх учасників. Скасувати неможливо.</string>
+    <string name="my_uins_sell_wallet">Твоя адреса для виплати</string>
+    <string name="my_uins_sell_bad_address">Адреса виглядає неправильно. Перевір її і спробуй ще раз.</string>
+</resources>

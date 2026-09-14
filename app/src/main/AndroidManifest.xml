@@ -71,7 +71,9 @@
              instance when it is already on top of the SAME task, and the system
              share sheet launches with FLAG_ACTIVITY_NEW_TASK - so every share
              from the Gallery built a NEW task with a NEW MainActivity, and
-             MainActivity.onCreate builds a Session per instance. The user saw
+             MainActivity.onCreate built a Session per instance back then
+             (Session.obtain shares one per process since 0.192, but a second
+             Activity would still split the UI). The user saw
              RCQ pile up in the recents list ("их можно наоткрывать сколько
              угодно"), and worse: the photos were sent by the new instance's
              Session, so the ORIGINAL app - the one they came back to - never

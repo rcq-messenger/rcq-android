@@ -86,7 +86,7 @@
     <string name="home_menu_add_account">添加账号</string>
     <string name="home_menu_manage_accounts">管理账号</string>
     <!-- Multi-account: add + manage -->
-    <string name="add_account_body">在你当前身份之外创建一个新的匿名身份。服务器留空则使用公共服务器。</string>
+    <string name="add_account_body">在你当前身份之外创建一个新的身份。服务器留空则使用公共服务器。</string>
     <string name="add_account_create">创建</string>
     <string name="access_token_label">网关密钥（可选）</string>
     <string name="access_token_hint">仅当岛屿隐藏在网关后面时需要。它不是上面的访问代码。</string>
@@ -942,6 +942,9 @@
     <plurals name="relay_key_ok_body"><item quantity="other">现在启用了 %1$d 个你自己的节点。共享池仍作为备用保留。</item></plurals>
     <string name="relay_key_active">已输入访问密钥</string>
     <string name="relay_key_remove">移除</string>
+    <string name="relay_key_ok_none">密钥已接受。目前还没有分配你自己的节点，所以暂时使用共享池。</string>
+    <string name="relay_key_offline_title">未能连接岛屿</string>
+    <string name="relay_key_offline_body">无法检查密钥：岛屿没有响应。密钥已保留，连接恢复后会再次检查。</string>
     <string name="relay_import_ok">中继已添加</string>
     <string name="relay_shared_section">收到的中继</string>
     <string name="relay_shared_empty">还没有收到中继。联系人可以在聊天里发给你，或者在上面粘贴链接。</string>

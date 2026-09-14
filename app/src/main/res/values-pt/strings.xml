@@ -86,7 +86,7 @@
     <string name="home_menu_add_account">Adicionar conta</string>
     <string name="home_menu_manage_accounts">Gerenciar contas</string>
     <!-- Multi-account: add + manage -->
-    <string name="add_account_body">Cria uma identidade anônima nova ao lado da que você já tem. Deixe o servidor em branco para usar o servidor público.</string>
+    <string name="add_account_body">Cria uma identidade nova ao lado da que você já tem. Deixe o servidor em branco para usar o servidor público.</string>
     <string name="add_account_create">Criar</string>
     <string name="access_token_label">Chave do gateway (opcional)</string>
     <string name="access_token_hint">Só se a ilha estiver escondida atrás de um gateway. Não é o código de acesso acima.</string>
@@ -942,6 +942,9 @@
     <plurals name="relay_key_ok_body"><item quantity="one">%1$d nó seu está em uso agora. O pool compartilhado continua como reserva.</item><item quantity="other">%1$d nós seus estão em uso agora. O pool compartilhado continua como reserva.</item></plurals>
     <string name="relay_key_active">Chave de acesso informada</string>
     <string name="relay_key_remove">Remover</string>
+    <string name="relay_key_ok_none">Chave aceita. Ainda não há nós seus vinculados a ela, então por enquanto o pool compartilhado é usado.</string>
+    <string name="relay_key_offline_title">A ilha não respondeu</string>
+    <string name="relay_key_offline_body">Não deu para verificar a chave: a ilha não respondeu. Ela fica guardada e será verificada de novo quando a conexão voltar.</string>
     <string name="relay_import_ok">Relay adicionado</string>
     <string name="relay_shared_section">Relays compartilhados</string>
     <string name="relay_shared_empty">Nenhum relay compartilhado. Um contato pode te mandar um na conversa, ou cole um link acima.</string>

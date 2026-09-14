@@ -86,7 +86,7 @@
     <string name="home_menu_add_account">Додати акаунт</string>
     <string name="home_menu_manage_accounts">Керування акаунтами</string>
     <!-- Multi-account: add + manage -->
-    <string name="add_account_body">Створює нову анонімну особу поруч з нинішньою. Лиши поле сервера порожнім, щоб узяти публічний сервер.</string>
+    <string name="add_account_body">Створює нову особу поруч з нинішньою. Лиши поле сервера порожнім, щоб узяти публічний сервер.</string>
     <string name="add_account_create">Створити</string>
     <string name="access_token_label">Ключ шлюзу (необовʼязково)</string>
     <string name="access_token_hint">Тільки якщо острів схований за шлюзом. Це не код доступу вище.</string>
@@ -942,6 +942,9 @@
     <plurals name="relay_key_ok_body"><item quantity="one">Твій %1$d власний вузол тепер у роботі. Спільний пул лишається запасним.</item><item quantity="few">Твої %1$d власні вузли тепер у роботі. Спільний пул лишається запасним.</item><item quantity="many">Твої %1$d власних вузлів тепер у роботі. Спільний пул лишається запасним.</item><item quantity="other">Твої %1$d власного вузла тепер у роботі. Спільний пул лишається запасним.</item></plurals>
     <string name="relay_key_active">Ключ доступу введено</string>
     <string name="relay_key_remove">Прибрати</string>
+    <string name="relay_key_ok_none">Ключ прийнято. Власних вузлів до нього ще не прив\'язано, тому поки що працює спільний пул.</string>
+    <string name="relay_key_offline_title">Острів не відповів</string>
+    <string name="relay_key_offline_body">Перевірити ключ не вдалося: острів не відповів. Ключ збережено, і перевірка повториться, коли зв\'язок повернеться.</string>
     <string name="relay_import_ok">Релей додано</string>
     <string name="relay_shared_section">Отримані релеї</string>
     <string name="relay_shared_empty">Отриманих релеїв немає. Контакт може надіслати релей у чаті, або встав посилання вище.</string>

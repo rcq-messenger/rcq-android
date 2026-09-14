@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Play-flavour overrides, Portuguese. See values/strings.xml in this source set. -->
+<resources>
+    <string name="cs_burn_body">Isto apaga sua conta e todos os dados locais. O número com que você responde volta para o fundo comum, e os grupos que você criou somem para todo mundo neles. Não pode ser desfeito.</string>
+    <string name="my_uins_sell_wallet">O seu endereço para receber</string>
+    <string name="my_uins_sell_bad_address">Esse endereço não parece certo. Confira e tente de novo.</string>
+</resources>

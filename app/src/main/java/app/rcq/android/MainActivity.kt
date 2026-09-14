@@ -316,7 +316,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val activeAccountId = app.rcq.android.data.AccountManager.activeId.value
         LocalStores.bindAccount(activeAccountId)
         app.rcq.android.data.VisitStore.bindAccount(activeAccountId)
-        session = Session(applicationContext)
+        // The process's one Session, not a new one per Activity: see
+        // [Session.obtain] for the two-sockets-per-account fight the per-
+        // Activity build produced whenever the process outlived the screen.
+        session = Session.obtain(applicationContext)
         // Push: request the notification runtime permission (API 33+) and ask
         // the active UnifiedPush distributor (ntfy, …) for an endpoint if one is
         // set up. A device with no distributor simply gets no push (degrades to

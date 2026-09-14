@@ -86,7 +86,7 @@
     <string name="home_menu_add_account">Hesap ekle</string>
     <string name="home_menu_manage_accounts">Hesapları yönet</string>
     <!-- Multi-account: add + manage -->
-    <string name="add_account_body">Şimdikinin yanına yeni bir anonim kimlik oluşturur. Herkese açık sunucuyu kullanmak için sunucu alanını boş bırak.</string>
+    <string name="add_account_body">Şimdikinin yanına yeni bir kimlik oluşturur. Herkese açık sunucuyu kullanmak için sunucu alanını boş bırak.</string>
     <string name="add_account_create">Oluştur</string>
     <string name="access_token_label">Ağ geçidi anahtarı (isteğe bağlı)</string>
     <string name="access_token_hint">Yalnızca ada bir ağ geçidinin arkasındaysa. Yukarıdaki erişim kodu değildir.</string>
@@ -942,6 +942,9 @@
     <plurals name="relay_key_ok_body"><item quantity="one">Kendi düğümlerinden %1$d tanesi artık kullanımda. Ortak havuz yedek olarak kalır.</item><item quantity="other">Kendi düğümlerinden %1$d tanesi artık kullanımda. Ortak havuz yedek olarak kalır.</item></plurals>
     <string name="relay_key_active">Erişim anahtarı girildi</string>
     <string name="relay_key_remove">Kaldır</string>
+    <string name="relay_key_ok_none">Anahtar kabul edildi. Henüz ona bağlı kendi düğümün yok, o yüzden şimdilik ortak havuz kullanılıyor.</string>
+    <string name="relay_key_offline_title">Adaya ulaşılamadı</string>
+    <string name="relay_key_offline_body">Anahtar kontrol edilemedi: ada yanıt vermedi. Anahtar saklandı, bağlantı geri gelince yeniden kontrol edilecek.</string>
     <string name="relay_import_ok">Röle eklendi</string>
     <string name="relay_shared_section">Paylaşılan röleler</string>
     <string name="relay_shared_empty">Paylaşılan röle yok. Bir kişin sana sohbetten gönderebilir ya da yukarıya bir bağlantı yapıştırabilirsin.</string>

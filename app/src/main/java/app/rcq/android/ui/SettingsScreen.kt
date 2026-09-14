@@ -2256,6 +2256,10 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
             // landed, and a message inside a dialog that just disappeared says
             // nothing. Null = nothing to report.
             var keyResult by remember { mutableStateOf<Int?>(null) }
+            // The key was stored but the island could not be asked about it.
+            // Its own sheet, because the answer is neither "accepted" nor
+            // "wrong": it is "kept, ask again later".
+            var keyHeld by remember { mutableStateOf(false) }
             var sharedRelays by remember { mutableStateOf(ContactRelayStore.list()) }
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.relay_shared_section), color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -2307,7 +2311,21 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 RcqAskSheet(
                     onDismiss = { keyResult = null },
                     title = stringResource(R.string.relay_key_ok_title),
-                    body = pluralStringResource(R.plurals.relay_key_ok_body, n, n),
+                    // ⚠ Zero is not "0 nodes of your own are now in use": a
+                    // key the broker accepted with nothing assigned to it yet
+                    // is a real state (the operator has not attached the
+                    // nodes), and the sentence must not claim otherwise.
+                    body = if (n == 0) stringResource(R.string.relay_key_ok_none)
+                    else pluralStringResource(R.plurals.relay_key_ok_body, n, n),
+                    actions = emptyList(),
+                    cancelLabel = stringResource(R.string.common_ok),
+                )
+            }
+            if (keyHeld) {
+                RcqAskSheet(
+                    onDismiss = { keyHeld = false },
+                    title = stringResource(R.string.relay_key_offline_title),
+                    body = stringResource(R.string.relay_key_offline_body),
                     actions = emptyList(),
                     cancelLabel = stringResource(R.string.common_ok),
                 )
@@ -2366,6 +2384,8 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                                 // success, so a mistyped key looked exactly
                                 // like a working one: reported from the
                                 // outside on the first day a key existed.
+                                // setTenantKey clears the previous verdict, so
+                                // what refresh() leaves behind is THIS key's.
                                 BrokerRelayStore.setTenantKey(parsed.key)
                                 keyChecking = true
                                 scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -2374,15 +2394,34 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                                     val mine = BrokerRelayStore.privateRelays().size
                                     withContext(kotlinx.coroutines.Dispatchers.Main) {
                                         keyChecking = false
-                                        if (verdict == "ok") {
-                                            relayImportOpen = false
-                                            keyResult = mine
-                                        } else {
-                                            // Not ours: drop it rather than
-                                            // leave a dead key in place
-                                            // quietly failing forever.
-                                            BrokerRelayStore.setTenantKey(null)
-                                            keyError = verdict ?: "unknown"
+                                        when {
+                                            verdict == app.rcq.android.net.BrokerVerdict.OK -> {
+                                                relayImportOpen = false
+                                                tenantKeyOn = true
+                                                keyResult = mine
+                                            }
+                                            // ⚠ The island's own word, and
+                                            // ONLY that, drops the key: a
+                                            // network that never carried the
+                                            // question used to land here too,
+                                            // and told the person to check
+                                            // their typing while their key
+                                            // was quietly deleted.
+                                            app.rcq.android.net.BrokerVerdict.removesKey(verdict) -> {
+                                                // Not ours: drop it rather than
+                                                // leave a dead key in place
+                                                // quietly failing forever.
+                                                BrokerRelayStore.setTenantKey(null)
+                                                keyError = verdict
+                                            }
+                                            else -> {
+                                                // Offline: the key is kept and
+                                                // asked about at the next
+                                                // refresh (every start()).
+                                                relayImportOpen = false
+                                                tenantKeyOn = true
+                                                keyHeld = true
+                                            }
                                         }
                                     }
                                 }

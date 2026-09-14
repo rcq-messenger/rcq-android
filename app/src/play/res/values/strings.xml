@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Play-flavour overrides. The flavour's resources win over main's for the
+     same name, so a string listed here replaces the sideload wording in the
+     Play build only. Two rules keep this file honest: nothing sold inside the
+     app is mentioned (the number shop is off on Play, founder 05.09), and no
+     string names a cryptocurrency, a chain or a token. Every locale that main
+     ships needs its own copy under the matching values-* folder, or the
+     locale's main string would win over this one. -->
+<resources>
+    <string name="cs_burn_body">This deletes your account and all local data. The number you answer as goes back into the pool for anybody to take, and groups you own disappear for everyone in them. It cannot be undone.</string>
+    <string name="my_uins_sell_wallet">Your payout address</string>
+    <string name="my_uins_sell_bad_address">That address does not look right. Check it and try again.</string>
+</resources>

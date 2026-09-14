@@ -98,7 +98,7 @@
     <string name="home_menu_manage_accounts">Manage accounts</string>
 
     <!-- Multi-account: add + manage -->
-    <string name="add_account_body">Creates a new anonymous identity alongside your current one. Leave the server blank to use the public server.</string>
+    <string name="add_account_body">Creates a new identity alongside your current one. Leave the server blank to use the public server.</string>
     <string name="add_account_create">Create</string>
     <string name="access_token_label">Gateway key (optional)</string>
     <string name="access_token_hint">Only if the island hides behind a gateway. This is not the access code above.</string>
@@ -980,6 +980,9 @@
     <plurals name="relay_key_ok_body"><item quantity="one">%1$d node of your own is now in use. The shared pool stays as a fallback.</item><item quantity="other">%1$d nodes of your own are now in use. The shared pool stays as a fallback.</item></plurals>
     <string name="relay_key_active">Access key entered</string>
     <string name="relay_key_remove">Remove</string>
+    <string name="relay_key_ok_none">The key was accepted. No private nodes are assigned to it yet, so the shared pool is in use for now.</string>
+    <string name="relay_key_offline_title">Island not reached</string>
+    <string name="relay_key_offline_body">The key could not be checked: the island did not answer. It is kept and will be checked again when the connection is back.</string>
     <string name="relay_import_ok">Relay added</string>
     <string name="relay_shared_section">Shared relays</string>
     <string name="relay_shared_empty">No shared relays. A contact can send you one in chat, or paste a link above.</string>
