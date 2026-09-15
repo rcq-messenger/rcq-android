@@ -186,7 +186,17 @@ object GroupJoinLink {
  *  holds it, so nothing here may be parked for later — the payload is read the
  *  moment the chat opens, in the same session as the tap. */
 object ShareIntake {
-    data class Req(val text: String?, val uris: List<android.net.Uri>)
+    /** [to] is the chat the user picked, set only on the [deliver] handoff.
+     *  ⚠ The handoff waits in a global until a ChatScreen collects it, and the
+     *  picked chat is not always the next one drawn: a PIN-locked thread shows
+     *  ChatLockGate first, and a notification tap can swap the target while
+     *  the gate is up. Without the tag, whichever chat opened next sent the
+     *  files - an album straight out, with no preview. */
+    data class Req(
+        val text: String?,
+        val uris: List<android.net.Uri>,
+        val to: app.rcq.android.ui.ChatTarget? = null,
+    )
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
     val deliver = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
@@ -876,7 +886,7 @@ private fun RcqApp(session: Session) {
                     // something around a shared link); files are handed to the
                     // chat, which sends them the way the paperclip does.
                     shareReq.text?.let { app.rcq.android.ui.seedDraft(picked, it) }
-                    if (shareReq.uris.isNotEmpty()) ShareIntake.deliver.value = shareReq
+                    if (shareReq.uris.isNotEmpty()) ShareIntake.deliver.value = shareReq.copy(to = picked)
                     // The browser outranks a chat in the `when` below, and
                     // the share of a site's address starts from the browser:
                     // left up, the chat just picked would be drawn under it
@@ -951,7 +961,10 @@ private fun RcqApp(session: Session) {
                     unlockedChatThread != chatThread
                 ) {
                     ChatLockGate(
-                        onBack = { chatTarget = null },
+                        // Backing out of the gate abandons a share picked
+                        // into this thread too; left set, the next chat opened
+                        // would be handed it (ChatScreen also checks `to`).
+                        onBack = { chatTarget = null; ShareIntake.deliver.value = null },
                         onUnlocked = { unlockedChatThread = chatThread },
                     )
                 } else {

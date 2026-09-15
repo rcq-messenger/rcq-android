@@ -145,28 +145,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
 
-/** The chat list, already sliced into its sections and sorted.
- *
- *  One object rather than nine loose values so the whole thing can hang off a
- *  single [androidx.compose.runtime.remember] in [HomeScreen]: see the comment
- *  at its call site for why recomputing these on every recomposition was worth
- *  removing. */
-private data class HomeLists(
-    val fav: List<Contact>,
-    val crossIsland: List<Contact>,
-    val online: List<Contact>,
-    val offline: List<Contact>,
-    val archivedContacts: List<Contact>,
-    val visibleGroups: List<RcqGroup>,
-    val archivedGroups: List<RcqGroup>,
-    val favGroups: List<RcqGroup>,
-    /// Chats filed into one of the user's OWN sections, by section id (founder
-    /// item 1 of 23.08). A chat in here has already left every derived section
-    /// above: it renders once, where the user put it, and nowhere else.
-    val filedContacts: Map<String, List<Contact>> = emptyMap(),
-    val filedGroups: Map<String, List<RcqGroup>> = emptyMap(),
-)
-
 /** One row's worth of long-press action, mirrors iOS ContextAction. */
 internal data class ContextAction(
     val title: String,
@@ -174,19 +152,6 @@ internal data class ContextAction(
     val destructive: Boolean = false,
     val onClick: () -> Unit,
 )
-
-/** A LazyColumn key for a contact row.
- *
- *  ⚠ The uin ALONE is not unique and never was. Islands number independently,
- *  so two cross-island contacts living on two different islands can both be
- *  #5, and `mergeCrossIslandContacts` only de-duplicates the foreign list
- *  against the LOCAL roster, not against itself. Two rows with the same key in
- *  one LazyColumn is not a cosmetic problem: Compose throws on the duplicate
- *  and the whole chat list goes down with it. The island is part of who the
- *  row is about, so it is part of the key. A local contact keeps an empty
- *  island, so its key is what it always was plus a trailing "@".
- */
-private fun contactKey(prefix: String, contact: Contact) = "${prefix}_${contact.uin}@${contact.host ?: ""}"
 
 /**
  * One local edit to the sections tree: patch the cache, repaint at the speed of
@@ -534,94 +499,11 @@ internal fun HomeScreen(
     // which is why the fix is worth having and also why it is not the whole of
     // the answer; see the notes on the row composables.)
     val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk) {
-        // Unread threads float to the top (iOS parity), then by recency.
-        fun byRecency(list: List<Contact>) =
-            list.sortedWith(
-                compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
-                    .thenByDescending { messages[it.uin]?.lastOrNull()?.sentAt ?: 0L },
-            )
-        // Inside a user section: unread first, then favorite, then the sort
-        // this client already uses. Favoriting is NOT cleared when a chat is
-        // filed; it just has no section of its own to render into any more, so
-        // it goes on doing the only other thing it ever did.
-        fun bySectionOrder(list: List<Contact>) =
-            list.sortedWith(
-                compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
-                    .thenByDescending { LocalStores.peerThread(it.uin) in favorites }
-                    .thenByDescending { messages[it.uin]?.lastOrNull()?.sentAt ?: 0L },
-            )
-        fun groupsBySectionOrder(list: List<RcqGroup>) =
-            list.sortedWith(
-                compareByDescending<RcqGroup> { (unread[LocalStores.groupThread(it.id)] ?: 0) > 0 }
-                    .thenByDescending { LocalStores.groupThread(it.id) in favorites }
-                    .thenBy { it.name.lowercase() },
-            )
-
-        // ⚠⚠ `!= false`, not `== true`. An unanswered /server/info keeps the
-        // filing exactly as the cache has it: a chat can only BE filed if the
-        // island had a vault when it was filed, so "we have not asked yet" is
-        // never a reason to spill one. Treating unknown as "no vault" takes the
-        // members of a PIN-gated section and draws them, by name and with their
-        // unread badges, in Online / Offline / Cross-island while the section's
-        // own header disappears. Only an explicit "no vault" un-files anything.
-        val filing = if (sectionsOk == false) emptyMap() else Sections.memberIndex(sectionsTree)
-        val userSecIds = Sections.userSections(sectionsTree).map { Sections.idOf(it) }.toSet()
-        // A membership pointing at a section this build does not hold (deleted
-        // elsewhere, not synced yet) reads as "not filed" and the chat falls
-        // back to its derived section. Rendering is where a stale membership is
-        // forgiven, NEVER where it is deleted.
-        fun sectionOfContact(ct: Contact): String? =
-            // ⚠ The key carries the HOST. LocalStores.peerThread does not, and
-            // two people numbered the same on two islands have bitten this
-            // project twice already.
-            filing[Sections.peerKey(ct.uin, ct.host)]?.takeIf { it in userSecIds }
-        fun sectionOfGroup(g: RcqGroup): String? =
-            app.rcq.android.data.SectionsVault.keyForGroup(g)?.let { filing[it] }?.takeIf { it in userSecIds }
-
-        val nonArchived = contacts.filterNot { LocalStores.peerThread(it.uin) in archived }
-        val visible = groups.filterNot { LocalStores.groupThread(it.id) in archived }
-        // Archive beats a user section, which beats every derived one. The
-        // membership is KEPT in the slot while a chat is archived, so
-        // un-archiving puts it straight back where the user filed it.
-        val filedContacts = LinkedHashMap<String, MutableList<Contact>>()
-        val looseContacts = ArrayList<Contact>()
-        for (ct in nonArchived) {
-            val sid = sectionOfContact(ct)
-            if (sid != null) filedContacts.getOrPut(sid) { ArrayList() }.add(ct) else looseContacts.add(ct)
+        // The slicing itself lives in [buildHomeLists], so the share picker
+        // (#987) files every chat into the section it has here and nowhere else.
+        buildHomeLists(contacts, groups, unread, favorites, archived, sectionsTree, sectionsOk) { peer ->
+            messages[peer]?.lastOrNull()?.sentAt ?: 0L
         }
-        val filedGroups = LinkedHashMap<String, MutableList<RcqGroup>>()
-        val looseGroups = ArrayList<RcqGroup>()
-        for (g in visible) {
-            val sid = sectionOfGroup(g)
-            if (sid != null) filedGroups.getOrPut(sid) { ArrayList() }.add(g) else looseGroups.add(g)
-        }
-        HomeLists(
-            fav = byRecency(looseContacts.filter { LocalStores.peerThread(it.uin) in favorites }),
-            // Cross-island contacts live in their own section: presence isn't
-            // tracked across islands, so filing them under online/offline would
-            // be a lie.
-            crossIsland = byRecency(looseContacts.filter { it.host != null && LocalStores.peerThread(it.uin) !in favorites }),
-            // ⚠ A favourited CONTACT lives in Favourites and only there, the
-            // same rule #748 gave favourited groups four lines below. It was
-            // never applied here, so a favourite appeared twice: once at the
-            // top and once again under Online or Offline. The web has always
-            // filed a contact into exactly one bucket.
-            online = byRecency(looseContacts.filter { it.host == null && it.presence != UserStatus.OFFLINE && LocalStores.peerThread(it.uin) !in favorites }),
-            offline = byRecency(looseContacts.filter { it.host == null && it.presence == UserStatus.OFFLINE && LocalStores.peerThread(it.uin) !in favorites }),
-            archivedContacts = byRecency(contacts.filter { LocalStores.peerThread(it.uin) in archived }),
-            // A favorited group lives in Favorites and ONLY there (#748) —
-            // the desktop has deduplicated this way from the start, and the
-            // double row was the reason people avoided favoriting groups.
-            visibleGroups = looseGroups.filter { LocalStores.groupThread(it.id) !in favorites },
-            archivedGroups = groups.filter { LocalStores.groupThread(it.id) in archived },
-            // Favorited groups are surfaced in the Favorites section (the toggle
-            // already persisted, but the section only rendered contacts so a
-            // favorited group never showed, reading as "favoriting does
-            // nothing").
-            favGroups = looseGroups.filter { LocalStores.groupThread(it.id) in favorites },
-            filedContacts = filedContacts.mapValues { bySectionOrder(it.value) },
-            filedGroups = filedGroups.mapValues { groupsBySectionOrder(it.value) },
-        )
     }
     val favContacts = lists.fav
     val crossIslandContacts = lists.crossIsland
@@ -1080,14 +962,7 @@ internal fun HomeScreen(
                     val unlockedNow = pinnedRec && sid in unlockedSections
                     val locked = pinnedRec && !unlockedNow
                     val isArchive = sid == Sections.SYS_ARCHIVE
-                    val collapseKey = when (sid) {
-                        Sections.SYS_FAV -> "sec:fav"
-                        Sections.SYS_GROUPS -> "sec:grp"
-                        Sections.SYS_ONLINE -> "sec:online"
-                        Sections.SYS_OFFLINE -> "sec:offline"
-                        Sections.SYS_CI -> "sec:ci"
-                        else -> "sec:u:$sid"
-                    }
+                    val collapseKey = sectionCollapseKey(sid)
                     val collapsed = when {
                         locked -> true
                         pinnedRec -> false
@@ -1669,36 +1544,6 @@ internal fun AccountAvatar(
 private fun AccountAvatar(row: AccountRow, session: Session, size: Dp) =
     AccountAvatar(row.avatarMediaId, row.avatarMediaKey, row.host, row.active, session, size)
 
-/** Saved Messages in the chat list. Same shape as a contact row so it does not
- *  read as a special banner, with a bookmark instead of an avatar. */
-@Composable
-private fun SavedRow(count: Int, unread: Int, onClick: () -> Unit) {
-    val c = RcqTheme.colors
-    Row(
-        // A fill of its own, because it is a list row and every other list row
-        // has one. Identical to the screen's background without a wallpaper;
-        // with one it takes the same veil as its neighbours instead of leaving
-        // its two lines of text standing on the picture (founder item 18b).
-        Modifier.fillMaxWidth().clickable(onClick = onClick)
-            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(c.bgSecondary), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Bookmark, null, tint = c.accent, modifier = Modifier.size(20.dp))
-        }
-        Column(Modifier.weight(1f)) {
-            Text(stringResource(R.string.home_menu_saved), color = c.textPrimary, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                pluralStringResource(R.plurals.saved_notes, count, count),
-                color = c.textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (unread > 0) UnreadBadge(unread)
-    }
-}
-
 private fun contactActions(
     contact: Contact,
     session: Session,
@@ -2214,187 +2059,6 @@ private fun HomeHeader(
                         onClick = { overflowMenu = false; onOpenRandom() },
                     )
                 }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun GroupRow(group: RcqGroup, ownUin: Int, session: Session, unread: Int, onClick: () -> Unit, onLongPress: () -> Unit) {
-    val c = RcqTheme.colors
-    val src = remember { MutableInteractionSource() }
-    val pressed by src.collectIsPressedAsState()
-    // NOT `by`: the animated value is read inside the graphicsLayer block
-    // below, in the draw phase, so a press animates without recomposing the row.
-    val scale = animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
-    // Observe the mute set so toggling mute reflects on the row immediately
-    // (was a one-shot read → the bell only appeared after leaving + re-entering).
-    val mutedSet by LocalStores.muted.collectAsState()
-    val muted = LocalStores.groupThread(group.id) in mutedSet
-    val reactSet by LocalStores.reactionInbox.collectAsState()
-    val mentionSet by LocalStores.mentionInbox.collectAsState()
-    val thread = LocalStores.groupThread(group.id)
-    val hasReaction = thread in reactSet
-    val hasMention = thread in mentionSet
-    Row(
-        Modifier.fillMaxWidth()
-            // graphicsLayer, not Modifier.scale: `scale` is read here in the
-            // modifier chain, so every frame of the press animation invalidated
-            // this row's COMPOSITION. Read inside the layer block instead and
-            // the animation costs a redraw, which is what it is.
-            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-            .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
-            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            // Animate the group's GIF avatar here too (founder: it animated in
-            // the chat but not on the home list). Safe: the chat list is a
-            // LazyColumn, so only the handful of on-screen group rows compose,
-            // and SafeAnimatedGif memoizes its decoder per instance — far lighter
-            // than the emoticon-dense-message churn that caused the old OOM.
-            GroupAvatar(group, session, 28.dp, animated = true)
-            UnreadBadge(unread, Modifier.align(Alignment.TopEnd))
-        }
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(group.name, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                BadgeMark(group.badge)
-                if (group.ownerUin == ownUin) Icon(Icons.Filled.Star, "Owner", tint = c.accent, modifier = Modifier.size(12.dp))
-                if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
-            }
-            Text(
-                memberCountLabel(group.memberCount) + (group.host?.let { " · $it" } ?: ""),
-                color = c.textSecondary, fontSize = 12.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (hasMention || hasReaction) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (hasMention) Icon(Icons.Filled.AlternateEmail, stringResource(R.string.home_mention_indicator), tint = c.accent, modifier = Modifier.size(14.dp))
-                if (hasReaction) Icon(Icons.Filled.Favorite, stringResource(R.string.home_reaction_indicator), tint = Color(0xFFE5484D), modifier = Modifier.size(14.dp))
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ContactRowItem(contact: Contact, unread: Int, session: Session, onClick: () -> Unit, onLongPress: () -> Unit) {
-    val aliases by LocalStores.aliases.collectAsState()
-    // My own name for this person wins over the nickname they chose. Device-only
-    // (see LocalStores.aliases) — a rename says more about the relationship than
-    // the contact row does, and the island has no business holding it.
-    val shownName = aliases[LocalStores.aliasKey(contact.uin, contact.host)] ?: contact.nickname
-    val c = RcqTheme.colors
-    val src = remember { MutableInteractionSource() }
-    val pressed by src.collectIsPressedAsState()
-    // NOT `by`: the animated value is read inside the graphicsLayer block
-    // below, in the draw phase, so a press animates without recomposing the row.
-    val scale = animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
-    val mutedSet by LocalStores.muted.collectAsState()
-    val muted = LocalStores.peerThread(contact.uin) in mutedSet
-    val reactSet by LocalStores.reactionInbox.collectAsState()
-    val mentionSet by LocalStores.mentionInbox.collectAsState()
-    val thread = LocalStores.peerThread(contact.uin)
-    val hasReaction = thread in reactSet
-    val hasMention = thread in mentionSet
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            // See [GroupRow]: read the press animation in the draw phase, not
-            // in composition.
-            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
-            .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
-            .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
-            // A picture when the contact has one, the status flower otherwise.
-            // Cross-island rows used to keep the glyph unconditionally, because
-            // the blob did not cross islands. §5e crosses it: the peer DEPOSITS
-            // their encrypted picture into our island and hands us the key in a
-            // sealed envelope, so there is a real picture to draw and it is
-            // fetched from our own island like any other. Presence still does
-            // not cross — that is what `crossIsland` keeps marking.
-            PersonAvatar(
-                contact.avatarMediaId, contact.avatarMediaKey,
-                contact.presence, session, 28.dp, crossIsland = contact.host != null,
-            )
-            UnreadBadge(unread, Modifier.align(Alignment.TopEnd))
-        }
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    shownName,
-                    color = if (contact.presence == UserStatus.OFFLINE) c.textSecondary else c.textPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                BadgeMark(contact.badge)
-                GenderIcon(contact.gender)
-                if (contact.blocked) Icon(Icons.Outlined.Block, null, tint = c.statusBusy, modifier = Modifier.size(11.dp))
-                if (muted) Icon(Icons.Filled.NotificationsOff, null, tint = c.textSecondary, modifier = Modifier.size(11.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${contact.uin}", color = c.textMono, fontSize = 12.sp)
-                val ctx = LocalContext.current
-                // ⚠ Order matters, and it used to be the other way round: a
-                // status message won outright, so an OFFLINE contact who had
-                // one never showed when they were last around. Measured on
-                // prod 31.08: of 1498 contact rows genuinely offline, 455
-                // (30%) carry a status message, so for nearly a third of
-                // people the last seen was invisible everywhere - most
-                // visibly in Favourites and user sections, where there is no
-                // Online/Offline heading to read it off instead. A status
-                // message is text somebody left behind; when they are not
-                // here, WHEN they were here is the more useful half, so it
-                // goes first and the message keeps whatever room is left.
-                val seen = if (contact.presence == UserStatus.OFFLINE && contact.lastSeen != null) {
-                    lastSeenPhrase(contact.lastSeen, contact.gender, ctx)
-                } else null
-                val msg = contact.statusMessage?.takeIf { it.isNotEmpty() }
-                // Both worth saying, room for one: they take turns (founder).
-                if (contact.host == null && seen != null && msg != null) {
-                    Text("·", color = c.textSecondary, fontSize = 12.sp)
-                    AltText(seen, msg, c.textSecondary, 12.sp)
-                    return@Row
-                }
-                val sub = when {
-                    // §5c: a cross-island peer shows its island (presence/last_seen
-                    // don't cross islands), then any status message.
-                    contact.host != null -> contact.host + (msg?.let { " · $it" } ?: "")
-                    seen != null -> seen
-                    else -> msg
-                }
-                if (sub != null) {
-                    Text(
-                        "· $sub",
-                        color = c.textSecondary,
-                        fontSize = 12.sp,
-                        // Italic marked "this is their own words". Now that a
-                        // last seen can share the line, italics would be a lie
-                        // about half of it, so it is kept only when the line is
-                        // nothing BUT their words.
-                        fontStyle = if (seen == null && msg != null) FontStyle.Italic else FontStyle.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-        if (hasMention || hasReaction) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (hasMention) Icon(Icons.Filled.AlternateEmail, stringResource(R.string.home_mention_indicator), tint = c.accent, modifier = Modifier.size(14.dp))
-                if (hasReaction) Icon(Icons.Filled.Favorite, stringResource(R.string.home_reaction_indicator), tint = Color(0xFFE5484D), modifier = Modifier.size(14.dp))
             }
         }
     }

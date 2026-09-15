@@ -930,6 +930,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         app.rcq.android.ShareIntake.deliver.collect { req ->
             req ?: return@collect
             app.rcq.android.ShareIntake.deliver.value = null
+            // Meant for another chat (the picked one never opened: its lock
+            // gate was abandoned, or a notification replaced it). Dropped, not
+            // re-parked: the URI grants must not outlive the tap that chose.
+            if (req.to != null && req.to != target) {
+                android.util.Log.i("RCQshare", "dropping share for ${req.to}, not $threadKey")
+                return@collect
+            }
             val uris = req.uris
             if (uris.isEmpty()) return@collect
             // Files switched off for this sender (#755): a share from another
