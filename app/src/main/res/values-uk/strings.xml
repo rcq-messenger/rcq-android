@@ -1151,6 +1151,8 @@
     <string name="account_burned_elsewhere">Акаунт було спалено з іншого пристрою. Локальні дані видалено.</string>
     <string name="account_moved_followed">Акаунт тепер відповідає як %1$d. Листування на місці.</string>
     <string name="account_moved_stuck">Акаунт переїхав на інший номер, а цей пристрій не зміг піти за ним. Тут нічого не видалено. Увійдіть знову за фразою відновлення.</string>
+    <string name="auth_rotated_elsewhere">Ключі цього акаунта змінили на іншому пристрої. Введіть нову фразу відновлення, щоб продовжити.</string>
+    <string name="auth_rotated_elsewhere_enter">Ввести нову фразу</string>
     <plurals name="saved_notes">
         <item quantity="one">%d нотатка</item>
         <item quantity="few">%d нотатки</item>

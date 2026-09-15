@@ -1186,6 +1186,8 @@
     <string name="account_burned_elsewhere">Аккаунт был сожжён с другого устройства. Локальные данные удалены.</string>
     <string name="account_moved_followed">Аккаунт теперь отвечает как %1$d. Переписка на месте.</string>
     <string name="account_moved_stuck">Аккаунт переехал на другой номер, а это устройство не смогло за ним пойти. Здесь ничего не удалено. Войдите заново по фразе восстановления.</string>
+    <string name="auth_rotated_elsewhere">Ключи этого аккаунта сменили на другом устройстве. Введите новую фразу восстановления, чтобы продолжить.</string>
+    <string name="auth_rotated_elsewhere_enter">Ввести новую фразу</string>
     <plurals name="saved_notes">
         <item quantity="one">%d заметка</item>
         <item quantity="few">%d заметки</item>

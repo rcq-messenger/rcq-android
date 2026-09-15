@@ -1151,6 +1151,8 @@
     <string name="account_burned_elsewhere">Esta conta foi queimada em outro aparelho. Os dados locais foram apagados.</string>
     <string name="account_moved_followed">Esta conta agora atende como %1$d. Suas conversas continuam aqui.</string>
     <string name="account_moved_stuck">Esta conta mudou para outro número e este aparelho não conseguiu acompanhar. Nada aqui foi apagado. Entre de novo com sua frase de recuperação.</string>
+    <string name="auth_rotated_elsewhere">As chaves desta conta foram trocadas em outro aparelho. Digite a nova frase de recuperação para continuar.</string>
+    <string name="auth_rotated_elsewhere_enter">Digitar nova frase</string>
     <plurals name="saved_notes">
         <item quantity="one">%d nota</item>
         <item quantity="other">%d notas</item>

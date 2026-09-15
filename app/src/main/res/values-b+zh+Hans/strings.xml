@@ -1151,6 +1151,8 @@
     <string name="account_burned_elsewhere">此账号已在其他设备上销毁。本地数据已清除。</string>
     <string name="account_moved_followed">此账号现在使用 %1$d。你的聊天记录都还在。</string>
     <string name="account_moved_stuck">此账号已迁移到别的号码，本设备没能跟上。这里什么都没有删除。请用恢复助记词重新登录。</string>
+    <string name="auth_rotated_elsewhere">此账号的密钥已在另一台设备上更换。请输入新的恢复助记词以继续。</string>
+    <string name="auth_rotated_elsewhere_enter">输入新的助记词</string>
     <plurals name="saved_notes">
         <item quantity="other">%d 条备忘</item>
     </plurals>

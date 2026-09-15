@@ -1194,6 +1194,8 @@
     <string name="account_burned_elsewhere">This account was burned from another device. Its local data has been erased.</string>
     <string name="account_moved_followed">This account now answers as %1$d. Your conversations are still here.</string>
     <string name="account_moved_stuck">This account moved to another number, and this device could not follow it. Nothing here was deleted. Sign in again with your recovery phrase.</string>
+    <string name="auth_rotated_elsewhere">This account\'s keys were changed on another device. Enter the new recovery phrase to continue.</string>
+    <string name="auth_rotated_elsewhere_enter">Enter new phrase</string>
     <plurals name="saved_notes">
         <item quantity="one">%d note</item>
         <item quantity="other">%d notes</item>

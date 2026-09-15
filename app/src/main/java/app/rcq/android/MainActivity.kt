@@ -1174,6 +1174,14 @@ private fun RcqApp(session: Session) {
                 crashReport = CrashReporter.pending(context)?.takeUnless { it.startsWith("RCQ launch crash") }
             }
         }
+        // P0.2: this account's keys were changed on another device. Nothing was
+        // erased; the sheet only points at the phrase entry. Drawn for the
+        // account it is about and never over the lock screen.
+        val rotatedUin by session.rotatedElsewhere.collectAsState()
+        if (s is UiState.Registered && !locked && !showRestore && rotatedUin == s.uin) RotatedElsewhereSheet(
+            onEnter = { session.dismissRotatedElsewhere(); showRestore = true },
+            onDismiss = { session.dismissRotatedElsewhere() },
+        )
         crashReport?.let { report ->
             if (s is UiState.Registered && !locked) CrashConsentDialog(
                 onSend = {
@@ -1594,6 +1602,18 @@ private fun UpdateDialog(
     }
 }
 
+
+/** The RotatedElsewhere notice (P0.2). Its own function so RcqApp gains one
+ *  call and no inline block. */
+@Composable
+private fun RotatedElsewhereSheet(onEnter: () -> Unit, onDismiss: () -> Unit) {
+    RcqAskSheet(
+        onDismiss = onDismiss,
+        title = stringResource(R.string.auth_rotated_elsewhere),
+        actions = listOf(SheetAction(stringResource(R.string.auth_rotated_elsewhere_enter), onClick = onEnter)),
+        cancelLabel = stringResource(R.string.common_close),
+    )
+}
 
 @Composable
 private fun CrashConsentDialog(onSend: () -> Unit, onDismiss: () -> Unit) {

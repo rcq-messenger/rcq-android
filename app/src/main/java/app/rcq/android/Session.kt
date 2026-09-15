@@ -3268,21 +3268,25 @@ class Session(context: Context) {
     suspend fun removeWipePin(): Boolean = withContext(Dispatchers.IO) { PanicPinService.removeWipePin(appCtx) }
 
     /** DURESS WIPE: erase ALL local data for every account + the PIN vault, so
-     *  the app drops to a fresh-install / onboarding state. Local-only (no
-     *  server call) — it must work offline and instantly under coercion. The
-     *  server-side accounts survive (recoverable later from another device if
-     *  the keys were backed up); this is about the seized device. */
+     *  the app drops to a fresh-install / onboarding state. It must work
+     *  offline and instantly under coercion. The server-side accounts survive
+     *  (recoverable later from another device if the keys were backed up)
+     *  unless the wipe slot asked for them to go too, and even then the local
+     *  wipe is finished before a single request leaves the phone. */
     suspend fun wipeEverything() = withContext(Dispatchers.IO) {
         // Read the flag out of the WIPE SLOT that was just entered, before the
         // vault goes. It is not in prefs on purpose: anyone holding an unlocked
         // phone can edit prefs, and switching this off is exactly what someone
         // who found the feature would do.
         val alsoServer = PanicPinService.consumeWipeServer()
-        // Server-side erasure runs FIRST — it needs the tokens the local wipe
-        // is about to destroy — and is strictly best-effort with a short
-        // deadline. A duress wipe has to be instant and has to work offline, so
-        // an unreachable island must never hold the local wipe up.
-        if (alsoServer) deleteAccountsServerSide()
+        // ⚠⚠ LOCAL FIRST, the network after (P0.3, founder decision 2). The
+        // deletes need the tokens this wipe is about to destroy, so they used
+        // to run BEFORE it with an 8 s deadline: on a hostile network that was
+        // eight seconds of a live account on screen in front of whoever made
+        // the person type the PIN. Now the tokens are copied into memory here,
+        // every store below is erased, and only then are the deletes launched,
+        // detached, from that copy. Flag off: no copy, and nothing is sent.
+        val serverSnapshot = if (alsoServer) snapshotServerHomes() else null
         runCatching { calls.teardown() }
         runCatching { audioRooms.teardown() }
         runCatching { nearby.teardown() }
@@ -3371,35 +3375,42 @@ class Session(context: Context) {
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _devices.value = null
         memberNames.clear()
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
-    }
-
-    /** DELETE /auth/account for every account on the roster, each against its
-     *  own island with its own token. Best-effort and time-boxed: this rides a
-     *  duress wipe, where waiting is not an option. */
-    private suspend fun deleteAccountsServerSide() {
-        // ⚠ ONE deadline for the whole thing, and the calls run in parallel.
-        // Per-account timeouts in a loop multiply: ten accounts on an island
-        // that is merely unreachable (which is exactly what a hostile network
-        // looks like) meant eighty seconds of a duress wipe not happening while
-        // someone watched the screen. The local wipe is the part that must be
-        // instant; this is the best-effort extra.
-        kotlinx.coroutines.withTimeoutOrNull(8_000) {
-            coroutineScope {
-                AccountManager.accounts.value.map { acc ->
-                    async(Dispatchers.IO) {
-                        runCatching {
-                            val s = SecureStore(appCtx, acc.id)
-                            val token = s.token ?: return@runCatching
-                            val host = s.serverHost ?: RcqApi.DEFAULT_HOST
-                            RcqApi("https://$host", isPrimary = false).apply { setToken(token) }.deleteAccount()
-                        }.onFailure {
-                            android.util.Log.w("RCQpin", "duress server delete failed for ${acc.id}: ${it.message}")
-                        }
-                    }
-                }.forEach { it.await() }
-            }
+        // Last, after every store above is gone, and it returns at once: see
+        // [app.rcq.android.net.BurnCascade.runDetached]. Its transport judges
+        // certificates from the snapshot and never writes the pin store, so
+        // nothing it does has to be wiped again afterwards.
+        if (serverSnapshot != null) {
+            app.rcq.android.net.BurnCascade.runDetached(serverSnapshot)
         }
     }
+
+    /** Every roster account's home island and session token, copied into
+     *  memory for the detached deletes of a wipe PIN: each account against its
+     *  own island with its own token, the same set the wipe PIN always asked to
+     *  delete. Never written anywhere, and nothing here is logged: the old
+     *  failure line named the account id.
+     *
+     *  ⚠⚠ The island's pin record is copied too. The wipe clears
+     *  [app.rcq.android.net.IslandTrust] before the deletes dial, and a delete
+     *  judged against that empty store took any certificate on the wire as a
+     *  first use: on the hostile network a wipe PIN is typed on, the bearer
+     *  token of a self-hosted island went to whoever answered. */
+    private fun snapshotServerHomes(): app.rcq.android.net.BurnCascade.Snapshot =
+        app.rcq.android.net.BurnCascade.Snapshot(
+            AccountManager.accounts.value.mapNotNull { acc ->
+                runCatching {
+                    val s = SecureStore(appCtx, acc.id)
+                    val token = s.token?.takeIf { it.isNotEmpty() } ?: return@runCatching null
+                    val host = s.serverHost ?: RcqApi.DEFAULT_HOST
+                    app.rcq.android.net.BurnCascade.HomeTarget(
+                        host = host,
+                        token = token,
+                        pin = app.rcq.android.net.IslandTrust.recordOf(host),
+                        caOnly = app.rcq.android.net.IslandTrust.isCaOnly(app.rcq.android.net.IslandTrust.hostAndPort(host).first),
+                    )
+                }.getOrNull()
+            },
+        )
 
     val hasDecoyPin: Boolean get() = PanicPinService.hasDecoyPin()
     fun decoyAccountId(): String? = PanicPinService.decoyAccountId()
@@ -5888,6 +5899,30 @@ class Session(context: Context) {
     private val _accountMoved = MutableSharedFlow<AccountMoved>(extraBufferCapacity = 1)
     val accountMoved: SharedFlow<AccountMoved> = _accountMoved
 
+    /** P0.2: the island answered `identity_rotated`. The signing key this
+     *  install holds was retired by a key change made on another device, so the
+     *  account is ALIVE under new keys. **Nothing is erased on this path, ever**:
+     *  the UI asks for the new phrase. Holds the number it is about, so a screen
+     *  drawn for another account never shows it; null when there is nothing to
+     *  say. */
+    private val _rotatedElsewhere = MutableStateFlow<Int?>(null)
+    val rotatedElsewhere: StateFlow<Int?> = _rotatedElsewhere.asStateFlow()
+
+    /** Once per number per process, like [announceMoveRefused]: the socket asks
+     *  again on every redial and the answer will not change. */
+    @Volatile private var rotatedTold: Int? = null
+
+    private fun announceRotatedElsewhere(me: Int) {
+        if (rotatedTold == me) return
+        rotatedTold = me
+        _rotatedElsewhere.value = me
+    }
+
+    /** The person closed the notice, or went on to enter the phrase. */
+    fun dismissRotatedElsewhere() {
+        _rotatedElsewhere.value = null
+    }
+
     @Volatile private var lastBurnProbeAt = 0L
 
     /** ⚠⚠ THE NUMBER WE WERE TOLD THIS ACCOUNT LEFT, and the one thing standing
@@ -5971,37 +6006,43 @@ class Session(context: Context) {
         val fresh = try {
             refreshForSelf(me)
         } catch (e: Exception) {
-            // ⚠⚠ THE ISLAND NOW SEPARATES THE TWO REFUSALS, and this is the
-            // one that must never wipe. `identity_ambiguous` means the number
-            // is vacant AND this signing key answers for more than one
-            // account, so the island declines to pick a winner: the account is
-            // ALIVE somewhere and the person has to finish the move by phrase.
-            // It used to arrive as `identity_not_found`, which this function
-            // reads as a burn, so a phone switched OFF during its owner's move
-            // erased a living account on its next launch. The in-memory
-            // [movedAwayFrom] below cannot help there: nothing told this
-            // process anything, because it was not running.
-            if (e.message?.contains("identity_ambiguous") == true) {
-                android.util.Log.w("RCQmove", "#$me is vacant and the key is shared - refusing to guess, keeping local data")
-                announceMoveRefused(me, null)
-                return
-            }
-            if (e.message?.contains("identity_not_found") == true) {
-                // ⚠⚠ THE ONE PLACE THAT DELETES A LIVE ACCOUNT IF IT IS WRONG.
-                // `identity_not_found` means the row for #me is gone, which is
-                // a burn UNLESS we were told the account merely moved off it —
-                // then it is the refresh refusing an ambiguous signing key, and
-                // the account it would erase is alive under another number.
-                // See [movedAwayFrom]. Told once (the socket asks again on
-                // every redial), and nothing here is erased.
-                if (movedAwayFrom == me) {
-                    android.util.Log.w("RCQmove", "#$me is gone because it MOVED, not burned - keeping local data")
+            // ⚠⚠ THE ONE PLACE THAT DELETES A LIVE ACCOUNT IF IT IS WRONG, so the
+            // decision is one pure function, [app.rcq.android.net.AuthRefusal.probeOutcome],
+            // made from the EXACT detail code of a 404 and nothing else. It used
+            // to be a substring match over the raw error text.
+            //  - `identity_ambiguous`: the number is vacant AND this signing key
+            //    answers for more than one account, so the island declines to
+            //    pick a winner. Alive somewhere; the person finishes the move by
+            //    phrase. It used to arrive as `identity_not_found`, so a phone
+            //    switched OFF during its owner's move erased a living account on
+            //    its next launch.
+            //  - `identity_rotated`: our key was retired by a key change made on
+            //    another device. Alive under new keys: keep everything and ask
+            //    for the new phrase.
+            //  - `identity_not_found`: the row for #me is gone, a burn, UNLESS the
+            //    island told us the account merely moved off it ([movedAwayFrom];
+            //    in memory only, so after a restart the codes above are what
+            //    keeps a moved account alive).
+            //  - A PendingRotation on this account blocks the erase whatever the
+            //    code: a key change started here may already have applied, and
+            //    the wipe would throw away the only copy of the new keys.
+            // Each notice is told once; the socket asks again on every redial.
+            val outcome = app.rcq.android.net.AuthRefusal.probeOutcome(e.message, movedAwayFrom == me, store.hasPendingRotation)
+            when (outcome) {
+                app.rcq.android.net.AuthRefusal.ProbeOutcome.MOVE_REFUSED -> {
+                    android.util.Log.w("RCQmove", "#$me is vacant, shared or moved - refusing to guess, keeping local data")
                     announceMoveRefused(me, null)
-                    return
                 }
-                android.util.Log.w("RCQburn", "island no longer knows #$me — wiping the local copy (#655)")
-                val next = eraseActiveAccountLocally(AccountManager.activeId.value)
-                _accountLost.tryEmit(AccountLost(me, next))
+                app.rcq.android.net.AuthRefusal.ProbeOutcome.ROTATED_ELSEWHERE -> {
+                    android.util.Log.w("RCQburn", "#$me keys were changed on another device - keeping local data")
+                    announceRotatedElsewhere(me)
+                }
+                app.rcq.android.net.AuthRefusal.ProbeOutcome.ERASE -> {
+                    android.util.Log.w("RCQburn", "island no longer knows #$me - wiping the local copy (#655)")
+                    val next = eraseActiveAccountLocally(AccountManager.activeId.value)
+                    _accountLost.tryEmit(AccountLost(me, next))
+                }
+                app.rcq.android.net.AuthRefusal.ProbeOutcome.KEEP -> Unit
             }
             return
         }
@@ -6108,22 +6149,28 @@ class Session(context: Context) {
         val fresh = try {
             refreshForSelf(me)
         } catch (e: Exception) {
-            // ⚠ Two very different failures, and only one is worth a message.
-            // `identity_ambiguous` (and, from an island too old to say it,
-            // `identity_not_found`) here is the REFUSAL (the number is vacant
+            // ⚠ Three very different failures, and none of them touches local
+            // data. `identity_ambiguous` (and, from an island too old to say
+            // it, `identity_not_found`) is the REFUSAL (the number is vacant
             // and the key is ambiguous): final, and the person has to act.
-            // Anything else is a network that was not there — silent, because
+            // `identity_rotated` is not a refused move at all but a key change
+            // made on another device, so it asks for the new phrase instead.
+            // Anything else is a network that was not there, silent, because
             // the socket keeps redialing and [probeBurnedAccount] runs this
-            // very refresh again on the next 4401. Either way nothing local is
-            // touched, and [movedAwayFrom] stays set so that retry cannot wipe.
-            val refused = e.message?.let {
-                it.contains("identity_ambiguous") || it.contains("identity_not_found")
-            } == true
-            if (refused) {
-                android.util.Log.w("RCQmove", "#$me moved but the island refuses to resolve it - local data left alone")
-                announceMoveRefused(me, announced)
-            } else {
-                android.util.Log.w("RCQmove", "#$me moved; follow failed for now (${e.message}) - will retry on the next probe")
+            // very refresh again on the next 4401; [movedAwayFrom] stays set so
+            // that retry cannot wipe. Codes are matched exactly, on a 404 only,
+            // see [app.rcq.android.net.AuthRefusal.followOutcome].
+            when (app.rcq.android.net.AuthRefusal.followOutcome(e.message, store.hasPendingRotation)) {
+                app.rcq.android.net.AuthRefusal.FollowOutcome.MOVE_REFUSED -> {
+                    android.util.Log.w("RCQmove", "#$me moved but the island refuses to resolve it - local data left alone")
+                    announceMoveRefused(me, announced)
+                }
+                app.rcq.android.net.AuthRefusal.FollowOutcome.ROTATED_ELSEWHERE -> {
+                    android.util.Log.w("RCQmove", "#$me keys were changed on another device - local data left alone")
+                    announceRotatedElsewhere(me)
+                }
+                app.rcq.android.net.AuthRefusal.FollowOutcome.RETRY_LATER ->
+                    android.util.Log.w("RCQmove", "#$me moved; follow failed for now (${e.message}) - will retry on the next probe")
             }
             return
         }
@@ -7941,11 +7988,39 @@ class Session(context: Context) {
      *  own carbon by id. Best-effort — the message already went out. */
     private suspend fun sendMessageCarbon(inner: Envelope, toPeer: Int?, toGroup: Int?) {
         if (!isCarbonable(inner)) return
+        runCatching { sendOwnCarbon(toPeer, toGroup, inner, envelopeType = "carbon") }
+    }
+
+    /**
+     * Seal a carbon to our OWN number and post it. Every envelope this device
+     * mirrors to the account's other installs goes through here (sent
+     * messages, edits, deletes, read markers, request answers), and nothing
+     * else in the client builds an [Envelope.Carbon].
+     *
+     * ⚠⚠ Always ONE v=1 copy signed by our own account key, never [encryptFor].
+     * A carbon files "sent by me" rows and applies edits, deletes and request
+     * answers, so a receiver applies one only when it is really ours (P0.1,
+     * [CrossIslandGate.carbonAccepted]). `from` sits outside the v=1 signature
+     * and deposits are open, so the one thing every client can check is that
+     * `spub` is the key all our installs share. A v=2 ratchet copy carries no
+     * `spub`: with v=2 outbound on by default, [encryptFor] used to send every
+     * carbon keyless, the ciack included, and a client that checks the key strictly
+     * (the first cut of the web gate refused a keyless carbon of any kind) had
+     * nothing to check, so a message sent, edited, deleted or read here would
+     * stop syncing to web and desktop of the same account. iOS and web already
+     * seal carbons this way.
+     *
+     * v=1 seals to the account's messaging key, which every install holds, so
+     * one unaddressed copy reaches all of them, a linked install this device
+     * has not heard of yet included. It also comes back to this install, where
+     * it is a no-op: rows dedup by id, an edit or a delete applies the same
+     * change twice, and a read marker only clears what is older than itself.
+     */
+    private suspend fun sendOwnCarbon(to: Int?, gid: Int?, inner: Envelope, envelopeType: String) {
         val me = store.uin ?: return
-        runCatching {
-            val carbon = Envelope.Carbon(to = toPeer, gid = toGroup, env = inner)
-            sendSealedCopies(me, encryptFor(me, carbon), envelopeType = "carbon")
-        }
+        val carbon = Envelope.Carbon(to = to, gid = gid, env = inner)
+        val signed = SealedCopy(null, SealedSender.encryptV1(carbon, recipientKey(me), me, signingPriv(), signingPub(), serverHost()))
+        sendSealedCopies(me, SealedFanout(listOf(signed), complete = true), envelopeType = envelopeType)
     }
 
     /** Tell my OTHER devices that I read a thread (megalist A2). The marker
@@ -7965,10 +8040,7 @@ class Session(context: Context) {
         val me = store.uin ?: return
         if (toPeer != null && toPeer == me) return
         if (toGroup != null && groups.value.firstOrNull { it.id == toGroup }?.host != null) return
-        runCatching {
-            val carbon = Envelope.Carbon(to = toPeer, gid = toGroup, env = Envelope.ReadMark(System.currentTimeMillis()))
-            sendSealedCopies(me, encryptFor(me, carbon), envelopeType = "read")
-        }
+        runCatching { sendOwnCarbon(toPeer, toGroup, Envelope.ReadMark(System.currentTimeMillis()), envelopeType = "read") }
     }
 
     /** Fan a control envelope (delete / edit / reaction) out to the group.
@@ -8855,7 +8927,14 @@ class Session(context: Context) {
                     // here rather than in storeCarbon, whose whole shape is
                     // "which thread does this row go in" (to/gid, both null on
                     // this one).
-                    if (dec.senderUin == store.uin) {
+                    //
+                    // ⚠⚠ Ours only under our own key (P0.1). Our number alone is
+                    // `from`, outside the v=1 signature, and deposits are open:
+                    // a forged carbon filed "sent by me" rows and a forged ciack
+                    // pinned an attacker's keys for any address we did not hold.
+                    // A refused carbon applies nothing, and the row is still done
+                    // (acked). See [carbonIsOurs].
+                    if (carbonIsOurs(dec, env.env)) {
                         val inner = env.env
                         if (inner is Envelope.CiAck) applyCiAck(inner)
                         else storeCarbon(env.to, env.gid, env.env, now, depositAtMs)
@@ -9841,6 +9920,19 @@ class Session(context: Context) {
         return true
     }
 
+    /** The carbon gate, see [CrossIslandGate.carbonAccepted]. [forgedOwnNumberRow]
+     *  already drops a v=1 row under a foreign key before any branch runs; this
+     *  is checked again at the carbon itself because it is the branch that acts
+     *  on "this is me", and because a v=2 row passes that first filter while a
+     *  ciack must not. */
+    private fun carbonIsOurs(dec: SealedSender.Decrypted, inner: Envelope): Boolean {
+        val ok = CrossIslandGate.carbonAccepted(ownNumberRow(dec, store.uin ?: 0), dec.senderDeviceId, inner)
+        if (!ok && dec.senderUin == store.uin) {
+            android.util.Log.w("RCQci", "carbon under our number is not signed by our key, dropped")
+        }
+        return ok
+    }
+
     /** Re-attribute a guest-mailbox row, see [CrossIslandGate.attributedHost]. */
     private fun attributeToMailbox(dec: SealedSender.Decrypted, mailboxHost: String?): SealedSender.Decrypted {
         if (mailboxHost == null) return dec
@@ -10127,8 +10219,13 @@ class Session(context: Context) {
                 // hand the row back on every drain for the queue's whole TTL.
                 // To myself it resolves to the self-thread, where an unknown
                 // inner kind files nothing on any of the three clients.
-                val carbon = Envelope.Carbon(to = me, gid = null, env = Envelope.CiAck(uin, host, act, card))
-                sendSealedCopies(me, encryptFor(me, carbon), envelopeType = "read")
+                //
+                // ⚠⚠ Sealed v=1 under our own signing key, like every carbon
+                // ([sendOwnCarbon]). A ciack pins keys, so every client applies
+                // one only when it carries our own signature (P0.1,
+                // [CrossIslandGate.carbonAccepted]), with none of the allowance
+                // a keyless carbon of another kind still gets.
+                sendOwnCarbon(me, null, Envelope.CiAck(uin, host, act, card), envelopeType = "read")
             }
         }
     }

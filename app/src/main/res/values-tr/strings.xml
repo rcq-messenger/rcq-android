@@ -1151,6 +1151,8 @@
     <string name="account_burned_elsewhere">Bu hesap başka bir cihazdan yakıldı. Yerel veriler silindi.</string>
     <string name="account_moved_followed">Bu hesap artık %1$d numarasıyla yanıt veriyor. Yazışmaların burada duruyor.</string>
     <string name="account_moved_stuck">Bu hesap başka bir numaraya taşındı ve bu cihaz onu takip edemedi. Burada hiçbir şey silinmedi. Kurtarma ifadenle yeniden giriş yap.</string>
+    <string name="auth_rotated_elsewhere">Bu hesabın anahtarları başka bir cihazda değiştirildi. Devam etmek için yeni kurtarma ifadesini gir.</string>
+    <string name="auth_rotated_elsewhere_enter">Yeni ifadeyi gir</string>
     <plurals name="saved_notes">
         <item quantity="one">%d not</item>
         <item quantity="other">%d not</item>

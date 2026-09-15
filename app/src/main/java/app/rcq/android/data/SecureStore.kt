@@ -109,6 +109,25 @@ class SecureStore(context: Context, accountId: String) {
      *  stay intact). */
     fun wipe() = wipeKeys(prefs, p)
 
+    /** The raw [PendingRotation] record, or null. Raw on purpose: the erase
+     *  guards ask whether one EXISTS, see [PendingRotation.isPresent]. */
+    val pendingRotationRaw: String?
+        get() = prefs.getString(p + K_PENDING_ROTATION, null)
+
+    /** True while a key rotation is under way for this account. Nothing may
+     *  erase the account locally while this holds. */
+    val hasPendingRotation: Boolean
+        get() = PendingRotation.isPresent(pendingRotationRaw)
+
+    /** ⚠ `commit`, not `apply`: the record is written before the request that
+     *  changes keys on the island, and an `apply` still queued when the process
+     *  dies is a rotation the island applied and this device never recorded. */
+    fun savePendingRotation(rotation: PendingRotation): Boolean =
+        prefs.edit().putString(p + K_PENDING_ROTATION, rotation.encode()).commit()
+
+    fun clearPendingRotation(): Boolean =
+        prefs.edit().remove(p + K_PENDING_ROTATION).commit()
+
     /// Remember what each room is called, so a wake can name it without the
     /// island having to.
     ///
@@ -141,9 +160,14 @@ class SecureStore(context: Context, accountId: String) {
         private const val K_SIGN_PRIV = "signing_private"
         private const val K_SERVER = "server_host"
         private const val K_SEED = "recovery_seed"
+        private const val K_PENDING_ROTATION = "pending_rotation"
         // Prefix, not a key: one entry per room id (see cacheGroupNames).
         private const val K_GNAME = "gname."
-        private val STRING_KEYS = listOf(K_TOKEN, K_NICK, K_ID_PRIV, K_SIGN_PRIV, K_SERVER, K_SEED)
+        // ⚠ The pending rotation is listed here so every account wipe (burn,
+        // wipe PIN, local delete) takes it: it holds the OLD private keys and
+        // the new seed. The legacy migration copies it too, which is a no-op:
+        // the unprefixed layout predates rotations.
+        private val STRING_KEYS = listOf(K_TOKEN, K_NICK, K_ID_PRIV, K_SIGN_PRIV, K_SERVER, K_SEED, K_PENDING_ROTATION)
 
         private fun openPrefs(context: Context): SharedPreferences {
             val masterKey = MasterKey.Builder(context.applicationContext)

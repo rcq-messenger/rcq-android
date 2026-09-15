@@ -134,6 +134,64 @@ object CrossIslandGate {
     }
 
     /**
+     * May a carbon (an envelope another of OUR devices sealed to our own
+     * number) be applied? P0.1 of the 15.09 cross-island spec, the same
+     * transitional rule iOS MessageService applies in its carbon branch
+     * (isSignedByMe).
+     *
+     * ⚠⚠ A carbon files "sent by me" rows, applies edits and deletes to our own
+     * messages, and a ciack `accept` PINS a peer's keys for an address this
+     * device does not hold yet. `from` is outside the v=1 signature and
+     * deposits are open, so a carbon that merely names our number let anybody
+     * who reads our key card do all of that. Only these pass:
+     *  - [OwnNumber.OURS_SIGNED]: the row carries a `spub` and it is our own
+     *    account key, which every install of ours holds. Any inner kind. A row
+     *    that carries any other key is [OwnNumber.FORGED] and nothing passes.
+     *  - [OwnNumber.OURS_V2]: a keyless v=2 row, for non-ciack kinds only. The
+     *    device-id condition below never refuses in practice (a missing `dev`
+     *    becomes the primary), so this is an allowance, not a check. NEVER a ciack: it pins keys, so it is
+     *    taken only under our own signature.
+     *
+     * ⚠⚠ The v=2 allowance is transitional and weaker than it looks. The spec's
+     * premise, "the session vouches for the sender", does NOT hold on Android:
+     * `from` and `dev` sit inside the outer ECIES with no signature, the Signal
+     * identity store trusts every identity on first use
+     * (SignalStores.isTrustedIdentity is always true), and unwrapV2 defaults a
+     * missing `dev` to the primary, so the device check never fires. Anyone
+     * holding our prekey bundle can open a fresh session that claims our number
+     * and file or rewrite our own rows through it. The allowance stays because
+     * Android builds before this one sealed EVERY carbon over v=2 without a
+     * key, and a carbon refused here is acked and gone: without it, whatever is
+     * sent, edited, deleted or read on such a phone would never reach this
+     * install again. This client now seals every carbon v=1 (`sendOwnCarbon` in
+     * Session), as iOS and web do, so the allowance can be retired once those
+     * builds have aged out. TODO(strict carbons): switch to OURS_SIGNED only,
+     * together with web (crossisland-gate.ts) and iOS (MessageService carbon
+     * branch); tracked in the 2026-09-15 cross-island spec addendum.
+     *
+     * ⚠ Those older builds sealed the ciack keyless as well, and it gets no
+     * allowance, here or on web and iOS: a cross-island request answered on
+     * such a phone stays pending on this install and has to be answered again.
+     * That is the price of P0.1, not a bug to relax: a keyless ciack cannot be
+     * told apart from a forged one. The release notes must say so.
+     *
+     * A cached-registry check was tried here and taken out: refuse a v=2 row
+     * whose session identity differs from the one our cached device list
+     * publishes for that id. The island overwrites the primary slot's identity
+     * in place on a reinstall or a phrase restore, so a list cached before that
+     * refused the re-keyed install's real carbons, while a forger could pick a
+     * device id the list does not name and pass anyway.
+     *
+     * A refused carbon applies nothing; the caller still treats the row as done
+     * so the island stops serving it.
+     */
+    fun carbonAccepted(own: OwnNumber, senderDeviceId: Int?, inner: Envelope): Boolean = when (own) {
+        OwnNumber.OURS_SIGNED -> true
+        OwnNumber.OURS_V2 -> senderDeviceId != null && inner !is Envelope.CiAck
+        OwnNumber.NOT_OURS, OwnNumber.FORGED -> false
+    }
+
+    /**
      * The island a 1:1 row is attributed to. [mailboxHost] is set only for a
      * row drained from our GUEST mailbox on another island (or re-ingested
      * after being held under that island): everyone who can write there is on
