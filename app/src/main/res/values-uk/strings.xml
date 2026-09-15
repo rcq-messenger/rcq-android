@@ -164,6 +164,10 @@
     <string name="backup_island_auto_busy">Обираємо острів…</string>
     <string name="backup_island_advanced">Додатково: додати острів вручну</string>
     <string name="backup_island_err_none">Зараз немає доступного резервного острова. Спробуй пізніше або додай вручну.</string>
+    <string name="backup_island_err_no_open">Зараз жоден відкритий острів із каталогу не може прийняти резервну копію. Острів можна додати вручну нижче.</string>
+    <string name="backup_island_err_entry">На цей острів пускають лише з кодом входу. Спробуй інший острів.</string>
+    <string name="backup_island_err_invite">На цей острів пускають лише за запрошенням. Спробуй інший острів.</string>
+    <string name="backup_island_err_switch_not_done">Перемикання не відбулося. Нічого не змінено.</string>
     <string name="backup_island_host_hint">Хост острова, напр. is2.rcq.app</string>
     <string name="backup_island_add">Додати резервний острів</string>
     <string name="backup_island_busy">Підключення…</string>
@@ -1416,7 +1420,6 @@
     <string name="file_download_speed">%s/с</string>
     <string name="backup_island_err_no_account">На цьому острові немає акаунта під ваш ключ, перемикатися нема на що. Приберіть острів і додайте заново.</string>
     <string name="backup_island_err_no_route">Адреса острова не розв’язується в цій мережі. Якщо він тут заблокований, увімкніть релеї RCQ і спробуйте ще раз.</string>
-    <string name="backup_island_err_said">Острів відповів %1$s, тому перемикання не відбулося. Нічого не змінено.</string>
     <string name="file_read_failed">Не вдалося прочитати цей файл. Спробуйте інший або спершу скопіюйте його в пам’ять телефона.</string>
     <string name="gi_open">Відкрита група</string>
     <string name="group_join_body">Ви з’явитеся у списку учасників і почнете отримувати її повідомлення.</string>

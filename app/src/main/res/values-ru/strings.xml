@@ -177,6 +177,10 @@
     <string name="backup_island_auto_busy">Подбираем остров…</string>
     <string name="backup_island_advanced">Дополнительно: добавить остров вручную</string>
     <string name="backup_island_err_none">Сейчас нет доступного резервного острова. Попробуйте позже или добавьте вручную.</string>
+    <string name="backup_island_err_no_open">Сейчас ни один открытый остров из каталога не может принять резерв. Можно добавить остров вручную ниже.</string>
+    <string name="backup_island_err_entry">Этот остров впускает только по коду входа. Попробуйте другой остров.</string>
+    <string name="backup_island_err_invite">Этот остров впускает только по приглашению. Попробуйте другой остров.</string>
+    <string name="backup_island_err_switch_not_done">Переключение не состоялось. Ничего не изменено.</string>
     <string name="backup_island_host_hint">Адрес острова, напр. is2.rcq.app</string>
     <string name="backup_island_add">Добавить резервный остров</string>
     <string name="backup_island_busy">Подключение…</string>
@@ -187,7 +191,6 @@
     <string name="backup_island_err_already">Этот остров уже добавлен.</string>
     <string name="backup_island_err_no_account">На этом острове нет аккаунта под ваш ключ, переключаться не на что. Уберите остров и добавьте заново.</string>
     <string name="backup_island_err_no_route">Адрес острова не разрешается в этой сети. Если он тут заблокирован, включите релеи RCQ и повторите.</string>
-    <string name="backup_island_err_said">Остров ответил %1$s, поэтому переключение не состоялось. Ничего не изменено.</string>
     <string name="backup_island_err_generic">Не удалось подключиться к острову.</string>
     <string name="backup_island_promote">Сделать основным</string>
     <string name="backup_island_promote_title">Сделать этот остров основным?</string>

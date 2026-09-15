@@ -2752,6 +2752,10 @@ class Session(context: Context) {
             } catch (e: java.net.UnknownHostException) {
                 throw IllegalArgumentException("no_route")
             } catch (e: java.io.IOException) {
+                // A door refusal travels as it came, so the screen can name the
+                // door (BackupIslandPick.promoteSentenceOf). Its body is only
+                // parsed there, never shown or logged.
+                if (app.rcq.android.net.BackupIslandPick.doorRefusal(e.message) != null) throw e
                 // Just the status code. A fixed-width prefix of the message
                 // dragged a fragment of the island's JSON body onto the screen,
                 // and that body is the island's to phrase, not ours to show
@@ -2782,32 +2786,49 @@ class Session(context: Context) {
         scope.launch { pushHomeRecordToContacts() }
     }
 
-    /** The auto-backup toggle's ON action: pick a healthy island from the
-     *  public catalogue and register there (recover-first, same keys). Returns
-     *  the chosen host. Throws IllegalArgumentException("no_island") when the
-     *  catalogue is unreachable or no flagged island responds. */
+    /** The auto-backup toggle's ON action: a backup on the first island of the
+     *  public catalogue that gives one (recover-first, same keys): registered
+     *  on an open island, adopted from a shut one that already holds a copy.
+     *  Which islands qualify is [BackupIslandPick]'s business. Returns the
+     *  chosen host. Throws IllegalArgumentException("no_island") when the
+     *  catalogue is unreachable or nothing answers, and ("no_open_island")
+     *  when islands answered and none gave a backup (#988). */
     suspend fun enableAutoBackup(): String {
         val uin = store.uin ?: error("no session")
-        val host = withContext(Dispatchers.IO) {
-            Multihome.autoPickHost(serverHost(), MultihomeStore.list(uin).map { it.host }.toSet())
-        } ?: throw IllegalArgumentException("no_island")
-        withContext(Dispatchers.IO) {
-            Multihome.addBackupIsland(
-                ownUin = uin,
+        val home = withContext(Dispatchers.IO) {
+            Multihome.autoAddBackup(
                 ownHost = serverHost(),
-                hostInput = host,
-                identityPub = identityPub(),
-                signingPriv = signingPriv(),
-                signingPub = signingPub(),
-                nickname = store.nickname ?: "user-$uin",
-                auto = true,
+                exclude = MultihomeStore.list(uin).map { it.host }.toSet(),
+                register = { host ->
+                    Multihome.addBackupIsland(
+                        ownUin = uin,
+                        ownHost = serverHost(),
+                        hostInput = host,
+                        identityPub = identityPub(),
+                        signingPriv = signingPriv(),
+                        signingPub = signingPub(),
+                        nickname = store.nickname ?: "user-$uin",
+                        auto = true,
+                    )
+                },
+                // A shut island: only a copy of this account it already holds.
+                adopt = { host ->
+                    Multihome.adoptBackupIsland(
+                        ownUin = uin,
+                        ownHost = serverHost(),
+                        hostInput = host,
+                        signingPriv = signingPriv(),
+                        signingPub = signingPub(),
+                        auto = true,
+                    )
+                },
             )
         }
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
         scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
         scope.launch { drainBackupQueuesOnce() }
-        return host
+        return home.host
     }
 
     /** The toggle's OFF action: forget every auto-picked home (manually-added

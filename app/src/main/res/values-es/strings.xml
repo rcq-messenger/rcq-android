@@ -164,6 +164,10 @@
     <string name="backup_island_auto_busy">Eligiendo una isla…</string>
     <string name="backup_island_advanced">Avanzado: añadir una isla a mano</string>
     <string name="backup_island_err_none">Ahora mismo no hay ninguna isla de reserva accesible. Inténtalo más tarde o añade una a mano.</string>
+    <string name="backup_island_err_no_open">Ahora mismo ninguna isla abierta del catálogo puede guardar una copia de reserva. Puedes añadir una isla a mano abajo.</string>
+    <string name="backup_island_err_entry">Esta isla solo deja entrar con un código de entrada. Prueba con otra isla.</string>
+    <string name="backup_island_err_invite">Esta isla solo deja entrar por invitación. Prueba con otra isla.</string>
+    <string name="backup_island_err_switch_not_done">El cambio no ocurrió. No cambió nada.</string>
     <string name="backup_island_host_hint">Host de la isla, p. ej. is2.rcq.app</string>
     <string name="backup_island_add">Añadir isla de reserva</string>
     <string name="backup_island_busy">Conectando…</string>
@@ -1412,7 +1416,6 @@
     <string name="file_download_speed">%s/s</string>
     <string name="backup_island_err_no_account">Esta isla no tiene una cuenta para tu clave, así que no hay adónde cambiar. Quítala y añádela de nuevo.</string>
     <string name="backup_island_err_no_route">La dirección de la isla no se resuelve en esta red. Si está bloqueada aquí, activa los relés de RCQ e inténtalo otra vez.</string>
-    <string name="backup_island_err_said">La isla respondió %1$s, así que el cambio no ocurrió. No cambió nada.</string>
     <string name="file_read_failed">No se pudo leer ese archivo. Prueba con otro o cópialo antes a otro sitio.</string>
     <string name="gi_open">Grupo abierto</string>
     <string name="group_join_body">Aparecerás en su lista de miembros y empezarás a recibir sus mensajes.</string>

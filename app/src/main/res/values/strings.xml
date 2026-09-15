@@ -178,6 +178,10 @@
     <string name="backup_island_auto_busy">Picking an island…</string>
     <string name="backup_island_advanced">Advanced: add an island manually</string>
     <string name="backup_island_err_none">No reachable backup island right now. Try again later, or add one manually.</string>
+    <string name="backup_island_err_no_open">No open island in the catalogue can take a backup right now. You can add an island by hand below.</string>
+    <string name="backup_island_err_entry">This island only lets people in with an entry code. Try another island.</string>
+    <string name="backup_island_err_invite">This island only lets people in by invite. Try another island.</string>
+    <string name="backup_island_err_switch_not_done">The switch did not happen. Nothing changed.</string>
     <string name="backup_island_host_hint">Island host, e.g. is2.rcq.app</string>
     <string name="backup_island_add">Add backup island</string>
     <string name="backup_island_busy">Connecting…</string>
@@ -188,7 +192,6 @@
     <string name="backup_island_err_already">This island is already added.</string>
     <string name="backup_island_err_no_account">This island has no account for your key, so there is nothing to switch to. Remove it and add it again.</string>
     <string name="backup_island_err_no_route">The island’s address did not resolve on this network. If it is blocked here, turn on RCQ relays and try again.</string>
-    <string name="backup_island_err_said">The island answered %1$s, so the switch did not happen. Nothing changed.</string>
     <string name="backup_island_err_generic">Could not connect to the island.</string>
     <string name="backup_island_promote">Make primary</string>
     <string name="backup_island_promote_title">Make this island primary?</string>

@@ -6,6 +6,8 @@ import app.rcq.android.crypto.RecoveryPhrase
 import app.rcq.android.crypto.SealedSender
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -101,13 +103,7 @@ object Multihome {
         nickname: String,
         auto: Boolean = false,
     ): MultihomeStore.Home {
-        val host = normalizeHost(hostInput) ?: throw IllegalArgumentException("invalid_host")
-        // The front is the flagship by another road: "adding" it registers a
-        // second mailbox on the island this account already lives on. Same
-        // refusal as the primary, because that is what it is.
-        if (host == ownHost || RelayConfigStore.isFrontHost(host)) throw IllegalArgumentException("primary_island")
-        if (MultihomeStore.list(ownUin).any { it.host == host }) throw IllegalArgumentException("already_added")
-
+        val host = backupHost(ownUin, ownHost, hostInput)
         val creds = recoverOn(host, signingPriv, signingPub) ?: run {
             val api = RcqApi("https://$host")
             val skB64 = Base64.encodeToString(signingPub, Base64.NO_WRAP)
@@ -131,6 +127,41 @@ object Multihome {
                 ),
             )
         }
+        return saveHome(ownUin, host, creds, auto)
+    }
+
+    /** Adopt the copy of this identity that [hostInput] ALREADY holds as a
+     *  backup home, and persist it exactly like [addBackupIsland] would. Never
+     *  registers: null when the island has no account for this key. This is
+     *  what the auto toggle does on an island whose door is shut (#988), where
+     *  `/auth/register` is not ours to call. Throws like [addBackupIsland] on
+     *  a bad host and on network errors. */
+    suspend fun adoptBackupIsland(
+        ownUin: Int,
+        ownHost: String,
+        hostInput: String,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        auto: Boolean = false,
+    ): MultihomeStore.Home? {
+        val host = backupHost(ownUin, ownHost, hostInput)
+        val creds = recoverOn(host, signingPriv, signingPub) ?: return null
+        return saveHome(ownUin, host, creds, auto)
+    }
+
+    /** The normalized host a backup may be kept on, or the short reason it
+     *  may not. */
+    private fun backupHost(ownUin: Int, ownHost: String, hostInput: String): String {
+        val host = normalizeHost(hostInput) ?: throw IllegalArgumentException("invalid_host")
+        // The front is the flagship by another road: "adding" it registers a
+        // second mailbox on the island this account already lives on. Same
+        // refusal as the primary, because that is what it is.
+        if (host == ownHost || RelayConfigStore.isFrontHost(host)) throw IllegalArgumentException("primary_island")
+        if (MultihomeStore.list(ownUin).any { it.host == host }) throw IllegalArgumentException("already_added")
+        return host
+    }
+
+    private fun saveHome(ownUin: Int, host: String, creds: RcqApi.RegisterResponse, auto: Boolean): MultihomeStore.Home {
         val home = MultihomeStore.Home(ownUin, host, creds.uin, creds.token, System.currentTimeMillis(), auto)
         MultihomeStore.save(home)
         return home
@@ -176,48 +207,166 @@ object Multihome {
         return null
     }
 
-    /** Pick a backup island from the SIGNED island list, minus our own island +
-     *  already-added hosts; the FIRST healthy one in list order wins (the order
-     *  is the project's preference). Returns the bare host, or null when the
-     *  list is unreachable, the signature fails, or no island responds
-     *  (fail-safe: never auto-register on an unverified island). Plain OkHttp,
-     *  same accepted simplification as the deposit path. Blocking — call from IO. */
-    fun autoPickHost(ownHost: String, exclude: Set<String>): String? = runCatching {
-        val direct = pickPass(ownHost, exclude)
-        if (direct != null) return@runCatching direct
-        // ⚠ ONE WHOLE PASS, NOT ONE PROBE, is what says the network is the
-        // problem. [http] alone never brings the tunnel up, so on a censored
-        // network the catalogue is unreachable, no island answers and the one
-        // feature whose purpose is "your island may go away, keep a spare"
-        // fails for exactly the people who need a spare (report #726). But a
-        // health probe is a call that is EXPECTED to fail: an island down for
-        // maintenance is not censorship, and engaging on a single IOException
-        // would move every later request in the process onto the relays
-        // because ONE island in the catalogue was offline, on a network that
-        // never blocked anything. Nothing at all answering is a different
-        // statement, and the only one worth a tunnel for. The user asked for
-        // this pass out loud by tapping the toggle.
-        if (SingBoxTransport.proxy() != null) return@runCatching null
-        // ⚠ BACKUP_SEARCH keeps a Toast where every other foreign path lost one
-        // (#929). There is no island to blame here — the catalogue AND every
-        // island in it stayed silent — so there is no card to draw a line on,
-        // and the toggle's own failure can only say "no island available",
-        // which is the sentence that made the opt-out look like a broken app in
-        // the first place (#588). The WHY has nowhere else to go.
-        if (!SingBoxTransport.engageForBlockedDestination(
-                "multihome:auto-pick",
-                SingBoxTransport.DeclineScope.BACKUP_SEARCH,
-            )
-        ) return@runCatching null
-        pickPass(ownHost, exclude)
-    }.getOrNull()
+    /** A backup on the first island of the SIGNED island list that gives one,
+     *  by the rule in [BackupIslandPick], the same on every client. Our own
+     *  island, already-added hosts and fronts are left out; the rest are asked
+     *  in list order (the project's preference). An OPEN island gets
+     *  [register]; a SHUT one only [adopt], which never registers; a SILENT
+     *  one nothing.
+     *
+     *  Throws IllegalArgumentException([BackupIslandPick.NO_ISLAND]) when the
+     *  list is unreachable, the signature fails or no island answers
+     *  (fail-safe: never auto-register on an unverified island), and
+     *  ([BackupIslandPick.NO_OPEN_ISLAND]) when islands answered and none of
+     *  them gave a backup. Plain OkHttp, same accepted simplification as the
+     *  deposit path. Blocking I/O, call from IO. */
+    suspend fun autoAddBackup(
+        ownHost: String,
+        exclude: Set<String>,
+        register: suspend (host: String) -> MultihomeStore.Home,
+        adopt: suspend (host: String) -> MultihomeStore.Home?,
+    ): MultihomeStore.Home = BackupIslandPick.attempt(
+        pass = { pickPass(ownHost, exclude, register, adopt) },
+        engageRelays = {
+            // ⚠ ONE WHOLE PASS, NOT ONE PROBE, is what says the network is the
+            // problem, and [BackupIslandPick.attempt] only asks for relays when
+            // the pass was silent from start to end. [http] alone never brings
+            // the tunnel up, so on a censored network the catalogue is
+            // unreachable, no island answers and the one feature whose purpose
+            // is "your island may go away, keep a spare" fails for exactly the
+            // people who need a spare (report #726). But a health probe is a
+            // call that is EXPECTED to fail: an island down for maintenance is
+            // not censorship, and engaging on a single IOException would move
+            // every later request in the process onto the relays because ONE
+            // island in the catalogue was offline, on a network that never
+            // blocked anything. Nothing at all answering is a different
+            // statement, and the only one worth a tunnel for. The user asked
+            // for this pass out loud by tapping the toggle. Already relayed:
+            // a second pass would ride the same route, so there is none.
+            //
+            // ⚠ BACKUP_SEARCH keeps a Toast where every other foreign path lost
+            // one (#929). There is no island to blame here, the catalogue AND
+            // every island in it stayed silent, so there is no card to draw a
+            // line on, and the toggle's own failure can only say "no island
+            // available", which is the sentence that made the opt-out look
+            // like a broken app in the first place (#588). The WHY has nowhere
+            // else to go.
+            SingBoxTransport.proxy() == null && runCatching {
+                SingBoxTransport.engageForBlockedDestination(
+                    "multihome:auto-pick",
+                    SingBoxTransport.DeclineScope.BACKUP_SEARCH,
+                )
+            }.getOrDefault(false)
+        },
+    )
 
-    /** One catalogue fetch plus one probe of each candidate, over whatever
-     *  route is up right now. */
-    private fun pickPass(ownHost: String, exclude: Set<String>): String? {
-        val islands = signedIslands() ?: return null
-        return islands.firstOrNull { it != ownHost && it !in exclude && !RelayConfigStore.isFrontHost(it) && healthy(it) }
+    /** One catalogue fetch, then the candidates in order over whatever route
+     *  is up right now. Lazy on purpose: an island is only asked once every
+     *  island before it has been ruled out, so a tap hands our address to as
+     *  few hosts as it takes. A catalogue that cannot be fetched or verified
+     *  is silence; a verified one that leaves nobody to ask is not (see
+     *  [BackupIslandPick.catalogPass]). [register] is [addBackupIsland], which
+     *  recovers first, so a door refusal never gets a second recover. */
+    private suspend fun pickPass(
+        ownHost: String,
+        exclude: Set<String>,
+        register: suspend (host: String) -> MultihomeStore.Home,
+        adopt: suspend (host: String) -> MultihomeStore.Home?,
+    ): BackupIslandPick.Pass<MultihomeStore.Home> {
+        return BackupIslandPick.catalogPass(
+            islands = signedIslands(),
+            ownHost = ownHost,
+            exclude = exclude,
+            isFront = { RelayConfigStore.isFrontHost(it) },
+            answers = ::healthy,
+            infoOf = ::serverInfo,
+            register = { host -> logFailure(host, "register") { register(host) } },
+            recover = { host -> logFailure(host, "recover") { adopt(host) } },
+        )
     }
+
+    /** [block], with a failure written to the log before it goes on to
+     *  [BackupIslandPick.runPass], which moves past it. Status and class
+     *  only, never the island's body (see [BackupIslandPick.causeLabel]). */
+    private inline fun <T> logFailure(host: String, what: String, block: () -> T): T {
+        try {
+            return block()
+        } catch (e: Exception) {
+            if (e !is java.util.concurrent.CancellationException) {
+                android.util.Log.w(
+                    "RCQfed",
+                    "auto backup $what $host: ${BackupIslandPick.causeLabel(e.message, e.javaClass.simpleName)}",
+                )
+            }
+            throw e
+        }
+    }
+
+    /** The client both auto-pick probes ride: [http] (so the relays and the
+     *  island trust still apply) with redirects OFF and short limits.
+     *
+     *  ⚠ OkHttp follows redirects by default, cross-host and https to http
+     *  included, and nothing looked at where an answer finally came from. A
+     *  catalogue island answering a probe with a 30x to another host had that
+     *  host's answer judged as its own, and a redirect to a self-signed host
+     *  with no record went through [IslandTrust] and wrote a first-use pin for
+     *  a host the person never aimed at. Same rule as BurnCascade's client.
+     *
+     *  ⚠ The deadline is OkHttp's call timeout, which covers the whole
+     *  exchange: DNS, connect, headers AND reading the body, not just a pause
+     *  between bytes. [BackupIslandPick.probeDeadlineSeconds]: 6 s direct so a
+     *  tap on a dead catalogue does not sit for a minute per island, 15 s over
+     *  the relays, where one request easily takes more than that. The connect
+     *  and read limits sit inside it. A timeout is silence either way, never a
+     *  shut door. */
+    private fun probeClient(): OkHttpClient {
+        val relayed = SingBoxTransport.proxy() != null
+        val deadline = BackupIslandPick.probeDeadlineSeconds(relayed)
+        return http().newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .connectTimeout(if (relayed) 10L else 5L, TimeUnit.SECONDS)
+            .readTimeout(if (relayed) 10L else 6L, TimeUnit.SECONDS)
+            .callTimeout(deadline, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** `host:port` of [url], the form [BackupIslandPick.classifyInfo] compares. */
+    private fun authority(url: HttpUrl) = "${url.host}:${url.port}"
+
+    /** What a candidate's `/server/info` came to, see [BackupIslandPick.Info].
+     *
+     *  ⚠ Asked fresh on every tap, and deliberately NOT taken from the
+     *  capabilities the session keeps on disk (`rcq_caps`). Those are written
+     *  for the islands this device's accounts live on, and a remembered "open"
+     *  is exactly the answer that went stale on 09.09 when the flagship put up
+     *  its paid door. No response cache sits on this client either. One small
+     *  GET per candidate asked, only when the person taps the toggle.
+     *
+     *  ⚠ The body goes through [BackupIslandPick.readInfoBody]: over
+     *  [BackupIslandPick.INFO_BODY_CAP] or not valid UTF-8 is rejected whole,
+     *  never cut, and so is silence. It used to be `peekBody`, which truncates
+     *  and hands the first 64 KB on as if it were the answer. */
+    private fun serverInfo(host: String): BackupIslandPick.Info = runCatching {
+        val url = "https://$host/server/info".toHttpUrl()
+        val req = Request.Builder().url(url).header("Cache-Control", "no-cache").get().build()
+        probeClient().newCall(req).execute().use { resp ->
+            val asked = authority(url)
+            val answeredFrom = if (resp.priorResponse != null) "" else authority(resp.request.url)
+            // The body is only read for an answer that could count.
+            val body = if (resp.isSuccessful && asked.equals(answeredFrom, ignoreCase = true)) {
+                resp.body?.let { b -> b.byteStream().use { BackupIslandPick.readInfoBody(it, b.contentLength()) } }
+            } else {
+                null
+            }
+            BackupIslandPick.classifyInfo(
+                asked = asked,
+                answeredFrom = answeredFrom,
+                status = resp.code,
+                body = body,
+            )
+        }
+    }.getOrDefault(BackupIslandPick.Info.Unreadable)
 
     /** Raw response bytes (the exact bytes the signature covers), or null. */
     private fun httpBytes(url: String): ByteArray? = runCatching {
@@ -225,9 +374,15 @@ object Multihome {
         http().newCall(req).execute().use { if (it.isSuccessful) it.body?.bytes() else null }
     }.getOrNull()
 
+    /** Does [host] itself answer `/health` with success? A redirect is not a
+     *  yes (see [probeClient]), and neither is an answer that belongs to some
+     *  other host. */
     private fun healthy(host: String): Boolean = runCatching {
-        val req = Request.Builder().url("https://$host/health").get().build()
-        http().newCall(req).execute().use { it.isSuccessful }
+        val url = "https://$host/health".toHttpUrl()
+        val req = Request.Builder().url(url).header("Cache-Control", "no-cache").get().build()
+        probeClient().newCall(req).execute().use {
+            it.isSuccessful && it.priorResponse == null && authority(it.request.url) == authority(url)
+        }
     }.getOrDefault(false)
 
     /**

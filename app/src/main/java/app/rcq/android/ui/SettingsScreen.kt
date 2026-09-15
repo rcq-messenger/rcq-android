@@ -3870,28 +3870,41 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
     // island by hand; everyone else just sees the toggle.
     var advanced by remember { mutableStateOf(manualHomes.isNotEmpty()) }
 
-    fun errorText(e: Throwable): String {
+    fun errorText(
+        e: Throwable,
+        sentenceOf: (String?) -> app.rcq.android.net.BackupIslandPick.Sentence =
+            app.rcq.android.net.BackupIslandPick::sentenceOf,
+    ): String {
         val m = e.message
-        // The island answered, and WHAT it answered is the whole diagnosis: a
-        // 401 is a key it will not take, a 404 an endpoint it does not have.
-        // Calling those "unreachable" sent a reporter chasing his own network
-        // while three healthy islands sat there answering him (#687).
-        if (m != null && m.startsWith("island_said:")) {
-            return context.getString(R.string.backup_island_err_said, m.removePrefix("island_said:"))
-        }
-        return when (m) {
-            "invalid_host" -> context.getString(R.string.backup_island_err_invalid)
-            "primary_island" -> context.getString(R.string.backup_island_err_primary)
-            "already_added" -> context.getString(R.string.backup_island_err_already)
-            "no_island" -> context.getString(R.string.backup_island_err_none)
-            "no_account_here" -> context.getString(R.string.backup_island_err_no_account)
-            "no_route" -> context.getString(R.string.backup_island_err_no_route)
-            "unreachable" -> context.getString(R.string.backup_island_err_unreachable)
-            // Keep the cause visible: "could not connect" alone is undebuggable
-            // for a self-hoster pointing at their own island.
-            else -> context.getString(R.string.backup_island_err_generic) +
-                " (${e.message ?: e.javaClass.simpleName})"
-        }
+        // The raw cause, status and class only, for a self-hoster reading
+        // logcat. Never the island's body, see BackupIslandPick.causeLabel.
+        android.util.Log.w(
+            "RcqBackupIsland",
+            "backup island failed: ${app.rcq.android.net.BackupIslandPick.causeLabel(m, e.javaClass.simpleName)}",
+        )
+        // ⚠ A sentence, never a status, a body or an exception string (#988:
+        // "(HTTP 403: {"detail":{"code":"entry_required"}})" under the toggle).
+        // The mapping is BackupIslandPick.sentenceOf, the same on every client:
+        // door refusals and the client's own reason codes have sentences of
+        // their own, anything else is the generic sentence alone.
+        return context.getString(
+            when (sentenceOf(m)) {
+                app.rcq.android.net.BackupIslandPick.Sentence.INVALID_HOST -> R.string.backup_island_err_invalid
+                app.rcq.android.net.BackupIslandPick.Sentence.PRIMARY_ISLAND -> R.string.backup_island_err_primary
+                app.rcq.android.net.BackupIslandPick.Sentence.ALREADY_ADDED -> R.string.backup_island_err_already
+                app.rcq.android.net.BackupIslandPick.Sentence.NO_ISLAND -> R.string.backup_island_err_none
+                app.rcq.android.net.BackupIslandPick.Sentence.NO_OPEN_ISLAND -> R.string.backup_island_err_no_open
+                app.rcq.android.net.BackupIslandPick.Sentence.NO_ACCOUNT_HERE -> R.string.backup_island_err_no_account
+                app.rcq.android.net.BackupIslandPick.Sentence.NO_ROUTE -> R.string.backup_island_err_no_route
+                app.rcq.android.net.BackupIslandPick.Sentence.UNREACHABLE -> R.string.backup_island_err_unreachable
+                // Make primary: the island answered with a failure. What it
+                // answered stays in the log; the screen says nothing changed.
+                app.rcq.android.net.BackupIslandPick.Sentence.SWITCH_NOT_DONE -> R.string.backup_island_err_switch_not_done
+                app.rcq.android.net.BackupIslandPick.Sentence.ENTRY -> R.string.backup_island_err_entry
+                app.rcq.android.net.BackupIslandPick.Sentence.INVITE -> R.string.backup_island_err_invite
+                app.rcq.android.net.BackupIslandPick.Sentence.GENERIC -> R.string.backup_island_err_generic
+            },
+        )
     }
 
     // §5a.5 promote: confirm-first — the number and the connected island change.
@@ -3917,7 +3930,11 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                                     ).show()
                                     session.uin?.let(onPromoted)
                                 }
-                                .onFailure { error = errorText(it) }
+                                // Any failed switch says nothing changed; only a
+                                // door refusal names the door (#988 D8).
+                                .onFailure {
+                                    error = errorText(it, app.rcq.android.net.BackupIslandPick::promoteSentenceOf)
+                                }
                             busy = false
                             promoteTarget = null
                         }
@@ -3952,7 +3969,15 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                 scope.launch {
                     runCatching {
                         if (on) session.enableAutoBackup() else session.disableAutoBackup()
-                    }.onFailure { error = errorText(it) }
+                    }.onFailure {
+                        error = errorText(it)
+                        // #988: that sentence sends the person to the manual
+                        // block "below", so the block is open, and stays open
+                        // once they start typing there (which clears the error).
+                        if (app.rcq.android.net.BackupIslandPick.sentenceOf(it.message) ==
+                            app.rcq.android.net.BackupIslandPick.Sentence.NO_OPEN_ISLAND
+                        ) advanced = true
+                    }
                     autoBusy = false
                 }
             }
@@ -3975,14 +4000,17 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
             }
             error?.let { Text(it, color = c.statusBusy, fontSize = 13.sp) }
 
-            // Manual host entry stays for self-hosters, tucked away.
+            // Manual host entry stays for self-hosters, tucked away. Never
+            // tucked away while the "no open island" sentence is on screen: it
+            // says "add an island by hand below", so below has to be there.
+            val manualOpen = advanced || error == stringResource(R.string.backup_island_err_no_open)
             Text(
-                (if (advanced) "▾ " else "▸ ") + stringResource(R.string.backup_island_advanced),
+                (if (manualOpen) "▾ " else "▸ ") + stringResource(R.string.backup_island_advanced),
                 color = c.textSecondary,
                 fontSize = 13.sp,
-                modifier = Modifier.clickable { advanced = !advanced },
+                modifier = Modifier.clickable { advanced = !manualOpen },
             )
-            if (advanced) {
+            if (manualOpen) {
                 if (manualHomes.isNotEmpty()) {
                     SettingsGroup {
                         manualHomes.forEachIndexed { index, h ->

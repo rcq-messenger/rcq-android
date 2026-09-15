@@ -164,6 +164,10 @@
     <string name="backup_island_auto_busy">Ada seçiliyor…</string>
     <string name="backup_island_advanced">Gelişmiş: adayı elle ekle</string>
     <string name="backup_island_err_none">Şu anda erişilebilir bir yedek ada yok. Sonra tekrar dene ya da elle ekle.</string>
+    <string name="backup_island_err_no_open">Katalogdaki açık adaların hiçbiri şu anda yedek alamıyor. Aşağıdan elle bir ada ekleyebilirsin.</string>
+    <string name="backup_island_err_entry">Bu ada yalnızca giriş koduyla içeri alıyor. Başka bir ada dene.</string>
+    <string name="backup_island_err_invite">Bu ada yalnızca davetle içeri alıyor. Başka bir ada dene.</string>
+    <string name="backup_island_err_switch_not_done">Geçiş gerçekleşmedi. Hiçbir şey değişmedi.</string>
     <string name="backup_island_host_hint">Ada adresi, örn. is2.rcq.app</string>
     <string name="backup_island_add">Yedek ada ekle</string>
     <string name="backup_island_busy">Bağlanıyor…</string>
@@ -1412,7 +1416,6 @@
     <string name="file_download_speed">%s/sn</string>
     <string name="backup_island_err_no_account">Bu adada anahtarınıza ait bir hesap yok, geçilecek bir yer de yok. Adayı kaldırıp yeniden ekleyin.</string>
     <string name="backup_island_err_no_route">Adanın adresi bu ağda çözülmedi. Burada engelliyse RCQ rölelerini açıp yeniden deneyin.</string>
-    <string name="backup_island_err_said">Ada %1$s yanıtını verdi, geçiş gerçekleşmedi. Hiçbir şey değişmedi.</string>
     <string name="file_read_failed">Bu dosya okunamadı. Başka birini deneyin ya da önce başka bir yere kopyalayın.</string>
     <string name="gi_open">Açık grup</string>
     <string name="group_join_body">Üye listesinde görüneceksiniz ve mesajlarını almaya başlayacaksınız.</string>
