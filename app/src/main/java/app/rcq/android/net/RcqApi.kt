@@ -52,7 +52,15 @@ class RcqApi(
      *  masquerade header for a closed island is unaffected: the interceptor
      *  stamps it per host, not per account. */
     private val anonKeyLookup: () -> Boolean = { false },
+    /** A tighter whole-call ceiling, for callers with a deadline of their own
+     *  (the burn cascade, F2: 8 s per call under one 15 s deadline). Null keeps
+     *  the defaults below. */
+    private val callTimeoutSeconds: Long? = null,
 ) {
+
+    /** A per-phase timeout, never longer than the whole-call ceiling a caller asked for. */
+    private fun capped(defaultSeconds: Long): Long =
+        callTimeoutSeconds?.let { minOf(it, defaultSeconds) } ?: defaultSeconds
 
     private val client = OkHttpClient.Builder()
         // Detect a dead/stale connection fast (cellular CGNAT + radio sleep
@@ -62,9 +70,15 @@ class RcqApi(
         // over many seconds — so give those a far longer leash, or the connect
         // gives up before the tunnel is ready (the "works in Telegram but not
         // RCQ" report: TG is patient, we weren't). Only local-proxy users pay it.
-        .connectTimeout(if (SingBoxTransport.localProxyMode()) 30 else 10, TimeUnit.SECONDS)
-        .readTimeout(if (SingBoxTransport.localProxyMode()) 30 else 15, TimeUnit.SECONDS)
-        .callTimeout(if (SingBoxTransport.localProxyMode()) 90 else 30, TimeUnit.SECONDS)
+        //
+        // ⚠ [callTimeoutSeconds] caps all three. A burn call left on the
+        // defaults ran 30 or 90 s, so one hung recover spent the cascade's whole
+        // 15 s deadline and its one retry never ran. The proxied twin from
+        // [http] and every rung of [viaBestRoute] come from newBuilder() and
+        // inherit the cap.
+        .connectTimeout(capped(if (SingBoxTransport.localProxyMode()) 30L else 10L), TimeUnit.SECONDS)
+        .readTimeout(capped(if (SingBoxTransport.localProxyMode()) 30L else 15L), TimeUnit.SECONDS)
+        .callTimeout(callTimeoutSeconds ?: (if (SingBoxTransport.localProxyMode()) 90L else 30L), TimeUnit.SECONDS)
         // Don't let pooled connections sit idle long enough to die unnoticed;
         // a fresh one is cheap next to a 10s+ dead-socket hang.
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
@@ -1566,6 +1580,74 @@ class RcqApi(
         sendNoResult("DELETE", "/auth/account", null, authed = true)
     }
 
+    /** DELETE /auth/account for the burn cascade (F2): the HTTP status, never
+     *  thrown, because 401, 403 and 404 each mean something different there.
+     *  Throws IOException only when no answer came back at all. */
+    suspend fun deleteAccountStatus(): Int = withContext(Dispatchers.IO) {
+        val b = Request.Builder().url("$baseUrl/auth/account").delete()
+        token?.let { b.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(b.build()).execute() }.use { it.code }
+    }
+
+    /** What one recover gave the burn cascade. [challengeMissing]: the
+     *  challenge route itself answered 404, which is an island too old to prove
+     *  a key on, never "no account". [code] is the exact detail code of a
+     *  refusal ([AuthRefusal.IDENTITY_NOT_FOUND], `identity_rotated`, ...). */
+    class BurnRecover(val status: Int, val code: String?, val token: String?, val challengeMissing: Boolean) {
+        override fun toString(): String = "BurnRecover($status, $code)"
+    }
+
+    /**
+     * Challenge and recover with [signingKeyB64], for the burn cascade only.
+     *
+     * ⚠ Not [Multihome.recoverOn], which maps every 404 to null: there a 404
+     * from the challenge route (an island too old) and `identity_rotated` (the
+     * copy sits under a key changed elsewhere) both read as "no account here",
+     * and a burn that believed that would wipe the only key able to delete
+     * the copy. Here each answer comes back as it was given.
+     */
+    suspend fun recoverForBurn(signingKeyB64: String, sign: (String) -> String): BurnRecover = withContext(Dispatchers.IO) {
+        val chReq = Request.Builder().url("$baseUrl/auth/recover/challenge")
+            .post(gson.toJson(RecoverChallengeRequest(signingKeyB64)).toRequestBody(JSON))
+            .build()
+        val challenge = viaBestRoute { it.newCall(chReq).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (resp.code == 404) return@withContext BurnRecover(404, refusalOf("HTTP 404: $text").code, null, challengeMissing = true)
+            if (!resp.isSuccessful) return@withContext BurnRecover(resp.code, refusalOf("HTTP ${resp.code}: $text").code, null, false)
+            runCatching { gson.fromJson(text, RecoverChallengeResponse::class.java)?.challenge }.getOrNull()
+                ?: return@withContext BurnRecover(resp.code, null, null, false)
+        }
+        val body = gson.toJson(RecoverRequest(signingKeyB64, challenge, sign(challenge)))
+        val recReq = Request.Builder().url("$baseUrl/auth/recover").post(body.toRequestBody(JSON)).build()
+        viaBestRoute { it.newCall(recReq).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (resp.isSuccessful) {
+                val tok = runCatching { gson.fromJson(text, RegisterResponse::class.java)?.token }.getOrNull()
+                BurnRecover(resp.code, null, tok?.takeIf { it.isNotEmpty() }, false)
+            } else {
+                BurnRecover(resp.code, refusalOf("HTTP ${resp.code}: $text").code, null, false)
+            }
+        }
+    }
+
+    /** What `DELETE /contacts/pending/{id}` answered: the status, the detail
+     *  code of a refusal and a 429's Retry-After. */
+    data class WithdrawAnswer(val status: Int, val code: String?, val retryAfter: Int?)
+
+    /** F1: clear a pending request addressed to this (guest) account without
+     *  answering it on this island. Never throws on an HTTP status; an
+     *  IOException means no answer came back. See [ServerCapabilities.contact_pending_withdraw]. */
+    suspend fun withdrawPending(id: Int): WithdrawAnswer = withContext(Dispatchers.IO) {
+        val b = Request.Builder().url("$baseUrl/contacts/pending/$id").delete()
+        token?.let { b.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            val r = refusalOf("HTTP ${resp.code}: $text")
+            val retry = r.retryAfter ?: resp.header("Retry-After")?.trim()?.toIntOrNull()
+            WithdrawAnswer(resp.code, r.code, retry)
+        }
+    }
+
     data class MigrateResponse(val new_uin: Int = 0, val token: String = "")
 
     /** POST /account/migrate — move to a freshly-allocated UIN. Server
@@ -1835,6 +1917,13 @@ class RcqApi(
         // island does not say", and the client keeps its own default of what
         // every RCQ island has shipped with.
         val media_max_blob_bytes: Long = 0,
+        /** F1 (server S1): `DELETE /contacts/pending/{id}` exists, so a request
+         *  answered from the home island can be cleared on the island that
+         *  holds our guest copy. Default false. ⚠ Absent means no withdraw at
+         *  all: the client hides the row locally and never declines instead,
+         *  because a decline tells the requester "no" about a request that was
+         *  in fact accepted. */
+        val contact_pending_withdraw: Boolean = false,
     )
     data class ServerInfoResponse(
         val name: String = "",

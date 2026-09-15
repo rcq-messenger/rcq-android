@@ -421,6 +421,28 @@ internal fun HomeScreen(
     // saying how many are waiting while folded.
     val collapsedRequests = "sec:req" in sectionFlags
     val collapsedCiRequests = "sec:cireq" in sectionFlags
+    // F1: Home (and unfolding the requests) asks the islands this device
+    // visited for requests addressed to our guest copies, at most once a
+    // minute per island.
+    LaunchedEffect(collapsedCiRequests) { if (!collapsedCiRequests) session.pokeVisitedPending() }
+    // A request from a guest poll is accepted through a sheet that says what
+    // accepting discloses; the flag is the island's card differing from a key
+    // seen in a room there.
+    var ciServerAsk by remember { mutableStateOf<Pair<CrossIslandRequestsStore.Request, Boolean>?>(null) }
+    ciServerAsk?.let { (req, keyWarn) ->
+        CiServerAcceptSheet(
+            req = req,
+            keyWarn = keyWarn,
+            onDismiss = { ciServerAsk = null },
+            onAccept = {
+                ciServerAsk = null
+                scope.launch {
+                    val out = runCatching { session.acceptCrossIslandRequestDetailed(req.uin, req.host, confirmKeyChange = keyWarn) }.getOrNull()
+                    if (out == app.rcq.android.Session.CiAccept.KEY_DIFFERS) ciServerAsk = req to true
+                }
+            },
+        )
+    }
 
     // ── The user's own sections (founder item 1 of 23.08) ────────────────
     //
@@ -881,7 +903,7 @@ internal fun HomeScreen(
                                 // A row that claims an accepted contact's address
                                 // under a different signing key says so instead of
                                 // its preview: it may not be them.
-                                preview = if (r.keyChanged) stringResource(R.string.ci_key_changed) else r.preview.ifEmpty {
+                                preview = if (r.keyChanged) stringResource(R.string.ci_key_changed) else if (r.fromServer) ciServerLine(r, groups) else r.preview.ifEmpty {
                                     if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
                                 },
                                 // ⚠ A key-changed row offers Dismiss only: Accept and
@@ -889,7 +911,7 @@ internal fun HomeScreen(
                                 // silence the real contact instead of the impostor.
                                 onAccept = if (r.keyChanged) null else {
                                     {
-                                        scope.launch {
+                                        if (r.fromServer) { ciServerAsk = r to r.viaKeyChanged } else scope.launch {
                                             // Accepting a same-island stranger releases their
                                             // held messages into a normal thread; open it.
                                             runCatching { session.acceptCrossIslandRequest(r.uin, r.host) }
@@ -2131,7 +2153,8 @@ private fun CiPendingRow(
         }
         Column(Modifier.weight(1f)) {
             Text(tag, color = c.textPrimary, fontSize = 14.sp)
-            if (preview.isNotEmpty()) Text(preview, color = c.textSecondary, fontSize = 12.sp, maxLines = 1)
+            // Two lines: a guest-poll row names the island and the shared room (F1).
+            if (preview.isNotEmpty()) Text(preview, color = c.textSecondary, fontSize = 12.sp, maxLines = 2)
         }
         // Three, because two were not enough: accept or block left no way to
         // say "not now" without silencing a stranger permanently (#586). The

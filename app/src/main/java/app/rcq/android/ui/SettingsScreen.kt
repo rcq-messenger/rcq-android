@@ -1034,12 +1034,14 @@ private fun SettingsRoot(
         )
     }
     if (confirmBurn) {
-        ConfirmSheet(
-            title = stringResource(R.string.cs_burn_title),
-            body = stringResource(R.string.cs_burn_body),
-            confirm = stringResource(R.string.cs_burn_cta), destructive = true,
-            onConfirm = { confirmBurn = false; scope.launch { onBurned(session.burnAccount()) } },
-            onDismiss = { confirmBurn = false },
+        // F2: the copies on other islands go first, and the sheet decides what
+        // happens when one of them fails. The work runs on this screen's scope
+        // so it finishes even if the sheet is dragged away.
+        BurnSheet(
+            session = session,
+            scope = scope,
+            onClose = { confirmBurn = false },
+            onBurned = { next -> confirmBurn = false; onBurned(next) },
         )
     }
     if (showBugReport) {

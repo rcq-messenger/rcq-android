@@ -29,6 +29,9 @@ import app.rcq.android.model.OutgoingRequest
 import app.rcq.android.model.PendingRequest
 import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
+import app.rcq.android.net.PendingPollSchedule
+import app.rcq.android.net.GuestPendingRequests
+import app.rcq.android.net.BurnCascade
 import app.rcq.android.net.CrossIslandSender
 import app.rcq.android.net.DeviceId
 import app.rcq.android.net.JwtPeek
@@ -54,6 +57,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -2825,7 +2829,9 @@ class Session(context: Context) {
         // it there and destroys the only other copy. This loop runs on a timer
         // that survives the lock, so the guard belongs here and not only at the
         // call site.
-        if (duressViewUp) return
+        // A burn deletes the copies these mailboxes belong to: a drain that
+        // recovered a token now would write fresh credentials for one (F2).
+        if (duressViewUp || burning) return
         // ⚠⚠ And the same "acked and gone" hazard is what makes an account
         // switch mid-drain worse than a leak here: the ack destroys account
         // A's mail on the backup island while the rows are being filed under
@@ -2870,7 +2876,7 @@ class Session(context: Context) {
             // Stage 5: a backup island that keeps one log per room is drained
             // from it too, right after its queue; a log row is filed exactly
             // like a legacy group row of the same mailbox, under the alias.
-            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host, envelopeType ->
+            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp && !burning }, onLogRow = { payload, groupId, host, envelopeType ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -2901,7 +2907,7 @@ class Session(context: Context) {
      *  normal ingest, whose cross-island consent gate quarantines unknown
      *  senders. Never throws. */
     private suspend fun drainVisitedQueuesOnce(epoch: Int = epochNow()) {
-        if (duressViewUp) return   // same acked-and-gone hazard as the backup drain
+        if (duressViewUp || burning) return   // same acked-and-gone hazard as the backup drain
         if (!stillOn(epoch)) return
         // The list is a snapshot ON PURPOSE. VisitedIslandsStore is a singleton
         // that rebindTo re-points, so reading it again after a suspension gives
@@ -2917,7 +2923,7 @@ class Session(context: Context) {
             // Stage 5 on the guest mailbox too: the rooms we visit live on
             // their island, and one that keeps a log is read from it (the
             // same filing under the alias as the legacy rows below).
-            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host, envelopeType ->
+            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) && !duressViewUp && !burning }, onLogRow = { payload, groupId, host, envelopeType ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -2932,6 +2938,10 @@ class Session(context: Context) {
                 else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true) }
             }
         }
+        // F1: the contact requests addressed to our guest copies, from the SAME
+        // snapshot and under the same guard. Due at most every five minutes
+        // per island, see [PendingPollSchedule].
+        if (stillOn(epoch) && !duressViewUp && !burning) pollVisitedPendingOnce(epoch, visited, sp, pp)
     }
 
     /** Cache the owner's read-receipt visibility so we honour a "nobody"
@@ -3286,7 +3296,20 @@ class Session(context: Context) {
         // the person type the PIN. Now the tokens are copied into memory here,
         // every store below is erased, and only then are the deletes launched,
         // detached, from that copy. Flag off: no copy, and nothing is sent.
-        val serverSnapshot = if (alsoServer) snapshotServerHomes() else null
+        app.rcq.android.net.BurnPhases.wipeLocalFirst(
+            alsoServer,
+            snapshot = { snapshotServerHomes() },
+            wipeLocal = { wipeLocalForPin() },
+            // Last, after every store is gone, and it returns at once: see
+            // [app.rcq.android.net.BurnCascade.runDetached]. Its transport
+            // judges certificates from the snapshot and never writes the pin
+            // store, so nothing it does has to be wiped again afterwards.
+            launch = { app.rcq.android.net.BurnCascade.runDetached(it) },
+        )
+    }
+
+    /** Everything [wipeEverything] erases on this device, every account. */
+    private suspend fun wipeLocalForPin() {
         runCatching { calls.teardown() }
         runCatching { audioRooms.teardown() }
         runCatching { nearby.teardown() }
@@ -3375,13 +3398,6 @@ class Session(context: Context) {
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _devices.value = null
         memberNames.clear()
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
-        // Last, after every store above is gone, and it returns at once: see
-        // [app.rcq.android.net.BurnCascade.runDetached]. Its transport judges
-        // certificates from the snapshot and never writes the pin store, so
-        // nothing it does has to be wiped again afterwards.
-        if (serverSnapshot != null) {
-            app.rcq.android.net.BurnCascade.runDetached(serverSnapshot)
-        }
     }
 
     /** Every roster account's home island and session token, copied into
@@ -3395,22 +3411,42 @@ class Session(context: Context) {
      *  judged against that empty store took any certificate on the wire as a
      *  first use: on the hostile network a wipe PIN is typed on, the bearer
      *  token of a self-hosted island went to whoever answered. */
-    private fun snapshotServerHomes(): app.rcq.android.net.BurnCascade.Snapshot =
-        app.rcq.android.net.BurnCascade.Snapshot(
-            AccountManager.accounts.value.mapNotNull { acc ->
-                runCatching {
-                    val s = SecureStore(appCtx, acc.id)
-                    val token = s.token?.takeIf { it.isNotEmpty() } ?: return@runCatching null
-                    val host = s.serverHost ?: RcqApi.DEFAULT_HOST
-                    app.rcq.android.net.BurnCascade.HomeTarget(
-                        host = host,
-                        token = token,
-                        pin = app.rcq.android.net.IslandTrust.recordOf(host),
-                        caOnly = app.rcq.android.net.IslandTrust.isCaOnly(app.rcq.android.net.IslandTrust.hostAndPort(host).first),
-                    )
-                }.getOrNull()
-            },
-        )
+    private fun snapshotServerHomes(): app.rcq.android.net.BurnCascade.Snapshot {
+        val accounts = AccountManager.accounts.value
+        val homes = accounts.mapNotNull { acc ->
+            runCatching {
+                val s = SecureStore(appCtx, acc.id)
+                val token = s.token?.takeIf { it.isNotEmpty() } ?: return@runCatching null
+                val host = s.serverHost ?: RcqApi.DEFAULT_HOST
+                app.rcq.android.net.BurnCascade.HomeTarget(
+                    host = host,
+                    token = token,
+                    pin = app.rcq.android.net.IslandTrust.recordOf(host),
+                    caOnly = app.rcq.android.net.IslandTrust.isCaOnly(app.rcq.android.net.IslandTrust.hostAndPort(host).first),
+                )
+            }.getOrNull()
+        }
+        // F2 (C1): the islands each account visited or keeps a backup on, with
+        // the keys that prove the copies there (both of them while a rotation
+        // is pending). Read here, before the wipe erases the stores and the
+        // keys; the detached run zeroes the key bytes when it ends.
+        val remotes = accounts.flatMap { acc ->
+            runCatching {
+                val s = SecureStore(appCtx, acc.id)
+                val priv = s.signingPrivate ?: return@runCatching emptyList<BurnCascade.BurnTarget>()
+                val rk = rotationKeys(BurnCascade.BurnKey(priv, ed25519Pub(priv)), s.pendingRotationRaw)
+                BurnCascade.planTargets(
+                    BurnCascade.copiesOf(VisitedIslandsStore.listFor(acc.id), s.uin?.let { MultihomeStore.list(it) }.orEmpty()),
+                    ownHost = s.serverHost ?: RcqApi.DEFAULT_HOST,
+                    skipHost = { app.rcq.android.net.RelayConfigStore.isFrontHost(it) },
+                    keysFor = { h -> BurnCascade.keyOrder(rk.current, rk.old, rk.done[h]) },
+                    pinOf = { app.rcq.android.net.IslandTrust.recordOf(it) },
+                    caOnlyOf = { app.rcq.android.net.IslandTrust.isCaOnly(app.rcq.android.net.IslandTrust.hostAndPort(it).first) },
+                )
+            }.getOrDefault(emptyList())
+        }
+        return app.rcq.android.net.BurnCascade.Snapshot(homes, remotes)
+    }
 
     val hasDecoyPin: Boolean get() = PanicPinService.hasDecoyPin()
     fun decoyAccountId(): String? = PanicPinService.decoyAccountId()
@@ -4522,6 +4558,9 @@ class Session(context: Context) {
     suspend fun ensureGuestOn(host: String): VisitedIslandsStore.Visited {
         val h = Multihome.normalizeHost(host) ?: throw IllegalArgumentException("invalid_host")
         if (h == serverHost()) throw IllegalArgumentException("own_island")
+        // A burn is deleting every copy this device made; registering a new
+        // one now would leave a copy nobody knows to delete (F2).
+        if (burning) throw IllegalStateException("burning")
         VisitedIslandsStore.get(h)?.let {
             syncGuestNicknameOnce(h)
             return it
@@ -5759,30 +5798,281 @@ class Session(context: Context) {
             burnDecoySession()
             return decoySessionUin
         }
+        // Without the sheet there is nobody to ask about a failed island, so
+        // this is "burn anyway": the copies elsewhere are tried first, the home
+        // island decides whether anything local is erased.
+        val plan = burnPlan() ?: return store.uin
+        burnRemote(plan)
+        return when (val f = burnFinish(plan)) {
+            is BurnFinish.Burned -> f.nextUin
+            else -> {
+                // Returning the CURRENT uin keeps the caller on this account, which
+                // is the truth: nothing was erased. Say so out loud, otherwise the
+                // screen just closes and the user assumes it worked.
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        appCtx, appCtx.getString(R.string.burn_failed), android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                store.uin
+            }
+        }
+    }
+
+    // ── F2: burn across islands (15.09 spec) ─────────────────────────
+    //
+    // Phases, each a call the Settings sheet makes:
+    //  0. [burnPlan]: what exists, read once, in memory, after the decoy check.
+    //  R. [burnRemote]: every other island in parallel, while the keys that
+    //     prove the copies are still here. The sheet shows what failed and
+    //     offers Try again, Burn anyway or Cancel ([burnCancel]).
+    //  H. [burnFinish]: the home island last, one retry; a failure there keeps
+    //     everything local.
+    //  W. the local wipe, same-key accounts on this device included.
+    // Linked devices never cascade: only the device holding these stores knows
+    // these islands, and no island can make another island delete anything.
+
+    /** What the burn reaches. Memory only, and the key bytes are zeroed when
+     *  the burn finishes or is cancelled. [decoy]: a duress session, where the
+     *  plan is empty and nothing is sent. */
+    class BurnPlan internal constructor(
+        val decoy: Boolean,
+        val remoteHosts: List<String>,
+        val ownedGroups: List<String>,
+        /** Same-key roster accounts on this device: number and island. */
+        val siblings: List<Pair<Int, String>>,
+        internal val accountId: String?,
+        internal val targets: List<BurnCascade.BurnTarget>,
+        internal val siblingRows: List<app.rcq.android.net.BurnPhases.Sibling>,
+        /** Tokens of same-key accounts whose home is OUR island. */
+        internal val homeSiblingTokens: List<String>,
+        /** The keys to prove on OUR island for those accounts, in order. */
+        internal val homeKeys: List<BurnCascade.BurnKey>,
+        private val keys: List<BurnCascade.BurnKey>,
+    ) {
+        internal fun zero() = keys.forEach { it.zero() }
+        override fun toString(): String = "BurnPlan"
+    }
+
+    sealed class BurnFinish {
+        /** [kept]: same-key accounts on our island (number and island) that
+         *  the island did not confirm deleting, so they stay on this device. */
+        data class Burned(val nextUin: Int?, val kept: List<Pair<Int, String>> = emptyList()) : BurnFinish()
+        /** The home island did not confirm: nothing local was touched. */
+        object HomeFailed : BurnFinish()
+        /** The account changed under the plan: nothing was done. */
+        object Refused : BurnFinish()
+    }
+
+    private class BurnSibling(val id: String, val uin: Int?, val host: String, val token: String?) {
+        override fun toString(): String = "BurnSibling"
+    }
+
+    /** From the first remote delete until the burn ends. Every drain, the guest
+     *  poll and guest registration stop on it: a drain that recovered a token
+     *  mid-burn would write fresh credentials for a copy being deleted. */
+    @Volatile private var burning = false
+
+    /** Our own home delete is running, so the 4401 it causes is not a probe. */
+    @Volatile private var burningSelf = false
+
+    suspend fun burnPlan(): BurnPlan? = withContext(Dispatchers.IO) {
+        // ⚠ The duress check comes before any store is read: a decoy plan is
+        // empty, so a burn from the duress view sends nothing (DuressGate stays
+        // the backstop).
+        if (duressViewUp) {
+            return@withContext BurnPlan(true, emptyList(), emptyList(), emptyList(), null, emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+        }
+        // A UIN move rewrites the very stores this plan reads.
+        if (isSelfMigrating() || followingMove) return@withContext null
+        val me = store.uin ?: return@withContext null
+        val accountId = AccountManager.activeId.value
+        val priv = runCatching { signingPriv() }.getOrNull() ?: return@withContext null
+        val storeKey = BurnCascade.BurnKey(priv, ed25519Pub(priv))
+        val rk = rotationKeys(storeKey, store.pendingRotationRaw)
+        val own = serverHost().lowercase()
+        // Every roster account, read once: the same-key ones are burned with
+        // this one, and the numbers of all of them decide whether a backup
+        // token can be trusted ([BurnCascade.backupTokensUsable]).
+        val roster = mutableListOf(BurnCascade.RosterEntry(me, sameKey = true))
+        val siblings = mutableListOf<BurnSibling>()
+        AccountManager.accounts.value.filter { it.id != accountId }.forEach { acc ->
+            roster += runCatching {
+                val s = SecureStore(appCtx, acc.id)
+                val uin = s.uin
+                val sp = s.signingPrivate
+                val same = sp != null && java.security.MessageDigest.isEqual(ed25519Pub(sp), storeKey.pub)
+                if (same) siblings += BurnSibling(acc.id, uin, (s.serverHost ?: RcqApi.DEFAULT_HOST).lowercase(), s.token)
+                BurnCascade.RosterEntry(uin, same)
+            }.getOrElse { BurnCascade.RosterEntry(null, sameKey = false, readable = false) }
+        }
+        fun backupCopies(visited: List<VisitedIslandsStore.Visited>, number: Int?): List<BurnCascade.Copy> =
+            BurnCascade.copiesOf(
+                visited,
+                number?.let { MultihomeStore.list(it) }.orEmpty(),
+                backupTokens = number != null && BurnCascade.backupTokensUsable(number, roster),
+            )
+        val copies = backupCopies(VisitedIslandsStore.list(), me) +
+            siblings.flatMap { sib ->
+                backupCopies(VisitedIslandsStore.listFor(sib.id), sib.uin) + BurnCascade.Copy(sib.host, sib.uin, sib.token)
+            }
+        val targets = BurnCascade.planTargets(
+            copies,
+            ownHost = own,
+            skipHost = { app.rcq.android.net.RelayConfigStore.isFrontHost(it) },
+            keysFor = { h -> BurnCascade.keyOrder(rk.current, rk.old, rk.done[h]) },
+            pinOf = { app.rcq.android.net.IslandTrust.recordOf(it) },
+            caOnlyOf = { app.rcq.android.net.IslandTrust.isCaOnly(app.rcq.android.net.IslandTrust.hostAndPort(it).first) },
+        )
+        // Rooms on visited islands whose owner is our guest number there: a
+        // burn deletes them for everyone in them, and the sheet says so.
+        val owned = _groups.value.mapNotNull { g ->
+            val h = g.host ?: return@mapNotNull null
+            if (VisitedIslandsStore.get(h)?.uin == g.ownerUin) g.name else null
+        }.distinct()
+        BurnPlan(
+            decoy = false,
+            remoteHosts = targets.map { it.host },
+            ownedGroups = owned,
+            siblings = siblings.mapNotNull { s -> s.uin?.let { it to s.host } },
+            accountId = accountId,
+            targets = targets,
+            siblingRows = siblings.map { app.rcq.android.net.BurnPhases.Sibling(it.id, it.uin, it.host, onHome = it.host == own) },
+            homeSiblingTokens = siblings.filter { it.host == own }.mapNotNull { it.token?.takeIf { t -> t.isNotEmpty() } },
+            homeKeys = BurnCascade.keyOrder(rk.current, rk.old, rk.done[own]),
+            keys = listOfNotNull(storeKey, rk.current, rk.old).distinct(),
+        )
+    }
+
+    /** Phase R, or a retry of it over [only]. Returns one result per island. */
+    suspend fun burnRemote(plan: BurnPlan, only: Set<String>? = null): Map<String, BurnCascade.IslandBurnResult> {
+        val decoy = plan.decoy || duressViewUp
+        if (!decoy && AccountManager.activeId.value != plan.accountId) return emptyMap()
+        if (!decoy) burning = true
+        val targets = if (only == null) plan.targets else plan.targets.filter { it.host in only }
+        return app.rcq.android.net.BurnPhases.remote(decoy, targets, BurnCascade.ApiTransport)
+    }
+
+    /** The person kept the account. Copies already deleted elsewhere stay
+     *  deleted; the drains resume. */
+    fun burnCancel(plan: BurnPlan) {
+        burning = false
+        plan.zero()
+    }
+
+    /** Phases H and W. */
+    suspend fun burnFinish(plan: BurnPlan): BurnFinish {
+        val decoy = plan.decoy || duressViewUp
         val burnedId = AccountManager.activeId.value
+        if (!decoy && burnedId != plan.accountId) {
+            burnCancel(plan)
+            return BurnFinish.Refused
+        }
+        if (!decoy) {
+            burning = true
+            burningSelf = true
+        }
+        // ⚠⚠ Not cancellable from here on. This runs on the Settings screen's
+        // scope: a person who left Settings after the island deleted the
+        // account cancelled the local wipe with it, and keys, tokens and history
+        // stayed on disk for an account that no longer existed. A cancel during
+        // the home delete is no better, since the island may already have acted.
+        return withContext(NonCancellable) {
+            try {
+                when (val o = app.rcq.android.net.BurnPhases.finish(decoy, plan.siblingRows, burnHost(plan, burnedId))) {
+                    app.rcq.android.net.BurnPhases.Outcome.HomeFailed -> {
+                        android.util.Log.w("RCQburn", "server delete failed; keeping the account rather than faking erasure")
+                        BurnFinish.HomeFailed
+                    }
+                    is app.rcq.android.net.BurnPhases.Outcome.Burned ->
+                        BurnFinish.Burned(o.nextUin, o.kept.mapNotNull { s -> s.uin?.let { it to s.host } })
+                }
+            } finally {
+                if (!decoy) {
+                    burningSelf = false
+                    burning = false
+                }
+                plan.zero()
+            }
+        }
+    }
+
+    /** The session side of [app.rcq.android.net.BurnPhases.finish]. */
+    private fun burnHost(plan: BurnPlan, burnedId: String?) = object : app.rcq.android.net.BurnPhases.Host {
+        override suspend fun burnDecoy(): Int? {
+            burnDecoySession()
+            return decoySessionUin
+        }
+
         // The server call decides whether anything is actually erased, so a
         // failure must not be swallowed: wiping local storage regardless left
         // the app telling someone their data was deleted while the account row
-        // was still on the island. Retry once (a burn is usually attempted on a
-        // bad network, and the endpoint is idempotent), and only then give up
-        // and keep the account so the user can try again instead of being told
-        // a comforting lie.
-        val serverDeleted = runCatching { api.deleteAccount() }
-            .recoverCatching { api.deleteAccount() }
-            .isSuccess
-        if (!serverDeleted) {
-            // Returning the CURRENT uin keeps the caller on this account, which
-            // is the truth: nothing was erased. Say so out loud, otherwise the
-            // screen just closes and the user assumes it worked.
-            android.util.Log.w("RCQburn", "server delete failed; keeping the account rather than faking erasure")
-            withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(
-                    appCtx, appCtx.getString(R.string.burn_failed), android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }
-            return store.uin
+        // was still on the island. The flow retries once (a burn is usually
+        // attempted on a bad network, and the endpoint is idempotent), and only
+        // then gives up and keeps the account so the user can try again.
+        override suspend fun deleteHome(): Boolean = try {
+            api.deleteAccount()
+            true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
         }
-        return eraseActiveAccountLocally(burnedId)
+
+        // A same-key account on this very island is a second row the home
+        // delete did not name. Its stored token may be stale (401) or wrong
+        // (404); recover with our keys then finds that row, because the active
+        // one is gone.
+        override suspend fun burnHomeSiblings(): BurnCascade.IslandBurnResult = withContext(Dispatchers.IO) {
+            val own = serverHost().lowercase()
+            val target = BurnCascade.BurnTarget(own, null, plan.homeSiblingTokens, plan.homeKeys)
+            BurnCascade.run(listOf(target), BurnCascade.ApiTransport)[own]
+                ?: BurnCascade.IslandBurnResult.NotTried
+        }
+
+        override fun wipeSibling(id: String, uin: Int?) = wipeSiblingLocally(id, uin)
+
+        override suspend fun eraseActive(): Int? = eraseActiveAccountLocally(burnedId)
+    }
+
+    /** Phase W for a same-key roster account that is not the active one. */
+    private fun wipeSiblingLocally(accountId: String, uin: Int?) {
+        runCatching {
+            SecureStore.wipeAccount(appCtx, accountId)
+            MessageDb.wipeAccount(appCtx, accountId)
+            SignalStoreDb.wipeAccount(appCtx, accountId)
+            app.rcq.android.data.VisitStore.wipeAccount(accountId)
+            CrossIslandStore.wipeAccount(accountId)
+            VisitedIslandsStore.wipeAccount(accountId)
+            LocalStores.clearAccount(accountId)
+            app.rcq.android.data.AccountCards.forget(appCtx, accountId)
+        }
+        AccountManager.remove(accountId)
+        uin?.let {
+            runCatching {
+                CrossIslandRequestsStore.wipeOwn(it)
+                MultihomeStore.wipeOwn(it)
+            }
+        }
+    }
+
+    private fun ed25519Pub(priv: ByteArray): ByteArray = Ed25519PrivateKeyParameters(priv, 0).generatePublicKey().encoded
+
+    private class RotationKeys(val current: BurnCascade.BurnKey, val old: BurnCascade.BurnKey?, val done: Map<String, Boolean>)
+
+    /** The keys a burn proves while a PendingRotation exists: the new one
+     *  (derived from the pending seed) and the retired one, with which islands
+     *  already took the new key. Without a record, the store key alone. */
+    private fun rotationKeys(storeKey: BurnCascade.BurnKey, raw: String?): RotationKeys {
+        val p = app.rcq.android.data.PendingRotation.decode(raw) ?: return RotationKeys(storeKey, null, emptyMap())
+        fun keyOf(priv: ByteArray?): BurnCascade.BurnKey? =
+            priv?.takeIf { it.size == 32 }?.let { BurnCascade.BurnKey(it, ed25519Pub(it)) }
+        val old = keyOf(p.oldSigningPriv?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() })
+        val fresh = runCatching { Base64.decode(p.newSeed, Base64.NO_WRAP) }.getOrNull()
+            ?.let { seed -> runCatching { app.rcq.android.crypto.IdentityKeys.fromSeed(seed).signingPrivate }.getOrNull() }
+            .let { keyOf(it) }
+        val done = p.targets.associate { it.host.lowercase() to (it.status == app.rcq.android.data.PendingRotation.Target.Status.DONE) }
+        return RotationKeys(fresh ?: storeKey, old, done)
     }
 
     /** The local half of a burn: wipe the ACTIVE account's storage, drop it
@@ -5979,6 +6269,9 @@ class Session(context: Context) {
         // Never from a duress view: `store` is the real account's and a probe
         // outcome must not tear anything down while a coercer is watching.
         if (duressViewUp) return
+        // Our own burn closes this socket with 4401 on purpose; [burnFinish]
+        // erases locally itself (F2).
+        if (burningSelf) return
         val now = System.currentTimeMillis()
         if (now - lastBurnProbeAt < BURN_PROBE_THROTTLE_MS) return
         lastBurnProbeAt = now
@@ -9517,9 +9810,12 @@ class Session(context: Context) {
         uin: Int,
         host: String,
         act: String? = Envelope.ACT_REQUEST,
+        /** A card the caller already fetched and checked (F1 accept), pinned
+         *  as is instead of fetching again. */
+        prefetched: CrossIslandSender.Card? = null,
     ): CiAdd = withContext(Dispatchers.IO) {
         if (clashesWithKnownNumber(uin, host)) return@withContext CiAdd.FAILED
-        val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull()
+        val card = prefetched ?: runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull()
             ?: return@withContext if (islandIsClosed(host)) CiAdd.CLOSED_ISLAND else CiAdd.FAILED
         val contact = CrossIslandStore.Contact(
             uin = uin, host = host,
@@ -10161,8 +10457,18 @@ class Session(context: Context) {
      *  so both sides end up holding the other as accepted — the mutual state
      *  §5d already checks and §5e assumes. If the card can't be fetched nothing
      *  was accepted, so the pending row stays instead of vanishing. */
-    suspend fun acceptCrossIslandRequest(uin: Int, host: String): Boolean {
-        val me = store.uin ?: return false
+    suspend fun acceptCrossIslandRequest(uin: Int, host: String): Boolean =
+        acceptCrossIslandRequestDetailed(uin, host) == CiAccept.OK
+
+    /** What [acceptCrossIslandRequestDetailed] did. [CiAccept.KEY_DIFFERS]:
+     *  nothing yet. The row came from a guest poll (F1) and the key card its
+     *  island serves differs from a key this device already saw for that
+     *  number in a room there, so the person confirms before anything is
+     *  pinned. */
+    enum class CiAccept { OK, FAILED, KEY_DIFFERS }
+
+    suspend fun acceptCrossIslandRequestDetailed(uin: Int, host: String, confirmKeyChange: Boolean = false): CiAccept {
+        val me = store.uin ?: return CiAccept.FAILED
         // A SAME-ISLAND stranger (host "", the opt-in Privacy quarantine): no
         // key card to fetch, no §5f accept to deposit. Accepting means "let
         // this person talk": remember the allowance so their future messages
@@ -10174,12 +10480,44 @@ class Session(context: Context) {
             CrossIslandRequestsStore.clear(me, uin, "")?.msgs?.forEach { ingest(it.payload) }
             sendCiAck(uin, "", "accept")
             refreshCiRequests()
-            return true
+            return CiAccept.OK
         }
         // Never for an impostor row: accepting would overwrite the contact
         // pinned at this address with a fresh card. See [isKeyChangedRequest].
-        if (isKeyChangedRequest(me, uin, host)) return false
-        if (addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT) == CiAdd.FAILED) return false
+        if (isKeyChangedRequest(me, uin, host)) return CiAccept.FAILED
+        val row = ciRequestRow(me, uin, host)
+        val srvId = row?.srvReqId
+        // F1: a request island [host] listed for our guest copy. Only that
+        // island vouches for the card, so it is fetched first and compared with
+        // what this device saw for that number in the island's rooms (critic
+        // 6). The card checked is the card pinned: no second fetch to race.
+        var card: CrossIslandSender.Card? = null
+        if (srvId != null) {
+            card = withContext(Dispatchers.IO) { runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull() }
+                ?: return CiAccept.FAILED
+            if (!confirmKeyChange && GuestPendingRequests.keyDiffers(card.signingKey, priorGroupKeys(me, uin, host))) {
+                CrossIslandRequestsStore.updateRow(me, uin, host) { it.copy(viaKeyChanged = true) }
+                refreshCiRequests()
+                return CiAccept.KEY_DIFFERS
+            }
+        }
+        val added = addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT, prefetched = card)
+        if (added == CiAdd.FAILED || added == CiAdd.CLOSED_ISLAND) return CiAccept.FAILED
+        if (srvId != null) {
+            val deposit = if (added == CiAdd.SENT) GuestPendingRequests.Deposit.SENT else GuestPendingRequests.Deposit.ADDED_ONLY
+            when (GuestPendingRequests.afterAccept(deposit, canWithdraw = true, triesBefore = row?.srvAcceptTries ?: 0)) {
+                GuestPendingRequests.AfterAccept.RETRYING, GuestPendingRequests.AfterAccept.GAVE_UP -> {
+                    // Added here, but the accept did not leave. The row stays
+                    // and says so, and the poll deposits it again.
+                    CrossIslandRequestsStore.updateRow(me, uin, host) { it.copy(srvAcceptTries = it.srvAcceptTries + 1, viaKeyChanged = false) }
+                    mergeCrossIslandContacts()
+                    refreshCiRequests()
+                }
+                GuestPendingRequests.AfterAccept.FAILED -> return CiAccept.FAILED
+                else -> completeServerAccept(me, uin, host, srvId)
+            }
+            return CiAccept.OK
+        }
         // Released under the island the row was held under: a row that came off
         // a guest mailbox without a foreign host of its own was attributed to it.
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
@@ -10187,18 +10525,18 @@ class Session(context: Context) {
         // My other devices hold their own copy of this request and would offer
         // to accept it a second time, which re-TOFUs the peer. Hand them the
         // answer and the card just pinned instead.
-        CrossIslandStore.get(uin, host)?.let { c ->
-            sendCiAck(uin, host, "accept", Envelope.CiCard(
-                nick = c.nickname, ik = c.identityKey, sk = c.signingKey,
-                sik = c.signalIdentityKey, gender = c.gender, status = c.statusMessage,
-            ))
-        }
+        CrossIslandStore.get(uin, host)?.let { c -> sendCiAck(uin, host, "accept", ciCardOf(c)) }
         refreshCiRequests()
         // §5e: newly accepted → send our current name + picture once, so they
         // do not sit on the snapshot their card fetch took.
         depositProfileToNewContact(uin, host)
-        return true
+        return CiAccept.OK
     }
+
+    private fun ciCardOf(c: CrossIslandStore.Contact) = Envelope.CiCard(
+        nick = c.nickname, ik = c.identityKey, sk = c.signingKey,
+        sik = c.signalIdentityKey, gender = c.gender, status = c.statusMessage,
+    )
 
     /** Tell my OWN other devices that a cross-island request has been answered,
      *  and hand them the card this device pinned when it was an accept.
@@ -10208,7 +10546,7 @@ class Session(context: Context) {
      *  effort: a lost ack costs exactly what the bug costs today, a request
      *  still sitting on the other device, so it must never fail an accept that
      *  already happened here. */
-    private fun sendCiAck(uin: Int, host: String, act: String, card: Envelope.CiCard? = null) {
+    private fun sendCiAck(uin: Int, host: String, act: String, card: Envelope.CiCard? = null, srv: Envelope.CiSrv? = null) {
         val me = store.uin ?: return
         scope.launch(Dispatchers.IO) {
             runCatching {
@@ -10225,7 +10563,7 @@ class Session(context: Context) {
                 // one only when it carries our own signature (P0.1,
                 // [CrossIslandGate.carbonAccepted]), with none of the allowance
                 // a keyless carbon of another kind still gets.
-                sendOwnCarbon(me, null, Envelope.CiAck(uin, host, act, card), envelopeType = "read")
+                sendOwnCarbon(me, null, Envelope.CiAck(uin, host, act, card, srv), envelopeType = "read")
             }
         }
     }
@@ -10240,6 +10578,13 @@ class Session(context: Context) {
     private fun applyCiAck(ack: Envelope.CiAck) {
         val me = store.uin ?: return
         if (ack.uin <= 0) return
+        // F1: the answer closed a request on the island that holds our guest
+        // copy; this device's own poll of that island must not offer it again.
+        // Only for the island the ack is about.
+        if (ack.act == "accept" || ack.act == "decline" || ack.act == "block") {
+            ack.srv?.takeIf { it.host.equals(ack.host, ignoreCase = true) }
+                ?.let { CrossIslandRequestsStore.markAnswered(me, it.host, it.id) }
+        }
         when (ack.act) {
             "block" -> {
                 CrossIslandRequestsStore.block(me, ack.uin, ack.host)
@@ -10284,13 +10629,29 @@ class Session(context: Context) {
      */
     fun dismissCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
-        CrossIslandRequestsStore.clear(me, uin, host)
-        sendCiAck(uin, host, "decline")
+        val srvId = CrossIslandRequestsStore.clear(me, uin, host)?.srvReqId
+        if (srvId != null) {
+            // F1: the request lives on island [host] as a same-island request
+            // to our guest copy, so it is declined THERE, honestly: the
+            // requester sees exactly the "declined" a same-island answer gives.
+            CrossIslandRequestsStore.markAnswered(me, host, srvId)
+            val ep = epochNow()
+            scope.launch(Dispatchers.IO) { runCatching { declineServerRow(ep, host, srvId) } }
+        }
+        sendCiAck(uin, host, "decline", srv = srvOf(host, srvId))
         refreshCiRequests()
     }
 
     fun blockCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
+        val srvId = ciRequestRow(me, uin, host)?.srvReqId
+        if (srvId != null) {
+            // F1: withdrawn on that island, not declined, and only where the
+            // island advertises it; elsewhere the row is just hidden here.
+            CrossIslandRequestsStore.markAnswered(me, host, srvId)
+            val ep = epochNow()
+            scope.launch(Dispatchers.IO) { runCatching { withdrawServerRow(ep, me, host, srvId) } }
+        }
         // ⚠ An impostor row names the address of a contact we accepted. Blocking
         // the address (here, in the bare-number list and on sibling devices)
         // would silence the REAL contact, so the row is only cleared.
@@ -10300,7 +10661,7 @@ class Session(context: Context) {
             return
         }
         CrossIslandRequestsStore.block(me, uin, host)
-        sendCiAck(uin, host, "block")
+        sendCiAck(uin, host, "block", srv = srvOf(host, srvId))
         // ...and in the list the user can actually SEE. The quarantine store
         // keeps its own per-(uin,host) denylist, so blocking a cross-island
         // stranger silenced them but left Settings → Blocked users empty, which
@@ -10308,6 +10669,230 @@ class Session(context: Context) {
         // surface: this is also what makes Unblock possible at all.
         LocalStores.setBlocked(uin, true)
         refreshCiRequests()
+    }
+
+    private fun srvOf(host: String, id: Int?): Envelope.CiSrv? = id?.let { Envelope.CiSrv(host.lowercase(), it) }
+
+    // ── F1: requests addressed to our guest copies (15.09 spec) ────────
+    //
+    // Somebody on island B meets us in a room there and sends an ordinary
+    // same-island contact request to our guest number. B cannot forward it
+    // anywhere, so it is seen only when this device asks B, with the guest
+    // token, on the visited drain. Accepting answers from HOME with a sealed
+    // §5f accept and withdraws the row on B; declining declines on B.
+    // Only VISITED islands are asked (founder, open question e), never the
+    // backup homes, and never from a duress view or during a burn.
+
+    private val pendingPoll = PendingPollSchedule()
+
+    /** One poll at a time: the 30 s loop and a poke from Home would otherwise
+     *  ask the same island twice in the same second. */
+    private val pendingPollLock = Mutex()
+
+    /** "own:host" → no withdraw before this time (the island's 60 an hour). */
+    private val withdrawFloorAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun pollKey(me: Int, host: String) = "$me@${host.lowercase()}"
+
+    private fun ciRequestRow(me: Int, uin: Int, host: String): CrossIslandRequestsStore.Request? =
+        CrossIslandRequestsStore.list(me).firstOrNull { it.uin == uin && it.host.equals(host, ignoreCase = true) }
+
+    /** The requests list was opened: every visited island becomes due now, at
+     *  most once a minute each ([PendingPollSchedule.forceSoon]). */
+    fun pokeVisitedPending() {
+        if (duressViewUp || burning) return
+        val me = store.uin ?: return
+        val visited = VisitedIslandsStore.list()
+        if (visited.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val forced = visited.filter { pendingPoll.forceSoon(pollKey(me, it.host), now) }
+        if (forced.isEmpty()) return
+        val ep = epochNow()
+        scope.launch {
+            runCatching {
+                val sp = signingPriv()
+                val pp = signingPub()
+                if (stillOn(ep)) pollVisitedPendingOnce(ep, forced, sp, pp)
+            }
+        }
+    }
+
+    private suspend fun pollVisitedPendingOnce(epoch: Int, visited: List<VisitedIslandsStore.Visited>, sp: ByteArray, pp: ByteArray) {
+        val me = store.uin ?: return
+        val ours = { stillOn(epoch) && !duressViewUp && !burning }
+        if (!ours() || visited.isEmpty()) return
+        if (!pendingPollLock.tryLock()) return
+        try {
+            withContext(Dispatchers.IO) {
+                Multihome.pollVisitedPending(
+                    visited,
+                    keyFor = { sp to pp },
+                    stillOurs = ours,
+                    due = { h -> pendingPoll.due(pollKey(me, h), System.currentTimeMillis()) },
+                    onRows = { h, guest, rows ->
+                        pendingPoll.onResult(pollKey(me, h), System.currentTimeMillis(), ok = true)
+                        ingestVisitedPending(epoch, me, h, guest, rows)
+                    },
+                    onFail = { h, status, retryAfter ->
+                        pendingPoll.onResult(
+                            pollKey(me, h), System.currentTimeMillis(), ok = false,
+                            retryAfterSec = if (status == 429) (retryAfter ?: 0) else null,
+                        )
+                    },
+                )
+            }
+        } finally {
+            pendingPollLock.unlock()
+        }
+    }
+
+    /** One island's list, through [GuestPendingRequests.plan]. */
+    private suspend fun ingestVisitedPending(
+        epoch: Int,
+        me: Int,
+        host: String,
+        guest: VisitedIslandsStore.Visited,
+        rows: List<RcqApi.PendingRow>,
+    ) {
+        val ours = { stillOn(epoch) && !duressViewUp && !burning }
+        if (!ours()) return
+        val h = host.lowercase()
+        val canWithdraw = rows.isNotEmpty() && Multihome.advertisesPendingWithdraw(h)
+        if (!ours()) return
+        val local = CrossIslandRequestsStore.list(me).filter { it.host.equals(h, ignoreCase = true) && it.srvReqId != null }
+        val steps = GuestPendingRequests.plan(
+            rows.map { GuestPendingRequests.Row(it.id, it.from_uin, it.nickname) },
+            canWithdraw,
+            isBlocked = { CrossIslandRequestsStore.isBlocked(me, it, h) },
+            isAnswered = { CrossIslandRequestsStore.isAnswered(me, h, it) },
+            hasContact = { CrossIslandStore.get(it, h) != null },
+            acceptTries = { uin, id -> local.firstOrNull { it.uin == uin && it.srvReqId == id }?.srvAcceptTries ?: 0 },
+        )
+        for (s in steps) {
+            if (!ours()) return
+            when (s.action) {
+                GuestPendingRequests.Action.UPSERT ->
+                    CrossIslandRequestsStore.upsertServerRequest(me, s.row.fromUin, h, s.row.id, guest.uin, s.row.nickname)
+                GuestPendingRequests.Action.WITHDRAW ->
+                    if (withdrawServerRow(epoch, me, h, s.row.id) == GuestPendingRequests.Withdraw.RATE_LIMITED) break
+                GuestPendingRequests.Action.REDEPOSIT -> redepositServerAccept(epoch, me, s.row.fromUin, h, s.row.id)
+                GuestPendingRequests.Action.KEEP, GuestPendingRequests.Action.SKIP -> Unit
+            }
+        }
+        if (!ours()) return
+        val live = rows.mapTo(HashSet()) { it.id }
+        CrossIslandRequestsStore.reconcileServerRequests(me, h, live)
+        refreshCiRequests()
+    }
+
+    /** `DELETE /contacts/pending/{id}` on [host] with the guest token, 401 →
+     *  recover once. Null when nothing was asked (no capability, no guest
+     *  entry, the account moved on).
+     *
+     *  Nothing is recorded on failure. The row stays answered, and the next
+     *  poll that still finds it listed withdraws it again
+     *  ([GuestPendingRequests.plan]), after a process restart too. */
+    private suspend fun withdrawServerRow(epoch: Int, me: Int, host: String, id: Int): GuestPendingRequests.Withdraw? {
+        val h = host.lowercase()
+        val ours = { stillOn(epoch) && !duressViewUp && !burning }
+        if (!ours()) return null
+        // ⚠ No capability, no call, and never a decline in its place: the row
+        // is already hidden here, and a decline would tell the requester "no"
+        // about a request that may have been accepted at home.
+        if (!Multihome.advertisesPendingWithdraw(h)) return null
+        if (System.currentTimeMillis() < (withdrawFloorAt["$me:$h"] ?: 0L)) {
+            return GuestPendingRequests.Withdraw.RATE_LIMITED
+        }
+        if (!ours()) return null
+        val guest = VisitedIslandsStore.get(h) ?: return null
+        val api = RcqApi("https://$h").apply { setToken(guest.jwt) }
+        var ans = try {
+            api.withdrawPending(id)
+        } catch (e: java.io.IOException) {
+            return GuestPendingRequests.Withdraw.RETRY
+        }
+        if (ans.status == 401) {
+            if (!ours()) return null
+            val fresh = runCatching { Multihome.recoverOn(h, signingPriv(), signingPub()) }.getOrNull()
+            if (fresh == null || !ours()) return GuestPendingRequests.Withdraw.UNAUTHORIZED
+            VisitedIslandsStore.updateCreds(h, fresh.uin, fresh.token)
+            api.setToken(fresh.token)
+            ans = try {
+                api.withdrawPending(id)
+            } catch (e: java.io.IOException) {
+                return GuestPendingRequests.Withdraw.RETRY
+            }
+        }
+        val out = GuestPendingRequests.withdrawOutcome(ans.status, ans.code)
+        when (out) {
+            // A 404 without the endpoint's code: the route is not there,
+            // whatever the cached capability said.
+            GuestPendingRequests.Withdraw.ROUTE_LOST -> Multihome.forgetPendingWithdraw(h)
+            GuestPendingRequests.Withdraw.RATE_LIMITED ->
+                withdrawFloorAt["$me:$h"] = System.currentTimeMillis() +
+                    maxOf((ans.retryAfter ?: 0) * 1000L, PendingPollSchedule.MIN_RETRY_AFTER_MS)
+            else -> Unit
+        }
+        return out
+    }
+
+    /** `POST /contacts/respond {accept:false}` on [host] with the guest token,
+     *  401 → recover once. Best effort: the row is hidden here either way. */
+    private suspend fun declineServerRow(epoch: Int, host: String, id: Int) {
+        val h = host.lowercase()
+        val ours = { stillOn(epoch) && !duressViewUp && !burning }
+        if (!ours()) return
+        val guest = VisitedIslandsStore.get(h) ?: return
+        val api = RcqApi("https://$h").apply { setToken(guest.jwt) }
+        try {
+            api.respondContact(id, false)
+        } catch (e: java.io.IOException) {
+            if (e.message?.startsWith("HTTP 401") != true || !ours()) return
+            val fresh = runCatching { Multihome.recoverOn(h, signingPriv(), signingPub()) }.getOrNull() ?: return
+            if (!ours()) return
+            VisitedIslandsStore.updateCreds(h, fresh.uin, fresh.token)
+            api.setToken(fresh.token)
+            runCatching { api.respondContact(id, false) }
+        }
+    }
+
+    /** An accept that only added the contact here: deposit it again from home. */
+    private suspend fun redepositServerAccept(epoch: Int, me: Int, uin: Int, host: String, id: Int) {
+        val c = CrossIslandStore.get(uin, host)
+        val sent = c != null && withContext(Dispatchers.IO) { depositContactRequest(host, uin, c.identityKey, Envelope.ACT_ACCEPT) }
+        if (!stillOn(epoch) || duressViewUp || burning) return
+        if (sent) {
+            completeServerAccept(me, uin, host, id)
+        } else {
+            CrossIslandRequestsStore.updateRow(me, uin, host) {
+                if (it.srvReqId == id) it.copy(srvAcceptTries = it.srvAcceptTries + 1) else it
+            }
+        }
+    }
+
+    /** The accept reached the requester: the row is answered, its held
+     *  messages are released, the other devices are told (with the island's
+     *  request id), and the row on the island is withdrawn in the background. */
+    private suspend fun completeServerAccept(me: Int, uin: Int, host: String, id: Int) {
+        CrossIslandRequestsStore.markAnswered(me, host, id)
+        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
+        mergeCrossIslandContacts()
+        CrossIslandStore.get(uin, host)?.let { c -> sendCiAck(uin, host, "accept", ciCardOf(c), srv = srvOf(host, id)) }
+        refreshCiRequests()
+        depositProfileToNewContact(uin, host)
+        val ep = epochNow()
+        scope.launch(Dispatchers.IO) { runCatching { withdrawServerRow(ep, me, host, id) } }
+    }
+
+    /** Signing keys this device already saw for [uin] in rooms on [host]: the
+     *  cached rosters and the sender-key chains those rooms handed us. Never
+     *  fetches. */
+    private fun priorGroupKeys(me: Int, uin: Int, host: String): List<String> {
+        val rooms = _groups.value.filter { it.host?.equals(host, ignoreCase = true) == true }
+        val roster = rooms.flatMap { g -> g.members.filter { it.uin == uin }.mapNotNull { it.signingKey?.takeIf { k -> k.isNotBlank() } } }
+        val gids = rooms.flatMap { g -> listOfNotNull(g.id, VisitedIslandsStore.refByAlias(g.id)?.remoteId) }.toSet()
+        val chains = runCatching { app.rcq.android.crypto.SenderKeyStore.inboundSpubs(me, uin, gids) }.getOrDefault(emptyList())
+        return (roster + chains).distinct()
     }
 
     /** Server-side search for the Add window (users + joinable groups). */

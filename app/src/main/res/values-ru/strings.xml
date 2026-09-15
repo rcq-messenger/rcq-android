@@ -292,7 +292,7 @@
     <string name="pin_decoy_pick">Переписки, которые показывает ложный PIN</string>
     <string name="pin_decoy_plausibility">Выберите обычные переписки, где нет ничего чувствительного. Они копируются в ложный профиль, и в копиях номера переписаны на выдуманные, так что внутри ничто не указывает на живого человека. Ложный профиль выдаёт именно пустота.</string>
     <string name="pin_wipe_server_label">Удалить и аккаунт на сервере</string>
-    <string name="pin_wipe_server_desc">По умолчанию выключено: PIN стирания чистит только это устройство. Если включить, он попросит остров удалить и сам аккаунт. Это необратимо, номер не вернётся.</string>
+    <string name="pin_wipe_server_desc">По умолчанию выключено: PIN стирания очищает только это устройство. Если включить, сразу после стирания приложение попросит ваш остров и все острова, где был аккаунт, удалить его. Стирание их не ждёт, но тот, кто следит за сетью, увидит эти соединения. Отменить нельзя, номер не вернётся.</string>
     <string name="pin_decoy_needs_chats">Выберите хотя бы одну переписку</string>
     <string name="pin_decoy_no_chats">Пока нечего копировать</string>
     <string name="pin_decoy_migrate_title">Ложный PIN изменился</string>
@@ -596,7 +596,7 @@
 
     <!-- Settings: account / history / about -->
     <string name="cs_move_footer">Остров сам выберет новый случайный номер. Контакты, группы, ключи и история чатов сохранятся. Выбрать конкретный номер можно в магазине UIN.</string>
-    <string name="cs_burn_footer">Стирает аккаунт везде. Необратимо.</string>
+    <string name="cs_burn_footer">Стирает аккаунт на вашем острове и на островах, где было это устройство. Необратимо.</string>
     <string name="cs_clear_title">Очистить историю чатов?</string>
     <string name="cs_clear_body">Удаляет все сообщения с этого устройства. Аккаунт и контакты остаются.</string>
     <string name="cs_history_cleared">История очищена</string>
@@ -1489,4 +1489,36 @@
     <string name="entry_pay_paid">Оплачено. Ваш код доступа готов.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
     <string name="file_download_speed">%s/с</string>
+
+    <!-- F1/F2 of the 15.09 cross-island spec: requests to guest copies, burn across islands -->
+    <string name="ci_srv_subtitle">Заявка в контакты на острове %1$s</string>
+    <string name="ci_srv_via_group">через группу «%1$s»</string>
+    <string name="ci_srv_via_groups">через группу «%1$s» и ещё %2$d</string>
+    <string name="ci_srv_no_group">Не из ваших групп на этом острове</string>
+    <string name="ci_srv_accept_hint">Если принять, человек увидит ваш домашний номер. Кто это, подтверждает только остров %1$s.</string>
+    <string name="ci_srv_key_differs">Ключ этого человека на острове %1$s не совпадает с тем, что был в группе. Уточните у него, прежде чем принять.</string>
+    <string name="ci_srv_retrying">Не удалось связаться с островом %1$s. Попробуем ещё раз.</string>
+    <string name="ci_srv_gave_up">Остров %1$s не принял ответ. Попробуйте позже.</string>
+    <string name="burn_owned_groups">Группы, которые вы там создали, удалятся у всех участников: %1$s.</string>
+    <string name="burn_sibling">Аккаунт %1$d на %2$s на этом устройстве использует те же ключи и тоже будет сожжён.</string>
+    <string name="burn_sibling_kept">Остров не удалил аккаунт %1$d на %2$s, поэтому он остаётся на этом устройстве.</string>
+    <string name="burn_not_covered">Копии, созданные другими вашими устройствами или добавленные владельцем группы на острове, куда это устройство не заходило, отсюда не удаляются.</string>
+    <string name="burn_progress">Удаляем копии на других островах…</string>
+    <string name="burn_row_confirmed">Остров подтвердил удаление</string>
+    <string name="burn_row_already_gone">Остров сообщает, что копии нет</string>
+    <string name="burn_row_offline">Нет связи</string>
+    <string name="burn_row_timeout">Остров не ответил вовремя</string>
+    <string name="burn_row_suspended">Аккаунт заблокирован на этом острове, удалить его нельзя</string>
+    <string name="burn_row_too_old">Этот остров слишком старый, копию удалить нельзя</string>
+    <string name="burn_row_limit">Копий больше, чем ожидалось, часть могла остаться</string>
+    <string name="burn_row_not_tried">Не успели, время вышло</string>
+    <string name="burn_row_server">Остров не удалил копию</string>
+    <string name="burn_retry">Повторить</string>
+    <string name="burn_anyway">Всё равно сжечь</string>
+    <string name="burn_anyway_hint">Копии на этих островах останутся. После удаления ключей стереть их можно будет только с фразой восстановления.</string>
+    <string name="burn_cancel_partial">Аккаунт остаётся. Уже удалённые копии на %1$s не вернутся.</string>
+    <string name="burn_home_failed_partial">До вашего острова не достучались, аккаунт там цел. Копии на других островах уже удалены. Попробуйте снова, когда будет связь.</string>
+    <plurals name="burn_islands_body"><item quantity="one">У аккаунта есть копия ещё на %1$d острове, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим её, потом аккаунт на вашем острове.</item><item quantity="few">У аккаунта есть копии ещё на %1$d островах, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим их, потом аккаунт на вашем острове.</item><item quantity="many">У аккаунта есть копии ещё на %1$d островах, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим их, потом аккаунт на вашем острове.</item><item quantity="other">У аккаунта есть копии ещё на %1$d островах, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим их, потом аккаунт на вашем острове.</item></plurals>
+    <plurals name="burn_failures_title"><item quantity="one">Не получилось удалить на %1$d острове</item><item quantity="few">Не получилось удалить на %1$d островах</item><item quantity="many">Не получилось удалить на %1$d островах</item><item quantity="other">Не получилось удалить на %1$d островах</item></plurals>
+    <plurals name="burn_done"><item quantity="one">Аккаунт сожжён на вашем острове и ещё на %1$d острове.</item><item quantity="few">Аккаунт сожжён на вашем острове и ещё на %1$d островах.</item><item quantity="many">Аккаунт сожжён на вашем острове и ещё на %1$d островах.</item><item quantity="other">Аккаунт сожжён на вашем острове и ещё на %1$d островах.</item></plurals>
 </resources>

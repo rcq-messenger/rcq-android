@@ -67,6 +67,16 @@ object VisitedIslandsStore {
         return runCatching { gson.fromJson<List<Visited>>(raw, type) }.getOrNull() ?: emptyList()
     }
 
+    /** The visited islands of ANY roster account, bound or not. For the wipe
+     *  PIN, which reads every account before erasing them all and must never
+     *  re-point this singleton to do it. */
+    fun listFor(accountId: String): List<Visited> {
+        if (!::prefs.isInitialized) return emptyList()
+        val raw = prefs.getString("$accountId.$K_VISITED", "[]") ?: "[]"
+        val type = object : TypeToken<List<Visited>>() {}.type
+        return runCatching { gson.fromJson<List<Visited>>(raw, type) }.getOrNull() ?: emptyList()
+    }
+
     fun get(host: String): Visited? = list().firstOrNull { it.host == host.lowercase() }
 
     fun save(v: Visited) {

@@ -274,7 +274,7 @@
     <string name="pin_decoy_pick">Conversaciones que muestra el señuelo</string>
     <string name="pin_decoy_plausibility">Elige conversaciones del día a día, sin nada delicado. Se copian al señuelo, y en las copias los números se reescriben por otros inventados, así que ahí dentro nada apunta a la persona real. Lo que delata un señuelo es que esté vacío.</string>
     <string name="pin_wipe_server_label">Borrar también la cuenta en el servidor</string>
-    <string name="pin_wipe_server_desc">Desactivado por defecto: el PIN de borrado limpia solo este dispositivo. Activado, también le pide a la isla que borre la cuenta. Eso no tiene vuelta atrás y el número no se recupera.</string>
+    <string name="pin_wipe_server_desc">Desactivado por defecto: el PIN de borrado limpia solo este dispositivo. Activado, justo después del borrado la app también pide a tu isla y a cada isla que visitó esta cuenta que la borren. El borrado no las espera, pero quien vigile la red puede ver esas conexiones. No tiene vuelta atrás y el número no se recupera.</string>
     <string name="pin_decoy_needs_chats">Elige al menos una conversación</string>
     <string name="pin_decoy_no_chats">Todavía no hay conversaciones que copiar</string>
     <string name="pin_decoy_migrate_title">El PIN señuelo ha cambiado</string>
@@ -575,7 +575,7 @@
     <string name="vis_nobody">Nadie</string>
     <!-- Settings: account / history / about dialogs + footers -->
     <string name="cs_move_footer">La isla elige un número nuevo al azar. Contactos, grupos, claves e historial se conservan. Para elegir un número concreto, usa la tienda de UIN.</string>
-    <string name="cs_burn_footer">Borra esta cuenta en todas partes. Irreversible.</string>
+    <string name="cs_burn_footer">Borra esta cuenta en tu isla y en las islas que visitó este dispositivo. Irreversible.</string>
     <string name="cs_clear_title">¿Borrar el historial de chats?</string>
     <string name="cs_clear_body">Quita todos los mensajes de este dispositivo. Tu cuenta y tus contactos se quedan.</string>
     <string name="cs_history_cleared">Historial borrado</string>
@@ -1427,4 +1427,36 @@
     <string name="room_return">Toca para volver a la sala</string>
     <string name="settings_island_people">personas en esta isla</string>
     <string name="settings_sec_island">Esta isla</string>
+
+    <!-- F1/F2 of the 15.09 cross-island spec: requests to guest copies, burn across islands -->
+    <string name="ci_srv_subtitle">Solicitud de contacto en la isla %1$s</string>
+    <string name="ci_srv_via_group">por el grupo «%1$s»</string>
+    <string name="ci_srv_via_groups">por el grupo «%1$s» y %2$d más</string>
+    <string name="ci_srv_no_group">No está en tus grupos de esta isla</string>
+    <string name="ci_srv_accept_hint">Si aceptas, verá tu número de casa. Solo la isla %1$s responde de quién es.</string>
+    <string name="ci_srv_key_differs">La clave de esta persona en la isla %1$s no coincide con la que viste en un grupo. Confírmalo con ella antes de aceptar.</string>
+    <string name="ci_srv_retrying">No se pudo contactar con la isla %1$s. Lo intentaremos de nuevo.</string>
+    <string name="ci_srv_gave_up">La isla %1$s no aceptó la respuesta. Inténtalo más tarde.</string>
+    <string name="burn_owned_groups">Los grupos que creaste allí se borrarán para todos sus miembros: %1$s.</string>
+    <string name="burn_sibling">La cuenta %1$d en %2$s de este dispositivo usa las mismas claves y también se quemará.</string>
+    <string name="burn_sibling_kept">La isla no borró la cuenta %1$d en %2$s, así que se queda en este dispositivo.</string>
+    <string name="burn_not_covered">Las copias creadas por tus otros dispositivos, o añadidas a un grupo por su dueño en una isla que este dispositivo nunca abrió, no se borran desde aquí.</string>
+    <string name="burn_progress">Borrando copias en otras islas…</string>
+    <string name="burn_row_confirmed">La isla confirmó el borrado</string>
+    <string name="burn_row_already_gone">La isla dice que no hay copia</string>
+    <string name="burn_row_offline">Sin conexión</string>
+    <string name="burn_row_timeout">La isla no respondió a tiempo</string>
+    <string name="burn_row_suspended">La cuenta está bloqueada en esta isla y no se puede borrar</string>
+    <string name="burn_row_too_old">Esta isla es demasiado antigua para borrar una copia</string>
+    <string name="burn_row_limit">Hay más copias de lo esperado, puede quedar alguna</string>
+    <string name="burn_row_not_tried">No se intentó, se acabó el tiempo</string>
+    <string name="burn_row_server">La isla no borró la copia</string>
+    <string name="burn_retry">Reintentar</string>
+    <string name="burn_anyway">Quemar igualmente</string>
+    <string name="burn_anyway_hint">Las copias en estas islas se quedan. Sin tus claves, solo podrán borrarse con tu frase de recuperación.</string>
+    <string name="burn_cancel_partial">La cuenta sigue. Las copias ya borradas en %1$s no vuelven.</string>
+    <string name="burn_home_failed_partial">No se pudo contactar con tu isla, así que la cuenta allí sigue intacta. Las copias en otras islas ya se borraron. Inténtalo de nuevo cuando tengas conexión.</string>
+    <plurals name="burn_islands_body"><item quantity="one">Esta cuenta también tiene una copia en %1$d isla más, donde te uniste a grupos o tienes una dirección de respaldo: %2$s. Se borra primero, y después la cuenta en tu isla.</item><item quantity="other">Esta cuenta también tiene copias en %1$d islas más, donde te uniste a grupos o tienes una dirección de respaldo: %2$s. Se borran primero, y después la cuenta en tu isla.</item></plurals>
+    <plurals name="burn_failures_title"><item quantity="one">No se pudo borrar en %1$d isla</item><item quantity="other">No se pudo borrar en %1$d islas</item></plurals>
+    <plurals name="burn_done"><item quantity="one">Cuenta quemada en tu isla y en %1$d isla más.</item><item quantity="other">Cuenta quemada en tu isla y en %1$d islas más.</item></plurals>
 </resources>

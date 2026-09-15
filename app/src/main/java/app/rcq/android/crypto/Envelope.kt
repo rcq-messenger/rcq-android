@@ -192,7 +192,14 @@ sealed interface Envelope {
         val host: String,
         val act: String,
         val card: CiCard? = null,
+        /** F1: the answer also closed pending request [CiSrv.id] on island
+         *  [CiSrv.host], addressed to our guest copy there. The other devices
+         *  file it as answered, so their own poll of that island does not offer
+         *  it again. Ignored by builds that do not know it. */
+        val srv: CiSrv? = null,
     ) : Envelope
+
+    data class CiSrv(val host: String, val id: Int)
 
     /** The half of a peer's key card another device needs to hold the same
      *  cross-island contact without fetching anything. */
@@ -489,6 +496,12 @@ sealed interface Envelope {
                     c.sik?.let { addProperty("sik", it) }
                     c.gender?.let { addProperty("gender", it) }
                     c.status?.let { addProperty("status", it) }
+                })
+            }
+            srv?.let { s ->
+                add("srv", JsonObject().apply {
+                    addProperty("host", s.host)
+                    addProperty("id", s.id)
                 })
             }
         }.toString().toByteArray(Charsets.UTF_8)
@@ -899,6 +912,11 @@ sealed interface Envelope {
                             gender = c.get("gender")?.takeIf { it.isJsonPrimitive }?.asString,
                             status = c.get("status")?.takeIf { it.isJsonPrimitive }?.asString,
                         )
+                    },
+                    srv = obj.get("srv")?.takeIf { it.isJsonObject }?.asJsonObject?.let { s ->
+                        val h = s.get("host")?.takeIf { it.isJsonPrimitive }?.asString
+                        val id = runCatching { s.get("id")?.takeIf { it.isJsonPrimitive }?.asInt }.getOrNull()
+                        if (h.isNullOrBlank() || id == null || id <= 0) null else CiSrv(h, id)
                     },
                 )
                 "carbon" -> Carbon(

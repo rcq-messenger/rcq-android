@@ -208,6 +208,15 @@ object SenderKeyStore {
     @Synchronized
     fun knowsKid(ownUin: Int, kid: String): Boolean = loadIn(ownUin).containsKey(kid)
 
+    /** The signing keys our inbound chains recorded for [senderUin] in rooms
+     *  [gids]. Read-only; for the F1 prior-key check, which compares a key card
+     *  an island serves with keys already seen from that number in its rooms. */
+    fun inboundSpubs(ownUin: Int, senderUin: Int, gids: Set<Int>): List<String> =
+        loadIn(ownUin).values
+            .filter { it.senderUin == senderUin && it.gid in gids && it.spub.isNotBlank() }
+            .map { it.spub }
+            .distinct()
+
     /** Has the chain for [kid] already moved PAST [index], with no key cached
      *  for it? Then the message under it was either opened before (the queue
      *  and the room log both re-serve rows a live frame already delivered, and

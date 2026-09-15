@@ -274,7 +274,7 @@
     <string name="pin_decoy_pick">Розмови, які показує підставний PIN</string>
     <string name="pin_decoy_plausibility">Обери звичайні розмови, де немає нічого чутливого. Вони копіюються в підставний профіль, і в копіях номери переписані на вигадані, тож усередині ніщо не вказує на живу людину. Підставний профіль видає саме порожнеча.</string>
     <string name="pin_wipe_server_label">Видалити і акаунт на сервері</string>
-    <string name="pin_wipe_server_desc">Типово вимкнено: PIN стирання чистить лише цей пристрій. Якщо ввімкнути, він попросить острів видалити і сам акаунт. Це незворотно, номер не повернеться.</string>
+    <string name="pin_wipe_server_desc">Типово вимкнено: PIN стирання чистить лише цей пристрій. Якщо ввімкнути, одразу після стирання застосунок попросить твій острів і всі острови, де був акаунт, видалити його. Стирання їх не чекає, але той, хто стежить за мережею, побачить ці з\'єднання. Скасувати не можна, номер не повернеться.</string>
     <string name="pin_decoy_needs_chats">Обери хоча б одну розмову</string>
     <string name="pin_decoy_no_chats">Поки нема чого копіювати</string>
     <string name="pin_decoy_migrate_title">Підставний PIN змінився</string>
@@ -575,7 +575,7 @@
     <string name="vis_nobody">Ніхто</string>
     <!-- Settings: account / history / about dialogs + footers -->
     <string name="cs_move_footer">Острів сам обере новий випадковий номер. Контакти, групи, ключі та історія чатів збережуться. Обрати конкретний номер можна в магазині UIN.</string>
-    <string name="cs_burn_footer">Стирає цей акаунт усюди. Незворотно.</string>
+    <string name="cs_burn_footer">Стирає акаунт на твоєму острові й на островах, де був цей пристрій. Незворотно.</string>
     <string name="cs_clear_title">Очистити історію чатів?</string>
     <string name="cs_clear_body">Прибирає всі повідомлення з цього пристрою. Акаунт і контакти лишаються.</string>
     <string name="cs_history_cleared">Історію очищено</string>
@@ -1431,4 +1431,36 @@
     <string name="room_return">Натисніть, щоб повернутися до кімнати</string>
     <string name="settings_island_people">людей на цьому острові</string>
     <string name="settings_sec_island">Цей острів</string>
+
+    <!-- F1/F2 of the 15.09 cross-island spec: requests to guest copies, burn across islands -->
+    <string name="ci_srv_subtitle">Запит у контакти на острові %1$s</string>
+    <string name="ci_srv_via_group">через групу «%1$s»</string>
+    <string name="ci_srv_via_groups">через групу «%1$s» і ще %2$d</string>
+    <string name="ci_srv_no_group">Не з твоїх груп на цьому острові</string>
+    <string name="ci_srv_accept_hint">Якщо прийняти, людина побачить твій домашній номер. Хто це, підтверджує лише острів %1$s.</string>
+    <string name="ci_srv_key_differs">Ключ цієї людини на острові %1$s не збігається з тим, що був у групі. Уточни в неї, перш ніж приймати.</string>
+    <string name="ci_srv_retrying">Не вдалося зв\'язатися з островом %1$s. Спробуємо ще раз.</string>
+    <string name="ci_srv_gave_up">Острів %1$s не прийняв відповідь. Спробуй пізніше.</string>
+    <string name="burn_owned_groups">Групи, створені тобою там, буде видалено для всіх учасників: %1$s.</string>
+    <string name="burn_sibling">Акаунт %1$d на %2$s на цьому пристрої має ті самі ключі й теж буде спалений.</string>
+    <string name="burn_sibling_kept">Острів не видалив акаунт %1$d на %2$s, тому він лишається на цьому пристрої.</string>
+    <string name="burn_not_covered">Копії, створені іншими твоїми пристроями або додані власником групи на острові, який цей пристрій не відкривав, звідси не видаляються.</string>
+    <string name="burn_progress">Видаляємо копії на інших островах…</string>
+    <string name="burn_row_confirmed">Острів підтвердив видалення</string>
+    <string name="burn_row_already_gone">Острів повідомляє, що копії немає</string>
+    <string name="burn_row_offline">Немає зв\'язку</string>
+    <string name="burn_row_timeout">Острів не відповів вчасно</string>
+    <string name="burn_row_suspended">Акаунт заблоковано на цьому острові, видалити його не можна</string>
+    <string name="burn_row_too_old">Цей острів застарий, копію видалити не можна</string>
+    <string name="burn_row_limit">Копій більше, ніж очікувалося, частина могла лишитися</string>
+    <string name="burn_row_not_tried">Не встигли, час вийшов</string>
+    <string name="burn_row_server">Острів не видалив копію</string>
+    <string name="burn_retry">Повторити</string>
+    <string name="burn_anyway">Все одно спалити</string>
+    <string name="burn_anyway_hint">Копії на цих островах лишаться. Коли ключів не стане, стерти їх можна буде лише з фразою відновлення.</string>
+    <string name="burn_cancel_partial">Акаунт лишається. Уже видалені копії на %1$s не повернуться.</string>
+    <string name="burn_home_failed_partial">До твого острова не достукалися, акаунт там цілий. Копії на інших островах уже видалено. Спробуй знову, коли буде зв\'язок.</string>
+    <plurals name="burn_islands_body"><item quantity="one">Акаунт має копію ще на %1$d острові, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо її, потім акаунт на твоєму острові.</item><item quantity="few">Акаунт має копії ще на %1$d островах, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо їх, потім акаунт на твоєму острові.</item><item quantity="many">Акаунт має копії ще на %1$d островах, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо їх, потім акаунт на твоєму острові.</item><item quantity="other">Акаунт має копії ще на %1$d островах, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо їх, потім акаунт на твоєму острові.</item></plurals>
+    <plurals name="burn_failures_title"><item quantity="one">Не вдалося видалити на %1$d острові</item><item quantity="few">Не вдалося видалити на %1$d островах</item><item quantity="many">Не вдалося видалити на %1$d островах</item><item quantity="other">Не вдалося видалити на %1$d островах</item></plurals>
+    <plurals name="burn_done"><item quantity="one">Акаунт спалено на твоєму острові й ще на %1$d острові.</item><item quantity="few">Акаунт спалено на твоєму острові й ще на %1$d островах.</item><item quantity="many">Акаунт спалено на твоєму острові й ще на %1$d островах.</item><item quantity="other">Акаунт спалено на твоєму острові й ще на %1$d островах.</item></plurals>
 </resources>

@@ -274,7 +274,7 @@
     <string name="pin_decoy_pick">伪装界面显示的会话</string>
     <string name="pin_decoy_plausibility">选一些日常的、没有敏感内容的会话。它们会被复制进伪装界面，复制时号码会改写成编造的，所以那里面没有任何东西指向真人。让伪装露馅的恰恰是空空如也。</string>
     <string name="pin_wipe_server_label">同时删除服务器上的账号</string>
-    <string name="pin_wipe_server_desc">默认关闭：抹除 PIN 只清这台设备。打开后，它还会请岛屿删除账号本身。这一步无法撤销，号码也拿不回来。</string>
+    <string name="pin_wipe_server_desc">默认关闭：抹除 PIN 只清这台设备。打开后，抹除一完成，应用还会请你的岛屿和这个账号去过的每个岛屿删除账号。抹除不会等它们，但监视网络的人能看到这些连接。这一步无法撤销，号码也拿不回来。</string>
     <string name="pin_decoy_needs_chats">至少选一个会话</string>
     <string name="pin_decoy_no_chats">暂时没有可复制的会话</string>
     <string name="pin_decoy_migrate_title">伪装 PIN 变了</string>
@@ -575,7 +575,7 @@
     <string name="vis_nobody">无人</string>
     <!-- Settings: account / history / about dialogs + footers -->
     <string name="cs_move_footer">岛会为你随机挑选一个新号码。联系人、群组、密钥和聊天记录都会保留。要选择特定号码，请使用 UIN 商店。</string>
-    <string name="cs_burn_footer">在所有地方抹除此账号。不可撤销。</string>
+    <string name="cs_burn_footer">在你的岛屿和这台设备去过的岛屿上抹除此账号。不可撤销。</string>
     <string name="cs_clear_title">清除聊天记录？</string>
     <string name="cs_clear_body">从这台设备移除所有消息。你的账号和联系人会保留。</string>
     <string name="cs_history_cleared">聊天记录已清除</string>
@@ -1425,4 +1425,36 @@
     <string name="room_return">点按返回房间</string>
     <string name="settings_island_people">这座岛屿上的人</string>
     <string name="settings_sec_island">这座岛屿</string>
+
+    <!-- F1/F2 of the 15.09 cross-island spec: requests to guest copies, burn across islands -->
+    <string name="ci_srv_subtitle">来自岛屿 %1$s 的联系人请求</string>
+    <string name="ci_srv_via_group">通过群组「%1$s」</string>
+    <string name="ci_srv_via_groups">通过群组「%1$s」和另外 %2$d 个群组</string>
+    <string name="ci_srv_no_group">不在你在这个岛屿上的群组里</string>
+    <string name="ci_srv_accept_hint">接受后，对方会看到你的主号码。只有岛屿 %1$s 能担保对方是谁。</string>
+    <string name="ci_srv_key_differs">这个人在岛屿 %1$s 上的密钥与你在群组里见过的不一致。接受前先向对方确认。</string>
+    <string name="ci_srv_retrying">无法连接岛屿 %1$s。我们会再试一次。</string>
+    <string name="ci_srv_gave_up">岛屿 %1$s 没有接收这个答复。请稍后再试。</string>
+    <string name="burn_owned_groups">你在那里创建的群组会对所有成员删除：%1$s。</string>
+    <string name="burn_sibling">这台设备上位于 %2$s 的账号 %1$d 使用相同的密钥，也会一并销毁。</string>
+    <string name="burn_sibling_kept">岛屿没有删除位于 %2$s 的账号 %1$d，所以它仍保留在这台设备上。</string>
+    <string name="burn_not_covered">你的其他设备创建的副本，或群主在这台设备从未打开过的岛屿上添加的副本，无法从这里删除。</string>
+    <string name="burn_progress">正在删除其他岛屿上的副本…</string>
+    <string name="burn_row_confirmed">岛屿已确认删除</string>
+    <string name="burn_row_already_gone">岛屿表示没有副本</string>
+    <string name="burn_row_offline">没有网络连接</string>
+    <string name="burn_row_timeout">岛屿没有及时响应</string>
+    <string name="burn_row_suspended">账号在这个岛屿上已被封禁，无法删除</string>
+    <string name="burn_row_too_old">这个岛屿版本太旧，无法删除副本</string>
+    <string name="burn_row_limit">副本比预期多，可能还有残留</string>
+    <string name="burn_row_not_tried">没来得及尝试，时间用完了</string>
+    <string name="burn_row_server">岛屿没有删除副本</string>
+    <string name="burn_retry">重试</string>
+    <string name="burn_anyway">仍然销毁</string>
+    <string name="burn_anyway_hint">这些岛屿上的副本会保留。密钥删除后，只能用恢复短语来删除它们。</string>
+    <string name="burn_cancel_partial">账号保留。已在 %1$s 上删除的副本不会恢复。</string>
+    <string name="burn_home_failed_partial">连不上你的岛屿，那里的账号原封不动。其他岛屿上的副本已经删除。有网络时再试一次。</string>
+    <plurals name="burn_islands_body"><item quantity="one">这个账号在另外 %1$d 个岛屿上还有副本，你在那里加入过群组或保留了备用地址：%2$s。会先删除它们，再删除你岛屿上的账号。</item><item quantity="other">这个账号在另外 %1$d 个岛屿上还有副本，你在那里加入过群组或保留了备用地址：%2$s。会先删除它们，再删除你岛屿上的账号。</item></plurals>
+    <plurals name="burn_failures_title"><item quantity="one">有 %1$d 个岛屿删除失败</item><item quantity="other">有 %1$d 个岛屿删除失败</item></plurals>
+    <plurals name="burn_done"><item quantity="one">账号已在你的岛屿和另外 %1$d 个岛屿上销毁。</item><item quantity="other">账号已在你的岛屿和另外 %1$d 个岛屿上销毁。</item></plurals>
 </resources>

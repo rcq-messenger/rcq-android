@@ -574,6 +574,83 @@ object Multihome {
         }
     }
 
+    // ── F1: contact requests addressed to our guest copies ──
+
+    /** Per host: `capabilities.contact_pending_withdraw` and when we asked. Same
+     *  shape and lifetime as [groupLogCaps]; an island that does not answer is
+     *  treated as one without withdraw, which only ever hides a row locally. */
+    private val withdrawCaps = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
+
+    suspend fun advertisesPendingWithdraw(host: String): Boolean {
+        val h = host.lowercase()
+        val now = System.currentTimeMillis()
+        withdrawCaps[h]?.let { (yes, at) -> if (now - at < CAPS_TTL_MS) return yes }
+        val yes = runCatching { RcqApi("https://$h").serverInfo().capabilities.contact_pending_withdraw }.getOrNull()
+            ?: return false
+        withdrawCaps[h] = yes to now
+        return yes
+    }
+
+    /** A withdraw answered a 404 without the endpoint's own code: the route is
+     *  not there, whatever the cached capability said. Ask again next time. */
+    fun forgetPendingWithdraw(host: String) {
+        withdrawCaps.remove(host.lowercase())
+    }
+
+    /**
+     * `GET /contacts/pending` on every visited island that [due] allows, with
+     * that island's guest token, right after the drain of the same snapshot.
+     * Same credential rule as [drainVisitedQueues]: a 401 recovers once with
+     * the key [keyFor] names for that host, and the fresh token is written only
+     * while [stillOurs] holds. [onRows] gets the guest entry as it stands after
+     * that refresh. Every failure, a 429 included, goes to [onFail] with the
+     * status and the Retry-After the island gave. Never throws.
+     */
+    suspend fun pollVisitedPending(
+        visited: List<VisitedIslandsStore.Visited>,
+        keyFor: (host: String) -> Pair<ByteArray, ByteArray>,
+        stillOurs: () -> Boolean,
+        due: (host: String) -> Boolean,
+        onRows: suspend (host: String, guest: VisitedIslandsStore.Visited, rows: List<RcqApi.PendingRow>) -> Unit,
+        onFail: (host: String, status: Int?, retryAfterSec: Int?) -> Unit,
+    ) {
+        for (v in visited) {
+            if (!stillOurs()) return
+            if (!due(v.host)) continue
+            try {
+                val api = RcqApi("https://${v.host}")
+                api.setToken(v.jwt)
+                var guest = v
+                val rows = try {
+                    api.pending()
+                } catch (e: IOException) {
+                    if (e.message?.startsWith("HTTP 401") != true) throw e
+                    if (!stillOurs()) return
+                    val (sp, pp) = keyFor(v.host)
+                    val fresh = recoverOn(v.host, sp, pp)
+                    if (!stillOurs()) return
+                    if (fresh == null) {
+                        onFail(v.host, 401, null)
+                        null
+                    } else {
+                        VisitedIslandsStore.updateCreds(v.host, fresh.uin, fresh.token)
+                        guest = v.copy(uin = fresh.uin, jwt = fresh.token)
+                        api.setToken(fresh.token)
+                        api.pending()
+                    }
+                } ?: continue
+                if (!stillOurs()) return
+                onRows(v.host, guest, rows)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val r = RcqApi.refusalOf(e.message)
+                onFail(v.host, r.status, r.retryAfter)
+                android.util.Log.w("RCQfed", "pending poll: ${e.javaClass.simpleName} ${r.status ?: ""}")
+            }
+        }
+    }
+
     // ── Gossip: mirror a peer's signed record by global identity (sk) so it can
     // be served from any honest island a contact uses (address-mobility B1).
     // Self-signed, so a mirror adds redundancy with zero added trust — the
