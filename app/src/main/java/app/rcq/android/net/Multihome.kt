@@ -299,10 +299,48 @@ object Multihome {
      *  [deviceId] must be the one the drain asked with: the island computes the
      *  acked prefix over the rows it served THAT device, and a mismatch wedges
      *  the cursor at the first row it thinks we skipped. */
-    private suspend fun ack(api: RcqApi, rows: List<RcqApi.QueuedEnvelope>, deviceId: Int) {
-        val direct = rows.filter { it.group_id == null }.map { it.id }
-        val group = rows.filter { it.group_id != null }.map { it.id }
-        runCatching { api.ackQueue(direct, group, deviceId) }
+    private suspend fun ack(api: RcqApi, acks: GroupLogPage.QueueAcks, deviceId: Int) {
+        if (acks.isEmpty) return
+        runCatching { api.ackQueue(acks.direct, acks.group, deviceId) }
+    }
+
+    /** The strike count of a foreign QUEUE row that would not ingest, the same
+     *  rule and the same in-memory shape as [logRowFails]. Keyed by host and the
+     *  island's table: its direct and group ids are independent sequences. */
+    private val queueRowFails = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Hand every row of one drained foreign queue page to [onPayload] and book
+     *  which of them may be acked.
+     *
+     *  ⚠⚠ The ack used to name EVERY row after the loop, whatever ingest said,
+     *  and the island deletes what is acked. A row the handler could not open
+     *  (a `gmsg` sent to the per-member decryptor, #986(a)) was destroyed in
+     *  silence. Now only rows that were handled, dropped for good or written off
+     *  after [GroupLogPage.FAIL_DRAINS] alike failures are named, the same rule
+     *  the primary drain applies to its own queue. A row with no payload is done.
+     *
+     *  Null when the account stopped being ours mid-page: nothing is acked then,
+     *  and nothing is booked for the rows that were not handed over. */
+    private fun fileQueueRows(
+        host: String,
+        rows: List<RcqApi.QueuedEnvelope>,
+        stillOurs: () -> Boolean,
+        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
+    ): GroupLogPage.QueueAcks? {
+        val acks = GroupLogPage.QueueAcks()
+        for (q in rows) {
+            if (!stillOurs()) return null
+            val key = "$host:${if (q.group_id != null) "g" else "d"}:${q.id}"
+            val payload = q.payload
+            val why = if (payload == null) null else onPayload(payload, q.group_id, host, q.envelope_type)
+            val fate = GroupLogPage.fate(queueRowFails[key], why)
+            if (fate.record == null) queueRowFails.remove(key) else queueRowFails[key] = fate.record
+            if (why != null && fate.done) {
+                android.util.Log.w("RCQfed", "queue row $key written off after ${GroupLogPage.FAIL_DRAINS} drains ($why)")
+            }
+            acks.row(q.id, q.group_id != null, fate.done)
+        }
+        return acks
     }
 
     // ── Stage 5 on a foreign mailbox: the room log of a backup or visited island ──
@@ -349,7 +387,7 @@ object Multihome {
          *  cannot be asked to start from a given seq, so an ack over rows that
          *  were never filed loses them for good, in silence. */
         stillOurs: () -> Boolean = { true },
-        onRow: (payload: String, groupId: Int, host: String) -> String?,
+        onRow: (payload: String, groupId: Int, host: String, envelopeType: String?) -> String?,
     ) {
         runCatching {
             var pages = 0
@@ -371,22 +409,19 @@ object Multihome {
                     // leaving every unread row on the island.
                     if (!stillOurs()) return
                     val payload = r.payload
-                    val why = if (payload == null) null else onRow(payload, r.gid, host)
+                    // The type rides along: a `gmsg` opens through the
+                    // sender-key chain, every other row is sealed per member.
+                    val why = if (payload == null) null else onRow(payload, r.gid, host, r.envelope_type)
                     val key = "$host:${r.gid}:${r.seq}"
-                    val done = if (why == null) {
-                        logRowFails.remove(key)
-                        true
-                    } else {
-                        val strike = GroupLogPage.strike(logRowFails[key], why)
-                        if (strike.writtenOff) {
-                            logRowFails.remove(key)
-                            android.util.Log.w("RCQfed", "log row $key written off after ${strike.count} drains ($why)")
-                        } else {
-                            logRowFails[key] = GroupLogPage.encode(strike)
-                        }
-                        strike.writtenOff
+                    // Same bookkeeping as the queue rows above, including the
+                    // failures that are not the row's fault (a closed store,
+                    // a switch): never booked, never written off.
+                    val fate = GroupLogPage.fate(logRowFails[key], why)
+                    if (fate.record == null) logRowFails.remove(key) else logRowFails[key] = fate.record
+                    if (why != null && fate.done) {
+                        android.util.Log.w("RCQfed", "log row $key written off after ${GroupLogPage.FAIL_DRAINS} drains ($why)")
                     }
-                    acks.row(r.gid, r.seq, done)
+                    acks.row(r.gid, r.seq, fate.done)
                 }
                 // The last gate before the cursor moves. Everything above this
                 // line is recoverable; an ack is not.
@@ -431,8 +466,11 @@ object Multihome {
          *  going does not merely misfile account A's mail under account B, it
          *  destroys the only copy. */
         stillOurs: () -> Boolean = { true },
-        onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
-        onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
+        onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?) -> String?)? = null,
+        /** The session's ingest for one row, with the row's `envelope_type`.
+         *  Its answer decides the ack: null = done with, a tag = may pass on a
+         *  later drain (see [fileQueueRows]). */
+        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
             if (!stillOurs()) return
@@ -458,14 +496,14 @@ object Multihome {
                     } else throw e
                 }
                 if (!stillOurs()) return@runCatching
-                rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, home.host) } }
+                val acks = fileQueueRows(home.host, rows, stillOurs, onPayload) ?: return@runCatching
                 // ⚠⚠ Asked AGAIN, after the loop. The account can change while
                 // the rows are being filed, and the handler then drops the rest
                 // of them - but the ack does not know that and would tell the
                 // island they were taken, which DELETES them. Skipping the ack
                 // costs one redelivery, which the envelope-uuid dedup collapses.
                 if (!stillOurs()) return@runCatching
-                ack(api, rows, deviceId)
+                ack(api, acks, deviceId)
                 // ⚠ Two network calls stand between the last check and this one
                 // (the ack above and the capability probe), so it is asked again
                 // here rather than inherited.
@@ -497,8 +535,10 @@ object Multihome {
          *  Checked before every write and before the ack, because the ack is a
          *  second network call and the island DELETES what it acknowledges. */
         stillOurs: () -> Boolean = { true },
-        onLogRow: ((payload: String, groupId: Int, host: String) -> String?)? = null,
-        onPayload: (payload: String, groupId: Int?, host: String) -> Unit,
+        onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?) -> String?)? = null,
+        /** Same contract as the backup drain's: the row's type in, "done with"
+         *  (null) or a failure tag out, and only done rows are acked. */
+        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
     ) {
         for (v in visited) {
             if (!stillOurs()) return
@@ -518,11 +558,11 @@ object Multihome {
                     } else throw e
                 }
                 if (!stillOurs()) return@runCatching
-                rows.forEach { q -> q.payload?.let { onPayload(it, q.group_id, v.host) } }
+                val acks = fileQueueRows(v.host, rows, stillOurs, onPayload) ?: return@runCatching
                 // Same as the backup drain: the ack is a deletion, so it is
                 // asked again after the rows have actually been handed over.
                 if (!stillOurs()) return@runCatching
-                ack(api, rows, deviceId)
+                ack(api, acks, deviceId)
                 // ⚠ Two network calls stand between the last check and this one
                 // (the ack above and the capability probe), so it is asked again
                 // here rather than inherited.

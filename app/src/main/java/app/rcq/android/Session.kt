@@ -38,6 +38,8 @@ import app.rcq.android.net.VisitedIslandsStore
 import app.rcq.android.net.GroupLogPage
 import app.rcq.android.net.Multihome
 import app.rcq.android.net.CrossIslandRequestsStore
+import app.rcq.android.net.CrossIslandGate
+import app.rcq.android.net.GuestCopies
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.net.SingBoxTransport
 import app.rcq.android.net.RelayConfigStore
@@ -2868,7 +2870,7 @@ class Session(context: Context) {
             // Stage 5: a backup island that keeps one log per room is drained
             // from it too, right after its queue; a log row is filed exactly
             // like a legacy group row of the same mailbox, under the alias.
-            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host ->
+            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host, envelopeType ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -2876,21 +2878,19 @@ class Session(context: Context) {
                 // the log cannot be re-read from a given seq. The switch is
                 // handled where it can actually stop the work, in
                 // drainGroupLog's page loop, before the ack.
-                asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
-            }) { payload, groupId, host ->
+                asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = false) }
+            }) { payload, groupId, host, envelopeType ->
                 // ⚠ VisitedIslandsStore is a SINGLETON re-pointed by rebindTo,
                 // so aliasFor here would mint account A's room aliases in
                 // account B's namespace, and no decryption is needed for that
                 // to be a leak: the alias carries the foreign host and room id.
-                if (stillOn(epoch)) {
-                    asBacklog {
-                        // A group row in a BACKUP mailbox = that island also hosts a
-                        // group we joined (§5c, same identity = same mailbox) — file it
-                        // under the local alias like the visited-island drain does.
-                        if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
-                        else ingest(payload)
-                    }
-                }
+                // A group row in a BACKUP mailbox = that island also hosts a
+                // group we joined (§5c, same identity = same mailbox): it files
+                // under the local alias like the visited-island drain does. The
+                // answer decides the ack; "switched" is not the row's fault, so
+                // it is neither booked nor acked.
+                if (!stillOn(epoch)) "switched"
+                else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = false) }
             }
         }
     }
@@ -2917,7 +2917,7 @@ class Session(context: Context) {
             // Stage 5 on the guest mailbox too: the rooms we visit live on
             // their island, and one that keeps a log is read from it (the
             // same filing under the alias as the legacy rows below).
-            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host ->
+            Multihome.drainVisitedQueues(sp, pp, dev, visited = visited, stillOurs = { stillOn(epoch) && !duressViewUp }, onLogRow = { payload, groupId, host, envelopeType ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -2925,14 +2925,11 @@ class Session(context: Context) {
                 // the log cannot be re-read from a given seq. The switch is
                 // handled where it can actually stop the work, in
                 // drainGroupLog's page loop, before the ack.
-                asBacklog { ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId)) }
-            }) { payload, groupId, host ->
-                if (stillOn(epoch)) {
-                    asBacklog {
-                        if (groupId != null) ingestGroup(payload, VisitedIslandsStore.aliasFor(host, groupId))
-                        else ingest(payload)
-                    }
-                }
+                asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true) }
+            }) { payload, groupId, host, envelopeType ->
+                // Same routing and the same ack contract as the backup drain.
+                if (!stillOn(epoch)) "switched"
+                else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true) }
             }
         }
     }
@@ -4377,7 +4374,7 @@ class Session(context: Context) {
         val foreign = foreignHosts.flatMap { (host, jwt) ->
             runCatching {
                 val guest = RcqApi("https://$host").apply { setToken(jwt) }
-                guest.groups().map { mapGroup(it).copy(id = VisitedIslandsStore.aliasFor(host, it.id), host = host) }
+                guest.groups().map { mapForeignGroup(it, host) }
             }.getOrElse { emptyList() }
         }
         if (!stillOn(ep)) return
@@ -4493,14 +4490,20 @@ class Session(context: Context) {
     private fun mapGroupCtx(ctx: GroupCtx, g: RcqApi.GroupOut): RcqGroup =
         // Stage 6 phase 2: a room we hold the key for renders its SEALED
         // identity over the open columns; everyone else sees the columns.
-        app.rcq.android.crypto.GroupState.overlay(
-            mapGroupCtxRaw(ctx, g),
-            LocalStores.roomKey(g.id)?.second,
-        )
+        // [mapGroup] already overlays an own room.
+        if (ctx.host == null) mapGroup(g) else mapForeignGroup(g, ctx.host)
 
-    private fun mapGroupCtxRaw(ctx: GroupCtx, g: RcqApi.GroupOut): RcqGroup =
-        if (ctx.host == null) mapGroup(g)
-        else mapGroup(g).copy(id = VisitedIslandsStore.aliasFor(ctx.host, g.id), host = ctx.host)
+    /** A room on another island, under its local alias. ⚠ The overlay reads
+     *  the room key filed under that ALIAS: the room's own id is that island's
+     *  number and may well be the id of one of our own rooms here, whose key
+     *  must never be tried on it or written by it. */
+    private fun mapForeignGroup(g: RcqApi.GroupOut, host: String): RcqGroup {
+        val alias = VisitedIslandsStore.aliasFor(host, g.id)
+        return app.rcq.android.crypto.GroupState.overlay(
+            mapGroupRaw(g).copy(id = alias, host = host),
+            LocalStores.roomKey(alias)?.second,
+        )
+    }
 
     /** Guest credentials for [host] (§5c), registering recover-first on first
      *  use — the multihome mechanic, but PRIVATE (never published in the
@@ -4508,7 +4511,10 @@ class Session(context: Context) {
     suspend fun ensureGuestOn(host: String): VisitedIslandsStore.Visited {
         val h = Multihome.normalizeHost(host) ?: throw IllegalArgumentException("invalid_host")
         if (h == serverHost()) throw IllegalArgumentException("own_island")
-        VisitedIslandsStore.get(h)?.let { return it }
+        VisitedIslandsStore.get(h)?.let {
+            syncGuestNicknameOnce(h)
+            return it
+        }
         val uin = store.uin ?: throw IllegalStateException("no identity")
         val creds = Multihome.recoverOn(h, signingPriv(), signingPub()) ?: run {
             val api = RcqApi("https://$h")
@@ -4528,6 +4534,9 @@ class Session(context: Context) {
         }
         val v = VisitedIslandsStore.Visited(h, creds.uin, creds.token, System.currentTimeMillis())
         VisitedIslandsStore.save(v)
+        // A recover lands on a row registered long ago, under whatever name
+        // the account had then: correct it once, now.
+        syncGuestNicknameOnce(h)
         return v
     }
 
@@ -4539,7 +4548,7 @@ class Session(context: Context) {
         val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
         val g = guest.joinGroup(remoteId)
         val alias = VisitedIslandsStore.aliasFor(v.host, remoteId)
-        upsertGroup(mapGroup(g).copy(id = alias, host = v.host))
+        upsertGroup(mapForeignGroup(g, v.host))
         alias
     }.getOrNull()
 
@@ -5147,6 +5156,9 @@ class Session(context: Context) {
             // the contacts table, so they are not in the audience). Deposit the
             // new name to them ourselves.
             broadcastProfileCrossIsland()
+            // #985(2): and to this account's own copies on other islands, where
+            // rooms still show the name the guest row was registered with.
+            pushNicknameToGuestCopies(body.nickname)
         }
         // Keep the read-receipt gate in sync when the user changes it.
         if (updated != null) body.read_receipts_visibility?.let { readReceiptsVisibility = it }
@@ -5421,6 +5433,35 @@ class Session(context: Context) {
         }
     }
 
+    /** One row off a mailbox we hold on ANOTHER island (a visited island or a
+     *  backup home), routed the way the primary drain routes its own rows: a
+     *  group row files under the room's local alias, a `gmsg` opens through the
+     *  sender-key chain, anything else is a 1:1 envelope and meets the
+     *  cross-island gate in [ingest]. Same answer as the three ingests: null
+     *  when the row is done with.
+     *
+     *  ⚠⚠ The type used to be thrown away on this road and every group row went
+     *  to the per-member decryptor, which cannot open a `gmsg`. Once the guest
+     *  number on that island advertised sender keys (a phrase sign-in there does
+     *  it, the capability is per number), its members sent one broadcast instead
+     *  of a sealed copy each, and the drain acked the unreadable rows away
+     *  (#986(a)). */
+    private fun ingestForeignRow(payload: String, groupId: Int?, host: String, envelopeType: String?, guestMailbox: Boolean): String? {
+        // ⚠ The mailbox host is handed on only for a GUEST mailbox. A backup
+        // home is our own identity's mailbox, and a contact from our own island
+        // failing over to it rightly stamps our own host there.
+        if (groupId == null) return ingest(payload, mailboxHost = if (guestMailbox) host else null)
+        val alias = VisitedIslandsStore.aliasFor(host, groupId)
+        return if (envelopeType == "gmsg") ingestGmsg(payload, alias) else ingestGroup(payload, alias)
+    }
+
+    /** The room id a broadcast was SEALED under. A room on another island is
+     *  filed here under its negative local alias, but its members sealed under
+     *  the room's id on that island, and that id is inside what the AEAD and the
+     *  signature cover. Null for an alias this account does not know. */
+    private fun gmsgWireGid(groupId: Int): Int? =
+        if (groupId >= 0) groupId else VisitedIslandsStore.refByAlias(groupId)?.remoteId
+
     /** Decode a sender-keys `gmsg` broadcast via the stored chain and route the
      *  inner envelope. Drops my own echoed broadcast (carbon handles own
      *  multi-device sync), NACKs an unknown kid, and ignores an unverifiable or
@@ -5437,6 +5478,9 @@ class Session(context: Context) {
         if (duressViewUp) return "duress"
         return runCatching {
             val me = store.uin ?: return null
+            // Resolved BEFORE the chain moves: deriving a key ratchets it, and a
+            // key derived for a row that then cannot be opened is a key lost.
+            val wireGid = gmsgWireGid(groupId) ?: return null
             val hdr = SenderKeys.parseGmsgHeader(payloadB64) ?: return null
             if (SenderKeyStore.ownsKid(me, hdr.kid)) return null // my own broadcast echoed back
             val key = SenderKeyStore.deriveInbound(me, hdr.kid, hdr.epoch, hdr.index)
@@ -5470,7 +5514,7 @@ class Session(context: Context) {
                 // leaves the room's cursor below it for a few drains.
                 return if (held) null else "hold_full"
             }
-            val opened = SenderKeys.openGmsg(payloadB64, groupId, key.mk, key.spub)
+            val opened = SenderKeys.openGmsg(payloadB64, wireGid, key.mk, key.spub)
             if (!opened.verified) {
                 android.util.Log.w("RCQgroup", "gmsg sig did not verify; dropping gid=$groupId kid=${hdr.kid}")
                 return null
@@ -6434,8 +6478,14 @@ class Session(context: Context) {
         applyMigration(resp.new_uin, resp.token)
 
     private fun applyMigration(newUin: Int, token: String) {
+        // Every caller holds an island-proven move: the migrate or take
+        // response, or `moved_from` from /auth/refresh. Never a socket frame.
+        val oldUin = store.uin
         socket.disconnect()
         store.updateAccount(newUin, token)
+        // Before start(): it republishes the signed home record from the
+        // backup-home store, which has to be under the new number by then.
+        rekeyMovedAccount(oldUin, newUin)
         api.setToken(token)
         peerIdentityCache.clear()
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
@@ -8425,7 +8475,9 @@ class Session(context: Context) {
      *  did not, which is exactly what the two screenshots showed.
      *
      *  Same contract as [ingestGmsg] and the room log's onRow. */
-    private fun ingest(payloadB64: String, depositAtMs: Long? = null): String? {
+    /** [mailboxHost]: set for a row off our GUEST mailbox on another island (or
+     *  released from a request held under one), see [CrossIslandGate.attributedHost]. */
+    private fun ingest(payloadB64: String, depositAtMs: Long? = null, mailboxHost: String? = null): String? {
         // Last line of defence: in a migrated decoy session `db` is the duress
         // store, and a real message written there is a real message lost.
         if (duressViewUp) return "duress"
@@ -8434,7 +8486,10 @@ class Session(context: Context) {
         if (!::db.isInitialized) return "db_closed"
         var why: String? = null
         runCatching {
-            val dec = decryptInbound(payloadB64)
+            val dec = attributeToMailbox(decryptInbound(payloadB64), mailboxHost)
+            // Our own number under somebody else's key is dropped before ANY
+            // branch runs, whatever host it stamps. See [forgedOwnNumberRow].
+            if (forgedOwnNumberRow(dec)) return@runCatching
             // Removed contacts are silently dropped — sealed sender means
             // the server can't filter by sender, so we gate on receipt.
             // ⚠ Never ourselves: a carbon always arrives from our own uin, and
@@ -8470,7 +8525,7 @@ class Session(context: Context) {
                     // in a thread, an unread badge and a missed-call banner.
                     // So the question those gates ask is asked here, in the
                     // one form that fits a call.
-                    if (!mayLeaveCallMarker(dec.senderUin, dec.senderHost)) return@runCatching
+                    if (!mayLeaveCallMarker(dec.senderUin, dec.senderHost, dec.senderSigningPub)) return@runCatching
                     // ⚠ A marker with no call id has no dedupe key at all, and
                     // acks are best-effort: the same envelope redelivered would
                     // file the row again, every time, for ever.
@@ -8554,7 +8609,10 @@ class Session(context: Context) {
                     }
                     return@runCatching
                 }
-                if (CrossIslandStore.get(dec.senderUin, host) == null) return@runCatching
+                // Only an accepted cross-island contact may ring us, and only a
+                // row signed by the key pinned for them is that contact: the
+                // address in the envelope is not signed.
+                if (!isVerifiedCrossIslandContact(dec.senderUin, host, dec.senderSigningPub)) return@runCatching
                 if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
                     // Same dedupe as the marker above: a cross-island offer can
                     // reach us twice (the live drain and a later one), and the
@@ -8608,7 +8666,7 @@ class Session(context: Context) {
             (dec.envelope as? Envelope.ContactRequest)?.let { cr ->
                 val host = dec.senderHost ?: return@runCatching
                 if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
-                handleContactRequest(dec.senderUin, host, cr)
+                handleContactRequest(dec.senderUin, host, cr, dec.senderSigningPub)
                 return@runCatching
             }
             // §5e cross-island profile refresh. Routed here, BEFORE the
@@ -8621,7 +8679,7 @@ class Session(context: Context) {
             (dec.envelope as? Envelope.ProfileUpdate)?.let { pu ->
                 val host = dec.senderHost ?: return@runCatching
                 if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
-                handleProfileUpdate(dec.senderUin, host, pu)
+                handleProfileUpdate(dec.senderUin, host, pu, dec.senderSigningPub)
                 return@runCatching
             }
             // Variant A consent: a 1:1 message from an un-accepted CROSS-ISLAND
@@ -8642,11 +8700,19 @@ class Session(context: Context) {
             val ciHost = dec.senderHost
             val meUin = store.uin ?: 0
             val ownHosts = setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
-            if (ciHost != null && ciHost !in ownHosts && dec.senderUin != meUin &&
-                CrossIslandStore.get(dec.senderUin, ciHost) == null
-            ) {
-                CrossIslandRequestsStore.hold(meUin, dec.senderUin, ciHost, payloadB64, ciPreview(dec.envelope))
-                refreshCiRequests()
+            // #985(1): room keys are taken ABOVE the gate, the way web and iOS
+            // take them. A member native to a room's island hands a guest the
+            // room key as a 1:1 envelope into the guest mailbox, and holding
+            // that as a "request" is why guests on Android never got one. Each
+            // kind keeps its roster check, see [handleRoomKeyEnvelope].
+            if (dec.envelope is Envelope.GsKey || dec.envelope is Envelope.GsKnack) {
+                handleRoomKeyEnvelope(dec)
+                return@runCatching
+            }
+            // The gate holds CONTENT only and drops everything else, and it
+            // believes an address only when the row is signed by the key pinned
+            // for it. See [crossIslandGateStops].
+            if (ciHost != null && ciHost !in ownHosts && crossIslandGateStops(dec, payloadB64, ciHost, meUin)) {
                 return@runCatching
             }
             // The same consent gate for OUR OWN island, opt-in (Privacy:
@@ -8841,32 +8907,8 @@ class Session(context: Context) {
                         }
                     }
                     }
-                is Envelope.GsKey ->
-                    // Room state key (stage 6 phase 2). Roster gate: only a
-                    // fellow member's key is worth holding; equal-version
-                    // replace is the wedge-repair rule from the design doc.
-                    if (groups.value.firstOrNull { it.id == env.gid }?.members?.any { it.uin == dec.senderUin } == true) {
-                        if (LocalStores.putRoomKey(env.gid, env.ver, env.key, replaceEqual = true)) {
-                            scope.launch { runCatching { refreshGroups() } }
-                        }
-                    } else Unit
-                is Envelope.GsKnack ->
-                    // Any holder answers. The asker must be in the roster we
-                    // can see; the reply is a plain sealed gskey.
-                    scope.launch {
-                        runCatching {
-                            val g = groups.value.firstOrNull { it.id == env.gid } ?: return@runCatching
-                            val member = g.members.firstOrNull { it.uin == dec.senderUin } ?: return@runCatching
-                            val k = LocalStores.roomKey(env.gid) ?: return@runCatching
-                            if (member.identityKey.isNotBlank()) {
-                                sendSealedCopies(
-                                    dec.senderUin,
-                                    encryptFor(dec.senderUin, Envelope.GsKey(env.gid, k.first, k.second)),
-                                    envelopeType = "skdm",
-                                )
-                            }
-                        }
-                    }
+                is Envelope.GsKey -> Unit      // taken above the gate, see [handleRoomKeyEnvelope]
+                is Envelope.GsKnack -> Unit    // taken above the gate, see [handleRoomKeyEnvelope]
                 is Envelope.Skdm -> Unit       // sender-keys distribution is group-only
                 is Envelope.Sknack -> Unit     // sender-keys recovery is group-only
                 is Envelope.RelayShare ->
@@ -9448,10 +9490,14 @@ class Session(context: Context) {
      * other — the mutual state §5d checks. `decline` drops our pending row for
      * them, silently. A blocked sender is dropped silently, same as same-island.
      */
-    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest) {
+    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest, spub: ByteArray) {
         val me = store.uin ?: return
         if (uin == me) return
         if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return
+        // Who this is, by KEY: an envelope that names an accepted contact's
+        // address but is signed by another key is a stranger's request, filed
+        // as one and marked, never merged into that contact.
+        val match = ciContactMatch(uin, host, spub)
         when (cr.act) {
             Envelope.ACT_REQUEST -> {
                 // Rate-limit REQUESTS only: those are what a stranger can flood.
@@ -9464,8 +9510,12 @@ class Session(context: Context) {
                 if (last != null && now - last < CI_REQ_MIN_INTERVAL_MS) return
                 ciReqSeenAt[key] = now
                 // Already ours: nothing to consent to, and no second row.
-                if (CrossIslandStore.get(uin, host) != null) return
-                if (CrossIslandRequestsStore.holdContactRequest(me, uin, host, cr.nickname, cr.note)) {
+                if (match == CrossIslandGate.ContactMatch.VERIFIED) return
+                if (CrossIslandRequestsStore.holdContactRequest(
+                        me, uin, host, cr.nickname, cr.note,
+                        keyChanged = match == CrossIslandGate.ContactMatch.KEY_MISMATCH,
+                    )
+                ) {
                     refreshCiRequests()
                 }
             }
@@ -9475,7 +9525,7 @@ class Session(context: Context) {
                 // client), so leave it alone: re-adding would re-pin keys from a
                 // card fetch an envelope just triggered. Both sides now hold
                 // each other, which is the mutual state §5d checks.
-                if (CrossIslandStore.get(uin, host) != null) {
+                if (match == CrossIslandGate.ContactMatch.VERIFIED) {
                     CrossIslandRequestsStore.clear(me, uin, host)
                     refreshCiRequests()
                     // §5e: the relationship just became mutual, so they are now
@@ -9491,8 +9541,13 @@ class Session(context: Context) {
                 // once in the roster their messages skip the Variant A
                 // quarantine and §5d lets them call). File it as a pending row
                 // the user decides on — same as iOS and web, so one envelope
-                // means one thing on all three clients.
-                if (CrossIslandRequestsStore.holdContactRequest(me, uin, host, cr.nickname, cr.note)) {
+                // means one thing on all three clients. An accept signed by a key
+                // other than the pinned one lands here too, marked.
+                if (CrossIslandRequestsStore.holdContactRequest(
+                        me, uin, host, cr.nickname, cr.note,
+                        keyChanged = match == CrossIslandGate.ContactMatch.KEY_MISMATCH,
+                    )
+                ) {
                     refreshCiRequests()
                 }
             }
@@ -9647,9 +9702,19 @@ class Session(context: Context) {
      *  - The store write is committed to DISK, because the push path reads that
      *    snapshot with no live Session.
      */
-    private fun handleProfileUpdate(uin: Int, host: String, pu: Envelope.ProfileUpdate) {
+    private fun handleProfileUpdate(uin: Int, host: String, pu: Envelope.ProfileUpdate, spub: ByteArray) {
         val me = store.uin ?: return
         if (uin == me) return
+        // ⚠ Renames only on the pinned key. A `profile` that names an accepted
+        // contact's address but is signed by another key would otherwise rename
+        // that contact from anybody's phone. Cosmetic data from a stranger is
+        // dropped, as it always was.
+        if (!isVerifiedCrossIslandContact(uin, host, spub)) {
+            if (CrossIslandStore.get(uin, host) != null) {
+                android.util.Log.w("RCQci", "profile for $uin@$host not signed by the pinned key, dropped")
+            }
+            return
+        }
         if (!CrossIslandStore.applyProfile(uin, host, pu.nickname, pu.avatarMediaId, pu.avatarMediaKey, pu.ts)) return
         refreshCrossIslandDisplay()
     }
@@ -9700,9 +9765,8 @@ class Session(context: Context) {
      *  through and no-ops instead of opening a request row. */
     private fun shouldQuarantineStranger(senderUin: Int, env: Envelope): Boolean {
         if (!LocalStores.strangerQuarantineEnabled()) return false
-        val content = env is Envelope.Text || env is Envelope.Photo || env is Envelope.Video ||
-            env is Envelope.File || env is Envelope.Voice || env is Envelope.Location
-        if (!content) return false
+        // One definition of "content", shared with the cross-island gate.
+        if (!CrossIslandGate.isContentKind(env)) return false
         return isQuarantinedStranger(senderUin)
     }
 
@@ -9733,6 +9797,245 @@ class Session(context: Context) {
         val json = LocalStores.cachedContactsJson() ?: return true
         val cached = runCatching { profileGson.fromJson(json, Array<Contact>::class.java) }.getOrNull() ?: return true
         return cached.any { it.uin == uin && it.host.isNullOrBlank() }
+    }
+
+    // ── #985 / #986: the cross-island gate, room keys, copies on other islands ──
+
+    /** An accepted cross-island contact at (uin, host) AND a row signed by the
+     *  key pinned for them. The address in a v=1 envelope is not signed, so the
+     *  address alone never makes a sender that contact. */
+    private fun isVerifiedCrossIslandContact(uin: Int, host: String, spub: ByteArray): Boolean {
+        val c = CrossIslandStore.get(uin, host) ?: return false
+        return CrossIslandGate.signingKeyMatches(c.signingKey, spub)
+    }
+
+    private fun ciContactMatch(uin: Int, host: String, spub: ByteArray): CrossIslandGate.ContactMatch {
+        val c = CrossIslandStore.get(uin, host)
+        return CrossIslandGate.contactMatch(c?.signingKey, c != null, spub)
+    }
+
+    /**
+     * The cross-island consent gate (Variant A) for one decrypted 1:1 row whose
+     * `from_host` names another island. True when the row is finished here.
+     *
+     *  - CONTENT from a stranger is held as a request, and a held row sends no
+     *    delivered receipt (returning skips store()).
+     *  - Everything else from a stranger is DROPPED: not held, not applied. The
+     *    control traffic co-members of a room over there send to our guest copy
+     *    (visit pings, receipts, key asks) opened phantom requests with an empty
+     *    preview when every kind was held (#985(1)), and letting it fall through
+     *    instead would apply a stranger's delete, edit or secure-screen.
+     *  - "Stranger" is decided by KEY. A row that names an accepted contact's
+     *    address under another key is held as a stranger's and marked on its
+     *    row; a row that names OUR number is ours only under our own key.
+     */
+    private fun ownNumberRow(dec: SealedSender.Decrypted, meUin: Int): CrossIslandGate.OwnNumber =
+        CrossIslandGate.ownNumberRow(dec.senderUin, meUin, dec.senderSigningPub, runCatching { signingPub() }.getOrNull())
+
+    /** A v=1 row that uses our own number but is not signed by our own key.
+     *  Checked for every row, not only cross-island ones: `from_host` is not
+     *  signed either, and the carbon branch trusts our number to mean us. */
+    private fun forgedOwnNumberRow(dec: SealedSender.Decrypted): Boolean {
+        if (ownNumberRow(dec, store.uin ?: 0) != CrossIslandGate.OwnNumber.FORGED) return false
+        android.util.Log.w("RCQci", "row uses our own number under a foreign key, dropped")
+        return true
+    }
+
+    /** Re-attribute a guest-mailbox row, see [CrossIslandGate.attributedHost]. */
+    private fun attributeToMailbox(dec: SealedSender.Decrypted, mailboxHost: String?): SealedSender.Decrypted {
+        if (mailboxHost == null) return dec
+        val host = CrossIslandGate.attributedHost(dec.senderHost, mailboxHost, listOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() })
+        return if (host == dec.senderHost) dec else dec.copy(senderHost = host)
+    }
+
+    /** A request row that claims an accepted contact's address under another
+     *  key. Accept and Block both act on the ADDRESS, so on such a row they
+     *  would re-pin or silence the real contact; only dismissing is offered. */
+    private fun isKeyChangedRequest(me: Int, uin: Int, host: String): Boolean =
+        CrossIslandRequestsStore.list(me).any { it.uin == uin && it.host.equals(host, ignoreCase = true) && it.keyChanged }
+
+    private fun crossIslandGateStops(dec: SealedSender.Decrypted, payloadB64: String, host: String, meUin: Int): Boolean {
+        val match = ciContactMatch(dec.senderUin, host, dec.senderSigningPub)
+        val verifiedSelf = ownNumberRow(dec, meUin) == CrossIslandGate.OwnNumber.OURS_SIGNED
+        return when (CrossIslandGate.verdict(true, verifiedSelf, match == CrossIslandGate.ContactMatch.VERIFIED, dec.envelope)) {
+            CrossIslandGate.Verdict.PASS -> false
+            CrossIslandGate.Verdict.DROP -> true
+            CrossIslandGate.Verdict.HOLD -> {
+                val mismatch = match == CrossIslandGate.ContactMatch.KEY_MISMATCH
+                if (mismatch) {
+                    android.util.Log.w("RCQci", "row from ${dec.senderUin}@$host is not signed by the pinned key, held as a stranger")
+                }
+                CrossIslandRequestsStore.hold(meUin, dec.senderUin, host, payloadB64, ciPreview(dec.envelope), keyChanged = mismatch)
+                refreshCiRequests()
+                true
+            }
+        }
+    }
+
+    /**
+     * Room state keys (stage 6 phase 2) in a 1:1 envelope, taken ABOVE the
+     * cross-island gate (#985(1)).
+     *
+     * From our own island: exactly the two branches that used to sit below the
+     * gate, with their roster checks, against our own rooms.
+     *
+     * From another island: only a room we already hold on THAT island counts
+     * ([VisitedIslandsStore.existingAlias] never allocates), the sender must be
+     * in that room's roster, and the row must be signed by the key the roster
+     * lists for them. ⚠⚠ The wire `gid` is that island's id. Looking it up among
+     * our own rooms would let a member of a room over there write the key of an
+     * unrelated room here that shares the number, so it is never done.
+     */
+    private fun handleRoomKeyEnvelope(dec: SealedSender.Decrypted) {
+        val env = dec.envelope
+        val host = dec.senderHost
+        val ownHosts = setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
+        if (host == null || host in ownHosts) {
+            handleOwnRoomKey(env, dec)
+            return
+        }
+        val remoteGid = when (env) {
+            is Envelope.GsKey -> env.gid
+            is Envelope.GsKnack -> env.gid
+            else -> return
+        }
+        val alias = VisitedIslandsStore.existingAlias(host, remoteGid) ?: return
+        val room = groups.value.firstOrNull { it.id == alias && it.host.equals(host, ignoreCase = true) } ?: return
+        val member = CrossIslandGate.verifiedMember(room.members, dec.senderUin, dec.senderSigningPub) ?: return
+        when (env) {
+            is Envelope.GsKey ->
+                if (LocalStores.putRoomKey(alias, env.ver, env.key, replaceEqual = true)) {
+                    scope.launch { runCatching { refreshGroups() } }
+                }
+            is Envelope.GsKnack -> answerForeignRoomKnack(alias, host, remoteGid, member)
+            else -> Unit
+        }
+    }
+
+    private fun handleOwnRoomKey(env: Envelope, dec: SealedSender.Decrypted) {
+        val senderUin = dec.senderUin
+        when (env) {
+            is Envelope.GsKey ->
+                // Roster gate: only a fellow member's key is worth holding;
+                // equal-version replace is the wedge-repair rule from the design doc.
+                // A signed (v=1) row must carry the key the roster lists for that
+                // member, see [CrossIslandGate.ownRoomMember].
+                if (groups.value.firstOrNull { it.id == env.gid }?.members
+                        ?.let { CrossIslandGate.ownRoomMember(it, senderUin, dec.senderSigningPub) } != null
+                ) {
+                    if (LocalStores.putRoomKey(env.gid, env.ver, env.key, replaceEqual = true)) {
+                        scope.launch { runCatching { refreshGroups() } }
+                    }
+                }
+            is Envelope.GsKnack ->
+                // Any holder answers. The asker must be in the roster we can
+                // see; the reply is a plain sealed gskey.
+                scope.launch {
+                    runCatching {
+                        val g = groups.value.firstOrNull { it.id == env.gid } ?: return@runCatching
+                        val member = CrossIslandGate.ownRoomMember(g.members, senderUin, dec.senderSigningPub) ?: return@runCatching
+                        val k = LocalStores.roomKey(env.gid) ?: return@runCatching
+                        if (member.identityKey.isNotBlank()) {
+                            sendSealedCopies(
+                                senderUin,
+                                encryptFor(senderUin, Envelope.GsKey(env.gid, k.first, k.second)),
+                                envelopeType = "skdm",
+                            )
+                        }
+                    }
+                }
+            else -> Unit
+        }
+    }
+
+    /** Answers already given per (room alias, member), so a verified member
+     *  asking in a loop cannot turn us into a deposit machine. In memory: a
+     *  restart costs one extra answer. */
+    private val answeredForeignKnackAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Hand the key of a room on [host] to a verified member there who asked.
+     *  ⚠ Deposited on THAT island, to the member's number THERE, as our guest
+     *  number there. Sent through our own island it would reach whoever holds
+     *  that number here. */
+    private fun answerForeignRoomKnack(alias: Int, host: String, remoteGid: Int, member: GroupMember) {
+        val k = LocalStores.roomKey(alias) ?: return
+        if (member.identityKey.isBlank()) return
+        val guestUin = foreignCreds(host)?.first ?: return
+        val key = "$alias:${member.uin}"
+        val now = System.currentTimeMillis()
+        if (now - (answeredForeignKnackAt[key] ?: 0L) < 10 * 60_000L) return
+        answeredForeignKnackAt[key] = now
+        val ep = epochNow()
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                if (!stillOn(ep) || duressViewUp) return@runCatching
+                CrossIslandSender.depositRoomKey(
+                    host, member.uin, member.identityKey,
+                    Envelope.GsKey(remoteGid, k.first, k.second),
+                    guestUin, signingPriv(), signingPub(),
+                )
+            }
+        }
+    }
+
+    /** An island-proven UIN move: the stores that file this account's state
+     *  under its NUMBER follow it to the new one. Stores keyed by the local
+     *  account id (visited islands, cross-island contacts) need nothing. */
+    private fun rekeyMovedAccount(oldUin: Int?, newUin: Int) {
+        if (oldUin == null || oldUin <= 0 || oldUin == newUin) return
+        runCatching { SenderKeyStore.rekeyAccount(oldUin, newUin) }
+            .onFailure { android.util.Log.w("RCQmove", "sender keys not re-keyed: ${it.message}") }
+        runCatching { MultihomeStore.rekeyOwner(oldUin, newUin) }
+            .onFailure { android.util.Log.w("RCQmove", "backup homes not re-keyed: ${it.message}") }
+        runCatching { CrossIslandRequestsStore.rekeyOwner(oldUin, newUin) }
+            .onFailure { android.util.Log.w("RCQmove", "cross-island requests not re-keyed: ${it.message}") }
+    }
+
+    /** Nickname pushes already made per (account, island, name) this process. */
+    private val guestNicknameSynced = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** Right after [ensureGuestOn]: once per process per island and name, so a
+     *  copy registered under an old name corrects itself. */
+    private fun syncGuestNicknameOnce(host: String) {
+        val nick = store.nickname?.takeIf { it.isNotBlank() } ?: return
+        val key = "${AccountManager.activeId.value}|${host.lowercase()}|$nick"
+        if (!guestNicknameSynced.add(key)) return
+        pushNicknameToGuestCopies(nick, onlyHost = host)
+    }
+
+    /**
+     * #985(2): repeat a nickname change on this account's copies on other
+     * islands (visited islands and backup homes), each with its own token.
+     * Best effort and off the caller's back: a profile edit never waits on
+     * foreign islands. ⚠ Only islands in this account's own stores, and only the
+     * nickname. Both stores are snapshotted before the first suspension, since
+     * an account switch re-points them.
+     */
+    private fun pushNicknameToGuestCopies(nickname: String, onlyHost: String? = null) {
+        if (duressViewUp) return
+        val me = store.uin ?: return
+        val ep = epochNow()
+        val targets = GuestCopies.targets(
+            VisitedIslandsStore.list(),
+            MultihomeStore.list(me),
+            serverHost(),
+            skipHost = { RelayConfigStore.isFrontHost(it) },
+        ).filter { onlyHost == null || it.host.equals(onlyHost, ignoreCase = true) }
+        if (targets.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            val sp = runCatching { signingPriv() }.getOrNull() ?: return@launch
+            val pp = runCatching { signingPub() }.getOrNull() ?: return@launch
+            val stillOurs = { stillOn(ep) && !duressViewUp }
+            for (t in targets) {
+                if (!stillOurs()) return@launch
+                GuestCopies.pushNickname(t, nickname, sp, pp, stillOurs) { target, fresh ->
+                    when (target.source) {
+                        GuestCopies.Source.VISITED -> VisitedIslandsStore.updateCreds(target.host, fresh.uin, fresh.token)
+                        GuestCopies.Source.BACKUP -> MultihomeStore.updateCreds(me, target.host, fresh.uin, fresh.token)
+                    }
+                }
+            }
+        }
     }
 
     /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
@@ -9781,8 +10084,13 @@ class Session(context: Context) {
             refreshCiRequests()
             return true
         }
+        // Never for an impostor row: accepting would overwrite the contact
+        // pinned at this address with a fresh card. See [isKeyChangedRequest].
+        if (isKeyChangedRequest(me, uin, host)) return false
         if (addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT) == CiAdd.FAILED) return false
-        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload) }
+        // Released under the island the row was held under: a row that came off
+        // a guest mailbox without a foreign host of its own was attributed to it.
+        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
         mergeCrossIslandContacts()
         // My other devices hold their own copy of this request and would offer
         // to accept it a second time, which re-TOFUs the peer. Hand them the
@@ -9886,6 +10194,14 @@ class Session(context: Context) {
 
     fun blockCrossIslandRequest(uin: Int, host: String) {
         val me = store.uin ?: return
+        // ⚠ An impostor row names the address of a contact we accepted. Blocking
+        // the address (here, in the bare-number list and on sibling devices)
+        // would silence the REAL contact, so the row is only cleared.
+        if (isKeyChangedRequest(me, uin, host)) {
+            CrossIslandRequestsStore.clear(me, uin, host)
+            refreshCiRequests()
+            return
+        }
         CrossIslandRequestsStore.block(me, uin, host)
         sendCiAck(uin, host, "block")
         // ...and in the list the user can actually SEE. The quarantine store
@@ -10576,11 +10892,11 @@ class Session(context: Context) {
      *  setting changed. Stale in the permissive direction costs one row the
      *  island would have refused; the enforcement that matters is still the
      *  island's, on the path a real call takes. */
-    private fun mayLeaveCallMarker(senderUin: Int, host: String?): Boolean {
+    private fun mayLeaveCallMarker(senderUin: Int, host: String?, spub: ByteArray): Boolean {
         val ownHosts = setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
         // Cross-island: exactly the gate every other cross-island call signal
         // passes a few lines below, since nothing else over there may ring us.
-        if (host != null && host !in ownHosts) return CrossIslandStore.get(senderUin, host) != null
+        if (host != null && host !in ownHosts) return isVerifiedCrossIslandContact(senderUin, host, spub)
         return when (cachedProfile()?.call_policy ?: "everyone") {
             "nobody" -> false
             "contacts" -> isSameIslandContact(senderUin)

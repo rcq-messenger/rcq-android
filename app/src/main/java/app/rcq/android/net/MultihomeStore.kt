@@ -90,6 +90,36 @@ object MultihomeStore {
         )
     }
 
+    /** An island-proven UIN move of the PRIMARY (the migrate response, or
+     *  `moved_from` from /auth/refresh, never a socket frame): re-file this
+     *  account's backup homes under the new number. Same shape as
+     *  [promoteSwap] without the host swap, since the primary island did not
+     *  change. Without it the backup drain and the credential lookup for rooms
+     *  hosted on a backup island both come back empty after a move (#986(a)).
+     *  Must run before start() republishes the signed home record, which is
+     *  assembled from this store. */
+    fun rekeyOwner(oldOwnUin: Int, newOwnUin: Int) {
+        if (!::prefs.isInitialized || oldOwnUin == newOwnUin) return
+        val before = all()
+        val after = rekeyHomes(before, oldOwnUin, newOwnUin)
+        if (after != before) write(after)
+    }
+
+    /** Pure half of [rekeyOwner]. An entry the new number already holds for
+     *  the same host wins and the old one is dropped: never overwrite, never
+     *  keep two tokens for one island. */
+    internal fun rekeyHomes(list: List<Home>, oldOwnUin: Int, newOwnUin: Int): List<Home> {
+        if (oldOwnUin == newOwnUin) return list
+        val taken = list.filter { it.ownUin == newOwnUin }.map { it.host.lowercase() }.toSet()
+        return list.mapNotNull {
+            when {
+                it.ownUin != oldOwnUin -> it
+                it.host.lowercase() in taken -> null
+                else -> it.copy(ownUin = newOwnUin)
+            }
+        }
+    }
+
     private fun all(): List<Home> = runCatching {
         val raw = prefs.getString(KEY_HOMES, null) ?: return emptyList()
         gson.fromJson<List<Home>>(raw, object : TypeToken<List<Home>>() {}.type) ?: emptyList()

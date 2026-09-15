@@ -49,6 +49,42 @@ object GroupLogPage {
 
     fun encode(s: Strike): String = "${s.count}:${s.why}"
 
+    /** Failures that say nothing about the row: the ingest refused to look at
+     *  it at all (the duress view is up, the store is closed, the account was
+     *  switched). They are never booked as a strike, or a phone that sits
+     *  PIN-locked through three drains would write off rows it never read. */
+    val NOT_THE_ROWS_FAULT = setOf("duress", "db_closed", "switched")
+
+    /** The fate of one row after one ingest. [done]: the ack may move past
+     *  it. [record]: what to keep for the row's next drain, null to forget. */
+    data class RowFate(val done: Boolean, val record: String?)
+
+    /** [why] is the ingest's answer (null = done with), [prev] what [record]
+     *  held for this row last drain. A failure that may pass later pins the
+     *  ack for [FAIL_DRAINS] drains of the same failure, then writes it off. */
+    fun fate(prev: String?, why: String?): RowFate {
+        if (why == null) return RowFate(done = true, record = null)
+        if (why in NOT_THE_ROWS_FAULT) return RowFate(done = false, record = prev)
+        val s = strike(prev, why)
+        return if (s.writtenOff) RowFate(done = true, record = null) else RowFate(done = false, record = encode(s))
+    }
+
+    /** The ack of one drained page of a legacy `/messages/queue`, split the way
+     *  the island wants it (the direct and group tables have independent ids
+     *  that can collide). Only rows that were handled or written off are
+     *  named: the island DELETES what is acked. */
+    class QueueAcks {
+        val direct = ArrayList<Int>()
+        val group = ArrayList<Int>()
+
+        fun row(id: Int, isGroup: Boolean, done: Boolean) {
+            if (!done) return
+            if (isGroup) group.add(id) else direct.add(id)
+        }
+
+        val isEmpty: Boolean get() = direct.isEmpty() && group.isEmpty()
+    }
+
     /** The live-frame rule: a `gmsg` frame may be acked on its own only when
      *  it is the NEXT seq after what this device is level with. The island's
      *  ack moves the cursor forward to whatever is named, and a frame that

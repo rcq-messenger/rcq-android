@@ -464,6 +464,21 @@ object CrossIslandSender {
         ownHost: String,
     ): Boolean = depositToPrimary(contact.host, contact.uin, contact.identityKey, env, ownUin, signingPriv, signingPub, ownHost)
 
+    /** A room-key answer to a fellow member of a room on [host] (§5c): the
+     *  same one-hop sealed deposit, addressed to that member's number THERE,
+     *  under the outer `skdm` type the own-island answer uses. [ownUin] and
+     *  [ownHost] are our guest number on that island and that island, never
+     *  the home pair: the member knows us by the roster of their room. */
+    fun depositRoomKey(
+        host: String,
+        uin: Int,
+        identityKeyB64: String,
+        env: Envelope,
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+    ): Boolean = depositToPrimary(host, uin, identityKeyB64, env, ownUin, signingPriv, signingPub, host, envelopeType = "skdm")
+
     /** One sealed envelope, one deposit, PRIMARY island only. No backup-home
      *  copies: those mailboxes are polled (~30s), and both callers are
      *  interactive (call signalling, a contact request the sender is waiting on).

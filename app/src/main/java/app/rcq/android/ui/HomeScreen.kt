@@ -878,19 +878,27 @@ internal fun HomeScreen(
                             val address = if (r.host.isEmpty()) "${r.uin}" else "${r.uin}@${r.host}"
                             CiPendingRow(
                                 tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
-                                preview = r.preview.ifEmpty {
+                                // A row that claims an accepted contact's address
+                                // under a different signing key says so instead of
+                                // its preview: it may not be them.
+                                preview = if (r.keyChanged) stringResource(R.string.ci_key_changed) else r.preview.ifEmpty {
                                     if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
                                 },
-                                onAccept = {
-                                    scope.launch {
-                                        // Accepting a same-island stranger releases their
-                                        // held messages into a normal thread; open it.
-                                        runCatching { session.acceptCrossIslandRequest(r.uin, r.host) }
-                                            .onSuccess { ok -> if (ok && r.host.isEmpty()) onOpenChat(r.uin) }
+                                // ⚠ A key-changed row offers Dismiss only: Accept and
+                                // Block act on the ADDRESS, so they would re-pin or
+                                // silence the real contact instead of the impostor.
+                                onAccept = if (r.keyChanged) null else {
+                                    {
+                                        scope.launch {
+                                            // Accepting a same-island stranger releases their
+                                            // held messages into a normal thread; open it.
+                                            runCatching { session.acceptCrossIslandRequest(r.uin, r.host) }
+                                                .onSuccess { ok -> if (ok && r.host.isEmpty()) onOpenChat(r.uin) }
+                                        }
                                     }
                                 },
                                 onDismiss = { session.dismissCrossIslandRequest(r.uin, r.host) },
-                                onBlock = { session.blockCrossIslandRequest(r.uin, r.host) },
+                                onBlock = if (r.keyChanged) null else { { session.blockCrossIslandRequest(r.uin, r.host) } },
                             )
                         }
                     }
@@ -2109,9 +2117,9 @@ private fun RequestAction(
 private fun CiPendingRow(
     tag: String,
     preview: String,
-    onAccept: () -> Unit,
+    onAccept: (() -> Unit)?,
     onDismiss: () -> Unit,
-    onBlock: () -> Unit,
+    onBlock: (() -> Unit)?,
 ) {
     val c = RcqTheme.colors
     Row(
@@ -2128,9 +2136,10 @@ private fun CiPendingRow(
         // Three, because two were not enough: accept or block left no way to
         // say "not now" without silencing a stranger permanently (#586). The
         // middle one just drops the request — they can write again.
-        RequestAction(Icons.Filled.Check, stringResource(R.string.home_accept), c.accent, onAccept)
+        // Null hides the action (a key-changed row offers Dismiss only).
+        onAccept?.let { RequestAction(Icons.Filled.Check, stringResource(R.string.home_accept), c.accent, it) }
         RequestAction(Icons.Filled.Close, stringResource(R.string.home_decline), c.textSecondary, onDismiss)
-        RequestAction(Icons.Filled.Block, stringResource(R.string.ci_block), c.statusBusy, onBlock)
+        onBlock?.let { RequestAction(Icons.Filled.Block, stringResource(R.string.ci_block), c.statusBusy, it) }
     }
 }
 

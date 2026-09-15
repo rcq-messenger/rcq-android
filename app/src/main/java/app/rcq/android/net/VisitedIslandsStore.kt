@@ -104,6 +104,14 @@ object VisitedIslandsStore {
 
     fun refByAlias(aliasId: Int): AliasRef? = aliases().firstOrNull { it.aliasId == aliasId }
 
+    /** The alias of a room we ALREADY know on [host], or null. Never allocates:
+     *  a host and a room id read off an envelope must not be able to mint
+     *  entries in this account's alias map. */
+    fun existingAlias(host: String, remoteId: Int): Int? {
+        val h = host.lowercase()
+        return aliases().firstOrNull { it.host == h && it.remoteId == remoteId }?.aliasId
+    }
+
     /** Wipe a specific (possibly non-active) account's slots (burn / delete). */
     fun wipeAccount(accountId: String) {
         if (::prefs.isInitialized) {

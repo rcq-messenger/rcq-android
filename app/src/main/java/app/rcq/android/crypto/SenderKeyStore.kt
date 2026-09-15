@@ -237,6 +237,62 @@ object SenderKeyStore {
     fun ownChainSnapshot(ownUin: Int, gid: Int): OwnSnapshot? =
         loadOut()[outKey(ownUin, gid)]?.let { OwnSnapshot(it.kid, it.epoch, it.index, it.ck) }
 
+    /**
+     * An island-proven UIN move (the migrate response, or `moved_from` from
+     * /auth/refresh, never a socket frame): carry this account's inbound
+     * chains and owned kids to the new number (#986(a)).
+     *
+     * ⚠ Inbound chains matter most for rooms on OTHER islands. Our member
+     * number there is the guest uin, which did not change, so the senders on
+     * that island still count us as served and never re-send the chain. Left
+     * under the old number, every broadcast from there shows an unknown kid
+     * and the room stays dark for hours of rate-limited re-send requests.
+     *
+     * ⚠⚠ Own OUTBOUND chains are deliberately NOT carried over, they are
+     * dropped. On Android they only ever exist for rooms on OUR island (the
+     * foreign-room send stays on the per-member path), and peers bound each
+     * of those kids to the OLD number when its SKDM arrived. Re-using the kid
+     * under the new number would attribute every broadcast to a number that is
+     * no longer in the room. With no chain the next send rotates a fresh kid
+     * and hands it out as the new number, which is what peers can accept.
+     *
+     * The kid in-memory hold table in Session is keyed by kid alone, so it has
+     * nothing to re-key. An entry the new number already holds wins.
+     */
+    @Synchronized
+    fun rekeyAccount(oldUin: Int, newUin: Int) {
+        if (!::prefs.isInitialized || oldUin == newUin) return
+        val srcIn = loadIn(oldUin)
+        val srcOwned = loadOwned(oldUin)
+        val inn = mergeTargetWins(loadIn(newUin), srcIn)
+        val owned = mergeOwned(loadOwned(newUin), srcOwned, OWNED_CAP)
+        val out = loadOut()
+        val keptOut = dropOwner(out, oldUin)
+        val edit = prefs.edit()
+            .putString(inKey(newUin), gson.toJson(inn))
+            .putString(ownedKey(newUin), gson.toJson(owned))
+            .remove(inKey(oldUin))
+            .remove(ownedKey(oldUin))
+        if (keptOut.size != out.size) edit.putString(KEY_OUT, gson.toJson(keptOut))
+        edit.apply()
+    }
+
+    /** Pure: [source] entries under keys [target] does not already hold. */
+    internal fun <T> mergeTargetWins(target: Map<String, T>, source: Map<String, T>): Map<String, T> {
+        val m = LinkedHashMap<String, T>(source)
+        m.putAll(target)
+        return m
+    }
+
+    /** Pure: owned kids, the new number's first (newest first), then the old
+     *  number's that it does not have, capped like [prepareOwnSend] caps. */
+    internal fun mergeOwned(target: List<String>, source: List<String>, cap: Int): List<String> =
+        (target + source.filter { it !in target }).distinct().take(cap)
+
+    /** Pure: the outbound map without [ownUin]'s chains (keys are "uin:gid"). */
+    internal fun <T> dropOwner(out: Map<String, T>, ownUin: Int): Map<String, T> =
+        out.filterKeys { !it.startsWith("$ownUin:") }
+
     /** Wipe all chains for an account (account burn / logout). */
     @Synchronized
     fun clearForAccount(ownUin: Int) {

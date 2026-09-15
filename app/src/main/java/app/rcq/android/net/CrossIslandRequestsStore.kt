@@ -36,6 +36,10 @@ object CrossIslandRequestsStore {
         val nickname: String? = null,
         val note: String? = null,
         val contactReq: Boolean = false,
+        // The row claims the address of a contact we already accepted, but was
+        // signed by a different key than the one pinned for them. Shown on the
+        // row: it is a stranger until the person looks, never a silent merge.
+        val keyChanged: Boolean = false,
     ) {
         val preview: String get() = msgs.firstOrNull()?.preview ?: note.orEmpty()
     }
@@ -100,11 +104,13 @@ object CrossIslandRequestsStore {
     fun isBlocked(ownUin: Int, uin: Int, host: String): Boolean = blockedSet().contains(reqKey(ownUin, uin, host))
 
     /** Quarantine one sealed payload. Returns false (caller drops it) when blocked. */
-    fun hold(ownUin: Int, uin: Int, host: String, payload: String, preview: String): Boolean {
+    fun hold(ownUin: Int, uin: Int, host: String, payload: String, preview: String, keyChanged: Boolean = false): Boolean {
         if (isBlocked(ownUin, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
-        val r = map[k] ?: Request(ownUin, uin, host, System.currentTimeMillis(), mutableListOf())
+        val base = map[k] ?: Request(ownUin, uin, host, System.currentTimeMillis(), mutableListOf())
+        // Sticky: one mismatched row is enough to warn about the whole request.
+        val r = if (keyChanged && !base.keyChanged) base.copy(keyChanged = true) else base
         r.msgs.add(Held(payload, preview))
         while (r.msgs.size > MAX_HELD) r.msgs.removeAt(0)
         map[k] = r
@@ -121,7 +127,7 @@ object CrossIslandRequestsStore {
      * rather than adding another. Returns false when the sender is blocked or
      * the pending list is full (caller drops the envelope).
      */
-    fun holdContactRequest(ownUin: Int, uin: Int, host: String, nickname: String?, note: String?): Boolean {
+    fun holdContactRequest(ownUin: Int, uin: Int, host: String, nickname: String?, note: String?, keyChanged: Boolean = false): Boolean {
         if (isBlocked(ownUin, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
@@ -136,9 +142,49 @@ object CrossIslandRequestsStore {
             nickname = nickname?.takeIf { it.isNotBlank() } ?: old?.nickname,
             note = note?.takeIf { it.isNotBlank() } ?: old?.note,
             contactReq = true,
+            keyChanged = keyChanged || old?.keyChanged == true,
         )
         writeAll(map)
         return true
+    }
+
+    /** An island-proven UIN move (the migrate response, or `moved_from` from
+     *  /auth/refresh, never a socket frame): re-file this account's pending
+     *  requests and blocks under the new number, or they vanish from the list
+     *  after the move and a blocked sender's deposits start landing again. */
+    fun rekeyOwner(oldOwnUin: Int, newOwnUin: Int) {
+        if (!::prefs.isInitialized || oldOwnUin == newOwnUin) return
+        val reqs = all()
+        val blocked = blockedSet()
+        val nextReqs = rekeyRequests(reqs, oldOwnUin, newOwnUin)
+        val nextBlocked = rekeyBlocked(blocked, oldOwnUin, newOwnUin)
+        prefs.edit()
+            .putString(KEY, gson.toJson(nextReqs))
+            .putString(KEY_BLOCKED, gson.toJson(nextBlocked))
+            .apply()
+    }
+
+    /** Pure half of [rekeyOwner] for the requests. A row the new number
+     *  already holds for the same sender wins; the old one is dropped. */
+    internal fun rekeyRequests(map: Map<String, Request>, oldOwnUin: Int, newOwnUin: Int): Map<String, Request> {
+        if (oldOwnUin == newOwnUin) return map
+        val pre = "$oldOwnUin:"
+        val out = LinkedHashMap<String, Request>()
+        map.forEach { (k, v) -> if (!k.startsWith(pre)) out[k] = v }
+        map.forEach { (k, v) ->
+            if (!k.startsWith(pre)) return@forEach
+            val nk = "$newOwnUin:" + k.removePrefix(pre)
+            if (nk !in out) out[nk] = v.copy(ownUin = newOwnUin)
+        }
+        return out
+    }
+
+    /** Pure half of [rekeyOwner] for the blocks: a set, so a block both
+     *  numbers hold simply stays one entry. */
+    internal fun rekeyBlocked(set: Set<String>, oldOwnUin: Int, newOwnUin: Int): Set<String> {
+        if (oldOwnUin == newOwnUin) return set
+        val pre = "$oldOwnUin:"
+        return set.mapTo(LinkedHashSet()) { if (it.startsWith(pre)) "$newOwnUin:" + it.removePrefix(pre) else it }
     }
 
     fun list(ownUin: Int): List<Request> = all().values.filter { it.ownUin == ownUin }.sortedByDescending { it.firstAt }
