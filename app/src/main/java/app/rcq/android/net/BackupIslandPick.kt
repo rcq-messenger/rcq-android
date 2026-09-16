@@ -64,6 +64,10 @@ object BackupIslandPick {
     const val NO_ISLAND = "no_island"
     const val NO_OPEN_ISLAND = "no_open_island"
 
+    /** The island holds a GUEST copy of this key (spec 2026-09-15, 10). A copy
+     *  that takes part in rooms and nothing else is never a backup home. */
+    const val GUEST_COPY = "guest_copy"
+
     /** The most of a `/server/info` answer accepted. It is a few hundred
      *  bytes; a longer one is REJECTED whole (silence), never cut and parsed. */
     const val INFO_BODY_CAP = 64L * 1024
@@ -549,6 +553,8 @@ object BackupIslandPick {
         SWITCH_NOT_DONE,
         ENTRY,
         INVITE,
+        /** The island holds a guest copy of this key ([GUEST_COPY]). */
+        GUEST_COPY,
         GENERIC,
     }
 
@@ -572,6 +578,7 @@ object BackupIslandPick {
             "invalid_host" -> Sentence.INVALID_HOST
             "primary_island" -> Sentence.PRIMARY_ISLAND
             "already_added" -> Sentence.ALREADY_ADDED
+            GUEST_COPY -> Sentence.GUEST_COPY
             NO_ISLAND -> Sentence.NO_ISLAND
             NO_OPEN_ISLAND -> Sentence.NO_OPEN_ISLAND
             "no_account_here" -> Sentence.NO_ACCOUNT_HERE

@@ -105,6 +105,17 @@ class SecureStore(context: Context, accountId: String) {
             .apply()
     }
 
+    /** True when the island answered this account's recover or refresh with
+     *  `guest: true` (spec 2026-09-15, 12.1): the key signed in to a guest
+     *  copy, which takes part in rooms there and nothing else. The home screen
+     *  says so and offers no 1:1, and no push endpoint is registered for it. */
+    val isGuestCopy: Boolean
+        get() = prefs.getBoolean(p + K_GUEST_COPY, false)
+
+    fun setGuestCopy(guest: Boolean) {
+        prefs.edit().putBoolean(p + K_GUEST_COPY, guest).apply()
+    }
+
     /** Wipe just this account's slots (the shared file's other accounts
      *  stay intact). */
     fun wipe() = wipeKeys(prefs, p)
@@ -161,6 +172,7 @@ class SecureStore(context: Context, accountId: String) {
         private const val K_SERVER = "server_host"
         private const val K_SEED = "recovery_seed"
         private const val K_PENDING_ROTATION = "pending_rotation"
+        private const val K_GUEST_COPY = "guest_copy"
         // Prefix, not a key: one entry per room id (see cacheGroupNames).
         private const val K_GNAME = "gname."
         // ⚠ The pending rotation is listed here so every account wipe (burn,
@@ -184,7 +196,7 @@ class SecureStore(context: Context, accountId: String) {
 
         private fun wipeKeys(prefs: SharedPreferences, prefix: String) {
             val e = prefs.edit()
-            (STRING_KEYS + K_UIN).forEach { e.remove(prefix + it) }
+            (STRING_KEYS + K_UIN + K_GUEST_COPY).forEach { e.remove(prefix + it) }
             e.remove(prefix + K_MSGDB_ENC)
             // ⚠ The room-name cache is a PREFIX, not a fixed key, so a burn
             // that only removes the named slots would leave the names of every

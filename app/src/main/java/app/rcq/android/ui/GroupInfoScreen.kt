@@ -111,6 +111,42 @@ private fun PermChip(label: String, on: Boolean, onClick: () -> Unit) {
     )
 }
 
+/**
+ * Decision E4: what this screen knows about leaving the room it shows.
+ *
+ * ⚠⚠ Three states, not a nullable string. With a `String?` "still asking" and
+ * "nothing to warn about" are the same value, so the confirm could be tapped
+ * through while the roster fetch was still in the air and the room would be
+ * left in silence after all. On a room on ANOTHER island that was the normal
+ * case, not the rare one: this screen never loads a foreign roster
+ * (`ensureRoster` answers from the cached row), so the fetch is real and the
+ * window is the whole HTTP timeout of an island that may be slow or gone.
+ * [Unknown] is therefore never treated as [Safe]: the leave button asks and
+ * WAITS, the way the web's `openDestroyConfirm` awaits its refetch.
+ */
+private sealed interface LeaveCheckState {
+    /** Not asked yet, or asked and still waiting on the room's island. */
+    object Unknown : LeaveCheckState
+
+    /** Somebody who lives on the room's island stays: leave, no question. */
+    object Safe : LeaveCheckState
+
+    /** We are the room's last resident: this sentence goes in front of the
+     *  leave, because the island deletes the room for the copies left in it. */
+    data class Warn(val text: String) : LeaveCheckState
+}
+
+/** The warning to put in a sheet body, or null when there is none to show. */
+private val LeaveCheckState.warningText: String?
+    get() = (this as? LeaveCheckState.Warn)?.text
+
+/** The room's answer to "may I walk out quietly?", with the roster FETCHED
+ *  when the one we hold cannot give one (decision E4). Suspends for as long as
+ *  that takes, which is the point: every caller here awaits it before it opens
+ *  a sheet with a leave in it. */
+private suspend fun leaveCheckOf(session: Session, groupId: Int): LeaveCheckState =
+    session.lastResidentWarning(groupId)?.let { LeaveCheckState.Warn(it) } ?: LeaveCheckState.Safe
+
 @Composable
 internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit, onLeft: () -> Unit, onOpenPeerInfo: (Int) -> Unit, onOpenGroup: (Int) -> Unit = {}) {
     val c = RcqTheme.colors
@@ -168,6 +204,13 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     var memberSearch by remember { mutableStateOf("") }
     // Copy-link transient feedback (label flips to "Link copied" for ~1.6s).
     var linkCopied by remember { mutableStateOf(false) }
+    // Decision D7: "Become a resident" for our guest copy on this room's island.
+    var showSettle by remember { mutableStateOf(false) }
+    // Decision E4: what we know about leaving this room, and whether that
+    // question is in the air right now. Keyed on the room, so opening another
+    // one starts at Unknown instead of inheriting the last room's answer.
+    var leaveCheck by remember(groupId) { mutableStateOf<LeaveCheckState>(LeaveCheckState.Unknown) }
+    var leaveChecking by remember(groupId) { mutableStateOf(false) }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) scope.launch {
@@ -186,6 +229,27 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
     // granted the "members" cap. Mirrors the backend `_member_can(.,'members')`.
     val ownMember = group.members.firstOrNull { it.uin == ownUin }
     val canManageMembers = isOwner || (ownMember?.permissions?.contains("members") == true)
+    // Our own session on this room's island is a guest copy (spec 2026-09-15,
+    // 12.1): the island adds nobody for a guest, so there is no Add and no
+    // invite to offer.
+    //
+    // ⚠ A room on our OWN island counts too, when the primary session is
+    // itself a copy: the guard used to ask only about foreign rooms, and a
+    // copy signed in as the account kept Add on every room it has here.
+    // Collected as state so the row goes the moment a refresh reports the
+    // flag, not at the next unrelated recomposition.
+    val primaryGuest by session.primaryIsGuest.collectAsState()
+    val guestHere = session.guestOnGroupIsland(groupId, primaryGuest)
+    // Re-asked whenever the roster or the crown moves under us: a member who
+    // left, a seat that was claimed, or a handover all change the answer.
+    //
+    // ⚠ A WARM-UP, nothing more. It is what makes the leave button answer
+    // instantly in the ordinary case, and it is never what the button trusts:
+    // the button runs the check itself, because this effect's "not filled in
+    // yet" and its "nothing to warn about" cannot be told apart from here.
+    androidx.compose.runtime.LaunchedEffect(groupId, group.members.size, group.memberCount, group.ownerUin) {
+        leaveCheck = leaveCheckOf(session, groupId)
+    }
     /** May I edit the room's name, description, picture and pin?
      *
      *  ⚠⚠ This client never asked. `members` was honoured one line above, but
@@ -380,6 +444,22 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         }
                     }
                     GroupToggleRow(stringResource(R.string.gi_closed), stringResource(R.string.gi_closed_desc), group.isClosed) { v -> scope.launch { runCatching { session.patchGroup(groupId, isClosed = v) } } }
+                    // Spec 2026-09-15, 2.2. Only an island that knows the switch
+                    // sends it, so an older one never shows a toggle that does nothing.
+                    //
+                    // ⚠ Owner-only, NOT `canEditInfo`. The island puts this field
+                    // behind ownership alone and answers 403 "owner only"
+                    // (groups.py, beside `is_closed` and on purpose: a moderator
+                    // trusted with names and pins must not be able to open a room
+                    // the owner closed to strangers). Drawn for a moderator with
+                    // the `info` cap, the switch would flip, the PATCH would be
+                    // refused inside `runCatching`, and it would snap back with
+                    // nothing said. Same rule as `gi_closed` and `gi_hide` above.
+                    if (isOwner) {
+                        group.allowGuests?.let { allow ->
+                            GroupToggleRow(stringResource(R.string.group_settings_allow_guests), "", allow) { v -> scope.launch { runCatching { session.patchGroup(groupId, allowGuests = v) } } }
+                        }
+                    }
                     GroupToggleRow(stringResource(R.string.gi_hide), stringResource(R.string.gi_hide_desc), group.membersHidden) { v -> scope.launch { runCatching { session.patchGroup(groupId, membersHidden = v) } } }
                     // Room policies (#755 — the desktop had these, this client
                     // could neither see nor set them). The island enforces
@@ -436,7 +516,7 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 // link; the server already allows it, gated only by the invitee's
                 // own invite policy + the owner's block list). A CLOSED group locks
                 // adds to the owner / members-moderator.
-                if (!group.isClosed || canManageMembers) {
+                if ((!group.isClosed || canManageMembers) && !guestHere) {
                     Row(Modifier.clip(RoundedCornerShape(percent = 50)).clickable { showAddMember = true }.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(Icons.Filled.PersonAdd, null, tint = c.accent, modifier = Modifier.size(16.dp))
                         Text(stringResource(R.string.home_bar_add), color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -495,7 +575,9 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             items(visibleMembers, key = { it.uin }) { m ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
                     Row(
-                        Modifier.fillMaxWidth().clickable(enabled = m.uin != ownUin) { onOpenPeerInfo(m.uin) },
+                        // A guest copy opens its Add-only card and an unclaimed
+                        // seat nothing (decision D5, MainActivity.openRoomMember).
+                        Modifier.fillMaxWidth().clickable(enabled = m.uin != ownUin && !m.invited) { onOpenPeerInfo(m.uin) },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -526,6 +608,12 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                                 BadgeMark(m.badge)
                             }
                             Text("${m.uin}", color = c.textMono, fontSize = 12.sp)
+                            if (m.guest) {
+                                Text(
+                                    stringResource(if (m.invited) R.string.group_member_invited else R.string.group_member_guest),
+                                    color = c.textSecondary, fontSize = 11.sp,
+                                )
+                            }
                         }
                         if (m.uin == group.ownerUin) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -569,7 +657,9 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         // island's users, so there is no wire form for "the new
                         // owner lives on island B" and the island refuses one
                         // it cannot resolve.
-                        if (group.host == null) {
+                        // Never to a guest copy: the island refuses it
+                        // (`target_guest`), because guests never own rooms.
+                        if (group.host == null && !m.guest) {
                             Text(
                                 stringResource(R.string.gi_transfer),
                                 color = Color(0xFFE5484D),
@@ -623,13 +713,67 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             }
         }
 
+        // Decision D7: our account on this room's island is a guest copy, which
+        // can become a resident there as the same row (spec 9.1).
+        if (guestHere) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp)).background(c.bgSecondary)
+                        .clickable { showSettle = true }.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.guest_settle_action, group.host ?: session.currentServer),
+                        color = c.accent, fontSize = 15.sp,
+                    )
+                }
+            }
+        }
+
         item {
             Box(
-                Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x14E5484D)).clickable { confirmDestructive = true }.padding(vertical = 14.dp),
+                Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x14E5484D))
+                    // ⚠⚠ Decision E4: the check runs ON THE TAP and the confirm
+                    // waits for it. It used to be read beside the button, out of
+                    // whatever the warm-up above had filled in, and a value that
+                    // is not there yet looked exactly like "nothing to warn
+                    // about". On a room on another island that was the NORMAL
+                    // case, not a rare race: this screen never loads a foreign
+                    // roster (`ensureRoster` answers from the cached row), so
+                    // the check really does go to the network, and against a
+                    // slow or unreachable island the window was the whole HTTP
+                    // timeout - long enough to open the sheet, answer it, and
+                    // delete the room for everyone left in it without a word.
+                    // The web has no such window (`openDestroyConfirm` awaits
+                    // its refetch before opening the confirm); now neither does
+                    // this. The owner's Delete asks the roster nothing: its own
+                    // sheet already says the room goes.
+                    .clickable(enabled = !leaveChecking) {
+                        if (isOwner) {
+                            confirmDestructive = true
+                        } else {
+                            leaveChecking = true
+                            scope.launch {
+                                leaveCheck = leaveCheckOf(session, groupId)
+                                leaveChecking = false
+                                confirmDestructive = true
+                            }
+                        }
+                    }
+                    .padding(vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(if (isOwner) Icons.Filled.Delete else Icons.AutoMirrored.Filled.ExitToApp, null, tint = Color(0xFFE5484D), modifier = Modifier.size(18.dp))
+                    // The tap can wait on another island, so it says so rather
+                    // than looking ignored.
+                    if (leaveChecking) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp), color = Color(0xFFE5484D), strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(if (isOwner) Icons.Filled.Delete else Icons.AutoMirrored.Filled.ExitToApp, null, tint = Color(0xFFE5484D), modifier = Modifier.size(18.dp))
+                    }
                     Text(stringResource(if (isOwner) R.string.gi_delete else R.string.gi_leave), color = Color(0xFFE5484D), fontWeight = FontWeight.SemiBold)
                 }
             }
@@ -645,6 +789,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 }
             }
         }
+    }
+
+    if (showSettle) {
+        GuestSettleSheet(session, group.host, onDismiss = { showSettle = false })
     }
 
     if (reportGroup) {
@@ -665,7 +813,10 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         RcqAskSheet(
             onDismiss = { confirmDestructive = false },
             title = stringResource(if (isOwner) R.string.gi_delete_q else R.string.gi_leave_q),
-            body = stringResource(if (isOwner) R.string.gi_delete_body else R.string.gi_leave_body),
+            // Decision D8: leaving as the room's last resident deletes it for
+            // everyone. The owner's button already says the room is deleted.
+            body = (if (!isOwner) leaveCheck.warningText else null)
+                ?: stringResource(if (isOwner) R.string.gi_delete_body else R.string.gi_leave_body),
             actions = listOf(
                 SheetAction(
                     label = stringResource(if (isOwner) R.string.common_delete else R.string.gi_leave_cta),
@@ -704,6 +855,13 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                         if (err != null) {
                             android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
                         } else {
+                            // Decision E4: the offer that follows has a leave in
+                            // it, so the roster answers BEFORE that sheet is
+                            // shown, never while it is already on screen. Same
+                            // rule as the leave button, kept here rather than in
+                            // the sheet's own action so that action stays the
+                            // plain self-removal it has to be (see below).
+                            leaveCheck = leaveCheckOf(session, groupId)
                             handedTo = target
                         }
                     }
@@ -720,7 +878,14 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         RcqAskSheet(
             onDismiss = { handedTo = null },
             title = stringResource(R.string.gi_transfer_done_title),
-            body = stringResource(R.string.gi_transfer_done, newOwner.nickname),
+            // Decision E4: this button leaves the room, so it carries the last
+            // resident's warning too when it applies. It normally does not,
+            // since the room was just handed to somebody who lives on its
+            // island and a copy from another island is never offered the crown.
+            // The answer was fetched before this sheet opened, so what it says
+            // here is the roster's, not the warm-up's.
+            body = listOfNotNull(stringResource(R.string.gi_transfer_done, newOwner.nickname), leaveCheck.warningText)
+                .joinToString("\n\n"),
             actions = listOf(
                 SheetAction(
                     label = stringResource(R.string.gi_leave_cta),
@@ -864,7 +1029,7 @@ private fun GroupToggleRow(title: String, subtitle: String, checked: Boolean, on
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, color = c.textPrimary, fontSize = 15.sp)
-            Text(subtitle, color = c.textSecondary, fontSize = 11.sp)
+            if (subtitle.isNotEmpty()) Text(subtitle, color = c.textSecondary, fontSize = 11.sp)
         }
         Switch(checked = checked, onCheckedChange = onChange, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
     }

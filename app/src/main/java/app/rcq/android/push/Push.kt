@@ -1091,6 +1091,8 @@ object Push {
             for (acct in AccountManager.accounts.value) {
                 val store = SecureStore(ctx, acct.id)
                 val token = store.token ?: continue
+                // A guest copy registers no wake (spec 2026-09-15, 12.1).
+                if (store.isGuestCopy) continue
                 val host = store.serverHost ?: RcqApi.DEFAULT_HOST
                 runCatching {
                     RcqApi("https://$host").apply { setToken(token) }

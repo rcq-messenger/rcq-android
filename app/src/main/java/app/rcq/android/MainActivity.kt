@@ -453,6 +453,26 @@ private fun RcqApp(session: Session) {
     // group's host — so ContactInfoScreen fetches their card from there instead
     // of our own island (which 404s). null for same-island / known contacts.
     var peerInfoHost by remember { mutableStateOf<String?>(null) }
+    // Decision D5: the card was opened for a guest copy in a room. Kept as the
+    // (uin, host) it was opened for, so opening anybody else never inherits it.
+    var peerInfoGuest by remember { mutableStateOf<Pair<Int, String?>?>(null) }
+
+    /** Open the card of [uin], tapped in room [roomId] (null outside a room):
+     *  the roster decides what the card may offer (decision D5). A guest copy
+     *  gets its Add-only card, resolved on the ROOM's island, where its number
+     *  means that copy; an unclaimed seat opens nothing. Every tap on a person
+     *  in a room comes through here: the member list, a sender's name or
+     *  avatar, a mention, the pin sheet, the media viewer, the reactions. */
+    fun openRoomMember(roomId: Int?, uin: Int) {
+        val room = roomId?.let { id -> session.groups.value.firstOrNull { it.id == id } }
+        val card = app.rcq.android.net.GuestPath.memberCard(room?.members?.firstOrNull { it.uin == uin })
+        if (card == app.rcq.android.net.GuestPath.MemberCard.NONE) return
+        val addOnly = card == app.rcq.android.net.GuestPath.MemberCard.ADD_ONLY
+        val host = if (addOnly) room?.host ?: session.currentServer else room?.host
+        peerInfoUin = uin
+        peerInfoHost = host
+        peerInfoGuest = if (addOnly) uin to host else null
+    }
     var showSettings by remember { mutableStateOf(false) }
     var settingsToBackupIsland by remember { mutableStateOf(false) }
     // Deep-link Settings straight to Network diagnostics (Home overflow menu).
@@ -940,6 +960,7 @@ private fun RcqApp(session: Session) {
                 onRemoved = { peerInfoUin = null; chatTarget = null },
                 onOpenChat = { peerInfoUin = null; chatTarget = ChatTarget.Peer(it) },
                 groupHost = peerInfoHost,
+                guestMember = peerInfoGuest == (peerInfo to peerInfoHost),
             )
             s is UiState.Registered && infoId != null -> GroupInfoScreen(
                 session, infoId,
@@ -947,7 +968,8 @@ private fun RcqApp(session: Session) {
                 onLeft = { groupInfoId = null; chatTarget = null },
                 // Carry the group's host so a cross-island member's profile resolves
                 // from the group's island, not ours.
-                onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = session.groups.value.firstOrNull { g -> g.id == infoId }?.host },
+                // Decision D5: see [openRoomMember].
+                onOpenPeerInfo = { openRoomMember(infoId, it) },
                 onOpenGroup = { groupInfoId = null; chatTarget = ChatTarget.Group(it) },
             )
             s is UiState.Registered && target != null -> {
@@ -973,7 +995,16 @@ private fun RcqApp(session: Session) {
                             session, target,
                             onBack = { chatTarget = null; unlockedChatThread = null },
                             onOpenGroupInfo = { groupInfoId = it },
-                            onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
+                            // Every person tapped in a thread comes through here:
+                            // a sender's name or avatar, a mention, the pin sheet,
+                            // the media viewer, the reactions sheet. In a room the
+                            // number is a number on the ROOM's island, so the card
+                            // resolves there, as GroupInfoScreen already does;
+                            // resolved on ours it named somebody else holding the
+                            // same number. A guest copy opens its Add-only card and
+                            // an unclaimed seat nothing: no Message, no Call, no
+                            // visit to either (decision D5, [openRoomMember]).
+                            onOpenPeerInfo = { uin -> openRoomMember((target as? ChatTarget.Group)?.id, uin) },
                             onOpenGroup = { chatTarget = ChatTarget.Group(it); unlockedChatThread = null },
                         )
                     }
@@ -1371,10 +1402,12 @@ private fun RcqApp(session: Session) {
                     onConfirm = {
                         GroupJoinLink.pending.value = null
                         scope.launch {
+                            // A foreign join says why it failed (spec 2026-09-15,
+                            // 12.5); a same-island join keeps its one sentence.
                             val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, req.id)
-                                         else session.joinGroup(req.id)?.let { req.id }
-                            if (opened != null) chatTarget = ChatTarget.Group(opened)
-                            else Toast.makeText(context, context.getString(R.string.group_invite_join_failed), Toast.LENGTH_LONG).show()
+                                         else session.joinGroup(req.id)?.let { Result.success(req.id) } ?: Result.failure<Int>(IllegalStateException("join"))
+                            opened.onSuccess { chatTarget = ChatTarget.Group(it) }
+                                .onFailure { e -> session.joinFailureSentence(e, foreignHost)?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
                         }
                     },
                     onDismiss = { GroupJoinLink.pending.value = null },

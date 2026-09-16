@@ -69,7 +69,14 @@ object Multihome {
     /** Re-authenticate on [host] by proving possession of the signing key
      *  (same challenge-response as seed-phrase recovery). Returns null when
      *  this identity never registered there; throws on network errors. */
-    suspend fun recoverOn(host: String, signingPriv: ByteArray, signingPub: ByteArray): RcqApi.RegisterResponse? {
+    suspend fun recoverOn(
+        host: String,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        /** True inside the guest flow: a 404 `identity_rotated` throws instead of
+         *  reading as "no account here" ([GuestPath.recoverAbsent], decision D2). */
+        rotatedIsError: Boolean = false,
+    ): RcqApi.RegisterResponse? {
         val api = RcqApi("https://$host")
         val skB64 = Base64.encodeToString(signingPub, Base64.NO_WRAP)
         // ⚠ The challenge call belongs INSIDE the same failure handling as the
@@ -80,13 +87,13 @@ object Multihome {
         val challenge = try {
             api.recoverChallenge(skB64).challenge
         } catch (e: IOException) {
-            if (e.message?.startsWith("HTTP 404") == true) return null else throw e
+            if (GuestPath.recoverAbsent(e.message, rotatedIsError)) return null else throw e
         }
         val signature = RecoveryPhrase.signChallenge(signingPriv, challenge)
         return try {
             api.recover(RcqApi.RecoverRequest(skB64, challenge, signature))
         } catch (e: IOException) {
-            if (e.message?.startsWith("HTTP 404") == true) null else throw e
+            if (GuestPath.recoverAbsent(e.message, rotatedIsError)) null else throw e
         }
     }
 
@@ -104,7 +111,12 @@ object Multihome {
         auto: Boolean = false,
     ): MultihomeStore.Home {
         val host = backupHost(ownUin, ownHost, hostInput)
-        val creds = recoverOn(host, signingPriv, signingPub) ?: run {
+        val recovered = recoverOn(host, signingPriv, signingPub)
+        // ⚠ A guest copy on that island (spec 2026-09-15, 10) is never a backup
+        // home: it takes part in rooms and nothing else, and registering beside
+        // it would give this key a second row its phrase can never reach.
+        if (recovered?.guest == true) throw IllegalArgumentException(BackupIslandPick.GUEST_COPY)
+        val creds = recovered ?: run {
             val api = RcqApi("https://$host")
             val skB64 = Base64.encodeToString(signingPub, Base64.NO_WRAP)
             // ⚠ The number is only handed out under proof now. Without the
@@ -146,6 +158,8 @@ object Multihome {
     ): MultihomeStore.Home? {
         val host = backupHost(ownUin, ownHost, hostInput)
         val creds = recoverOn(host, signingPriv, signingPub) ?: return null
+        // A guest copy is not a copy of this account to adopt ([addBackupIsland]).
+        if (creds.guest) return null
         return saveHome(ownUin, host, creds, auto)
     }
 

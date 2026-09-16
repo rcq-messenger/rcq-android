@@ -827,6 +827,7 @@
     <string name="gi_transfer_err_not_a_member">They are not in this group any more.</string>
     <string name="gi_transfer_err_no_such_user">This island does not know them.</string>
     <string name="gi_transfer_err_target_suspended">That account is suspended.</string>
+    <string name="gi_transfer_err_target_guest">A member from another island can\'t own this group.</string>
     <string name="gi_transfer_err_rate_limited_in">Too many attempts. Try again in %1$d s.</string>
     <string name="gi_transfer_err_rate_limited">Too many attempts. Try again later.</string>
     <string name="gi_transfer_err_failed">Could not hand the group over.</string>
@@ -1005,7 +1006,7 @@
     <string name="group_invite_none">You have no groups to share.</string>
     <string name="group_join_confirm">Join this group?</string>
     <string name="group_join_body">You will appear in its member list and start receiving its messages.</string>
-    <string name="group_invite_closed_hint">Invite-only group. Ask a member to add you.</string>
+    <string name="group_invite_closed_hint">This group is invite-only. Ask the owner to add you.</string>
     <string name="group_invite_join_failed">Couldn\'t join. The island may be unreachable or the group is invite-only.</string>
     <string name="chat_recording">Recording  %1$s</string>
     <string name="chat_send">Send</string>
@@ -1442,10 +1443,10 @@
     <string name="badge_desc_unknown">A mark given by this island.</string>
     <string name="home_discover_join_failed">Couldn\'t join, try again.</string>
     <string name="cs_move_footer_play">The island picks a fresh random number for you. Contacts, groups, keys and chat history are all kept.</string>
-    <string name="reg_invite_label">Access code</string>
-    <string name="reg_invite_required">This island is closed: joining needs an access code from its operator. Paste it below.</string>
-    <string name="reg_entry_required">Entry to this island is paid. Buy entry, then paste the access code you get below.</string>
-    <string name="reg_invite_invalid">That access code was not accepted. It may be used up, expired, or meant for another island.</string>
+    <string name="reg_invite_label">Entry code</string>
+    <string name="reg_invite_required">This island is closed: joining needs an entry code from its operator. Paste it below.</string>
+    <string name="reg_entry_required">Entry to this island is paid. Buy entry, then paste the entry code you get below.</string>
+    <string name="reg_invite_invalid">That code was not accepted. It may be used up, expired, or meant for another island.</string>
     <string name="ci_closed_island">This island is closed. To write to somebody there you need a link from them: a shared contact, or a message they sent you first.</string>
     <string name="island_entry_price">%1$s once</string>
     <string name="island_entry_closed">Closed club</string>
@@ -1477,12 +1478,12 @@
     <string name="residency_since">Resident since %1$s</string>
     <string name="residency_body">One payment, once. A resident wears the island\'s mark, and hands out the access codes this island gives its residents.</string>
     <string name="residency_buy">Buy on %1$s</string>
-    <string name="residency_have_code">I have an access code</string>
+    <string name="residency_have_code">I have an entry code</string>
     <string name="residency_redeem">Activate</string>
     <string name="residency_redeeming">Checking…</string>
     <string name="residency_done">You live here now.</string>
     <string name="residency_already">This account is already a resident.</string>
-    <string name="residency_code_spent">That access code has already been used.</string>
+    <string name="residency_code_spent">That entry code has already been used.</string>
     <string name="residency_not_sold">This island does not sell residency.</string>
     <string name="residency_failed">The island did not accept it. Try again.</string>
     <!-- The crypto gateway inside the app, sideload only (founder item 2, 12.09).
@@ -1532,4 +1533,35 @@
     <plurals name="burn_islands_body"><item quantity="one">This account also has a copy on %1$d other island, where you joined groups or keep a backup address: %2$s. It is deleted first, then the account on your island.</item><item quantity="other">This account also has copies on %1$d other islands, where you joined groups or keep a backup address: %2$s. They are deleted first, then the account on your island.</item></plurals>
     <plurals name="burn_failures_title"><item quantity="one">Could not delete on %1$d island</item><item quantity="other">Could not delete on %1$d islands</item></plurals>
     <plurals name="burn_done"><item quantity="one">Account burned on your island and on %1$d other island.</item><item quantity="other">Account burned on your island and on %1$d other islands.</item></plurals>
+    <!-- Guest copies on paid and invite islands (spec 2026-09-15, 12.5). -->
+    <string name="guest_join_closed">%1$s doesn\'t let in people from other islands.</string>
+    <string name="guest_join_room_closed">The owner of this group doesn\'t let in people from other islands.</string>
+    <string name="guest_join_room_full">This group is too big to take people from other islands.</string>
+    <string name="guest_join_room_limit">Too many people from other islands joined this group today. Try again tomorrow.</string>
+    <string name="guest_join_rate">Too many attempts. Try again in an hour.</string>
+    <string name="guest_join_group_limit">You\'re in too many groups on %1$s. Leave one to join this one.</string>
+    <string name="guest_join_old_paid">Only paying residents can get into %1$s, and its server can\'t take people from other islands yet.</string>
+    <string name="guest_join_old_invite">%1$s is invite-only, and its server can\'t take people from other islands yet.</string>
+    <string name="guest_unavailable">%1$s can\'t take guests right now. Try again later.</string>
+    <string name="guest_restricted">You\'re a guest on %1$s: you can take part in its groups, but personal chats, calls and everything else work from your home island.</string>
+    <string name="guest_restricted_contacts">Answer this request from your home account.</string>
+    <string name="guest_copy_banner">This is your guest copy for groups on %1$s.</string>
+    <string name="group_add_foreign_limit">Too many people from other islands were added today. Try again tomorrow.</string>
+    <string name="group_add_foreign_seat_limit">This person has already been invited to several groups and hasn\'t accepted any invite yet.</string>
+    <string name="group_add_foreign_stale_key">This contact has new keys. Ask for a fresh contact link.</string>
+    <string name="group_add_foreign_guest_adder">You\'re a guest in this group, so you can\'t add people to it.</string>
+    <string name="group_member_guest">From another island</string>
+    <string name="group_member_invited">Invited, hasn\'t joined yet</string>
+    <string name="group_settings_allow_guests">Let in people from other islands</string>
+    <string name="group_leave_last_resident">You\'re the last member who lives on %1$s. If you leave, the group will be deleted for everyone.</string>
+    <string name="guest_settle_action">Become a resident of %1$s</string>
+    <string name="guest_settle_done">You now live on %1$s.</string>
+    <string name="guest_settle_number_invite">This invite comes with its own number and can\'t be used on a guest copy. Ask for an invite without a number.</string>
+    <string name="backup_is_guest_copy">Your account on %1$s is a guest copy, so it can\'t be a backup island.</string>
+    <string name="guest_settle_code_hint">Entry code, if you have one</string>
+    <!-- Decision D3: a refused join says the same thing on every client. The
+         foreign island answers these on its own self-join route; the web named
+         them from the start, this client used to show the generic line. -->
+    <string name="group_join_blocked">The owner has blocked you from this group.</string>
+    <string name="group_join_gone">This group no longer exists.</string>
 </resources>

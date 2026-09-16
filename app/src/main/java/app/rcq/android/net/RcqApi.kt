@@ -271,7 +271,17 @@ class RcqApi(
      *  that as "burned from another device" and WIPES the local copy - so a
      *  phone in a drawer deleted the chats of a live account because its owner
      *  changed number on their laptop. Null everywhere else. */
-    data class RegisterResponse(val uin: Int, val token: String, val moved_from: Int? = null)
+    data class RegisterResponse(
+        val uin: Int,
+        val token: String,
+        val moved_from: Int? = null,
+        /** True when the account this token opens is a guest copy on that
+         *  island (spec 2026-09-15, 2.3): it takes part in rooms and nothing
+         *  else. Filled by `/auth/recover` and `/auth/refresh` on islands that
+         *  know guests, false everywhere older. ⚠ A guest copy is never adopted
+         *  as a backup home ([Multihome.addBackupIsland]). */
+        val guest: Boolean = false,
+    )
 
     // Account recovery (seed-phrase): prove possession of the signing key to
     // rebind a fresh device to the same UIN. Reuses RegisterResponse {uin,token}.
@@ -529,6 +539,48 @@ class RcqApi(
     )
     suspend fun refreshSession(req: RefreshRequest): RegisterResponse = withContext(Dispatchers.IO) {
         post("/auth/refresh", gson.toJson(req), authed = false, RegisterResponse::class.java)
+    }
+
+    // ── guest copies on paid and invite islands (spec 2026-09-15) ────
+
+    /** `POST /auth/guest`. [host] is the island as dialled, [group_id] the room
+     *  on THAT island, [signature] Ed25519 over
+     *  [app.rcq.android.crypto.GuestProof.proofBytes]. ⚠ No home host and no
+     *  home number: nothing else about this account goes to the island. */
+    data class GuestRequest(
+        val v: Int = 1,
+        val host: String,
+        val group_id: Int,
+        val nickname: String,
+        val identity_key: String,
+        val signing_key: String,
+        val challenge: String,
+        val signature: String,
+        val device_id: String? = null,
+    )
+
+    /** [guest] false: the key opened a NATIVE account there (a backup home, or a
+     *  copy made while the door was open). [created]: true only for a 201. */
+    data class GuestResponse(val uin: Int, val token: String, val guest: Boolean = false, val created: Boolean = false)
+
+    /** A 120 s challenge for a guest proof. The island binds it to typ "guest",
+     *  so a register or recover challenge is not spendable here, nor this one
+     *  there. */
+    suspend fun guestChallenge(signingKey: String): RecoverChallengeResponse = withContext(Dispatchers.IO) {
+        post("/auth/guest/challenge", gson.toJson(RecoverChallengeRequest(signingKey)), authed = false, RecoverChallengeResponse::class.java)
+    }
+
+    suspend fun guest(req: GuestRequest): GuestResponse = withContext(Dispatchers.IO) {
+        post("/auth/guest", gson.toJson(req), authed = false, GuestResponse::class.java)
+    }
+
+    /** `POST /auth/guest/settle`: this guest copy becomes a resident, as the SAME
+     *  row. [code] is an entry voucher or an invite; null on an open island. */
+    data class GuestSettleRequest(val code: String? = null)
+    data class GuestSettleResponse(val uin: Int = 0, val resident_since: String? = null, val badge: String? = null)
+
+    suspend fun guestSettle(code: String?): GuestSettleResponse = withContext(Dispatchers.IO) {
+        post("/auth/guest/settle", gson.toJson(GuestSettleRequest(code)), authed = true, GuestSettleResponse::class.java)
     }
 
     /** Rotate the long-term identity keys for the current (authed) account in
@@ -1280,6 +1332,11 @@ class RcqApi(
         // exposes the nickname on this row.
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
+        // A guest copy from another island (spec 2026-09-15, 2.3): no Message and
+        // no Call to it. It never says which island. [invited]: an unclaimed
+        // seat a member put in the room by public keys; always implies [guest].
+        val guest: Boolean = false,
+        val invited: Boolean = false,
     )
 
     data class GroupOut(
@@ -1315,6 +1372,10 @@ class RcqApi(
         // the roster's own size.
         val member_count: Int = 0,
         val members: List<GroupMemberOut> = emptyList(),
+        // Owner switch (spec 2026-09-15, 2.2): may people from other islands come
+        // in. Null on an island older than the field, which has no such switch,
+        // so the settings screen draws no toggle for it there.
+        val allow_guests: Boolean? = null,
     )
 
     /** The account's groups.
@@ -1383,6 +1444,19 @@ class RcqApi(
         post("/groups/$id/members", gson.toJson(AddMemberBody(uin)), authed = true, GroupOut::class.java)
     }
 
+    /** The contact's PUBLIC card, for `POST /groups/{id}/guests`. No home host
+     *  and no home number. */
+    data class GuestAddRequest(val identity_key: String, val signing_key: String, val nickname: String)
+
+    /** Owner-add of somebody from another island, on an island that advertises
+     *  `guest_accounts_v1` (spec 2026-09-15, 5): the key lands on the row it
+     *  already has there, or on a new unclaimed seat, together with its
+     *  membership. Answers with the room like [addGroupMember]; `added_uin` and
+     *  `created` ride along unread. There is no token for anybody in it. */
+    suspend fun addGuestMember(id: Int, req: GuestAddRequest): GroupOut = withContext(Dispatchers.IO) {
+        post("/groups/$id/guests", gson.toJson(req), authed = true, GroupOut::class.java)
+    }
+
     /** Self-leave or owner-kick (DELETE /groups/{id}/members/{uin}). */
     suspend fun leaveGroup(id: Int, memberUin: Int) = withContext(Dispatchers.IO) {
         sendNoResult("DELETE", "/groups/$id/members/$memberUin", null, authed = true)
@@ -1435,6 +1509,7 @@ class RcqApi(
         val slowmode_sec: Int? = null,
         val min_account_age_hours: Int? = null,
         val in_catalog: Boolean? = null,
+        val allow_guests: Boolean? = null,
         val avatar_media_id: String? = null,
         val avatar_media_key: String? = null,
     )
@@ -1924,6 +1999,13 @@ class RcqApi(
          *  because a decline tells the requester "no" about a request that was
          *  in fact accepted. */
         val contact_pending_withdraw: Boolean = false,
+        /** Spec 2026-09-15, 3.3: `POST /auth/guest/challenge`, `/auth/guest`,
+         *  `/auth/guest/settle` and `/groups/{id}/guests` exist AND this island
+         *  admits new guests right now. Only `true` takes the new join and add
+         *  paths ([GuestPath.decide]); absent or false keeps the legacy
+         *  recover-first and register paths exactly as they were. Nullable, so
+         *  an island that never sent it reads as absent, not as a decision. */
+        val guest_accounts_v1: Boolean? = null,
     )
     data class ServerInfoResponse(
         val name: String = "",
@@ -2578,6 +2660,9 @@ private class SealingBody(
              *  refusal, including a young-account 403 from an island too old to
              *  send the number. */
             val hoursLeft: Int? = null,
+            /** Which budget a `guest_add_limit` ran out of: "seat" (this person's
+             *  unclaimed seat is in enough rooms) or "group" (the room's). */
+            val scope: String? = null,
         )
 
         /** Read one. Never throws: an unparseable or truncated body simply has
@@ -2592,8 +2677,13 @@ private class SealingBody(
             val code = runCatching { detail.get("code")?.asString }.getOrNull()
             val retry = runCatching { detail.get("retry_after")?.asInt }.getOrNull()
             val hours = runCatching { detail.get("hours_left")?.asInt }.getOrNull()
-            return Refusal(status, code, retry, hours)
+            val scope = runCatching { detail.get("scope")?.asString }.getOrNull()
+            return Refusal(status, code, retry, hours, scope)
         }
+
+        /** The exact `detail.code` of whatever RcqApi threw, or null (spec
+         *  2026-09-15, 12.2). Codes, never substrings, for every new refusal. */
+        fun detailCode(e: Throwable?): String? = refusalOf(e?.message).code
 
         /** The longest report `reason` the island stores, in CODE POINTS.
          *  ⚠ Pydantic's max_length counts Python characters, so an emoji is ONE

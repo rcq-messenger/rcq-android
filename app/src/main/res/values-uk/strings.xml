@@ -796,6 +796,7 @@
     <string name="gi_transfer_err_not_a_member">Його більше немає в цій групі.</string>
     <string name="gi_transfer_err_no_such_user">Цей острів його не знає.</string>
     <string name="gi_transfer_err_target_suspended">Цей обліковий запис заблоковано.</string>
+    <string name="gi_transfer_err_target_guest">Учасник з іншого острова не може володіти цією групою.</string>
     <string name="gi_transfer_err_rate_limited_in">Забагато спроб. Повтори через %1$d с.</string>
     <string name="gi_transfer_err_rate_limited">Забагато спроб. Спробуй пізніше.</string>
     <string name="gi_transfer_err_failed">Не вдалося передати групу.</string>
@@ -967,7 +968,7 @@
     <string name="group_invite_join">Приєднатися</string>
     <string name="group_invite_none">У тебе немає груп, якими можна поділитися.</string>
     <string name="group_join_confirm">Приєднатися до цієї групи?</string>
-    <string name="group_invite_closed_hint">Група лише за запрошенням. Попроси учасника додати тебе.</string>
+    <string name="group_invite_closed_hint">Ця група лише за запрошенням. Попроси власника додати тебе.</string>
     <string name="group_invite_join_failed">Не вдалося приєднатися. Можливо, острів недоступний або група лише за запрошенням.</string>
     <string name="chat_recording">Запис  %1$s</string>
     <string name="chat_send">Надіслати</string>
@@ -1466,4 +1467,40 @@
     <plurals name="burn_islands_body"><item quantity="one">Акаунт має копію ще на %1$d острові, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо її, потім акаунт на твоєму острові.</item><item quantity="few">Акаунт має копії ще на %1$d островах, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо їх, потім акаунт на твоєму острові.</item><item quantity="many">Акаунт має копії ще на %1$d островах, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо їх, потім акаунт на твоєму острові.</item><item quantity="other">Акаунт має копії ще на %1$d островах, де ти в групах або маєш запасну адресу: %2$s. Спершу видалимо їх, потім акаунт на твоєму острові.</item></plurals>
     <plurals name="burn_failures_title"><item quantity="one">Не вдалося видалити на %1$d острові</item><item quantity="few">Не вдалося видалити на %1$d островах</item><item quantity="many">Не вдалося видалити на %1$d островах</item><item quantity="other">Не вдалося видалити на %1$d островах</item></plurals>
     <plurals name="burn_done"><item quantity="one">Акаунт спалено на твоєму острові й ще на %1$d острові.</item><item quantity="few">Акаунт спалено на твоєму острові й ще на %1$d островах.</item><item quantity="many">Акаунт спалено на твоєму острові й ще на %1$d островах.</item><item quantity="other">Акаунт спалено на твоєму острові й ще на %1$d островах.</item></plurals>
+    <!-- Guest copies on paid and invite islands (spec 2026-09-15, 12.5). -->
+    <string name="guest_join_closed">Острів %1$s не пускає людей з інших островів.</string>
+    <string name="guest_join_room_closed">Власник цієї групи не пускає людей з інших островів.</string>
+    <string name="guest_join_room_full">Ця група завелика, щоб приймати людей з інших островів.</string>
+    <string name="guest_join_room_limit">Сьогодні до цієї групи увійшло забагато людей з інших островів. Спробуй завтра.</string>
+    <string name="guest_join_rate">Забагато спроб. Спробуй за годину.</string>
+    <string name="guest_join_group_limit">Ти в забагатьох групах на острові %1$s. Вийди з однієї, щоб вступити в цю.</string>
+    <string name="guest_join_old_paid">На острів %1$s пускають лише тих, хто оплатив вхід, а людей з інших островів його сервер поки не приймає.</string>
+    <string name="guest_join_old_invite">На острів %1$s вхід лише за запрошенням, а людей з інших островів його сервер поки не приймає.</string>
+    <string name="guest_unavailable">Острів %1$s зараз не може прийняти гостей. Спробуй пізніше.</string>
+    <string name="guest_restricted">На острові %1$s ти гість: можна брати участь у групах, а особисті чати, дзвінки й усе інше працюють з твого домашнього острова.</string>
+    <string name="guest_restricted_contacts">Відповідай на цей запит зі свого домашнього акаунта.</string>
+    <string name="guest_copy_banner">Це твоя гостьова копія для груп на острові %1$s.</string>
+    <string name="group_add_foreign_limit">Сьогодні додано забагато людей з інших островів. Спробуй завтра.</string>
+    <string name="group_add_foreign_seat_limit">Цю людину вже запросили в кілька груп, і жодне запрошення поки не прийнято.</string>
+    <string name="group_add_foreign_stale_key">У цього контакту нові ключі. Попроси свіже посилання на контакт.</string>
+    <string name="group_add_foreign_guest_adder">У цій групі ти гість і не можеш додавати до неї людей.</string>
+    <string name="group_member_guest">З іншого острова</string>
+    <string name="group_member_invited">Запрошення ще не прийнято</string>
+    <string name="group_settings_allow_guests">Пускати людей з інших островів</string>
+    <string name="group_leave_last_resident">Ти останній учасник, який живе на острові %1$s. Якщо ти вийдеш, група видалиться в усіх.</string>
+    <string name="guest_settle_action">Стати мешканцем острова %1$s</string>
+    <string name="guest_settle_done">Тепер ти живеш на острові %1$s.</string>
+    <string name="guest_settle_number_invite">Це запрошення з власним номером, його не можна застосувати до гостьової копії. Попроси запрошення без номера.</string>
+    <string name="backup_is_guest_copy">Твій акаунт на острові %1$s це гостьова копія, запасним островом він бути не може.</string>
+    <string name="guest_settle_code_hint">Код доступу, якщо він є</string>
+    <!-- Decision D3, shipped locales: the settle sheet reuses these four
+         residency strings, which existed only in en and ru, so settling a guest
+         copy here showed an English button and English refusals. -->
+    <string name="residency_redeem">Активувати</string>
+    <string name="residency_redeeming">Перевіряємо…</string>
+    <string name="residency_code_spent">Цей код доступу вже використано.</string>
+    <string name="residency_failed">Острів не прийняв його. Спробуй ще раз.</string>
+    <!-- Decision D3: a refused join says the same thing on every client. -->
+    <string name="group_join_blocked">Власник закрив тобі доступ до цієї групи.</string>
+    <string name="group_join_gone">Цієї групи більше немає.</string>
 </resources>

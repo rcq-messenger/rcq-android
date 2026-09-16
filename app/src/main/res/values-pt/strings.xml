@@ -796,6 +796,7 @@
     <string name="gi_transfer_err_not_a_member">Ele não está mais neste grupo.</string>
     <string name="gi_transfer_err_no_such_user">Esta ilha não o conhece.</string>
     <string name="gi_transfer_err_target_suspended">Essa conta está suspensa.</string>
+    <string name="gi_transfer_err_target_guest">Um membro de outra ilha não pode ser dono deste grupo.</string>
     <string name="gi_transfer_err_rate_limited_in">Tentativas demais. Tente de novo em %1$d s.</string>
     <string name="gi_transfer_err_rate_limited">Tentativas demais. Tente mais tarde.</string>
     <string name="gi_transfer_err_failed">Não foi possível transferir o grupo.</string>
@@ -967,7 +968,7 @@
     <string name="group_invite_join">Entrar</string>
     <string name="group_invite_none">Você não tem grupos para compartilhar.</string>
     <string name="group_join_confirm">Entrar neste grupo?</string>
-    <string name="group_invite_closed_hint">Grupo só por convite. Peça a um membro para te adicionar.</string>
+    <string name="group_invite_closed_hint">Este grupo é só por convite. Peça ao dono para te adicionar.</string>
     <string name="group_invite_join_failed">Não foi possível entrar. A ilha pode estar inacessível ou o grupo é só por convite.</string>
     <string name="chat_recording">Gravando  %1$s</string>
     <string name="chat_send">Enviar</string>
@@ -1462,4 +1463,39 @@
     <plurals name="burn_islands_body"><item quantity="one">Esta conta também tem uma cópia em mais %1$d ilha, onde você entrou em grupos ou mantém um endereço reserva: %2$s. Ela é apagada primeiro, depois a conta na sua ilha.</item><item quantity="other">Esta conta também tem cópias em mais %1$d ilhas, onde você entrou em grupos ou mantém um endereço reserva: %2$s. Elas são apagadas primeiro, depois a conta na sua ilha.</item></plurals>
     <plurals name="burn_failures_title"><item quantity="one">Não foi possível apagar em %1$d ilha</item><item quantity="other">Não foi possível apagar em %1$d ilhas</item></plurals>
     <plurals name="burn_done"><item quantity="one">Conta queimada na sua ilha e em mais %1$d ilha.</item><item quantity="other">Conta queimada na sua ilha e em mais %1$d ilhas.</item></plurals>
+    <!-- Guest copies on paid and invite islands (spec 2026-09-15, 12.5). -->
+    <string name="guest_join_closed">%1$s não deixa entrar pessoas de outras ilhas.</string>
+    <string name="guest_join_room_closed">O dono deste grupo não deixa entrar pessoas de outras ilhas.</string>
+    <string name="guest_join_room_full">Este grupo é grande demais para aceitar pessoas de outras ilhas.</string>
+    <string name="guest_join_room_limit">Hoje entraram pessoas demais de outras ilhas neste grupo. Tente amanhã.</string>
+    <string name="guest_join_rate">Tentativas demais. Tente de novo daqui a uma hora.</string>
+    <string name="guest_join_group_limit">Você está em grupos demais em %1$s. Saia de um para entrar neste.</string>
+    <string name="guest_join_old_paid">Em %1$s só entram residentes pagantes, e o servidor ainda não aceita pessoas de outras ilhas.</string>
+    <string name="guest_join_old_invite">%1$s é só por convite, e o servidor ainda não aceita pessoas de outras ilhas.</string>
+    <string name="guest_unavailable">%1$s não pode receber convidados agora. Tente mais tarde.</string>
+    <string name="guest_restricted">Em %1$s você é convidado: pode participar dos grupos, mas chats pessoais, chamadas e todo o resto funcionam a partir da sua ilha de origem.</string>
+    <string name="guest_restricted_contacts">Responda a este pedido pela sua conta de origem.</string>
+    <string name="guest_copy_banner">Esta é a sua cópia de convidado para os grupos de %1$s.</string>
+    <string name="group_add_foreign_limit">Hoje foram adicionadas pessoas demais de outras ilhas. Tente amanhã.</string>
+    <string name="group_add_foreign_seat_limit">Esta pessoa já foi convidada para vários grupos e ainda não aceitou nenhum convite.</string>
+    <string name="group_add_foreign_stale_key">Este contato tem chaves novas. Peça um link de contato novo.</string>
+    <string name="group_add_foreign_guest_adder">Neste grupo você é convidado e não pode adicionar pessoas.</string>
+    <string name="group_member_guest">De outra ilha</string>
+    <string name="group_member_invited">Convidado, ainda não entrou</string>
+    <string name="group_settings_allow_guests">Deixar entrar pessoas de outras ilhas</string>
+    <string name="group_leave_last_resident">Você é o último membro que mora em %1$s. Se sair, o grupo será apagado para todos.</string>
+    <string name="guest_settle_action">Tornar-se residente de %1$s</string>
+    <string name="guest_settle_done">Agora você mora em %1$s.</string>
+    <string name="guest_settle_number_invite">Este convite vem com um número próprio e não pode ser usado numa cópia de convidado. Peça um convite sem número.</string>
+    <string name="backup_is_guest_copy">A sua conta em %1$s é uma cópia de convidado, por isso não pode ser uma ilha de reserva.</string>
+    <string name="guest_settle_code_hint">Código de acesso, se tiver um</string>
+    <!-- Decision D3, shipped locales: the settle sheet reuses these four
+         residency strings, which existed only in en and ru. -->
+    <string name="residency_redeem">Ativar</string>
+    <string name="residency_redeeming">Verificando…</string>
+    <string name="residency_code_spent">Esse código de acesso já foi usado.</string>
+    <string name="residency_failed">A ilha não aceitou. Tente de novo.</string>
+    <!-- Decision D3: a refused join says the same thing on every client. -->
+    <string name="group_join_blocked">O dono do grupo bloqueou você aqui.</string>
+    <string name="group_join_gone">Este grupo não existe mais.</string>
 </resources>

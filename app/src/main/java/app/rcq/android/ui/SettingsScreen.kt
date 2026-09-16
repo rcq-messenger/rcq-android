@@ -498,6 +498,7 @@ private fun SettingsRoot(
     val ownStatus by session.status.collectAsState()
     val contacts by session.contacts.collectAsState()
     val uinShopEnabled by session.uinShopEnabled.collectAsState()
+    val guestCopy by session.primaryIsGuest.collectAsState()
     // An island that runs no report desk gets neither the bug form nor the
     // answers screen; hoisted because search has to hide those rows too.
     val reportsOn by session.reportsEnabled.collectAsState()
@@ -673,13 +674,19 @@ private fun SettingsRoot(
             // that opens a screen this build hides is a dead end (a removed
             // feature answers, it does not vanish, and here the answer is "no
             // such row on this island").
-            val hidden = remember(uinShopEnabled, heldCount, reportsOn, hofOffered) {
+            val hidden = remember(uinShopEnabled, heldCount, reportsOn, hofOffered, guestCopy) {
                 buildSet {
                     if (!uinShopEnabled) add(SettingsFind.UIN_SHOP)
                     if (!uinShopEnabled && heldCount == 0) add(SettingsFind.MY_UINS)
                     if (!reportsOn) { add(SettingsFind.REPORT_BUG); add(SettingsFind.MY_REPORTS) }
                     if (!hofOffered) add(SettingsFind.HALL_OF_FAME)
                     if (BuildConfig.PLAY_STORE) add(SettingsFind.SHARE_APK)
+                    // A guest copy has no number to hand out, and the list below
+                    // hides the row for that reason (decision D6, spec 12.1).
+                    // Search has to hide it too: the hit would call
+                    // `shareInvite(context, uin)` and give away the copy's
+                    // number as a 1:1 invite, which is the very surface D6 drops.
+                    if (guestCopy) add(SettingsFind.INVITE)
                 }
             }
             SettingsSearchResults(
@@ -786,10 +793,14 @@ private fun SettingsRoot(
                 // row below, which solves a different problem (installing when
                 // rcq.app is blocked) and hands over a 100MB file — not what
                 // anyone sends to say "join me".
-                SettingsRow(Icons.Filled.PersonAdd, stringResource(R.string.settings_row_invite), modifier = anchor(SettingsFind.INVITE)) {
-                    app.rcq.android.net.UpdateChecker.shareInvite(context, uin)
+                // A guest copy invites nobody: the invite names its number for
+                // a 1:1, and it has none to offer (spec 2026-09-15, 12.1).
+                if (!guestCopy) {
+                    SettingsRow(Icons.Filled.PersonAdd, stringResource(R.string.settings_row_invite), modifier = anchor(SettingsFind.INVITE)) {
+                        app.rcq.android.net.UpdateChecker.shareInvite(context, uin)
+                    }
+                    Divider()
                 }
-                Divider()
                 if (!app.rcq.android.BuildConfig.PLAY_STORE) SettingsRow(Icons.Filled.Share, stringResource(R.string.settings_row_share_app), modifier = anchor(SettingsFind.SHARE_APK)) {
                     app.rcq.android.net.UpdateChecker.shareApk(context)
                 }
@@ -3887,8 +3898,14 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
         // The mapping is BackupIslandPick.sentenceOf, the same on every client:
         // door refusals and the client's own reason codes have sentences of
         // their own, anything else is the generic sentence alone.
+        // The one sentence that names the island: only a manual add can hit it,
+        // and the host typed there is the island it is about.
+        if (sentenceOf(m) == app.rcq.android.net.BackupIslandPick.Sentence.GUEST_COPY) {
+            return context.getString(R.string.backup_is_guest_copy, host.trim())
+        }
         return context.getString(
             when (sentenceOf(m)) {
+                app.rcq.android.net.BackupIslandPick.Sentence.GUEST_COPY -> R.string.backup_island_err_generic
                 app.rcq.android.net.BackupIslandPick.Sentence.INVALID_HOST -> R.string.backup_island_err_invalid
                 app.rcq.android.net.BackupIslandPick.Sentence.PRIMARY_ISLAND -> R.string.backup_island_err_primary
                 app.rcq.android.net.BackupIslandPick.Sentence.ALREADY_ADDED -> R.string.backup_island_err_already

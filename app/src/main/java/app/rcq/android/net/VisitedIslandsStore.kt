@@ -30,6 +30,11 @@ object VisitedIslandsStore {
         val uin: Int,     // per-island uin of this identity (same keys as primary)
         val jwt: String,
         val addedAt: Long,
+        // The copy is a GUEST on that island (spec 2026-09-15): it takes part in
+        // rooms and nothing else. From the reply that made or found it; false
+        // for every entry saved before the field existed, which is what those
+        // copies are (they walked in through an open door).
+        val guest: Boolean = false,
     )
 
     data class AliasRef(

@@ -4011,10 +4011,10 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
                         joining = true
                         scope.launch {
                             if (foreignHost != null) {
-                                val alias = session.joinForeignGroup(foreignHost, groupId)
+                                val joined = session.joinForeignGroup(foreignHost, groupId)
                                 joining = false
                                 showJoin = false
-                                if (alias != null) onOpenGroup(alias)
+                                joined.onSuccess(onOpenGroup).onFailure { session.toastJoinFailure(it, foreignHost) }
                             } else {
                                 val g = session.joinGroup(groupId)
                                 joining = false
@@ -4216,9 +4216,9 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
                         joining = true
                         scope.launch {
                             if (foreignHost != null) {
-                                val alias = session.joinForeignGroup(foreignHost, groupId)
+                                val joined = session.joinForeignGroup(foreignHost, groupId)
                                 joining = false; showJoin = false
-                                if (alias != null) onOpenGroup(alias)
+                                joined.onSuccess(onOpenGroup).onFailure { session.toastJoinFailure(it, foreignHost) }
                             } else {
                                 val g = session.joinGroup(groupId)
                                 joining = false; showJoin = false

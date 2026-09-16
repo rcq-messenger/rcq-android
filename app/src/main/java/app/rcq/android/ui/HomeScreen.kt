@@ -373,9 +373,19 @@ internal fun HomeScreen(
     // Operator-toggleable features (admin console → Features); default true.
     val nearbyEnabled by session.nearbyEnabled.collectAsState()
     val randomEnabled by session.randomEnabled.collectAsState()
+    // Signed in to a guest copy (spec 2026-09-15, 12.1): rooms only. Every way
+    // to a 1:1 from this account goes, and a line says what the account is.
+    val guestCopy by session.primaryIsGuest.collectAsState()
 
     var showAdd by AddSheet.open
     var showQr by remember { mutableStateOf(false) }
+    // Decision D7: the settle sheet behind the guest-copy banner.
+    var showGuestSettle by remember { mutableStateOf(false) }
+    // Decision E4: a room the long-press menu is about to leave, when leaving
+    // it deletes it for the copies still inside, with the sentence that says
+    // so. The menu asks here instead of leaving, because the island acts the
+    // moment the last resident is gone and there is nothing to undo after.
+    var leaveWarnTarget by remember { mutableStateOf<Pair<RcqGroup, String>?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
     var showAddAccount by remember { mutableStateOf(false) }
@@ -810,6 +820,7 @@ internal fun HomeScreen(
                 // Random chat is a secondary destination and an operator can
                 // switch it off entirely (admin console -> Features).
                 showRandom = randomEnabled,
+                guestCopy = guestCopy,
                 onToggleBypass = { session.setObfuscation(it) },
                 onComingSoon = { comingSoon = it },
                 onSwitchAccount = onSwitchAccount,
@@ -835,6 +846,32 @@ internal fun HomeScreen(
                         .clickable(onClick = onOpenBackupIsland)
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
+            }
+
+            if (guestCopy) {
+                // A tap offers to become a resident as the same account
+                // (decision D7, spec 9.1).
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(c.bgSecondary.copy(alpha = LocalHomeVeil.current))
+                        .clickable { showGuestSettle = true }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.guest_copy_banner, session.currentServer),
+                        color = c.textSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                    )
+                    Text(
+                        stringResource(R.string.guest_settle_action, session.currentServer),
+                        color = c.accent,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
@@ -879,7 +916,16 @@ internal fun HomeScreen(
                                 name = req.fromNickname,
                                 fromUin = req.fromUin,
                                 onOpenProfile = onOpenPeerInfo,
-                                onAccept = { scope.launch { runCatching { session.respond(req.requestId, true) } } },
+                                onAccept = {
+                                    scope.launch {
+                                        runCatching { session.respond(req.requestId, true) }
+                                            .onFailure { e ->
+                                                session.respondRefusalSentence(e)?.let {
+                                                    android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                    }
+                                },
                                 onDecline = { scope.launch { runCatching { session.respond(req.requestId, false) } } },
                             )
                         }
@@ -930,9 +976,9 @@ internal fun HomeScreen(
                 // petal loader instead of the misleading "no contacts" prompt.
                 if (contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()) {
                     item(key = "empty") {
-                        if (connecting) ConnectingState(stealth = stealthActive) else EmptyState(onAdd = { showAdd = true }, myUin = uin, session = session, onOpenGroup = onOpenGroup)
+                        if (connecting) ConnectingState(stealth = stealthActive) else if (!guestCopy) EmptyState(onAdd = { showAdd = true }, myUin = uin, session = session, onOpenGroup = onOpenGroup)
                     }
-                } else if (contacts.isEmpty() && !connecting) {
+                } else if (contacts.isEmpty() && !connecting && !guestCopy) {
                     // ⚠ The state above is almost never reached: every new
                     // account is joined to RCQ Beta, so `groups` is never empty
                     // and the "no contacts yet" screen a first-time user was
@@ -1111,7 +1157,7 @@ internal fun HomeScreen(
                                         tint = c.accent,
                                         modifier = Modifier.size(20.dp).clip(CircleShape).clickable { sectionPicker = sid },
                                     )
-                                    sid == Sections.SYS_GROUPS -> Icon(
+                                    sid == Sections.SYS_GROUPS && !guestCopy -> Icon(
                                         Icons.Filled.Add,
                                         "New group",
                                         tint = c.accent,
@@ -1137,7 +1183,8 @@ internal fun HomeScreen(
                         }
                         Sections.SYS_GROUPS -> {
                             if (visibleGroups.isEmpty()) {
-                                item(key = "grp-empty") {
+                                // A guest copy makes no rooms (spec 2026-09-15, 8.1).
+                                if (!guestCopy) item(key = "grp-empty") {
                                     Row(Modifier.fillMaxWidth().clickable { showCreateGroup = true }.padding(horizontal = 10.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Icon(Icons.Filled.Add, null, tint = c.accent, modifier = Modifier.size(18.dp))
                                         Text(stringResource(R.string.home_create_group), color = c.textPrimary, fontSize = 13.sp)
@@ -1198,7 +1245,9 @@ internal fun HomeScreen(
                 onNearby = onOpenNearby,
                 onSettings = onOpenSettings,
                 // Operator toggles Nearby via the admin console (Features).
-                showNearby = nearbyEnabled,
+                showNearby = nearbyEnabled && !guestCopy,
+                // Add and the contact QR both lead to a 1:1.
+                showAdd = !guestCopy,
             )
         }
 
@@ -1240,7 +1289,13 @@ internal fun HomeScreen(
                 // so a member who left is not a number here either.
                 senderName = { u -> session.memberDisplayName(g, u, groupMsgs[g.id] ?: emptyList()) },
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
-                    onClearThread = { clearGroupTarget = it }),
+                    onClearThread = { clearGroupTarget = it },
+                    // Decision E4: asked, not told. The preview closes so the
+                    // question is not left standing behind it.
+                    onLastResident = { room, warning ->
+                        previewGroup = null
+                        leaveWarnTarget = room to warning
+                    }),
                 onDismiss = { previewGroup = null },
             )
         }
@@ -1252,6 +1307,10 @@ internal fun HomeScreen(
         }
     }
     } // CompositionLocalProvider(LocalHomeVeil)
+
+    if (showGuestSettle) {
+        GuestSettleSheet(session, null, onDismiss = { showGuestSettle = false })
+    }
 
     if (showAdd) {
         AddContactDialog(
@@ -1357,6 +1416,26 @@ internal fun HomeScreen(
                     label = stringResource(R.string.home_clear_chat_confirm),
                     destructive = true,
                     onClick = { session.clearGroupThread(g.id); clearGroupTarget = null },
+                ),
+            ),
+        )
+    }
+    // Decision E4: the same question the group screen asks, asked here, because
+    // this menu leaves rooms too. The warning came from a roster that was
+    // fetched if the one we held could not answer.
+    leaveWarnTarget?.let { (room, warning) ->
+        RcqAskSheet(
+            onDismiss = { leaveWarnTarget = null },
+            title = stringResource(R.string.gi_leave_q),
+            body = warning,
+            actions = listOf(
+                SheetAction(
+                    label = stringResource(R.string.gi_leave_cta),
+                    destructive = true,
+                    onClick = {
+                        leaveWarnTarget = null
+                        scope.launch { session.leaveGroup(room.id) }
+                    },
                 ),
             ),
         )
@@ -1618,6 +1697,9 @@ private fun groupActions(
     context: android.content.Context,
     onOpenGroup: (Int) -> Unit,
     onClearThread: (RcqGroup) -> Unit,
+    /** Leaving [RcqGroup] would delete it for everyone left in it: ask first,
+     *  with this sentence (decision E4). */
+    onLastResident: (RcqGroup, String) -> Unit,
 ): List<ContextAction> {
     val thread = LocalStores.groupThread(group.id)
     val fav = LocalStores.isFavorite(thread)
@@ -1639,7 +1721,19 @@ private fun groupActions(
         if (isOwner)
             ContextAction(s(R.string.home_delete_group), Icons.Filled.Delete, destructive = true) { scope.launch { session.deleteGroup(group.id) } }
         else
-            ContextAction(s(R.string.home_leave_group), Icons.AutoMirrored.Filled.ExitToApp, destructive = true) { scope.launch { session.leaveGroup(group.id) } },
+            ContextAction(s(R.string.home_leave_group), Icons.AutoMirrored.Filled.ExitToApp, destructive = true) {
+                // Decision E4: the roster decides, and it is FETCHED when the
+                // one we hold cannot answer, which on this screen is the usual
+                // case, because a room on another island carries no roster
+                // until somebody opens it. A toast used to be all this said,
+                // and it left the room un-left with no way to go on; now the
+                // question is a sheet with the leave in it.
+                scope.launch {
+                    val warning = session.lastResidentWarning(group.id)
+                    if (warning != null) onLastResident(group, warning)
+                    else session.leaveGroup(group.id)
+                }
+            },
     )
 }
 
@@ -1683,6 +1777,8 @@ private fun HomeHeader(
     onOpenSites: () -> Unit,
     onOpenRandom: () -> Unit,
     showRandom: Boolean = true,
+    /** A guest copy: no contact add or search, no audio rooms, no sites. */
+    guestCopy: Boolean = false,
     onToggleBypass: (Boolean) -> Unit,
     onComingSoon: (String) -> Unit,
     onSwitchAccount: (String) -> Unit,
@@ -2024,7 +2120,7 @@ private fun HomeHeader(
                     leadingIcon = { Icon(Icons.Filled.NetworkCheck, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenDiagnostics() },
                 )
-                DropdownMenuItem(
+                if (!guestCopy) DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_menu_add_contact), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.PersonAdd, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onAddContact() },
@@ -2034,7 +2130,7 @@ private fun HomeHeader(
                     leadingIcon = { Icon(Icons.Outlined.Schedule, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenOutgoing() },
                 )
-                DropdownMenuItem(
+                if (!guestCopy) DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_menu_search), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.Search, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onSearch() },
@@ -2058,7 +2154,7 @@ private fun HomeHeader(
                     leadingIcon = { Icon(Icons.Filled.Bookmark, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenSaved() },
                 )
-                DropdownMenuItem(
+                if (!guestCopy) DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_menu_audio_rooms), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.GraphicEq, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenAudioRooms() },
@@ -2072,7 +2168,7 @@ private fun HomeHeader(
                 // reason random chat is: it is a place you go to now and then,
                 // not one of the four you reach every day. `Icons.Filled.Public`
                 // is spoken for on this screen as the cross-island glyph.
-                DropdownMenuItem(
+                if (!guestCopy) DropdownMenuItem(
                     text = { Text(stringResource(R.string.home_menu_sites), color = c.textPrimary) },
                     leadingIcon = { Icon(Icons.Filled.Language, null, tint = c.accent) },
                     onClick = { overflowMenu = false; onOpenSites() },
@@ -2418,7 +2514,7 @@ private fun ConnectingState(stealth: Boolean = false) {
 }
 
 @Composable
-private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onNearby: () -> Unit, onSettings: () -> Unit, showNearby: Boolean = true) {
+private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onNearby: () -> Unit, onSettings: () -> Unit, showNearby: Boolean = true, showAdd: Boolean = true) {
     val c = RcqTheme.colors
     Row(
         Modifier
@@ -2430,8 +2526,8 @@ private fun BottomBar(onAdd: () -> Unit, onQr: () -> Unit, onNearby: () -> Unit,
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BarButton(Icons.Filled.PersonAdd, stringResource(R.string.home_bar_add), onAdd)
-        BarButton(Icons.Filled.QrCode2, stringResource(R.string.home_bar_qr), onQr)
+        if (showAdd) BarButton(Icons.Filled.PersonAdd, stringResource(R.string.home_bar_add), onAdd)
+        if (showAdd) BarButton(Icons.Filled.QrCode2, stringResource(R.string.home_bar_qr), onQr)
         // Nearby is a mesh feature and stays on the bar; the operator can still
         // switch it off (admin console -> Features), and then the bar is three
         // buttons wide instead of four. Each one takes an equal share of the
@@ -2756,10 +2852,11 @@ private fun AddContactDialog(
                                 if (closed) {
                                     android.widget.Toast.makeText(context, context.getString(R.string.group_invite_closed_hint), android.widget.Toast.LENGTH_LONG).show()
                                 } else scope.launch {
+                                    // A foreign join says why it failed (spec 2026-09-15, 12.5).
                                     val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, groupRef.id)
-                                                 else session.joinGroup(groupRef.id)?.let { groupRef.id }
-                                    if (opened != null) onOpenGroup(opened)
-                                    else android.widget.Toast.makeText(context, context.getString(R.string.group_invite_join_failed), android.widget.Toast.LENGTH_LONG).show()
+                                                 else session.joinGroup(groupRef.id)?.let { Result.success(groupRef.id) } ?: Result.failure<Int>(IllegalStateException("join"))
+                                    opened.onSuccess { onOpenGroup(it) }
+                                        .onFailure { e -> session.joinFailureSentence(e, foreignHost)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
                                 }
                             }
                         }

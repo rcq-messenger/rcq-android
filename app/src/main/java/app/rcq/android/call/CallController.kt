@@ -43,6 +43,9 @@ class CallController(
          *  missed-call marker apart from the row it already filed (#678). */
         callId: String?,
     ) -> Unit,
+    /** False when this account may not place a call at all. Asked before
+     *  anything rings or touches the network; it says why itself. */
+    private val mayPlace: () -> Boolean = { true },
 ) {
     enum class Media(val wire: String) {
         AUDIO("audio"), VIDEO("video");
@@ -313,6 +316,7 @@ class CallController(
     // ── public API ──────────────────────────────────────────────────────
     fun start(peerUin: Int, media: Media) {
         if (_state.value.active) return
+        if (!mayPlace()) return
         WebRtcClient.ensureInitialised(appContext) // EGL ready before the screen composes
         val call = CallInfo(UUID.randomUUID().toString(), peerUin, nameFor(peerUin), media, outgoing = true)
         startedAtMs = System.currentTimeMillis()

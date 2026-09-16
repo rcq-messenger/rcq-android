@@ -796,6 +796,7 @@
     <string name="gi_transfer_err_not_a_member">Artık bu grupta değil.</string>
     <string name="gi_transfer_err_no_such_user">Bu ada onu tanımıyor.</string>
     <string name="gi_transfer_err_target_suspended">O hesap askıya alınmış.</string>
+    <string name="gi_transfer_err_target_guest">Başka bir adadan bir üye bu grubun sahibi olamaz.</string>
     <string name="gi_transfer_err_rate_limited_in">Çok fazla deneme. %1$d sn sonra tekrar dene.</string>
     <string name="gi_transfer_err_rate_limited">Çok fazla deneme. Sonra tekrar dene.</string>
     <string name="gi_transfer_err_failed">Grup devredilemedi.</string>
@@ -967,7 +968,7 @@
     <string name="group_invite_join">Katıl</string>
     <string name="group_invite_none">Paylaşacak grubun yok.</string>
     <string name="group_join_confirm">Bu gruba katılınsın mı?</string>
-    <string name="group_invite_closed_hint">Yalnızca davetle girilen grup. Bir üyeden seni eklemesini iste.</string>
+    <string name="group_invite_closed_hint">Bu grup yalnızca davetle girilir. Sahibinden seni eklemesini iste.</string>
     <string name="group_invite_join_failed">Katılınamadı. Adaya erişilemiyor olabilir ya da gruba yalnızca davetle girilir.</string>
     <string name="chat_recording">Kaydediliyor  %1$s</string>
     <string name="chat_send">Gönder</string>
@@ -1462,4 +1463,39 @@
     <plurals name="burn_islands_body"><item quantity="one">Bu hesabın, gruplara katıldığın ya da yedek adres tuttuğun %1$d adada daha kopyası var: %2$s. Önce onlar, sonra kendi adandaki hesap silinir.</item><item quantity="other">Bu hesabın, gruplara katıldığın ya da yedek adres tuttuğun %1$d adada daha kopyası var: %2$s. Önce onlar, sonra kendi adandaki hesap silinir.</item></plurals>
     <plurals name="burn_failures_title"><item quantity="one">%1$d adada silinemedi</item><item quantity="other">%1$d adada silinemedi</item></plurals>
     <plurals name="burn_done"><item quantity="one">Hesap kendi adanda ve %1$d adada daha yakıldı.</item><item quantity="other">Hesap kendi adanda ve %1$d adada daha yakıldı.</item></plurals>
+    <!-- Guest copies on paid and invite islands (spec 2026-09-15, 12.5). -->
+    <string name="guest_join_closed">%1$s başka adalardan insanları içeri almıyor.</string>
+    <string name="guest_join_room_closed">Bu grubun sahibi başka adalardan insanları içeri almıyor.</string>
+    <string name="guest_join_room_full">Bu grup, başka adalardan insan almak için fazla büyük.</string>
+    <string name="guest_join_room_limit">Bugün bu gruba başka adalardan çok fazla kişi katıldı. Yarın tekrar dene.</string>
+    <string name="guest_join_rate">Çok fazla deneme. Bir saat sonra tekrar dene.</string>
+    <string name="guest_join_group_limit">%1$s üzerinde çok fazla gruptasın. Buna katılmak için birinden ayrıl.</string>
+    <string name="guest_join_old_paid">%1$s adasına yalnızca ödeme yapan sakinler girebiliyor ve sunucusu henüz başka adalardan insan kabul etmiyor.</string>
+    <string name="guest_join_old_invite">%1$s adasına yalnızca davetle giriliyor ve sunucusu henüz başka adalardan insan kabul etmiyor.</string>
+    <string name="guest_unavailable">%1$s şu anda misafir kabul edemiyor. Daha sonra tekrar dene.</string>
+    <string name="guest_restricted">%1$s üzerinde misafirsin: gruplarına katılabilirsin, ama özel sohbetler, aramalar ve geri kalan her şey kendi adandan çalışır.</string>
+    <string name="guest_restricted_contacts">Bu isteği kendi adandaki hesabından yanıtla.</string>
+    <string name="guest_copy_banner">Bu, %1$s üzerindeki gruplar için misafir kopyan.</string>
+    <string name="group_add_foreign_limit">Bugün başka adalardan çok fazla kişi eklendi. Yarın tekrar dene.</string>
+    <string name="group_add_foreign_seat_limit">Bu kişi zaten birkaç gruba davet edildi ve henüz hiçbir daveti kabul etmedi.</string>
+    <string name="group_add_foreign_stale_key">Bu kişinin anahtarları yenilenmiş. Yeni bir kişi bağlantısı iste.</string>
+    <string name="group_add_foreign_guest_adder">Bu grupta misafirsin, bu yüzden gruba kişi ekleyemezsin.</string>
+    <string name="group_member_guest">Başka bir adadan</string>
+    <string name="group_member_invited">Davet edildi, henüz katılmadı</string>
+    <string name="group_settings_allow_guests">Başka adalardan insanları içeri al</string>
+    <string name="group_leave_last_resident">%1$s üzerinde yaşayan son üye sensin. Ayrılırsan grup herkes için silinir.</string>
+    <string name="guest_settle_action">%1$s sakini ol</string>
+    <string name="guest_settle_done">Artık %1$s üzerinde yaşıyorsun.</string>
+    <string name="guest_settle_number_invite">Bu davetin kendi numarası var ve misafir kopyasında kullanılamaz. Numarasız bir davet iste.</string>
+    <string name="backup_is_guest_copy">%1$s üzerindeki hesabın bir misafir kopyası, bu yüzden yedek ada olamaz.</string>
+    <string name="guest_settle_code_hint">Varsa erişim kodu</string>
+    <!-- Decision D3, shipped locales: the settle sheet reuses these four
+         residency strings, which existed only in en and ru. -->
+    <string name="residency_redeem">Etkinleştir</string>
+    <string name="residency_redeeming">Kontrol ediliyor…</string>
+    <string name="residency_code_spent">Bu erişim kodu zaten kullanılmış.</string>
+    <string name="residency_failed">Ada kabul etmedi. Tekrar dene.</string>
+    <!-- Decision D3: a refused join says the same thing on every client. -->
+    <string name="group_join_blocked">Grup sahibi seni bu gruptan engelledi.</string>
+    <string name="group_join_gone">Bu grup artık yok.</string>
 </resources>

@@ -1,0 +1,21 @@
+{
+  "description": "rcq-guest-v1 proof vector (spec 2026-09-15, section 4.3). bytes = UTF-8 lines joined by \\n, no trailing newline: prefix, canonical host (lowercase, :port only when not 443), group_id (decimal, the room id on the island), identity_key, signing_key (standard padded base64 of 32 bytes), challenge (verbatim). signature = Ed25519 by the signing key over bytes, standard base64. The challenge here is an opaque placeholder: clients never parse it, they sign what the island hands them. Throwaway test keys only: the seed below is public.",
+  "version": 1,
+  "host_input": "API.rcq.app:443",
+  "canonical_host": "api.rcq.app",
+  "host_spellings_same_binding": [
+    "api.rcq.app",
+    "API.RCQ.APP",
+    "api.rcq.app.",
+    "api.rcq.app:443"
+  ],
+  "group_id": 41,
+  "identity_key_b64_unpadded": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "identity_key_b64": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+  "signing_seed_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+  "signing_key_b64": "Kay64UG8yvCyLhqU000LxzYeUm0L/hLIl5S8kyKWbdc=",
+  "challenge": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXAiOiJndWVzdCJ9.fixture-challenge-opaque-to-clients",
+  "proof_bytes_text": "rcq-guest-v1\napi.rcq.app\n41\nQEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=\nKay64UG8yvCyLhqU000LxzYeUm0L/hLIl5S8kyKWbdc=\neyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXAiOiJndWVzdCJ9.fixture-challenge-opaque-to-clients",
+  "proof_bytes_hex": "7263712d67756573742d76310a6170692e7263712e6170700a34310a5145464351305246526b64495355704c5445314f54314252556c4e5556565a5857466c6157317864586c383d0a4b61793634554738797643794c6871553030304c787a5965556d304c2f684c496c3553386b794b576264633d0a65794a68624763694f694a49557a49314e694973496e523563434936496b705856434a392e65794a30655841694f694a6e6457567a64434a392e666978747572652d6368616c6c656e67652d6f70617175652d746f2d636c69656e7473",
+  "signature_b64": "eTb3Xd3Ofg7/QG0I6PDbli7nV3oEhlLIXsPNFXLzzIbkGcI85NcEuxECILULPGVdPmeLI35sTLHkl3Ph4bDtCg=="
+}

@@ -72,8 +72,14 @@ private val WARNING = Color(0xFFF5A524)
  *  message, and any visibility-gated profile fields the server returns,
  *  plus per-contact actions (favorite, mute, block, remove). */
 @Composable
-internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, onRemoved: () -> Unit, onOpenChat: (Int) -> Unit = {}, groupHost: String? = null) {
+internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, onRemoved: () -> Unit, onOpenChat: (Int) -> Unit = {}, groupHost: String? = null, guestMember: Boolean = false) {
     val c = RcqTheme.colors
+    // Signed in to a guest copy (spec 2026-09-15, 12.1): the card still shows
+    // who this is, and offers no 1:1 of any kind from the copy.
+    val guestCopy by session.primaryIsGuest.collectAsState()
+    // [guestMember]: opened for a guest copy in a room (decision D5). Its name,
+    // what it is, and one Add: the ordinary contact request to its number on
+    // the room's island. No Message, no visit ping, no other action.
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val contacts by session.contacts.collectAsState()
@@ -139,7 +145,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             notFound = absent
             if (!absent) {
                 identityChanged = session.peerIdentityChanged(uin)
-                runCatching { session.sendVisit(uin) }
+                if (!guestCopy && !guestMember) runCatching { session.sendVisit(uin) }
             }
         } else if (contact == null && groupHost != null) {
             // Cross-island group member: fetch their open card from the GROUP'S
@@ -208,7 +214,9 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                         color = c.textSecondary, fontSize = 13.sp,
                     )
                 }
-                Text(
+                if (guestMember) {
+                    Text(stringResource(R.string.group_member_guest), color = c.textSecondary, fontSize = 13.sp)
+                } else Text(
                     stringResource(if (alias == null) R.string.ci_set_name else R.string.ci_change_name),
                     color = c.accent, fontSize = 13.sp,
                     modifier = Modifier.clickable { editAlias = alias ?: "" },
@@ -234,7 +242,9 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             // non-contact (this profile is opened from the add-contact search
             // BEFORE requesting) gets "Send request". Cross-island peers are
             // already added on resolve, so they only ever show Message.
-            if (contact != null && !blocked) {
+            if (guestCopy || (guestMember && contact != null)) {
+                // No Message, no request: see [guestCopy] and [guestMember] above.
+            } else if (contact != null && !blocked) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accent)
                         .clickable { onOpenChat(uin) }.padding(14.dp),
@@ -243,7 +253,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     Text(stringResource(R.string.ci_message), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(12.dp))
-            } else if (contact == null && crossIslandHost == null && notFound) {
+            } else if (contact == null && crossIslandHost == null && notFound && !guestMember) {
                 // Nobody holds this number. Say so instead of offering to write
                 // to them: the island will refuse the request anyway, and the
                 // refusal used to be swallowed silently.
@@ -352,7 +362,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             // further down the screen (#407). The icon is amber, not red: this is
             // a warning to check something, not a prohibition, and the reporter
             // said as much.
-            if (identityChanged) {
+            if (identityChanged && !guestMember) {
                 Spacer(Modifier.height(12.dp))
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)
@@ -425,8 +435,8 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
 
             Spacer(Modifier.height(18.dp))
 
-            // Actions.
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)) {
+            // Actions. None on a guest copy's card (decision D5).
+            if (!guestMember) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)) {
                 InfoAction(if (isFav) Icons.Filled.Star else Icons.Filled.StarBorder, stringResource(if (isFav) R.string.ci_remove_fav else R.string.ci_add_fav)) { LocalStores.toggleFavorite(thread) }
                 InfoDivider()
                 InfoAction(Icons.Filled.NotificationsOff, stringResource(if (isMuted) R.string.ci_unmute else R.string.ci_mute)) { LocalStores.toggleMute(thread) }
@@ -456,7 +466,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             // branches on that above to show "Add contact" instead — but the
             // remove button was drawn unconditionally, so the profile of
             // someone who is not your contact offered to delete them (#425).
-            if (contact != null) {
+            if (contact != null && !guestMember) {
                 Spacer(Modifier.height(16.dp))
                 Box(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).clickable { confirmRemove = true }.padding(vertical = 14.dp),

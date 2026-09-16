@@ -823,6 +823,7 @@
     <string name="gi_transfer_err_not_a_member">Его больше нет в этой группе.</string>
     <string name="gi_transfer_err_no_such_user">Этот остров его не знает.</string>
     <string name="gi_transfer_err_target_suspended">Эта учётная запись заблокирована.</string>
+    <string name="gi_transfer_err_target_guest">Участник с другого острова не может владеть этой группой.</string>
     <string name="gi_transfer_err_rate_limited_in">Слишком много попыток. Повторите через %1$d с.</string>
     <string name="gi_transfer_err_rate_limited">Слишком много попыток. Попробуйте позже.</string>
     <string name="gi_transfer_err_failed">Не удалось передать группу.</string>
@@ -1001,7 +1002,7 @@
     <string name="group_invite_none">У вас нет групп, чтобы поделиться.</string>
     <string name="group_join_confirm">Войти в эту группу?</string>
     <string name="group_join_body">Вы появитесь в списке участников и начнёте получать её сообщения.</string>
-    <string name="group_invite_closed_hint">Группа только по приглашению. Попросите участника добавить вас.</string>
+    <string name="group_invite_closed_hint">Эта группа только по приглашению. Попросите владельца добавить вас.</string>
     <string name="group_invite_join_failed">Не удалось войти. Остров недоступен или группа только по приглашению.</string>
     <string name="chat_recording">Запись  %1$s</string>
     <string name="chat_send">Отправить</string>
@@ -1524,4 +1525,33 @@
     <plurals name="burn_islands_body"><item quantity="one">У аккаунта есть копия ещё на %1$d острове, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим её, потом аккаунт на вашем острове.</item><item quantity="few">У аккаунта есть копии ещё на %1$d островах, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим их, потом аккаунт на вашем острове.</item><item quantity="many">У аккаунта есть копии ещё на %1$d островах, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим их, потом аккаунт на вашем острове.</item><item quantity="other">У аккаунта есть копии ещё на %1$d островах, где вы вступали в группы или держите запасной адрес: %2$s. Сначала удалим их, потом аккаунт на вашем острове.</item></plurals>
     <plurals name="burn_failures_title"><item quantity="one">Не получилось удалить на %1$d острове</item><item quantity="few">Не получилось удалить на %1$d островах</item><item quantity="many">Не получилось удалить на %1$d островах</item><item quantity="other">Не получилось удалить на %1$d островах</item></plurals>
     <plurals name="burn_done"><item quantity="one">Аккаунт сожжён на вашем острове и ещё на %1$d острове.</item><item quantity="few">Аккаунт сожжён на вашем острове и ещё на %1$d островах.</item><item quantity="many">Аккаунт сожжён на вашем острове и ещё на %1$d островах.</item><item quantity="other">Аккаунт сожжён на вашем острове и ещё на %1$d островах.</item></plurals>
+    <!-- Guest copies on paid and invite islands (spec 2026-09-15, 12.5). -->
+    <string name="guest_join_closed">Остров %1$s не пускает людей с других островов.</string>
+    <string name="guest_join_room_closed">Владелец этой группы не пускает людей с других островов.</string>
+    <string name="guest_join_room_full">Эта группа слишком большая, чтобы принимать людей с других островов.</string>
+    <string name="guest_join_room_limit">Сегодня в эту группу вошло слишком много людей с других островов. Попробуйте завтра.</string>
+    <string name="guest_join_rate">Слишком много попыток. Попробуйте через час.</string>
+    <string name="guest_join_group_limit">Вы состоите в слишком многих группах на острове %1$s. Выйдите из одной, чтобы вступить в эту.</string>
+    <string name="guest_join_old_paid">На остров %1$s пускают только тех, кто оплатил вход, а людей с других островов его сервер пока не принимает.</string>
+    <string name="guest_join_old_invite">На остров %1$s вход только по приглашению, а людей с других островов его сервер пока не принимает.</string>
+    <string name="guest_unavailable">Остров %1$s сейчас не может принять гостей. Попробуйте позже.</string>
+    <string name="guest_restricted">На острове %1$s вы гость: можно участвовать в группах, а личные чаты, звонки и всё остальное работают с вашего домашнего острова.</string>
+    <string name="guest_restricted_contacts">Ответьте на эту заявку со своего домашнего аккаунта.</string>
+    <string name="guest_copy_banner">Это ваша гостевая копия для групп на острове %1$s.</string>
+    <string name="group_add_foreign_limit">Сегодня добавлено слишком много людей с других островов. Попробуйте завтра.</string>
+    <string name="group_add_foreign_seat_limit">Этого человека уже пригласили в несколько групп, и ни одно приглашение пока не принято.</string>
+    <string name="group_add_foreign_stale_key">У этого контакта новые ключи. Попросите свежую ссылку на контакт.</string>
+    <string name="group_add_foreign_guest_adder">В этой группе вы гость и не можете добавлять в неё людей.</string>
+    <string name="group_member_guest">С другого острова</string>
+    <string name="group_member_invited">Приглашение ещё не принято</string>
+    <string name="group_settings_allow_guests">Пускать людей с других островов</string>
+    <string name="group_leave_last_resident">Вы последний участник, который живёт на острове %1$s. Если вы выйдете, группа удалится у всех.</string>
+    <string name="guest_settle_action">Стать жителем острова %1$s</string>
+    <string name="guest_settle_done">Теперь вы живёте на острове %1$s.</string>
+    <string name="guest_settle_number_invite">Это приглашение с собственным номером, его нельзя применить к гостевой копии. Попросите приглашение без номера.</string>
+    <string name="backup_is_guest_copy">Ваш аккаунт на острове %1$s это гостевая копия, запасным островом он быть не может.</string>
+    <string name="guest_settle_code_hint">Код доступа, если он есть</string>
+    <!-- Decision D3: a refused join says the same thing on every client. -->
+    <string name="group_join_blocked">Владелец закрыл вам доступ в эту группу.</string>
+    <string name="group_join_gone">Этой группы больше не существует.</string>
 </resources>

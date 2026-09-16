@@ -21,6 +21,10 @@ data class GroupMember(
     // exposes the nickname on this row.
     val avatarMediaId: String? = null,
     val avatarMediaKey: String? = null,
+    // A guest copy from another island (spec 2026-09-15, 2.3): no Message, no
+    // Call, no profile to open. [invited]: a seat nobody has claimed yet.
+    val guest: Boolean = false,
+    val invited: Boolean = false,
 ) {
     val presence: UserStatus get() = UserStatus.from(status)
     /** True if this member may delete anyone's message: the owner, an ADMIN,
@@ -84,6 +88,9 @@ data class RcqGroup(
     // set, [id] is the local NEGATIVE alias and the server-side id lives in
     // VisitedIslandsStore's alias map. Null for own-island groups.
     val host: String? = null,
+    /** Owner switch (spec 2026-09-15, 2.2): may people from other islands come
+     *  in. Null when the island does not know the switch; no toggle then. */
+    val allowGuests: Boolean? = null,
 ) {
     /** Broadcast mode (owner_only) is enforced client-side; the server
      *  can't see who's posting under sealed sender. */

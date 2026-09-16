@@ -368,6 +368,16 @@ class Session(context: Context) {
         appendHistory = { peer, fromMe, text, missed, startedAt, callId ->
             logCallHistory(peer, fromMe, text, missed, startedAt, callId)
         },
+        // A guest copy calls nobody (spec 2026-09-15, 12.1). The chat header
+        // cannot grow a check of its own (ChatScreen is at the method-size
+        // limit), so the one door every outgoing call passes says it here.
+        mayPlace = {
+            if (!store.isGuestCopy) true
+            else {
+                android.widget.Toast.makeText(appCtx, appCtx.getString(R.string.guest_restricted, serverHost()), android.widget.Toast.LENGTH_LONG).show()
+                false
+            }
+        },
     )
 
     /** Same-island call signals owed to the peer while the socket is down.
@@ -750,7 +760,45 @@ class Session(context: Context) {
      *  starts, and they drew the retired surface from the permissive default. */
     private val cachedCaps: RcqApi.ServerCapabilities? = capsCache(serverHost())
 
-    private val _uinShopEnabled = MutableStateFlow((cachedCaps?.uin_shop ?: true) && !app.rcq.android.BuildConfig.PLAY_STORE)
+    /** The active account signed in to a guest copy (spec 2026-09-15, 12.1):
+     *  the island answered its recover or refresh with `guest: true`. Such an
+     *  account takes part in rooms and nothing else, so the screens drop every
+     *  way to a 1:1 (contact search and add, invites, calls, Random, audio
+     *  rooms, the number shop, sites, new groups), say what the account is,
+     *  and no push endpoint is registered for it. The island refuses most of
+     *  those anyway; a sealed 1:1 deposit it cannot refuse, which is why the
+     *  screens must not offer one. */
+    private val _primaryIsGuest = MutableStateFlow(store.isGuestCopy)
+    val primaryIsGuest: StateFlow<Boolean> = _primaryIsGuest.asStateFlow()
+
+    /** Record what the island just said about the active account, see
+     *  [primaryIsGuest]. Clears nothing the island has not cleared: `false`
+     *  comes only from a reply that says so. */
+    private fun notePrimaryGuest(guest: Boolean) {
+        store.setGuestCopy(guest)
+        _primaryIsGuest.value = guest
+        if (guest) {
+            _uinShopEnabled.value = false
+            _randomEnabled.value = false
+        }
+    }
+
+    /** Register our UnifiedPush endpoint with the active account's island.
+     *  Idempotent upsert. Never for a guest copy (spec 2026-09-15, 12.1):
+     *  nothing there is worth a wake, and the endpoint would tie this device to
+     *  the copy. A settle calls it again once the copy is a resident's. */
+    private fun registerPushEndpoint() {
+        if (store.isGuestCopy) return
+        scope.launch {
+            runCatching {
+                app.rcq.android.push.Push.savedEndpoint(appCtx)?.let {
+                    api.setPushToken(it, app.rcq.android.net.DeviceId.get(appCtx))
+                }
+            }
+        }
+    }
+
+    private val _uinShopEnabled = MutableStateFlow((cachedCaps?.uin_shop ?: true) && !app.rcq.android.BuildConfig.PLAY_STORE && !_primaryIsGuest.value)
     val uinShopEnabled: StateFlow<Boolean> = _uinShopEnabled.asStateFlow()
 
     /** Hall of Fame opt-in surface. Flagship advertises hall_of_fame=true;
@@ -790,10 +838,12 @@ class Session(context: Context) {
      *  live answer may say "no vault" out loud: see [vaultAvailable]. */
     private fun applyCaps(c: RcqApi.ServerCapabilities, live: Boolean = false) {
         // Nothing is sold inside the Play build: the shop stays off whatever the island says.
-        _uinShopEnabled.value = c.uin_shop && !app.rcq.android.BuildConfig.PLAY_STORE
+        // A guest copy gets neither whatever the island offers residents.
+        val guestCopy = store.isGuestCopy
+        _uinShopEnabled.value = c.uin_shop && !app.rcq.android.BuildConfig.PLAY_STORE && !guestCopy
         _hallOfFameEnabled.value = c.hall_of_fame
         _nearbyEnabled.value = c.nearby
-        _randomEnabled.value = c.random_chat
+        _randomEnabled.value = c.random_chat && !guestCopy
         _reportsEnabled.value = c.reports
         // Both or neither: an island that understands the open lookups but
         // issues no tokens would hand out bundles without a one-time prekey
@@ -829,7 +879,7 @@ class Session(context: Context) {
         ))
         cached?.let { app.rcq.android.data.AccountManager.serverMaxAccounts = it.max_accounts_per_device }
     }
-    private val _randomEnabled = MutableStateFlow(cachedCaps?.random_chat ?: true)
+    private val _randomEnabled = MutableStateFlow((cachedCaps?.random_chat ?: true) && !_primaryIsGuest.value)
     val randomEnabled: StateFlow<Boolean> = _randomEnabled.asStateFlow()
 
     /** Does this island run a report desk at all? A self-hoster who does not
@@ -1440,6 +1490,9 @@ class Session(context: Context) {
             serverHost = host,
             seed = seed,
         )
+        // A phrase can open a guest copy on an island where this key only
+        // ever joined rooms. Kept before the rebind, which reads it.
+        SecureStore(appCtx, acct.id).setGuestCopy(resp.guest)
         socket.disconnect()
         rebindTo(acct.id)
         start()
@@ -1576,6 +1629,7 @@ class Session(context: Context) {
         nearby.teardown()
         radio.teardown()
         store = SecureStore(appCtx, accountId)
+        _primaryIsGuest.value = store.isGuestCopy
         // db is (re)opened by bindDb() in start(), with the current dataKey.
         if (::db.isInitialized) db.close()
         signalStores = SignalStores(SignalStoreDb(appCtx, accountId))
@@ -2558,13 +2612,9 @@ class Session(context: Context) {
         // Re-register our UnifiedPush endpoint with this account's island so it
         // can wake the device for offline messages/calls. Idempotent upsert;
         // covers an endpoint obtained before login + account/island switches.
-        scope.launch {
-            runCatching {
-                app.rcq.android.push.Push.savedEndpoint(appCtx)?.let {
-                    api.setPushToken(it, app.rcq.android.net.DeviceId.get(appCtx))
-                }
-            }
-        }
+        // Never for a guest copy (spec 2026-09-15, 12.1): nothing there is
+        // worth a wake, and the endpoint would tie this device to the copy.
+        registerPushEndpoint()
         // Ensure our libsignal prekey bundle is published so peers can start
         // v=2 sessions with us. Best-effort: failure leaves us on v=1.
         scope.launch {
@@ -4324,8 +4374,11 @@ class Session(context: Context) {
                 senderKeys = it.sender_keys,
                 avatarMediaId = it.avatar_media_id,
                 avatarMediaKey = it.avatar_media_key,
+                guest = it.guest,
+                invited = it.invited,
             )
         },
+        allowGuests = g.allow_guests,
         createdAt = parseIso(g.created_at),
         // Older islands do not send it; the roster's own size is right there.
         memberCount = if (g.member_count > 0) g.member_count else g.members.size,
@@ -4555,6 +4608,70 @@ class Session(context: Context) {
     fun groupHost(groupId: Int): String? =
         if (groupId < 0) VisitedIslandsStore.refByAlias(groupId)?.host else null
 
+    /** True where our own session on this room's island is a guest copy (spec
+     *  2026-09-15, 12.1): on another island our visited copy there, and on our
+     *  OWN island the primary session itself. The island adds nobody for a
+     *  guest, so the screen offers no Add and no invite.
+     *
+     *  [primaryGuest] is a parameter so a screen can hand in the value it
+     *  collected and recompose the moment the flag flips; it defaults to the
+     *  live one for the callers that are not composing. */
+    fun guestOnGroupIsland(groupId: Int, primaryGuest: Boolean = primaryIsGuest.value): Boolean {
+        val host = groupHost(groupId)
+        return app.rcq.android.net.GuestPath.hideAddInRoom(
+            host, host?.let { VisitedIslandsStore.get(it)?.guest }, primaryGuest,
+        )
+    }
+
+    /** The warning to show before we leave [groupId], or null when leaving
+     *  deletes nothing (decision D8): we live on the room's island and every
+     *  other member is a guest copy or an unclaimed seat, so the island deletes
+     *  the room for everyone once we are gone (spec 8.1).
+     *
+     *  ⚠⚠ Decision E4: a roster that cannot answer is FETCHED, once, and only
+     *  then does the leave go ahead. It used to read "no roster" as "nothing to
+     *  warn about", which is exactly backwards on the screen where it matters
+     *  most: a room on another island never loads its roster until somebody
+     *  opens it (`ensureRoster` returns the cached row for a foreign room), so
+     *  the long-press leave on the home list would delete the room for everyone
+     *  in it without a word. An island that does not answer at all warns, which
+     *  costs a tap; leaving in silence costs everyone else the room. */
+    suspend fun lastResidentWarning(groupId: Int): String? {
+        val g = group(groupId) ?: return null
+        fun warning(room: RcqGroup) =
+            appCtx.getString(R.string.group_leave_last_resident, room.host ?: serverHost())
+        return when (app.rcq.android.net.GuestPath.leaveCheck(g.members, groupCtx(groupId).myUin, g.memberCount)) {
+            app.rcq.android.net.GuestPath.LeaveCheck.SAFE -> null
+            app.rcq.android.net.GuestPath.LeaveCheck.WARN -> warning(g)
+            app.rcq.android.net.GuestPath.LeaveCheck.NEED_ROSTER -> {
+                val fresh = rosterForLeave(groupId) ?: return warning(g)
+                val safe = app.rcq.android.net.GuestPath.leaveCheck(
+                    fresh.members, groupCtx(groupId).myUin, fresh.memberCount,
+                ) == app.rcq.android.net.GuestPath.LeaveCheck.SAFE
+                if (safe) null else warning(fresh)
+            }
+        }
+    }
+
+    /** The room's roster, asked for now: one `GET /groups/{id}`, on the room's
+     *  OWN island with that island's token. Null when nothing answered, which
+     *  [lastResidentWarning] reads as "cannot tell".
+     *
+     *  ⚠ Not [ensureRoster]: that one answers with the room it already had when
+     *  the fetch fails (so a failure is indistinguishable from a full roster)
+     *  and returns early for a room on another island without asking at all. */
+    private suspend fun rosterForLeave(groupId: Int): RcqGroup? {
+        val cached = group(groupId) ?: return null
+        val ctx = groupCtx(groupId)
+        // A foreign room whose island we hold no credentials for: groupCtx fell
+        // back to our own api, which knows nothing about that room.
+        if (cached.host != null && ctx.host == null) return null
+        val fresh = runCatching { mapGroupCtx(ctx, ctx.api.groupInfo(ctx.gid)) }.getOrNull() ?: return null
+        // The screen and the decision read one roster.
+        upsertGroup(fresh)
+        return fresh
+    }
+
     private fun mapGroupCtx(ctx: GroupCtx, g: RcqApi.GroupOut): RcqGroup =
         // Stage 6 phase 2: a room we hold the key for renders its SEALED
         // identity over the open columns; everyone else sees the columns.
@@ -4573,55 +4690,322 @@ class Session(context: Context) {
         )
     }
 
-    /** Guest credentials for [host] (§5c), registering recover-first on first
-     *  use — the multihome mechanic, but PRIVATE (never published in the
-     *  signed home record). Throws with a short reason on failure. */
-    suspend fun ensureGuestOn(host: String): VisitedIslandsStore.Visited {
+    /** Guest credentials for [host] (§5c), made on first use: the multihome
+     *  mechanic, but PRIVATE (never published in the signed home record).
+     *  Throws with a short reason on failure.
+     *
+     *  [groupId] is the room's id on THAT island. Where the island advertises
+     *  `guest_accounts_v1` (spec 2026-09-15), the copy is made by proving the
+     *  key for that room (`POST /auth/guest`), the one door a paid or invite
+     *  island leaves open to people from other islands. Everywhere else the old
+     *  recover-first then register path runs exactly as before. */
+    suspend fun ensureGuestOn(host: String, groupId: Int? = null): VisitedIslandsStore.Visited {
+        // ⚠ Before the first suspension, see [accountEpoch]: an account switch
+        // mid-join re-points [store] and VisitedIslandsStore, and without this
+        // one account's token lands in the other's Visited store, and the guest
+        // island is handed one account's nickname next to the other's key.
+        val epoch = epochNow()
         val h = Multihome.normalizeHost(host) ?: throw IllegalArgumentException("invalid_host")
         if (h == serverHost()) throw IllegalArgumentException("own_island")
         // A burn is deleting every copy this device made; registering a new
         // one now would leave a copy nobody knows to delete (F2).
         if (burning) throw IllegalStateException("burning")
+        // Everything below talks to another island as the REAL account, signed
+        // with the real key. The duress view neither uses a copy nor makes one:
+        // it reads as offline (spec 12.1).
+        if (duressViewUp) throw IllegalStateException("offline")
         VisitedIslandsStore.get(h)?.let {
             syncGuestNicknameOnce(h)
+            // Decision E6: a copy an older build named after our home number.
+            repairForeignNicknameOnce(h)
             return it
         }
-        val uin = store.uin ?: throw IllegalStateException("no identity")
-        val creds = Multihome.recoverOn(h, signingPriv(), signingPub()) ?: run {
-            val api = RcqApi("https://$h")
-            val skB64 = Base64.encodeToString(signingPub(), Base64.NO_WRAP)
-            val challenge = runCatching { api.registerChallenge(skB64).challenge }.getOrNull()
-            api.register(
-                RcqApi.RegisterRequest(
-                    nickname = store.nickname ?: "user-$uin",
-                    identity_key = Base64.encodeToString(identityPub(), Base64.NO_WRAP),
-                    signing_key = skB64,
-                    challenge = challenge,
-                    signature = challenge?.let {
-                        app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv(), it)
-                    },
-                ),
-            )
+        // Everything the requests say about this account, read together and
+        // now, so no request can mix two accounts.
+        val me = GuestSelf(
+            uin = store.uin ?: throw IllegalStateException("no identity"),
+            nickname = store.nickname,
+            sp = signingPriv(),
+            spub = signingPub(),
+            ipub = identityPub(),
+            epoch = epoch,
+        )
+        // Asked here and only here, on the explicit Join tap: seeing a link never
+        // touches the island (the §5c privacy rule).
+        val creds = when (app.rcq.android.net.GuestPath.decide(RcqApi.serverInfoOf(h))) {
+            app.rcq.android.net.GuestPath.Path.GUEST ->
+                if (groupId != null) guestCopyOn(h, groupId, me)
+                // No room, no mint: only a copy this key already has there.
+                else recoverForGuest(h, me)
+                    ?.let { GuestCreds(it.uin, it.token, it.guest) }
+                    ?: throw IllegalStateException("no_account_here")
+            app.rcq.android.net.GuestPath.Path.LEGACY -> legacyGuestCopyOn(h, me)
         }
-        val v = VisitedIslandsStore.Visited(h, creds.uin, creds.token, System.currentTimeMillis())
+        // These credentials are the account [epoch] was taken for. Written
+        // after a switch, they would be another account's copy in this store.
+        if (!stillOn(epoch)) throw IllegalStateException("switched")
+        val v = VisitedIslandsStore.Visited(h, creds.uin, creds.token, System.currentTimeMillis(), guest = creds.guest)
         VisitedIslandsStore.save(v)
         // A recover lands on a row registered long ago, under whatever name
         // the account had then: correct it once, now.
         syncGuestNicknameOnce(h)
+        // ...and a row named after our home number is repaired even when we
+        // have no name of our own to push (decision E6).
+        repairForeignNicknameOnce(h)
         return v
     }
 
-    /** §5c join: guest-register on [host] (explicit user action — seeing a
-     *  foreign link never touches the island), join the group there, merge it
-     *  into the list under its local alias. Returns the alias id, or null. */
-    suspend fun joinForeignGroup(host: String, remoteId: Int): Int? = runCatching {
-        val v = ensureGuestOn(host)
+    private class GuestCreds(val uin: Int, val token: String, val guest: Boolean)
+
+    /** The account a guest copy is being made for, snapshotted by
+     *  [ensureGuestOn] before its first suspension, with the [epoch] it was
+     *  read under. Nothing below reads [store] again. */
+    private class GuestSelf(
+        val uin: Int,
+        val nickname: String?,
+        val sp: ByteArray,
+        val spub: ByteArray,
+        val ipub: ByteArray,
+        val epoch: Int,
+    )
+
+    /** Recover-first inside the guest flow: [Multihome.recoverOn], except that a
+     *  404 `identity_rotated` is not "no account here" (decision D2). The key
+     *  was retired on that island by a key change made elsewhere, so the
+     *  rotated-elsewhere notice starts for the account whose key it is, and the
+     *  join fails with nothing registered beside the retired row. */
+    private suspend fun recoverForGuest(h: String, me: GuestSelf): RcqApi.RegisterResponse? =
+        try {
+            Multihome.recoverOn(h, me.sp, me.spub, rotatedIsError = true)
+        } catch (e: java.io.IOException) {
+            if (app.rcq.android.net.GuestPath.joinStep(e.message) == app.rcq.android.net.GuestPath.JoinStep.ROTATED &&
+                stillOn(me.epoch)
+            ) {
+                announceRotatedElsewhere(me.uin)
+            }
+            throw e
+        }
+
+    /** `rcq-guest-v1` (spec 2026-09-15, 4 and 12.1): a challenge, a proof over
+     *  this island, the room and both keys, then `POST /auth/guest`. The island
+     *  answers for a row this key already has too (a native copy, a seat an
+     *  owner put us in, a guest copy), so this is the recover as well as the
+     *  register, and it repairs an identity key an adder got wrong.
+     *
+     *  ⚠ Nothing about our home island goes in the request, and the nickname
+     *  never falls back to our home number. */
+    private suspend fun guestCopyOn(h: String, groupId: Int, me: GuestSelf): GuestCreds {
+        val api = RcqApi("https://$h")
+        val skB64 = app.rcq.android.crypto.GuestProof.canonicalKey(me.spub)
+        for (attempt in 0..1) {
+            val failure = try {
+                val challenge = api.guestChallenge(skB64).challenge
+                // The switch check sits right before the request that makes a
+                // row, not only before the save: the island must never be sent
+                // an account this session no longer serves.
+                if (!stillOn(me.epoch)) throw IllegalStateException("switched")
+                val signed = app.rcq.android.crypto.GuestProof.proofBytes(h, groupId, me.ipub, me.spub, challenge)
+                val r = api.guest(
+                    RcqApi.GuestRequest(
+                        host = h,
+                        group_id = groupId,
+                        nickname = app.rcq.android.net.GuestPath.nicknameFor(me.nickname, me.uin),
+                        identity_key = app.rcq.android.crypto.GuestProof.canonicalKey(me.ipub),
+                        signing_key = skB64,
+                        challenge = challenge,
+                        signature = app.rcq.android.crypto.GuestProof.sign(me.sp, signed),
+                    ),
+                )
+                return GuestCreds(r.uin, r.token, r.guest)
+            } catch (e: java.io.IOException) {
+                e
+            }
+            when (app.rcq.android.net.GuestPath.joinStep(failure.message)) {
+                // A spent or expired challenge, or a create race: once more.
+                app.rcq.android.net.GuestPath.JoinStep.RETRY_FRESH_CHALLENGE ->
+                    if (attempt == 0) continue else throw failure
+                app.rcq.android.net.GuestPath.JoinStep.ROTATED -> {
+                    // P0.2: the key was retired by a key change made elsewhere.
+                    // The account is alive; ask for the new phrase, erase nothing.
+                    // Only for the account whose key it was.
+                    if (!stillOn(me.epoch)) throw IllegalStateException("switched")
+                    announceRotatedElsewhere(me.uin)
+                    throw failure
+                }
+                // The capability said yes and the route is not there after all.
+                app.rcq.android.net.GuestPath.JoinStep.LEGACY -> return legacyGuestCopyOn(h, me)
+                app.rcq.android.net.GuestPath.JoinStep.TRANSIENT -> {
+                    // One recover-first attempt: a copy this key already has
+                    // there is still ours to use while the new route is down.
+                    val recovered = try {
+                        recoverForGuest(h, me)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // A retired key is the rotated flow (D2), not the join's
+                        // own failure: that one already raised the notice.
+                        if (e is java.io.IOException &&
+                            app.rcq.android.net.GuestPath.joinStep(e.message) == app.rcq.android.net.GuestPath.JoinStep.ROTATED
+                        ) throw e
+                        null
+                    }
+                    recovered?.let { return GuestCreds(it.uin, it.token, it.guest) }
+                    throw failure
+                }
+                app.rcq.android.net.GuestPath.JoinStep.REFUSED -> throw failure
+            }
+        }
+        throw IllegalStateException("guest join failed")
+    }
+
+    /** Today's path, unchanged: recover-first, then `/auth/register`. For every
+     *  island without `guest_accounts_v1` (older, open, or not admitting guests
+     *  right now). A door refusal from it names an island too old to take
+     *  people from other islands ([joinFailureSentence]). */
+    private suspend fun legacyGuestCopyOn(h: String, me: GuestSelf): GuestCreds {
+        val creds = recoverForGuest(h, me) ?: run {
+            val api = RcqApi("https://$h")
+            val skB64 = Base64.encodeToString(me.spub, Base64.NO_WRAP)
+            val challenge = runCatching { api.registerChallenge(skB64).challenge }.getOrNull()
+            if (!stillOn(me.epoch)) throw IllegalStateException("switched")
+            api.register(
+                RcqApi.RegisterRequest(
+                    // ⚠ Never "user-<uin>" (decision D1): that is our HOME number.
+                    nickname = app.rcq.android.net.GuestPath.nicknameFor(me.nickname, me.uin),
+                    identity_key = Base64.encodeToString(me.ipub, Base64.NO_WRAP),
+                    signing_key = skB64,
+                    challenge = challenge,
+                    signature = challenge?.let {
+                        app.rcq.android.crypto.RecoveryPhrase.signChallenge(me.sp, it)
+                    },
+                ),
+            )
+        }
+        return GuestCreds(creds.uin, creds.token, creds.guest)
+    }
+
+    /** §5c join: a guest copy on [host] (explicit user action; seeing a foreign
+     *  link never touches the island), join the group there, merge it into the
+     *  list under its local alias. The alias id, or the failure, which
+     *  [joinFailureSentence] turns into what the join card says. */
+    suspend fun joinForeignGroup(host: String, remoteId: Int): Result<Int> = runCatching {
+        val epoch = epochNow()
+        val v = ensureGuestOn(host, remoteId)
         val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
         val g = guest.joinGroup(remoteId)
+        // The room belongs in the list of the account that joined it.
+        if (!stillOn(epoch)) throw IllegalStateException("switched")
         val alias = VisitedIslandsStore.aliasFor(v.host, remoteId)
         upsertGroup(mapForeignGroup(g, v.host))
         alias
-    }.getOrNull()
+    }
+
+    /** The sentence for a failed join (spec 2026-09-15, 12.5). [host] is null
+     *  for a room on our own island, which keeps its one generic sentence. */
+    fun joinFailureSentence(e: Throwable?, host: String?): String? {
+        if (host == null) return appCtx.getString(R.string.group_invite_join_failed)
+        val s = app.rcq.android.net.GuestPath.joinSentence(e?.message)
+        // A retired key already raised the rotated-elsewhere notice, which says
+        // what happened and what to do (decision D2): no second, generic line.
+        if (s == app.rcq.android.net.GuestPath.Sentence.ROTATED) return null
+        return guestSentence(s, host)
+    }
+
+    /** [joinFailureSentence] as a toast, for join cards without a Context. */
+    fun toastJoinFailure(e: Throwable?, host: String?) {
+        val s = joinFailureSentence(e, host) ?: return
+        android.widget.Toast.makeText(appCtx, s, android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    /** One place turns a 12.5 sentence into words, so a join and an add that
+     *  hit the same refusal say the same thing. */
+    private fun guestSentence(s: app.rcq.android.net.GuestPath.Sentence, host: String): String = when (s) {
+        app.rcq.android.net.GuestPath.Sentence.CLOSED -> appCtx.getString(R.string.guest_join_closed, host)
+        app.rcq.android.net.GuestPath.Sentence.ROOM_CLOSED -> appCtx.getString(R.string.guest_join_room_closed)
+        app.rcq.android.net.GuestPath.Sentence.ROOM_FULL -> appCtx.getString(R.string.guest_join_room_full)
+        app.rcq.android.net.GuestPath.Sentence.ROOM_LIMIT -> appCtx.getString(R.string.guest_join_room_limit)
+        app.rcq.android.net.GuestPath.Sentence.RATE -> appCtx.getString(R.string.guest_join_rate)
+        app.rcq.android.net.GuestPath.Sentence.GROUP_LIMIT -> appCtx.getString(R.string.guest_join_group_limit, host)
+        app.rcq.android.net.GuestPath.Sentence.OLD_PAID -> appCtx.getString(R.string.guest_join_old_paid, host)
+        app.rcq.android.net.GuestPath.Sentence.OLD_INVITE -> appCtx.getString(R.string.guest_join_old_invite, host)
+        app.rcq.android.net.GuestPath.Sentence.UNAVAILABLE -> appCtx.getString(R.string.guest_unavailable, host)
+        app.rcq.android.net.GuestPath.Sentence.RESTRICTED -> appCtx.getString(R.string.guest_restricted, host)
+        app.rcq.android.net.GuestPath.Sentence.RESTRICTED_CONTACTS -> appCtx.getString(R.string.guest_restricted_contacts)
+        app.rcq.android.net.GuestPath.Sentence.ADD_LIMIT -> appCtx.getString(R.string.group_add_foreign_limit)
+        app.rcq.android.net.GuestPath.Sentence.ADD_SEAT_LIMIT -> appCtx.getString(R.string.group_add_foreign_seat_limit)
+        app.rcq.android.net.GuestPath.Sentence.STALE_KEY -> appCtx.getString(R.string.group_add_foreign_stale_key)
+        app.rcq.android.net.GuestPath.Sentence.GUEST_ADDER -> appCtx.getString(R.string.group_add_foreign_guest_adder)
+        app.rcq.android.net.GuestPath.Sentence.BLOCKED -> appCtx.getString(R.string.gi_add_blocked)
+        app.rcq.android.net.GuestPath.Sentence.CONTACTS_ONLY -> appCtx.getString(R.string.gi_add_contacts_only)
+        app.rcq.android.net.GuestPath.Sentence.NOBODY -> appCtx.getString(R.string.gi_add_nobody)
+        app.rcq.android.net.GuestPath.Sentence.INVITE_ONLY -> appCtx.getString(R.string.group_invite_closed_hint)
+        app.rcq.android.net.GuestPath.Sentence.JOIN_BLOCKED -> appCtx.getString(R.string.group_join_blocked)
+        app.rcq.android.net.GuestPath.Sentence.GONE -> appCtx.getString(R.string.group_join_gone)
+        app.rcq.android.net.GuestPath.Sentence.JOIN_FAILED -> appCtx.getString(R.string.group_invite_join_failed)
+        app.rcq.android.net.GuestPath.Sentence.ADD_FAILED -> appCtx.getString(R.string.gi_add_failed)
+        // Decision E2: the same two refusals the transfer screen already names,
+        // said the same way wherever else they turn up.
+        app.rcq.android.net.GuestPath.Sentence.TARGET_GUEST -> appCtx.getString(R.string.gi_transfer_err_target_guest)
+        app.rcq.android.net.GuestPath.Sentence.NO_USER -> appCtx.getString(R.string.gi_transfer_err_no_such_user)
+        // Never shown: [joinFailureSentence] stops before it (decision D2).
+        app.rcq.android.net.GuestPath.Sentence.ROTATED -> appCtx.getString(R.string.group_invite_join_failed)
+        app.rcq.android.net.GuestPath.Sentence.SETTLED -> appCtx.getString(R.string.guest_settle_done, host)
+        app.rcq.android.net.GuestPath.Sentence.NUMBER_INVITE -> appCtx.getString(R.string.guest_settle_number_invite)
+        app.rcq.android.net.GuestPath.Sentence.ENTRY_REQUIRED -> appCtx.getString(R.string.reg_entry_required)
+        app.rcq.android.net.GuestPath.Sentence.INVITE_REQUIRED -> appCtx.getString(R.string.reg_invite_required)
+        app.rcq.android.net.GuestPath.Sentence.INVITE_INVALID -> appCtx.getString(R.string.reg_invite_invalid)
+        app.rcq.android.net.GuestPath.Sentence.VOUCHER_SPENT -> appCtx.getString(R.string.residency_code_spent)
+        app.rcq.android.net.GuestPath.Sentence.SETTLE_FAILED -> appCtx.getString(R.string.residency_failed)
+    }
+
+    /** What a settle came to: [done] when the copy is a resident's row now. */
+    class SettleOutcome(val done: Boolean, val sentence: String)
+
+    /** "Become a resident of {host}" (decision D7, spec 9.1): the guest copy
+     *  turns into a resident's account as the SAME row, number and rooms
+     *  included. [host] null is the active account itself (signed in to a
+     *  guest copy, [primaryIsGuest]); otherwise our visited copy on [host].
+     *  [code] is an entry voucher or an invite, blank on an open island.
+     *
+     *  On success the guest state is cleared where it was recorded: for the
+     *  active account the flag, the island's surfaces (re-read from the
+     *  island) and the push endpoint the copy was denied; for a visited copy
+     *  its Visited entry. `not_a_guest` counts as success: another device or
+     *  the operator settled it first. */
+    suspend fun settleGuestCopy(host: String?, code: String?): SettleOutcome = withContext(Dispatchers.IO) {
+        val epoch = epochNow()
+        val island = host ?: serverHost()
+        val failed = SettleOutcome(false, appCtx.getString(R.string.residency_failed))
+        // The duress view makes no request as the real account.
+        if (duressViewUp) return@withContext failed
+        val client = if (host == null) api else {
+            val copy = VisitedIslandsStore.get(host) ?: return@withContext failed
+            RcqApi("https://${copy.host}").apply { setToken(copy.jwt) }
+        }
+        val said = try {
+            client.guestSettle(code?.trim()?.takeIf { it.isNotEmpty() }?.take(512))
+            app.rcq.android.net.GuestPath.Sentence.SETTLED
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: java.io.IOException) {
+            app.rcq.android.net.GuestPath.settleSentence(e.message)
+        } catch (e: Exception) {
+            app.rcq.android.net.GuestPath.Sentence.SETTLE_FAILED
+        }
+        if (said != app.rcq.android.net.GuestPath.Sentence.SETTLED) {
+            return@withContext SettleOutcome(false, guestSentence(said, island))
+        }
+        // The answer belongs to the account that asked.
+        if (!stillOn(epoch)) return@withContext failed
+        if (host == null) {
+            notePrimaryGuest(false)
+            refreshCaps()
+            registerPushEndpoint()
+        } else {
+            VisitedIslandsStore.get(host)?.let { VisitedIslandsStore.save(it.copy(guest = false)) }
+        }
+        SettleOutcome(true, appCtx.getString(R.string.guest_settle_done, island))
+    }
 
     /** §5c invite-card preview for a group on another island. The invite LINK is
      *  the capability, so we read the foreign island's PUBLIC card (name/avatar/
@@ -4757,28 +5141,26 @@ class Session(context: Context) {
         }.getOrElse { addMemberReason(it.message) }
     }
 
-    /** Map the IOException message ("HTTP <code>: <body>" from RcqApi.execute) to
-     *  a localized string by matching the distinct 403 detail substrings the
-     *  groups router emits. Non-403 -> generic add-failed. */
-    fun addMemberReason(message: String?): String {
-        val m = message ?: ""
-        val res = when {
-            m.contains("the group owner has blocked this user") -> R.string.gi_add_blocked
-            m.contains("only accepts group invites from their contacts") -> R.string.gi_add_contacts_only
-            m.contains("does not accept group invites") -> R.string.gi_add_nobody
-            else -> R.string.gi_add_failed
-        }
-        return appCtx.getString(res)
-    }
+    /** The sentence for a failed add ([message] is what RcqApi threw): by
+     *  `detail.code` first (the guest owner-add and the guest rules on
+     *  `/members`, spec 2026-09-15, 12.5), then by the three distinct prose 403
+     *  details a native add has always answered with (the owner blocked the
+     *  user / the invitee only accepts invites from contacts / the invitee
+     *  accepts no invites). [host] names the room's island. */
+    fun addMemberReason(message: String?, host: String? = null): String =
+        guestSentence(app.rcq.android.net.GuestPath.addSentence(message), host ?: serverHost())
 
     /** §5c owner-initiated cross-island add: put a contact who lives on ANOTHER
-     *  island into a group on THIS group's island. The group's island has no
-     *  account for the foreign uin (that's the "no such user" 404), so we
-     *  resolve-or-register the contact's PUBLIC keys there to get a local uin,
-     *  add THAT uin, then send the contact the group link so they guest-register
-     *  (recover-first → the SAME uin) and start polling. Because they're added
-     *  FIRST, their later /join short-circuits on "already a member" — so this
-     *  works for CLOSED groups too. Returns null on success, else a reason. */
+     *  island into a group on THIS group's island, then send them the group link
+     *  so they claim the seat (same keys, so the SAME uin) and start polling.
+     *  Because they are in the roster FIRST, their later /join short-circuits on
+     *  "already a member", so this works for CLOSED groups too.
+     *
+     *  Where the room's island advertises `guest_accounts_v1` (spec 2026-09-15,
+     *  5 and 12.1) the seat is minted by `POST /groups/{id}/guests` with the
+     *  contact's PUBLIC card, and no token goes to anybody. Everywhere else the
+     *  legacy uin-for-key, `/auth/register`, `/members` chain runs as before.
+     *  Returns null on success, else the sentence to show. */
     suspend fun addCrossIslandGroupMember(groupId: Int, contact: app.rcq.android.net.CrossIslandStore.Contact): String? =
         withContext(Dispatchers.IO) {
             val ctx = groupCtx(groupId)
@@ -4789,18 +5171,53 @@ class Session(context: Context) {
             if (contact.host.equals(groupHost, ignoreCase = true)) {
                 return@withContext runCatching {
                     upsertGroup(mapGroupCtx(ctx, ctx.api.addGroupMember(ctx.gid, contact.uin))); null
-                }.getOrElse { it.message ?: "add failed" }
+                }.getOrElse { addMemberReason(it.message, groupHost) }
             }
-            // Resolve (or mint) the contact's uin ON the group's island.
-            val localUin = CrossIslandSender.resolveUinForKey(groupHost, contact.signingKey)
-                ?: CrossIslandSender.registerForeignKeys(
-                    groupHost, contact.identityKey, contact.signingKey,
-                    contact.nickname.takeIf { it.isNotBlank() } ?: "user-${contact.uin}",
+            // Our own account on that island is a guest copy: the island adds
+            // nobody for a guest, so say so without asking it.
+            if (guestOnGroupIsland(groupId)) {
+                return@withContext appCtx.getString(R.string.group_add_foreign_guest_adder)
+            }
+            // Re-read the contact's card at home before putting keys in a room:
+            // a seat minted from a stale card is recoverable by the OLD seed.
+            // Unreachable (or no card) means the pinned card, as before.
+            val fresh = runCatching { CrossIslandSender.fetchCard(contact.host, contact.uin) }.getOrNull()
+            if (fresh != null && app.rcq.android.net.GuestPath.cardStale(
+                    contact.identityKey, contact.signingKey, fresh.identityKey, fresh.signingKey,
                 )
-                ?: return@withContext "could not reach ${groupHost}"
-            // Add them to the roster on the group's island.
-            val added = runCatching { ctx.api.addGroupMember(ctx.gid, localUin) }.getOrElse {
-                return@withContext it.message ?: "add failed"
+            ) {
+                return@withContext appCtx.getString(R.string.group_add_foreign_stale_key)
+            }
+            // Asked of the room's island at the moment of the add. Our own island
+            // is asked through our own client, so the front and relays apply.
+            val info = if (ctx.host == null) runCatching { api.serverInfo() }.getOrNull()
+                       else RcqApi.serverInfoOf(groupHost)
+            val added = if (app.rcq.android.net.GuestPath.decide(info) == app.rcq.android.net.GuestPath.Path.GUEST) {
+                runCatching {
+                    ctx.api.addGuestMember(
+                        ctx.gid,
+                        RcqApi.GuestAddRequest(
+                            identity_key = contact.identityKey,
+                            signing_key = contact.signingKey,
+                            // ⚠ The pinned card's name, never "user-<uin>": that
+                            // number is the contact's HOME number.
+                            nickname = app.rcq.android.net.GuestPath.nicknameFor(contact.nickname, contact.uin),
+                        ),
+                    )
+                }.getOrElse { return@withContext addMemberReason(it.message, groupHost) }
+            } else {
+                // Legacy: resolve (or mint) the contact's uin ON the group's island.
+                val localUin = CrossIslandSender.resolveUinForKey(groupHost, contact.signingKey)
+                    ?: CrossIslandSender.registerForeignKeys(
+                        groupHost, contact.identityKey, contact.signingKey,
+                        // ⚠ Never "user-<uin>" (decision D1): the contact's HOME number.
+                        app.rcq.android.net.GuestPath.nicknameFor(contact.nickname, contact.uin),
+                    )
+                    ?: return@withContext "could not reach ${groupHost}"
+                // Add them to the roster on the group's island.
+                runCatching { ctx.api.addGroupMember(ctx.gid, localUin) }.getOrElse {
+                    return@withContext addMemberReason(it.message, groupHost)
+                }
             }
             withContext(Dispatchers.Main) { upsertGroup(mapGroupCtx(ctx, added)) }
             // Tell the contact via a cross-island 1:1: the group invite link
@@ -4860,6 +5277,8 @@ class Session(context: Context) {
             "not_a_member" -> R.string.gi_transfer_err_not_a_member
             "no_such_user" -> R.string.gi_transfer_err_no_such_user
             "target_suspended" -> R.string.gi_transfer_err_target_suspended
+            // A guest copy never owns a room (spec 8.1).
+            "target_guest" -> R.string.gi_transfer_err_target_guest
             "rate_limited" -> return rateLimitedSentence(refusal.retryAfter)
             else -> if (refusal.status == 429) return rateLimitedSentence(refusal.retryAfter)
                 else R.string.gi_transfer_err_failed
@@ -5128,6 +5547,7 @@ class Session(context: Context) {
         slowmodeSec: Int? = null,
         minAccountAgeHours: Int? = null,
         inCatalog: Boolean? = null,
+        allowGuests: Boolean? = null,
     ) {
         val ctx = groupCtx(id)
         upsertGroup(mapGroupCtx(ctx, ctx.api.patchGroup(ctx.gid, RcqApi.GroupPatchBody(
@@ -5136,6 +5556,7 @@ class Session(context: Context) {
             links_allowed = linksAllowed, files_allowed = filesAllowed, slowmode_sec = slowmodeSec,
             min_account_age_hours = minAccountAgeHours,
             in_catalog = inCatalog,
+            allow_guests = allowGuests,
         ))))
     }
 
@@ -5607,6 +6028,12 @@ class Session(context: Context) {
         // filter, so we gate on the decrypted sender here. Sender-key control
         // (SKDM/SKNACK) is handled before this call, so chain recovery is safe.
         if (LocalStores.isBlocked(senderUin)) return
+        // Section 7 of the 2026-09-15 guest spec: a group frame never carries a
+        // 1:1 conversation. The island cannot tell a post to the room from a
+        // payload one member deposited for exactly one other member, so the
+        // kinds that only mean something between two people stop here, before
+        // any handler below could act on them.
+        if (app.rcq.android.crypto.GroupFrameRule.oneToOneOnly(envelope)) return
         val dec = SenderUin(senderUin)
         val now = System.currentTimeMillis()
         when (val env = envelope) {
@@ -6376,6 +6803,7 @@ class Session(context: Context) {
         // Alive after all — the token had merely rotted. Adopt + redial.
         movedAwayFrom = null; moveRefusalTold = null
         store.updateToken(fresh.token)
+        notePrimaryGuest(fresh.guest)
         api.setToken(fresh.token)
         socket.disconnect()
         connectAndSync(me, fresh.token)
@@ -6504,6 +6932,7 @@ class Session(context: Context) {
         // die of the epoch bump anyway) and redial, the same tail the probe has.
         movedAwayFrom = null; moveRefusalTold = null
         store.updateToken(fresh.token)
+        notePrimaryGuest(fresh.guest)
         api.setToken(fresh.token)
         socket.disconnect()
         connectAndSync(me, fresh.token)
@@ -10412,6 +10841,64 @@ class Session(context: Context) {
         pushNicknameToGuestCopies(nick, onlyHost = host)
     }
 
+    /** Islands whose name for this copy has already been looked at once. */
+    private val foreignNicknameRepaired = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * Decision E6: our copy on [host] is still called after our HOME number.
+     *
+     * "user-<uin>" was the name every §5c registration fell back to, and a
+     * phrase sign-in whose profile read failed stores exactly that locally, so
+     * copies made by older builds carry our home digits in the one field every
+     * member of those rooms can read. [syncGuestNicknameOnce] cannot fix them:
+     * it pushes the name we hold, and refuses to push one that spells the
+     * number (decision D1), so a copy whose only name IS the number keeps it.
+     *
+     * So once per island per process, after signing in to or joining it: read
+     * the name that island holds for us, and if it spells our home number,
+     * replace it with the neutral word ([GuestPath.NEUTRAL_NICKNAME]).
+     *
+     * ⚠ The neutral word, NOT [GuestPath.nicknameFor]: decision E6 is one
+     * repair with one result on all three clients, and `nicknameFor` gives our
+     * own nickname whenever we have a usable one, so the same account's copy on
+     * the same island would end up called "Anna" from here and "Guest" from the
+     * web and iOS. There is nothing to gain from sending our own name either:
+     * [syncGuestNicknameOnce] has already pushed it by the time this runs, so
+     * the only copies left for this to repair are the ones that name has not
+     * fixed. What matters is what leaves: the home number does not.
+     *
+     * ⚠⚠ Visited islands only. A BACKUP home holds this account in the open,
+     * number and all, on purpose: there is nothing to hide there and renaming
+     * it would rename the account's own row on an island where it lives.
+     */
+    private fun repairForeignNicknameOnce(host: String) {
+        // The duress view makes no request as the real account.
+        if (duressViewUp) return
+        val h = host.lowercase()
+        val me = store.uin ?: return
+        if (MultihomeStore.list(me).any { it.host.equals(h, ignoreCase = true) }) return
+        val v = VisitedIslandsStore.get(h) ?: return
+        if (!foreignNicknameRepaired.add("${AccountManager.activeId.value}|$h")) return
+        val ep = epochNow()
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val foreign = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
+                // Our own row on that island: the one read a guest is allowed.
+                val stored = foreign.userInfo(v.uin).nickname
+                if (stored.isNullOrBlank() ||
+                    !app.rcq.android.net.GuestPath.carriesNumber(stored, me)
+                ) return@runCatching
+                // The name belongs to the account this started for.
+                if (!stillOn(ep) || duressViewUp) return@runCatching
+                foreign.updateMe(
+                    RcqApi.UpdateMeBody(nickname = app.rcq.android.net.GuestPath.NEUTRAL_NICKNAME),
+                )
+            }.onFailure {
+                android.util.Log.w("RCQfed", "nickname repair $h: ${it.javaClass.simpleName}")
+            }
+        }
+    }
+
     /**
      * #985(2): repeat a nickname change on this account's copies on other
      * islands (visited islands and backup homes), each with its own token.
@@ -10437,6 +10924,10 @@ class Session(context: Context) {
             val stillOurs = { stillOn(ep) && !duressViewUp }
             for (t in targets) {
                 if (!stillOurs()) return@launch
+                // ⚠ Decision D1: a name that spells our home number never goes to
+                // a guest copy on another island. A backup home carries that
+                // number in the open already, so it still gets the name.
+                if (t.source == GuestCopies.Source.VISITED && app.rcq.android.net.GuestPath.carriesNumber(nickname, me)) continue
                 GuestCopies.pushNickname(t, nickname, sp, pp, stillOurs) { target, fresh ->
                     when (target.source) {
                         GuestCopies.Source.VISITED -> VisitedIslandsStore.updateCreds(target.host, fresh.uin, fresh.token)
@@ -10982,6 +11473,16 @@ class Session(context: Context) {
 
     suspend fun searchGroups(q: String): List<RcqApi.GroupPreviewOut> =
         runCatching { api.searchGroups(q) }.getOrNull() ?: emptyList()
+
+    /** What to say when accepting a contact request failed, or null for the
+     *  silent failures it always had. A guest copy is refused
+     *  (`guest_restricted`, spec 2026-09-15, 10 and 12.5): the person answers
+     *  from their home account. */
+    fun respondRefusalSentence(e: Throwable?): String? =
+        when (app.rcq.android.net.GuestPath.respondSentence(e?.message)) {
+            null -> null
+            else -> appCtx.getString(R.string.guest_restricted_contacts)
+        }
 
     suspend fun respond(requestId: Int, accept: Boolean) {
         api.respondContact(requestId, accept)
