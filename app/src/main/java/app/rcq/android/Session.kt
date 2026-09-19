@@ -1595,12 +1595,34 @@ class Session(context: Context) {
         )
         val phrase = try {
             reissueHome(seed, identity)
-        } catch (e: Throwable) {
-            // Nothing on the home island changed, so nothing is stranded: drop
-            // the record rather than leaving a banner over a rotation that
-            // never started.
-            store.clearPendingRotation()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // ⚠⚠ NOT a failure, and above all not a decision: the screen was
+            // left, or the scope died. The request may be in flight or already
+            // applied, and the record is the only copy of the new seed, so it
+            // stays and the next visit resumes it.
             throw e
+        } catch (e: Throwable) {
+            // ⚠⚠ THE WORST CASE IN THIS WHOLE PATH: the island applied the
+            // rotation and the reply never arrived. Dropping the record here
+            // would throw away the only copy of the new seed while the island
+            // is already on the new keys — an account nothing can open again.
+            // So ask, with the NEW key: an island that answers has taken it,
+            // and what is left to do is adopt it locally (spec F3 step 4).
+            val landed = runCatching {
+                Multihome.recoverOn(homeHost, identity.signingPrivate, identity.signingPublic)
+            }.getOrNull()
+            if (landed != null) {
+                adoptRotatedIdentity(
+                    landed.uin, landed.token, store.nickname ?: "user-$meUin",
+                    store.serverHost, seed, identity,
+                )
+            } else {
+                // The island never took it: nothing is stranded, so the record
+                // goes rather than leaving a banner over a rotation that never
+                // started.
+                store.clearPendingRotation()
+                throw e
+            }
         }
         val results = targets.map { t ->
             t.host to rotateCopyOn(t, oldSigningPriv, oldSigningPub, identity)
@@ -1639,13 +1661,21 @@ class Session(context: Context) {
         )
     }
 
-    /** The islands a half-finished rotation has still not reached, newest
-     *  record first. Empty when nothing is pending, which is the normal state. */
-    fun rotationPending(): List<String> =
-        PendingRotation.decode(store.pendingRotationRaw)
-            ?.targets.orEmpty()
+    /** The islands a half-finished rotation has still not reached. Empty when
+     *  nothing is pending, which is the normal state.
+     *
+     *  ⚠ The HOME island is in the list while the record is still `prepared`:
+     *  that phase means the home request was written down and never finished,
+     *  so the phrase may not have changed there either, and a list that left it
+     *  out would be telling somebody their own island is done when nobody
+     *  knows that yet. */
+    fun rotationPending(): List<String> {
+        val rec = PendingRotation.decode(store.pendingRotationRaw) ?: return emptyList()
+        val left = rec.targets
             .filter { it.status != PendingRotation.Target.Status.DONE && it.status != PendingRotation.Target.Status.FORGOTTEN }
             .map { it.host }
+        return if (rec.phase == PendingRotation.Phase.PREPARED) listOf(rec.homeHost) + left else left
+    }
 
     /**
      * Try the islands a rotation could not reach, with the keys it saved.
@@ -1667,6 +1697,26 @@ class Session(context: Context) {
             ?: throw IllegalStateException("new_seed_gone")
         val identity = IdentityKeys.fromSeed(seed)
         val oldPub = ed25519Pub(oldPriv)
+        // ⚠ A record still in `prepared` means the HOME half never finished:
+        // finish it before the copies, or the cascade rotates other islands
+        // onto keys the home island has never heard of.
+        if (rec.phase == PendingRotation.Phase.PREPARED) {
+            val landed = runCatching {
+                Multihome.recoverOn(rec.homeHost, identity.signingPrivate, identity.signingPublic)
+            }.getOrNull()
+            if (landed != null) {
+                // It went through after all; only this device did not know.
+                adoptRotatedIdentity(
+                    landed.uin, landed.token, store.nickname ?: "user-${rec.homeUin}",
+                    store.serverHost, seed, identity,
+                )
+            } else {
+                // Still on the old key there, and the store still holds it, so
+                // a fresh proof signs the same change again.
+                reissueHome(seed, identity)
+            }
+            store.savePendingRotation(rec.copy(phase = PendingRotation.Phase.HOME_DONE))
+        }
         val left = rec.targets.filter {
             it.status != PendingRotation.Target.Status.DONE && it.status != PendingRotation.Target.Status.FORGOTTEN
         }
@@ -1793,6 +1843,9 @@ class Session(context: Context) {
         }
     }
 
+    /** Just enough of the island's answer for [adoptRotatedIdentity]. */
+    private class RotatedHome(val uin: Int, val token: String)
+
     /** The HOME half of a rotation: the island this account lives on. Returns
      *  the NEW 24-word phrase. */
     private suspend fun reissueHome(seed: ByteArray, identity: app.rcq.android.crypto.GeneratedIdentity): List<String> = withContext(Dispatchers.IO) {
@@ -1842,6 +1895,27 @@ class Session(context: Context) {
                 signature = proofSig,
             )
         )
+        adoptRotatedIdentity(resp.uin, resp.token, nick, host, seed, identity)
+    }
+
+    /**
+     * Everything that follows the home island saying yes.
+     *
+     * ⚠⚠ Split out because it has TWO callers: the ordinary one, and the
+     * recovery from a reply that never arrived. An island that applied the
+     * rotation and lost the reply leaves the island on the new keys and this
+     * phone on the old ones, and the only way back is to notice and adopt what
+     * already happened.
+     */
+    private suspend fun adoptRotatedIdentity(
+        uin: Int,
+        token: String,
+        nick: String,
+        host: String?,
+        seed: ByteArray,
+        identity: app.rcq.android.crypto.GeneratedIdentity,
+    ): List<String> = withContext(Dispatchers.IO) {
+        val resp = RotatedHome(uin, token)
         // Persist the new identity + seed under the active account (same UIN /
         // nick / server). store reads prefs live, so this takes effect at once.
         store.saveIdentity(
