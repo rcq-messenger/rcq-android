@@ -87,6 +87,13 @@ fun EntryCheckoutSheet(
     val uriHandler = LocalUriHandler.current
     var chains by remember { mutableStateOf<List<TillApi.Chain>>(emptyList()) }
     var invoice by remember { mutableStateOf<TillApi.EntryInvoice?>(null) }
+    // ⚠ NOT `resumeId` itself. A remembered unpaid invoice used to be the only
+    // thing this sheet would ever show for that island: every later tap on
+    // "buy entry" reopened it, so the coin picked once was the only coin on
+    // offer until that invoice expired, and the other chains the till takes
+    // were unreachable. Dropping the row is how somebody gets back to the
+    // picker, so the id has to be something this sheet can let go of.
+    var resuming by remember { mutableStateOf(resumeId) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showQr by remember { mutableStateOf(false) }
@@ -108,9 +115,10 @@ fun EntryCheckoutSheet(
 
     LaunchedEffect(Unit) { EntryInvoices.init(ctx) }
 
-    LaunchedEffect(resumeId) {
-        if (resumeId != null) {
-            runCatching { TillApi.entryInvoice(resumeId, tillUrl) }
+    LaunchedEffect(resuming) {
+        val open = resuming
+        if (open != null) {
+            runCatching { TillApi.entryInvoice(open, tillUrl) }
                 .onSuccess { inv ->
                     invoice = inv
                     if (inv.status == "paid" && !inv.voucher.isNullOrBlank() && !handed.value) {
@@ -267,6 +275,41 @@ fun EntryCheckoutSheet(
                     Text(
                         stringResource(R.string.uin_pay_exact),
                         color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+                    )
+                    // Nothing has been sent yet as far as this device knows, so
+                    // the coin is still a free choice.
+                    //
+                    // ⚠ The invoice is NOT forgotten, only left behind: money
+                    // sent to that address a minute after this tap must still
+                    // find its way home, and the sweep in EntryBuyButton walks
+                    // every remembered id for exactly that. The next invoice is
+                    // remembered in front of it, so a second visit resumes the
+                    // coin actually chosen rather than this one.
+                    Text(
+                        stringResource(R.string.uin_pay_other_coin),
+                        color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = !busy) {
+                                busy = true; error = null; showQr = false
+                                scope.launch {
+                                    runCatching { TillApi.entryQuote(host, tillUrl) }
+                                        .onSuccess { q ->
+                                            if (q.price_cents <= 0 || q.chains.isEmpty()) {
+                                                error = notForSale
+                                            } else {
+                                                chains = q.chains
+                                                invoice = null
+                                                resuming = null
+                                            }
+                                        }
+                                        .onFailure { e ->
+                                            error = say((e as? TillApi.TillException)?.code ?: "offline")
+                                        }
+                                    busy = false
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                     Legal()
                 }

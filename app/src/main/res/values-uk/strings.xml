@@ -1360,6 +1360,7 @@
     <string name="uin_pay_address">Адреса</string>
     <string name="uin_pay_copy">Копіювати</string>
     <string name="uin_pay_copied">Скопійовано</string>
+    <string name="uin_pay_other_coin">Заплатити іншою монетою</string>
     <string name="uin_pay_show_qr">Показати QR</string>
     <string name="uin_pay_hide_qr">Сховати QR</string>
     <string name="uin_pay_waiting">Чекаємо переказ · %1$s</string>

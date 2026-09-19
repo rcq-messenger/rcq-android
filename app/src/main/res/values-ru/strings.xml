@@ -1404,6 +1404,7 @@
     <string name="uin_pay_address">Адрес</string>
     <string name="uin_pay_copy">Копировать</string>
     <string name="uin_pay_copied">Скопировано</string>
+    <string name="uin_pay_other_coin">Заплатить другой монетой</string>
     <string name="uin_pay_show_qr">Показать QR</string>
     <string name="uin_pay_hide_qr">Скрыть QR</string>
     <string name="uin_pay_waiting">Ждём перевод · %1$s</string>

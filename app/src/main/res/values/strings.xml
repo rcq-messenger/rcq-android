@@ -1409,6 +1409,7 @@
     <string name="uin_pay_address">Address</string>
     <string name="uin_pay_copy">Copy</string>
     <string name="uin_pay_copied">Copied</string>
+    <string name="uin_pay_other_coin">Pay with another coin</string>
     <string name="uin_pay_show_qr">Show QR</string>
     <string name="uin_pay_hide_qr">Hide QR</string>
     <string name="uin_pay_waiting">Waiting for the transfer · %1$s</string>

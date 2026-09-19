@@ -1354,6 +1354,7 @@
     <string name="uin_pay_address">地址</string>
     <string name="uin_pay_copy">复制</string>
     <string name="uin_pay_copied">已复制</string>
+    <string name="uin_pay_other_coin">换一种币支付</string>
     <string name="uin_pay_show_qr">显示二维码</string>
     <string name="uin_pay_hide_qr">隐藏二维码</string>
     <string name="uin_pay_waiting">等待转账 · %1$s</string>

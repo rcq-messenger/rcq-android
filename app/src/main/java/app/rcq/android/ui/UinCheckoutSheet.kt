@@ -82,11 +82,20 @@ private const val TON_PATH =
         "c.51-.89-.14-1.99-1.16-1.99h-.24Zm-5.42 8.4L10.4 12.6 8.06 8.68a.29.29 0 0 1 .25-.44h3.21v6.66Z" +
         "m4.16-6.22-2.34 3.92-1.12 2.3V8.24h3.21c.24 0 .38.24.25.44Z"
 
+// A plain hexagon, the one shape everybody who has seen Polygon recognises.
+// Drawn rather than traced from the brand mark for the same reason as the
+// other two: it has to be OURS to ship, and a row without a mark next to two
+// rows with one reads as the broken option.
+private const val POLYGON_PATH =
+    "M12 5.6 17.5 8.8v6.4L12 18.4 6.5 15.2V8.8Z" +
+        "m0 2.6L8.8 10.1v3.8L12 15.8l3.2-1.9v-3.8Z"
+
 @Composable
 internal fun CoinMark(chain: String, size: androidx.compose.ui.unit.Dp = 26.dp) {
     val spec = when (chain) {
         "tron" -> Color(0xFF26A17B) to USDT_PATH
         "ton" -> Color(0xFF0098EA) to TON_PATH
+        "polygon" -> Color(0xFF8247E5) to POLYGON_PATH
         else -> return
     }
     val path = remember(chain) { PathParser().parsePathString(spec.second).toPath() }
@@ -162,6 +171,10 @@ fun UinCheckoutSheet(
     val c = RcqTheme.colors
     var chains by remember { mutableStateOf<List<TillApi.Chain>>(emptyList()) }
     var invoice by remember { mutableStateOf<TillApi.Invoice?>(null) }
+    // ⚠ NOT `resumeId` itself: see the "pay with another coin" row below. A
+    // remembered unpaid invoice pinned the coin, so the one picked first was
+    // the only one this number could be paid in until it expired.
+    var resuming by remember { mutableStateOf(resumeId) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showQr by remember { mutableStateOf(false) }
@@ -182,9 +195,10 @@ fun UinCheckoutSheet(
     }
 
     // Pick up where a previous visit left off, or ask what we can be paid in.
-    LaunchedEffect(resumeId) {
-        if (resumeId != null) {
-            runCatching { TillApi.invoice(resumeId, checkoutUrl) }
+    LaunchedEffect(resuming) {
+        val open = resuming
+        if (open != null) {
+            runCatching { TillApi.invoice(open, checkoutUrl) }
                 .onSuccess { inv ->
                     invoice = inv
                     if (inv.status == "paid" && !inv.voucher.isNullOrBlank() && !handed.value) {
@@ -308,6 +322,35 @@ fun UinCheckoutSheet(
                     Text(
                         stringResource(R.string.uin_pay_exact),
                         color = c.textSecondary, fontSize = 11.sp, textAlign = TextAlign.Center,
+                    )
+                    // ⚠ The invoice is left behind, not forgotten: money sent
+                    // to that address after this tap still has to find its way
+                    // home, and the sweep that hands a late payment over walks
+                    // every remembered id. The next invoice is remembered in
+                    // front of it, so a later visit resumes the chosen coin.
+                    Text(
+                        stringResource(R.string.uin_pay_other_coin),
+                        color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(enabled = !busy) {
+                                busy = true; error = null; showQr = false
+                                scope.launch {
+                                    runCatching { TillApi.prices(checkoutUrl) }
+                                        .onSuccess { p ->
+                                            if (p.chains.isEmpty()) {
+                                                error = unreachable
+                                            } else {
+                                                chains = p.chains
+                                                invoice = null
+                                                resuming = null
+                                            }
+                                        }
+                                        .onFailure { error = unreachable }
+                                    busy = false
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
 
