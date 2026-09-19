@@ -1487,6 +1487,36 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_CONTACTS_CACHE), json).apply()
     }
 
+    // ── island description cache (the "this island" block) ───────────
+    // `/server/info` was held in a map that lives and dies with the process,
+    // so the FIRST visit to Settings after every launch drew the island block
+    // empty and filled it a network round trip later, which is the jitter in
+    // report #1026 ("информация появляется не сразу... экран дёргается").
+    //
+    // NOT per account, deliberately: an island's name, welcome text and logo
+    // version are the same public bytes for everybody on it, and two accounts
+    // on one island should not each wait for their own copy. So the key carries
+    // the HOST instead of the account prefix `pk()` adds.
+    fun islandInfoJson(host: String): String? =
+        if (::prefs.isInitialized) prefs.getString(islandInfoKey(host), null) else null
+
+    fun setIslandInfoJson(host: String, json: String) {
+        if (::prefs.isInitialized) prefs.edit().putString(islandInfoKey(host), json).apply()
+    }
+
+    private fun islandInfoKey(host: String) = "island_info." + host.trim().lowercase()
+
+    /** The island's headcount, cached for the same reason and under the same
+     *  rule: public, per host, not per account. */
+    fun islandPeople(host: String): Int? =
+        if (::prefs.isInitialized) prefs.getInt(islandPeopleKey(host), 0).takeIf { it > 0 } else null
+
+    fun setIslandPeople(host: String, count: Int) {
+        if (::prefs.isInitialized) prefs.edit().putInt(islandPeopleKey(host), count).apply()
+    }
+
+    private fun islandPeopleKey(host: String) = "island_people." + host.trim().lowercase()
+
     /** Headless read of a SPECIFIC account's roster cache, for the push
      *  receiver: a wake names the account it is for ([to_uin]), which on a
      *  multi-account phone is often not the bound one, and a background start

@@ -577,7 +577,12 @@ private fun SettingsRoot(
 
     fun copyUin() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("UIN", "$uin"))
+        // `uin@island`, not a bare number: this is the string a person sends to
+        // somebody on ANOTHER island, and a bare number means a different
+        // person there. The island name was nowhere near the copy button, so
+        // the suffix had to be typed from memory (#1025).
+        cm.setPrimaryClip(ClipData.newPlainText(
+            "UIN", app.rcq.android.net.RcqFederation.fullAddress(uin, session.currentServer)))
         Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
     }
 
@@ -856,12 +861,9 @@ private fun SettingsRoot(
             SettingsGroup {
                 val islandHost = session.currentServer
                 val islandInfo by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
-                    initialValue = serverInfoCache[islandHost], islandHost,
+                    initialValue = app.rcq.android.net.IslandInfoCache.peek(islandHost), islandHost,
                 ) {
-                    app.rcq.android.net.RcqApi.serverInfoOf(islandHost)?.let {
-                        serverInfoCache[islandHost] = it
-                        value = it
-                    }
+                    app.rcq.android.net.IslandInfoCache.refresh(islandHost)?.let { value = it }
                 }
                 val islandName = islandInfo?.name?.takeIf { it.isNotBlank() }
                 val islandRules = islandInfo?.welcome?.takeIf { it.isNotBlank() }
@@ -906,8 +908,10 @@ private fun SettingsRoot(
                 // Absent, not zero, when the island did not answer: a headcount
                 // of 0 on an island you are demonstrably logged into is a lie,
                 // and a row that is simply not there is not.
-                val islandPeople by produceState<Int?>(initialValue = null, islandHost) {
-                    value = app.rcq.android.net.RcqApi.islandPeople(islandHost)
+                val islandPeople by produceState<Int?>(
+                    initialValue = app.rcq.android.net.IslandInfoCache.peekPeople(islandHost), islandHost,
+                ) {
+                    app.rcq.android.net.IslandInfoCache.refreshPeople(islandHost)?.let { value = it }
                 }
                 islandPeople?.let { people ->
                     Divider()
@@ -1991,12 +1995,9 @@ private fun NetworkScreen(session: Session, onOpenCustomServer: () -> Unit, onOp
                 // the island name blinked in seconds late on a slow network
                 // and the screen read as broken (#619).
                 val info by produceState<app.rcq.android.net.RcqApi.ServerInfoResponse?>(
-                    initialValue = serverInfoCache[host], host,
+                    initialValue = app.rcq.android.net.IslandInfoCache.peek(host), host,
                 ) {
-                    app.rcq.android.net.RcqApi.serverInfoOf(host)?.let {
-                        serverInfoCache[host] = it
-                        value = it
-                    }
+                    app.rcq.android.net.IslandInfoCache.refresh(host)?.let { value = it }
                 }
                 val islandName = info?.name?.takeIf { it.isNotBlank() }
                 SettingsRow(
@@ -4631,9 +4632,10 @@ private fun Divider() {
     Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 48.dp).background(RcqTheme.colors.divider))
 }
 
-/** Last /server/info answer per host — process-lifetime, tiny, lets the
- *  network screen paint the island's name instantly on re-entry (#619). */
-private val serverInfoCache = mutableMapOf<String, app.rcq.android.net.RcqApi.ServerInfoResponse>()
+// The per-host `/server/info` cache moved to net/IslandInfoCache: the map here
+// lived and died with the process, so the FIRST visit after a launch still
+// painted the island block empty and filled it a round trip later (#1026). The
+// replacement keeps the same in-memory layer and adds a stored one.
 
 /**
  * The invites a paying RESIDENT may hand out, on the island section.
@@ -5019,7 +5021,12 @@ private fun SettingsRow(
     ) {
         if (leading != null) leading() else
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
-        Text(label, color = if (destructive) Color(0xFFE5484D) else c.textPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        // ⚠ The LABEL gets the bigger share, 1.7 against 1. An even split is
+        // what truncated "Резидентство" while its value ("$15 разово") sat in
+        // half a row it did not need (#1026, item 2). The fix is the split and
+        // not the words: "разово" is what tells somebody this is not a
+        // subscription, and it is the first thing people ask.
+        Text(label, color = if (destructive) Color(0xFFE5484D) else c.textPrimary, fontSize = 16.sp, modifier = Modifier.weight(1.7f))
         // ⚠ The value MUST carry a weight too, or a long one ("RCQ Exodus ·
         // api.rcq.app") is measured at full intrinsic width first and the
         // weighted label is left a one-character column — on a narrow screen

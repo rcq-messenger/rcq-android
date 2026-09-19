@@ -1794,7 +1794,14 @@ private fun HomeHeader(
     // Read here rather than threaded in as a parameter: the header is the only
     // place on this screen that wants it, and `loadProfile` is the cached copy
     // the Settings screen already reads for the same field.
-    var ownBadge by remember { mutableStateOf<String?>(null) }
+    // Seeded from the STORED profile, then refreshed. It used to start null and
+    // wait for `/users/me`, so the mark beside your own name appeared a round
+    // trip after the screen did, every single time the screen was entered —
+    // while Settings, which seeds from the same cache, showed it at once
+    // (report #1026, item 3: "галочка у моего имени... всегда появляется позже").
+    // Keyed on uin so an account switch re-seeds instead of showing the mark of
+    // the account that just left the screen.
+    var ownBadge by remember(uin) { mutableStateOf(session.cachedProfile()?.badge) }
     LaunchedEffect(uin) { ownBadge = session.loadProfile()?.badge }
 
     if (showStealthInfo) {

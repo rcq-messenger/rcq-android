@@ -2516,6 +2516,11 @@ class Session(context: Context) {
                 // into at the moment. Not in a decoy session: nothing about
                 // one is written to disk, here as everywhere.
                 if (!app.rcq.android.data.AccountManager.isDecoyMode) {
+                    // The settings screen paints its island block from this
+                    // same answer. Feeding the cache HERE costs no request and
+                    // means the first visit after a launch is already filled in
+                    // rather than jumping a round trip later (#1026).
+                    app.rcq.android.net.IslandInfoCache.put(askedHost, info)
                     app.rcq.android.data.IslandCards.markActive(askedHost)
                     app.rcq.android.data.IslandCards.record(
                         appCtx, askedHost, info.name, info.logo_version,

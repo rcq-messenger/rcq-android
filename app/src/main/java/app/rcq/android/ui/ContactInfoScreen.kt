@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.rcq.android.R
 import app.rcq.android.Session
+import app.rcq.android.net.RcqFederation
 import app.rcq.android.data.LocalStores
 import app.rcq.android.model.UserStatus
 import app.rcq.android.net.CrossIslandSender
@@ -214,14 +215,17 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     val blocked = contact?.blocked == true
 
     // A bare number is ambiguous across islands: "#134" reaches a different
-    // person depending on where you type it. Copy the full `uin@host` for a
-    // contact who does not live on our island, which is exactly when someone
-    // needs to pass the address on (user report).
-    val fullAddress = crossIslandHost?.let { "$uin@$it" }
+    // person depending on where you type it, so what goes to the clipboard is
+    // always the full `uin@host` — a foreign contact's island, and OUR OWN
+    // island for everybody else. It used to spell out only the foreign half,
+    // which left the common case (passing a neighbour's number to somebody on
+    // another island) as a string the person had to finish by hand, with the
+    // island name nowhere on the screen (report #1025).
+    val fullAddress = RcqFederation.fullAddress(uin, crossIslandHost ?: session.currentServer)
 
     fun copyUin() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("UIN", fullAddress ?: "$uin"))
+        cm.setPrimaryClip(ClipData.newPlainText("UIN", fullAddress))
         Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
     }
 
@@ -388,7 +392,12 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("UIN", color = c.textSecondary, fontSize = 12.sp)
-                    Text(fullAddress ?: "$uin", color = c.textMono, fontSize = 15.sp)
+                    // What the row COPIES, spelled out, island and all. This is
+                    // the one screen whose subject is "who is this, exactly",
+                    // so the suffix the chat list hides is information here,
+                    // and showing it is also the only way the person learns
+                    // what to type when they pass the number on (#1025).
+                    Text(fullAddress, color = c.textMono, fontSize = 15.sp)
                 }
                 Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy_uin), tint = c.textSecondary, modifier = Modifier.size(18.dp))
             }

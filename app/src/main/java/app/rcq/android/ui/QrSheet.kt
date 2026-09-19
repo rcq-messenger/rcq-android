@@ -143,7 +143,10 @@ fun QrDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = {
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("UIN", "$uin"))
+                    // Same rule as the contact card and the settings row: what
+                    // leaves the app carries its island (#1025).
+                    cm.setPrimaryClip(ClipData.newPlainText(
+                        "UIN", app.rcq.android.net.RcqFederation.fullAddress(uin, session.currentServer)))
                     Toast.makeText(context, context.getString(R.string.common_uin_copied), Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Filled.ContentCopy, null, tint = c.accent, modifier = Modifier.size(16.dp))

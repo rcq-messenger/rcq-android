@@ -65,6 +65,19 @@ object RcqFederation {
     fun formatAddress(a: Address, showFlagship: Boolean = false): String =
         if (a.host == FLAGSHIP_HOST && !showFlagship) a.uin.toString() else "${a.uin}@${a.host}"
 
+    /** The form that goes to the CLIPBOARD, always spelled out.
+     *
+     *  Display hides `@api.rcq.app` because on the flagship it is noise. A
+     *  copied string is different: it leaves the island. "134" reaches a
+     *  different person on every island, so a person handing their number to
+     *  somebody elsewhere had to know to append the island themselves, and
+     *  nothing on screen told them what to append (report #1025). Pasting the
+     *  long form back on its OWN island is not a regression either: the add
+     *  sheet has resolved `134@this.island` to the local number since report
+     *  #433, and [parseAddress] accepts everything this produces. */
+    fun fullAddress(uin: Int, host: String): String =
+        formatAddress(Address(uin, host.trim().lowercase()), showFlagship = true)
+
     fun isFlagship(host: String): Boolean = host.lowercase() == FLAGSHIP_HOST
 
     // ─────────────────── canonical JSON (spec §2.2) ───────────────────
