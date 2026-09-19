@@ -2021,6 +2021,14 @@ class RcqApi(
          *  recover-first and register paths exactly as they were. Nullable, so
          *  an island that never sent it reads as absent, not as a decision. */
         val guest_accounts_v1: Boolean? = null,
+        /** Spec 2026-09-15, F3: `POST /auth/reissue` understands the signed
+         *  `rcq-reissue-v1` proof. An island that does NOT advertise it applies
+         *  a rotation on the bearer token alone and writes no retired-key
+         *  marker, and a second device of the same account then reads its own
+         *  refusal as "this account was deleted" and wipes itself. So a
+         *  rotation is refused unless this is true. Nullable: an island that
+         *  never sent it reads as absent, not as a no. */
+        val reissue_proof_v1: Boolean? = null,
     )
     data class ServerInfoResponse(
         val name: String = "",

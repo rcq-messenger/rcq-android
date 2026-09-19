@@ -268,6 +268,36 @@ object SenderKeyStore {
      * The kid in-memory hold table in Session is keyed by kid alone, so it has
      * nothing to re-key. An entry the new number already holds wins.
      */
+    /**
+     * Throw away the OUTBOUND chains this account sends rooms under, so the
+     * next send in each mints a fresh kid and hands every member a new SKDM.
+     *
+     * ⚠⚠ WHY A KEY ROTATION MUST DO THIS. A member's inbound chain pins the
+     * signing key that came with the SKDM, and `openGmsg` verifies every
+     * message against that pinned key. Rotate the identity and keep the chain,
+     * and the sender signs with the new key while twenty phones check the old
+     * one: every message verifies false and is dropped with a line in the log
+     * and nothing on anybody's screen. The chain only rotates by itself when a
+     * member leaves, so a quiet room stays broken for ever.
+     *
+     * Inbound chains are untouched: other people's messages are still theirs to
+     * read, and their keys have not changed.
+     *
+     * [gids] null drops every room; a set drops only those, which is how the
+     * rooms on a foreign island wait for that island to take the new key.
+     */
+    @Synchronized
+    fun dropOwnChains(ownUin: Int, gids: Set<Int>? = null) {
+        if (!::prefs.isInitialized) return
+        val out = loadOut()
+        val prefix = "$ownUin:"
+        val kept = out.filterKeys { k ->
+            if (!k.startsWith(prefix)) true
+            else gids != null && k.removePrefix(prefix).toIntOrNull() !in gids
+        }
+        if (kept.size != out.size) saveOut(kept)
+    }
+
     @Synchronized
     fun rekeyAccount(oldUin: Int, newUin: Int) {
         if (!::prefs.isInitialized || oldUin == newUin) return

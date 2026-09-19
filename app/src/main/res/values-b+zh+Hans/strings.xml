@@ -235,6 +235,9 @@
     <string name="reissue_done">密钥已重新签发。请抄下新的恢复短语。</string>
     <string name="reissue_pending">这些岛上的短语还没有更换：%1$s。在更换之前，那里的副本仍然能用旧短语打开。</string>
     <string name="reissue_retry">在剩下的岛上完成</string>
+    <string name="reissue_give_up">放弃其余的岛</string>
+    <string name="reissue_give_up_title">放弃那些没有回应的岛？</string>
+    <string name="reissue_give_up_body">旧短语在那些岛上会继续有效，而且以后再也换不了：证明它属于你的那把钥匙现在就会被销毁。本岛以及已经回应的岛都已经换成新短语了。</string>
     <string name="reissue_done_islands">本岛以及另外 %1$d 座岛上的密钥都已重新签发。请抄下新的恢复短语。</string>
     <string name="reissue_partial">本岛的密钥已重新签发，但这些岛还没有：%1$s。那里的副本仍然能用旧短语打开。请在此页面重试。</string>
     <string name="reissue_failed">无法重新签发密钥。检查网络后重试。</string>

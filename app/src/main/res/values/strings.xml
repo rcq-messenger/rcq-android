@@ -253,6 +253,9 @@
     <string name="reissue_done">Keys re-issued. Write down your new recovery phrase.</string>
     <string name="reissue_pending">The phrase has not changed yet on: %1$s. Until it does, the old phrase still opens your copy there.</string>
     <string name="reissue_retry">Finish on the remaining islands</string>
+    <string name="reissue_give_up">Give up on the rest</string>
+    <string name="reissue_give_up_title">Give up on the islands that did not answer?</string>
+    <string name="reissue_give_up_body">Your old phrase keeps working on them, and it can never be changed there afterwards: the key that would prove it is yours is destroyed with this. Everything here and on the islands that did answer is already on the new phrase.</string>
     <string name="reissue_done_islands">Keys re-issued here and on %1$d other island(s). Write down your new recovery phrase.</string>
     <string name="reissue_partial">Keys re-issued here, but not yet on: %1$s. The old phrase still opens the copy there. Try again from this screen.</string>
     <string name="reissue_failed">Couldn\'t re-issue keys. Check your connection and try again.</string>

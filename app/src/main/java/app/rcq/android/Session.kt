@@ -1547,17 +1547,45 @@ class Session(context: Context) {
      *  or ("rotation_pending") when one is already half done. */
     suspend fun rotateEverywhere(): Rotation = withContext(Dispatchers.IO) {
         if (duressViewUp) throw IllegalStateException("duress")
+        // ⚠ A burn is deleting this account island by island, and the cascade
+        // writes fresh credentials for every copy it reaches: run the two
+        // together and the rotation writes live tokens back for rows the burn
+        // just deleted. Same hazard the burn already names for the drains.
+        if (burning) throw IllegalStateException("burning")
         if (store.hasPendingRotation) throw IllegalStateException("rotation_pending")
         val meUin = store.uin ?: throw IllegalStateException("not_registered")
         val homeHost = serverHost()
+        // ⚠⚠ AN ISLAND THAT DOES NOT KNOW THE PROOF MUST NOT BE ROTATED. It
+        // applies the change on the bearer token alone and writes no
+        // retired-key marker, so a second device of this account asks with the
+        // old key, is told "no such identity" rather than "that key moved",
+        // reads that as a deleted account and wipes itself. Refused rather
+        // than risked; the island is one update away from being able to.
+        val homeInfo = runCatching { RcqApi.serverInfoOf(homeHost) }.getOrNull()
+        if (homeInfo?.capabilities?.reissue_proof_v1 != true) {
+            throw IllegalStateException("island_too_old")
+        }
         // ⚠ Read BEFORE the home call rewrites the store: after it,
         // `signingPriv()` is the NEW key and no copy would accept a proof
         // signed with it.
         val oldSigningPriv = signingPriv()
         val oldSigningPub = ed25519Pub(oldSigningPriv)
         val oldIdentityPriv = store.identityPrivate
+        // ⚠⚠ THE ISLANDS THIS INSTALL KNOWS ARE NOT ALL OF THEM. A backup home
+        // switched on from the web or from a second phone is in the account's
+        // PUBLISHED record and not in this phone's store, and a rotation that
+        // skipped it would report a clean sweep while the old phrase still
+        // opened the copy there. The published record is read the same way
+        // publishHomeIslandRecord reads it, and those hosts carry no token, so
+        // the cascade proves the old key to get one.
+        val publishedHomes = runCatching {
+            val skPub = Base64.encodeToString(ed25519Pub(oldSigningPriv), Base64.NO_WRAP)
+            Multihome.ownPublishedHomes(homeHost, meUin, skPub)
+                .map { Triple(it.host, it.uin, null as String?) }
+        }.getOrElse { emptyList() }
         val targets = ReissueCascade.plan(
-            backups = runCatching { MultihomeStore.list(meUin).map { Triple(it.host, it.uin, it.jwt) } }.getOrElse { emptyList() },
+            backups = runCatching { MultihomeStore.list(meUin).map { Triple(it.host, it.uin, it.jwt) } }
+                .getOrElse { emptyList() } + publishedHomes,
             visited = runCatching { VisitedIslandsStore.list().map { Triple(it.host, it.uin, it.jwt) } }.getOrElse { emptyList() },
             ownHost = homeHost,
             skipHost = { app.rcq.android.net.RelayConfigStore.isFrontHost(it) },
@@ -1569,7 +1597,11 @@ class Session(context: Context) {
         // ⚠ commit(), before the wire. A record written after a reply that
         // never came back is a rotation the island applied and this device
         // cannot finish.
-        store.savePendingRotation(
+        // ⚠⚠ The write is the safety net, so a rotation that could not write it
+        // does not happen at all: without the record the old key dies with the
+        // first successful call and every island the cascade misses is stranded
+        // for good.
+        val recorded = store.savePendingRotation(
             PendingRotation(
                 id = java.util.UUID.randomUUID().toString(),
                 startedAt = startedAt,
@@ -1593,6 +1625,7 @@ class Session(context: Context) {
                 sibling = false,
             )
         )
+        if (!recorded) throw IllegalStateException("rotation_not_recorded")
         val phrase = try {
             reissueHome(seed, identity)
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1624,40 +1657,94 @@ class Session(context: Context) {
                 throw e
             }
         }
-        val results = targets.map { t ->
-            t.host to rotateCopyOn(t, oldSigningPriv, oldSigningPub, identity)
-        }
-        if (ReissueCascade.settled(results.map { it.second })) {
-            // Every copy is on the new key or gone: the old one has no use left
-            // and no reason to survive.
-            store.clearPendingRotation()
-        } else {
-            PendingRotation.decode(store.pendingRotationRaw)?.let { rec ->
-                val by = results.toMap()
-                store.savePendingRotation(
-                    rec.copy(
-                        phase = PendingRotation.Phase.HOME_DONE,
-                        targets = rec.targets.map { tg ->
-                            when (by[tg.host]) {
-                                ReissueCascade.Outcome.DONE, ReissueCascade.Outcome.GONE ->
-                                    tg.copy(status = PendingRotation.Target.Status.DONE, attempts = tg.attempts + 1, lastTryAt = System.currentTimeMillis())
-                                null -> tg
-                                else -> tg.copy(
-                                    status = PendingRotation.Target.Status.FAILED,
-                                    reason = by[tg.host]?.name?.lowercase(),
-                                    attempts = tg.attempts + 1,
-                                    lastTryAt = System.currentTimeMillis(),
-                                )
-                            }
-                        },
-                    )
-                )
-            }
-        }
+        // ⚠⚠ THE CASCADE OUTLIVES THE SCREEN. It used to run in the phrase
+        // screen's own scope, so pressing back, or an incoming call, cancelled
+        // every island still in flight — after the home island had already
+        // rotated. On the session's scope the work finishes and the record is
+        // written whatever the person does with the screen.
+        val results = scope.async {
+            walkCopies(targets, oldSigningPriv, oldSigningPub, identity, meUin)
+        }.await()
         Rotation(
             phrase = phrase,
             done = results.filter { it.second == ReissueCascade.Outcome.DONE || it.second == ReissueCascade.Outcome.GONE }.map { it.first },
             failed = results.filter { it.second != ReissueCascade.Outcome.DONE && it.second != ReissueCascade.Outcome.GONE },
+        )
+    }
+
+    /**
+     * Every copy, one at a time, writing what happened to each ISLAND'S row in
+     * the record as soon as that island settles.
+     *
+     * ⚠ Written per island rather than once at the end: a cascade that is cut
+     * short otherwise leaves the record claiming nothing was reached, and the
+     * retry then walks islands that are already done — on a key they no longer
+     * hold, which reads as a stranger's row.
+     */
+    private suspend fun walkCopies(
+        targets: List<ReissueCascade.Target>,
+        oldSigningPriv: ByteArray,
+        oldSigningPub: ByteArray,
+        identity: app.rcq.android.crypto.GeneratedIdentity,
+        meUin: Int,
+    ): List<Pair<String, ReissueCascade.Outcome>> = withContext(Dispatchers.IO) {
+        val out = mutableListOf<Pair<String, ReissueCascade.Outcome>>()
+        for (t in targets) {
+            // ⚠ One island cannot be allowed to end the cascade. Anything
+            // rotateCopyOn does not expect (a target with no number, a store
+            // that will not read) would otherwise throw past every other
+            // island AND past the code that writes the record, leaving a
+            // rotation nobody can finish. An island that threw is simply one
+            // nobody reached.
+            val outcome = runCatching {
+                rotateCopyOn(t, oldSigningPriv, oldSigningPub, identity)
+            }.getOrElse { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                ReissueCascade.Outcome.UNREACHABLE
+            }
+            out += t.host to outcome
+            recordTargetOutcome(t.host, outcome)
+            if (outcome == ReissueCascade.Outcome.DONE) {
+                // Rooms on an island that has now taken the new key: the same
+                // reason as the home island's rooms, once that island can
+                // vouch for the key.
+                runCatching {
+                    val rooms = _groups.value.filter { it.host.equals(t.host, true) }.map { it.id }.toSet()
+                    if (rooms.isNotEmpty()) SenderKeyStore.dropOwnChains(store.uin ?: meUin, rooms)
+                }
+            }
+        }
+        // The old key has no use left only when every island is settled.
+        val rec = PendingRotation.decode(store.pendingRotationRaw)
+        if (rec != null && rec.targets.all {
+                it.status == PendingRotation.Target.Status.DONE ||
+                    it.status == PendingRotation.Target.Status.FORGOTTEN
+            }
+        ) {
+            store.clearPendingRotation()
+        }
+        out
+    }
+
+    /** One island's row in the record, after that island answered. */
+    private fun recordTargetOutcome(host: String, outcome: ReissueCascade.Outcome) {
+        val rec = PendingRotation.decode(store.pendingRotationRaw) ?: return
+        val now = System.currentTimeMillis()
+        val settled = outcome == ReissueCascade.Outcome.DONE || outcome == ReissueCascade.Outcome.GONE
+        store.savePendingRotation(
+            rec.copy(
+                phase = PendingRotation.Phase.HOME_DONE,
+                targets = rec.targets.map { tg ->
+                    if (!tg.host.equals(host, true)) tg
+                    else tg.copy(
+                        status = if (settled) PendingRotation.Target.Status.DONE
+                                 else PendingRotation.Target.Status.FAILED,
+                        reason = if (settled) null else outcome.name.lowercase(),
+                        attempts = tg.attempts + 1,
+                        lastTryAt = now,
+                    )
+                },
+            )
         )
     }
 
@@ -1678,6 +1765,29 @@ class Session(context: Context) {
     }
 
     /**
+     * Give up on the islands a rotation could not reach.
+     *
+     * ⚠⚠ THIS DESTROYS THE OLD SIGNING KEY, and with it any chance of ever
+     * rotating the copies that were missed: the old phrase keeps opening them
+     * for good. It exists because the alternative is worse — without it one
+     * island that never answers again means this account can never change its
+     * phrase at all, its pending banner never goes away, and (through the erase
+     * guards that read the same record) it cannot be tidied up either. The
+     * screen says what is being given up before it calls this.
+     */
+    fun abandonRotation(): Boolean {
+        if (duressViewUp) return false
+        val rec = PendingRotation.decode(store.pendingRotationRaw)
+        if (rec == null) {
+            // A record this build cannot read is the same trap with no way to
+            // describe it: the guards see one, nothing can finish it. Dropping
+            // it is the only exit, and it is the person's own call.
+            return if (store.hasPendingRotation) store.clearPendingRotation() else true
+        }
+        return store.clearPendingRotation()
+    }
+
+    /**
      * Try the islands a rotation could not reach, with the keys it saved.
      *
      * ⚠⚠ THE OLD KEY COMES OUT OF THE RECORD, not out of the store: the store
@@ -1687,6 +1797,7 @@ class Session(context: Context) {
      */
     suspend fun retryRotation(): Rotation = withContext(Dispatchers.IO) {
         if (duressViewUp) throw IllegalStateException("duress")
+        if (burning) throw IllegalStateException("burning")
         val rec = PendingRotation.decode(store.pendingRotationRaw)
             ?: throw IllegalStateException("no_rotation")
         val oldPriv = runCatching { Base64.decode(rec.oldSigningPriv ?: "", Base64.NO_WRAP) }.getOrNull()
@@ -1720,32 +1831,17 @@ class Session(context: Context) {
         val left = rec.targets.filter {
             it.status != PendingRotation.Target.Status.DONE && it.status != PendingRotation.Target.Status.FORGOTTEN
         }
-        val results = left.map { tg ->
-            val target = ReissueCascade.Target(
-                host = tg.host, uin = tg.uin, token = null,
-                backup = tg.kind == PendingRotation.Target.Kind.BACKUP,
+        val results = scope.async {
+            walkCopies(
+                left.map { tg ->
+                    ReissueCascade.Target(
+                        host = tg.host, uin = tg.uin, token = null,
+                        backup = tg.kind == PendingRotation.Target.Kind.BACKUP,
+                    )
+                },
+                oldPriv, oldPub, identity, rec.homeUin,
             )
-            tg.host to rotateCopyOn(target, oldPriv, oldPub, identity)
-        }
-        val by = results.toMap()
-        val merged = rec.targets.map { tg ->
-            when (by[tg.host]) {
-                ReissueCascade.Outcome.DONE, ReissueCascade.Outcome.GONE ->
-                    tg.copy(status = PendingRotation.Target.Status.DONE, attempts = tg.attempts + 1, lastTryAt = System.currentTimeMillis())
-                null -> tg
-                else -> tg.copy(
-                    status = PendingRotation.Target.Status.FAILED,
-                    reason = by[tg.host]?.name?.lowercase(),
-                    attempts = tg.attempts + 1,
-                    lastTryAt = System.currentTimeMillis(),
-                )
-            }
-        }
-        if (merged.all { it.status == PendingRotation.Target.Status.DONE || it.status == PendingRotation.Target.Status.FORGOTTEN }) {
-            store.clearPendingRotation()
-        } else {
-            store.savePendingRotation(rec.copy(phase = PendingRotation.Phase.HOME_DONE, targets = merged))
-        }
+        }.await()
         Rotation(
             phrase = app.rcq.android.crypto.RecoveryPhrase.encode(seed, appCtx),
             done = results.filter { it.second == ReissueCascade.Outcome.DONE || it.second == ReissueCascade.Outcome.GONE }.map { it.first },
@@ -1786,8 +1882,19 @@ class Session(context: Context) {
                 val already = runCatching {
                     Multihome.recoverOn(target.host, identity.signingPrivate, identity.signingPublic)
                 }.getOrNull()
-                if (already != null) rememberCopyCreds(target, already.uin, already.token)
-                return@withContext ReissueCascade.afterOldKeyMissing(already != null)
+                if (already != null) {
+                    rememberCopyCreds(target, already.uin, already.token)
+                    return@withContext ReissueCascade.Outcome.DONE
+                }
+                // ⚠⚠ NEITHER KEY OPENS ANYTHING HERE, AND THAT IS NOT ENOUGH.
+                // A 404 from a front, a CDN or an island too old for the route
+                // reads exactly like "no account for this key", and calling
+                // that "gone" settles the island and lets the old key be
+                // destroyed while the copy there still holds it. An island
+                // that answers its own /server/info is an island that spoke
+                // for itself; one that does not was never reached.
+                val answered = runCatching { RcqApi.serverInfoOf(target.host) }.getOrNull() != null
+                return@withContext ReissueCascade.afterOldKeyMissing(false, islandAnswered = answered)
             }
             token = rec.token
             uinThere = rec.uin
@@ -1931,6 +2038,13 @@ class Session(context: Context) {
         // device that just received it over that socket (one tone from the app,
         // one from the notification). Claim the install back immediately; the
         // session is NOT restarted here, so nothing else would.
+        // ⚠ ORDER. The socket takes the rotation's own token FIRST, because the
+        // install claim below is asynchronous: if it landed first and this ran
+        // after it, the socket would be put back on the pre-claim token and
+        // come back as "primary", which is the duplicate-notification bug the
+        // claim exists to prevent. The claim hands the socket its own token
+        // when it returns.
+        socket.retoken(resp.token)
         claimInstallToken(resp.token)
         // Rotate the libsignal identity too (upload-first; throws on failure so
         // the UI can ask the user to retry). This is what changes the safety
@@ -1939,13 +2053,33 @@ class Session(context: Context) {
         // Old sessions/cache referenced the previous identity — drop them.
         peerIdentityCache.clear()
         peerDeviceCache.clear()
-        // ⚠ THE SOCKET IS STILL HOLDING THE OLD TOKEN. Without this the app sat
-        // offline after a rotation until somebody killed and reopened it: the
-        // dot stayed amber, the island's `last_seen` stopped moving, and
-        // nothing said why. Not `start()` either — that returns at once on an
-        // already-started session, so a disconnect followed by it is a socket
-        // that never comes back.
-        socket.retoken(resp.token)
+        // ⚠⚠ EVERY GROUP THIS ACCOUNT SENDS TO IS NOW SIGNING WITH A KEY ITS
+        // MEMBERS DO NOT EXPECT. A member's inbound chain pins the signing key
+        // that arrived with the SKDM and verifies every message against it, so
+        // after a rotation twenty phones check the old key against the new
+        // signature, fail, and drop the message with nothing on screen. The
+        // chain rotates by itself only when a member leaves, so a settled room
+        // would stay broken for good. Dropping our outbound chain makes the
+        // next send mint a fresh one and hand everybody a new SKDM.
+        //
+        // Rooms on OTHER islands wait for their island to take the new key
+        // (done at the end of the cascade): their members check the key that
+        // island serves.
+        runCatching {
+            val homeRooms = _groups.value.filter { it.host == null }.map { it.id }.toSet()
+            SenderKeyStore.dropOwnChains(resp.uin, homeRooms)
+        }
+        // ⚠⚠ THE SIGNED HOME RECORD IS SIGNED WITH THE OLD KEY. Federation
+        // Layer B publishes where this account can be reached, and every reader
+        // verifies the signature against the key the island now holds — the new
+        // one. Leaving the old record standing means senders can no longer
+        // verify it, so the backup mailboxes stop being advertised and a
+        // cross-island contact loses the way back. Republished under the new
+        // key, and the contacts told, exactly as adding a backup island does.
+        scope.launch {
+            publishHomeIslandRecord()
+            pushHomeRecordToContacts()
+        }
         app.rcq.android.crypto.RecoveryPhrase.encode(seed, appCtx)
     }
 
@@ -7660,11 +7794,16 @@ class Session(context: Context) {
             forStore.updateToken(fresh.token)
             forApi.setToken(fresh.token)
             // The socket authenticates with the token it was handed at dial
-            // time; reconnect so it comes back under the install's own name
-            // instead of "primary". The captured one, so a switch that raced
-            // us cannot make this redial the NEW account's socket with a token
-            // the OLD account's island issued.
-            forSocket.reconnectNow()
+            // time; hand it the new one and redial so it comes back under the
+            // install's own name instead of "primary". The captured socket, so
+            // a switch that raced us cannot make this redial the NEW account's
+            // socket with a token the OLD account's island issued.
+            //
+            // ⚠ `retoken`, not `reconnectNow`: the latter redials with whatever
+            // token the socket was holding, which is the one from before this
+            // claim — so the redial came back as "primary" all over again, and
+            // after a key rotation (a fresh token) it came back refused.
+            forSocket.retoken(fresh.token)
         }
     }
 

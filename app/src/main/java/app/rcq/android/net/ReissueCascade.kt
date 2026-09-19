@@ -132,7 +132,13 @@ object ReissueCascade {
         // attempt rebuilds from a fresh timestamp.
         code == "reissue_unavailable" || code == "reissue_clock_skew" -> Outcome.UNREACHABLE
 
-        status == 404 -> Outcome.GONE
+        // ⚠⚠ A BARE 404 IS NOT "THE COPY IS GONE". Only the island says that,
+        // in its own words. A 404 with no code is a front, a CDN, a proxy
+        // mid-deploy or a path that is not up yet — and reading it as "gone"
+        // settles that island, which lets the old signing key be destroyed
+        // while the copy there is still on it. Unreachable is the honest
+        // reading: we never got the island's own answer.
+        status == 404 -> Outcome.UNREACHABLE
         status == 409 -> Outcome.DIFFERENT_KEY
         status == 403 -> Outcome.DIFFERENT_KEY
         status == 400 -> Outcome.REFUSED
@@ -172,8 +178,16 @@ object ReissueCascade {
      * writing off a copy that is fine or keeping the old key alive for a copy
      * that no longer exists.
      */
-    fun afterOldKeyMissing(newKeyOpens: Boolean): Outcome =
-        if (newKeyOpens) Outcome.DONE else Outcome.GONE
+    fun afterOldKeyMissing(newKeyOpens: Boolean, islandAnswered: Boolean = true): Outcome = when {
+        newKeyOpens -> Outcome.DONE
+        // ⚠⚠ "Gone" is a claim about the ISLAND's answer, and an island that
+        // never answered made no claim. A front, a CDN or a build too old for
+        // the route all say 404 the same way a deleted copy does, and reading
+        // that as gone settles the island and lets the old signing key die
+        // while the copy there still holds it.
+        !islandAnswered -> Outcome.UNREACHABLE
+        else -> Outcome.GONE
+    }
 
     /**
      * What a refusal means once the new key has been asked.

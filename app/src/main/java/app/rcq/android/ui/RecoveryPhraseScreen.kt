@@ -102,6 +102,7 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
         // Islands a previous rotation could not reach. Read once per visit: it
         // only changes through the button right below it.
         var pending by remember { mutableStateOf(session.rotationPending()) }
+        var confirmGiveUp by remember { mutableStateOf(false) }
         // Blurred until asked for, the way iOS and the web already do it. The
         // phrase is the whole account, and it was being painted the instant the
         // screen opened: a glance over a shoulder, a screen recording or a
@@ -181,11 +182,21 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
                                 Toast.makeText(context, sayRotation(context, r), Toast.LENGTH_LONG).show()
                             }
                             .onFailure {
+                                // ⚠ Even a failed try may have finished some
+                                // islands: re-read rather than leaving the
+                                // list claiming they are all still pending.
+                                pending = session.rotationPending()
                                 Toast.makeText(context, context.getString(R.string.reissue_failed), Toast.LENGTH_LONG).show()
                             }
                         rotating = false
                     }
                 }
+                Text(
+                    stringResource(R.string.reissue_give_up),
+                    color = c.textSecondary, fontSize = 13.sp,
+                    modifier = Modifier.clickable(enabled = !rotating) { confirmGiveUp = true }
+                        .padding(vertical = 6.dp),
+                )
             } else {
                 CapsuleButton(
                     if (rotating) stringResource(R.string.reissue_working) else stringResource(R.string.reissue_cta),
@@ -193,6 +204,21 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { confirmReissue = true }
             }
+        }
+
+        if (confirmGiveUp) {
+            RcqAskSheet(
+                onDismiss = { confirmGiveUp = false },
+                title = stringResource(R.string.reissue_give_up_title),
+                body = stringResource(R.string.reissue_give_up_body),
+                actions = listOf(
+                    SheetAction(stringResource(R.string.reissue_give_up), destructive = true) {
+                        confirmGiveUp = false
+                        session.abandonRotation()
+                        pending = session.rotationPending()
+                    },
+                ),
+            )
         }
 
         if (confirmReissue) {
@@ -212,6 +238,13 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
                                     Toast.makeText(context, sayRotation(context, r), Toast.LENGTH_LONG).show()
                                 }
                                 .onFailure {
+                                    // ⚠⚠ The home island may have taken the
+                                    // rotation before whatever went wrong, in
+                                    // which case the phrase on this screen no
+                                    // longer opens anything. Re-read both, so
+                                    // nobody writes down a dead phrase.
+                                    session.recoveryPhrase()?.let { phrase = it }
+                                    pending = session.rotationPending()
                                     Toast.makeText(context, context.getString(R.string.reissue_failed), Toast.LENGTH_LONG).show()
                                 }
                             rotating = false
