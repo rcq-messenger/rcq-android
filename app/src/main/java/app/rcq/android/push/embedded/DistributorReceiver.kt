@@ -82,16 +82,39 @@ class DistributorReceiver : BroadcastReceiver() {
 }
 
 /**
- * Bring the push socket back after a reboot. Without this the device would be
- * silent until the user next opened RCQ by hand, which is the one moment push
- * is least useful. BOOT_COMPLETED is one of the cases where starting a
- * foreground service from the background is still permitted.
+ * Bring the push socket back after a reboot, and after an update of our own apk.
+ * Without this the device would be silent until the user next opened RCQ by
+ * hand, which is the one moment push is least useful. All three actions below
+ * are cases where starting a foreground service from the background is still
+ * permitted.
+ *
+ * ⚠⚠ MY_PACKAGE_REPLACED is the one that was missing, and it is the more common
+ * of the two by far: a reboot happens now and then, an update happens on every
+ * release. Android kills the process when the apk under it is replaced and does
+ * NOT bring a START_STICKY service back, so until this was wired the socket
+ * stayed down from the moment the update landed until somebody opened the app:
+ * silent, with no error anywhere, and indistinguishable from the account's push
+ * registration being broken.
+ *
+ * ⚠ What this still cannot answer: an OEM power manager that kills the
+ * foreground service later and refuses its restart. That one is not ours, and
+ * nothing in the app can out-argue it.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
-            intent.action != "android.intent.action.QUICKBOOT_POWERON"
-        ) return
+        if (intent.action !in WAKE_ACTIONS) return
         EmbeddedDistributor.ensureRunning(context.applicationContext)
+    }
+
+    private companion object {
+        /** ⚠ Must stay in step with the receiver's intent filters in the
+         *  manifest: an action the filter delivers and this set does not is a
+         *  silent no-op, and the reverse is dead code. QUICKBOOT_POWERON was
+         *  the second kind for as long as the embedded distributor has existed. */
+        val WAKE_ACTIONS = setOf(
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            "android.intent.action.QUICKBOOT_POWERON",
+        )
     }
 }

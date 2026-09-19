@@ -59,6 +59,7 @@ import app.rcq.android.Session
 import app.rcq.android.data.LocalStores
 import app.rcq.android.model.UserStatus
 import app.rcq.android.net.CrossIslandSender
+import app.rcq.android.net.CrossIslandStore
 import app.rcq.android.net.RcqApi
 import kotlinx.coroutines.launch
 
@@ -97,6 +98,16 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             ?: contacts.firstOrNull { it.uin == uin && it.host == null }
         else -> contacts.firstOrNull { it.uin == uin }
     }
+    // ⚠ The roster is not the only thing that knows which island a 1:1 is on,
+    // and taking it as such is the other half of #1024: a cross-island contact
+    // lives in CrossIslandStore, and the visible roster only carries a copy of
+    // it. Until that copy is folded in (an accept that came from another
+    // device, a roster answering 304) the row is absent here, the card resolved
+    // on our own island, and it drew whoever holds that number THERE. Read the
+    // store as the last word on the host, not the first: see [PeerIsland].
+    // remember(uin), because this is a prefs read and a Gson parse, and a card
+    // recomposes for every presence frame.
+    val storeHost = remember(uin) { CrossIslandStore.findByUin(uin)?.host }
 
     val thread = LocalStores.peerThread(uin)
     val favorites by LocalStores.favorites.collectAsState()
@@ -124,7 +135,13 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     // /users/{uin}/info 404s. crossIslandHost is the existing contact's host, OR
     // (when opened from a cross-island GROUP member who isn't a contact yet) the
     // group's host. In both cases we render from the open card, never our island.
-    val crossIslandHost = contact?.host ?: groupHost?.takeIf { !here }
+    val crossIslandHost = app.rcq.android.data.PeerIsland.cardHost(
+        callerHost = groupHost,
+        ourIsland = session.currentServer,
+        rosterMatched = contact != null,
+        rosterHost = contact?.host,
+        storeHost = storeHost,
+    )
     // The blob a cross-island contact's picture lives in is on THEIR island and
     // our media endpoint has never held it, so the card draws the glyph for
     // them — which is why the id is gated here rather than at the avatar alone:
@@ -147,11 +164,33 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 identityChanged = session.peerIdentityChanged(uin)
                 if (!guestCopy && !guestMember) runCatching { session.sendVisit(uin) }
             }
-        } else if (contact == null && groupHost != null) {
-            // Cross-island group member: fetch their open card from the GROUP'S
-            // island instead of our own (which would 404 — the founder's report).
+        } else if (contact == null) {
+            // Somebody on another island with no row in the visible roster:
+            // fetch their open card from THEIR island instead of our own (which
+            // would 404, the founder's report). Two ways to get here now. A
+            // cross-island group member, who is not a contact at all, is the
+            // original one. The other is #1024: a cross-island contact the store
+            // holds while the roster has not folded it in yet, which used to
+            // land in the branch above and draw whoever holds that number on OUR
+            // island. [crossIslandHost] and not [groupHost], so both are served
+            // by the one fetch; it is non-null here by construction.
+            //
+            // ⚠ runCatching, like every other caller of fetchCard (e.g.
+            // Session.addCrossIslandContactDetailed). It throws on three ordinary
+            // paths, not just on a broken island: viaBestRoute rethrows the
+            // IOException when no tunnel can be raised or the certificate was
+            // refused, DuressGate.check() throws by design, and the card parse
+            // asserts `identity_key` is there. Uncaught inside a LaunchedEffect
+            // that is the composition going down, and this branch is no longer
+            // the rare foreign-group-member sheet it was written for — an
+            // ordinary 1:1 card reaches it now.
+            //
+            // ⚠ INSIDE the withContext and not around it: the blocking fetch is
+            // the only thing that may be swallowed. Wrapping the withContext
+            // itself would swallow the CancellationException too, and this effect
+            // is cancelled every time the card is closed mid-fetch.
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                CrossIslandSender.fetchCard(groupHost, uin)
+                runCatching { CrossIslandSender.fetchCard(crossIslandHost, uin) }.getOrNull()
             }?.let { card ->
                 ciCardName = card.nickname
                 ciCardStatus = card.statusMessage

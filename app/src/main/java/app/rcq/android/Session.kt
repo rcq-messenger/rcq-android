@@ -16,6 +16,7 @@ import app.rcq.android.crypto.SignalStoreDb
 import app.rcq.android.crypto.SignalStores
 import org.signal.libsignal.protocol.DuplicateMessageException
 import app.rcq.android.data.AccountManager
+import app.rcq.android.data.CrossIslandRoster
 import app.rcq.android.data.DecoyStore
 import app.rcq.android.data.LocalStores
 import app.rcq.android.data.ProfileKeyVault
@@ -772,8 +773,17 @@ class Session(context: Context) {
     val primaryIsGuest: StateFlow<Boolean> = _primaryIsGuest.asStateFlow()
 
     /** Record what the island just said about the active account, see
-     *  [primaryIsGuest]. Clears nothing the island has not cleared: `false`
-     *  comes only from a reply that says so. */
+     *  [primaryIsGuest].
+     *
+     *  ⚠ `false` does NOT mean the island said "not a guest". The field defaults
+     *  to false on [RcqApi.RegisterResponse], so an island too old to know about
+     *  guest copies clears the flag exactly as a denial would. That is the right
+     *  way round and is the reason this is worth spelling out: every unknown
+     *  resolves to "ordinary account", so the flag can only ever be set by an
+     *  island that actually says `guest: true`. A false positive here would
+     *  silence push for a resident ([registerPushEndpoint]), which is why it
+     *  must not be possible to reach one by downgrading, by talking to a backup
+     *  island, or by a field going missing. */
     private fun notePrimaryGuest(guest: Boolean) {
         store.setGuestCopy(guest)
         _primaryIsGuest.value = guest
@@ -3962,8 +3972,15 @@ class Session(context: Context) {
     suspend fun removeContact(uin: Int, alsoDeleteMessages: Boolean = false) {
         LocalStores.addRemoved(uin)
         val ci = CrossIslandStore.findByUin(uin)
-        if (ci != null) CrossIslandStore.remove(ci.uin, ci.host)
-        else runCatching { api.removeContact(uin) }
+        if (ci != null) {
+            CrossIslandStore.remove(ci.uin, ci.host)
+            // ⚠ The refreshContacts() at the end of this function cannot do it:
+            // dropping a foreign row moves nothing on our island, so that call
+            // answers 304 and the person stayed on screen until the account was
+            // switched away and back (#1024). Remove has to publish its own
+            // result.
+            syncCrossIslandContacts()
+        } else runCatching { api.removeContact(uin) }
         // Take them out of whatever section they were filed in. ⚠ This is the
         // ONLY pruning there is: nothing prunes because a chat failed to
         // resolve while rendering. ⚠⚠ And it runs whether or not they WERE
@@ -10275,6 +10292,10 @@ class Session(context: Context) {
             gender = card.gender, statusMessage = card.statusMessage,
         )
         CrossIslandStore.save(contact)
+        // Show them NOW, on the action that added them, instead of waiting for a
+        // roster refresh that answers 304 and changes nothing (#1024). The store
+        // is the source of truth either way; this only republishes it.
+        syncCrossIslandContacts()
         if (act == null) return@withContext CiAdd.ADDED_ONLY
         if (depositContactRequest(host, uin, contact.identityKey, act)) CiAdd.SENT else CiAdd.ADDED_ONLY
     }
@@ -10948,19 +10969,96 @@ class Session(context: Context) {
         Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = true, host = c.host, gender = c.gender, statusMessage = c.statusMessage, avatarMediaId = c.avatarMediaId, avatarMediaKey = c.avatarMediaKey)
     }
 
-    /** Append cross-island contacts to the displayed roster (skip uin already
-     *  held by a same-island contact). Called after every contacts refresh
-     *  (which overwrites the list) + on accept. */
-    fun mergeCrossIslandContacts() {
+    /** Make the displayed roster's cross-island half equal [CrossIslandStore]:
+     *  add the store's rows the list is missing, drop the list's foreign rows
+     *  the store no longer has. Called after every contacts refresh (which
+     *  overwrites the list), on accept, and now after every local add or remove.
+     *
+     *  ⚠⚠ Both directions, and that is report #1024. This used to only APPEND,
+     *  which was enough while it ran after every full roster body: the body
+     *  overwrote the list, so a dropped store row simply never came back. Then
+     *  the roster went to a conditional GET and a 304 started returning from
+     *  [refreshContacts] before this call (it has to, see the comment there,
+     *  #909). Nothing cross-island touches our island, so the ETag never moves,
+     *  so the answer is 304 forever: an add showed nothing, a remove showed
+     *  nothing, and both appeared at the next account switch, which is the one
+     *  thing that clears the ETag. The rule itself is [CrossIslandRoster.fold],
+     *  where it can be tested.
+     *
+     *  ⚠ Same-island rows are never touched. The whole of what marks a row as
+     *  ours to manage is a non-null [Contact.host]; see [CrossIslandRoster]. */
+    fun syncCrossIslandContacts() {
         // The decoy roster is exactly what was seeded and nothing else. The
         // store is bound to the decoy namespace so this would return nothing
         // anyway; the guard is here because this is the one function whose job
         // is to ADD real people to the visible roster, and a future call site
         // that runs after an unlock must not be able to reach it.
+        //
+        // ⚠⚠ And it matters MORE now than it did when this only appended: with
+        // an empty store the fold below would DROP rows rather than add none.
         if (duressViewUp) return
-        val extra = crossIslandContacts().filter { c -> _contacts.value.none { it.uin == c.uin } }
-        if (extra.isNotEmpty()) _contacts.value = _contacts.value + extra
+        val rev = CrossIslandStore.revision()
+        val cachedRows = synchronized(ciFoldLock) {
+            // Nothing has written the store and nothing has written the list
+            // since the fold that produced it, so this fold can only produce the
+            // same list a second time. Costs a comparison of two ints and one
+            // reference; see [ciFoldLock] for why that is worth having.
+            if (rev == ciFoldedRev && _contacts.value === ciFoldedList) return
+            if (rev == ciRowsRev) ciRows else null
+        }
+        val rows = cachedRows ?: crossIslandContacts().also { fresh ->
+            synchronized(ciFoldLock) {
+                // Only cache a parse that nothing raced: a write that landed
+                // while we were parsing may or may not be in `fresh`, and
+                // filing it under the newer revision would pin a snapshot that
+                // is missing it for as long as nobody writes again.
+                if (CrossIslandStore.revision() == rev) {
+                    ciRowsRev = rev
+                    ciRows = fresh
+                }
+            }
+        }
+        // ⚠⚠ A compare-and-set and NOT `_contacts.value = fold(...)`. Two of the
+        // call sites (removeContact, addCrossIslandContactDetailed) run outside
+        // [contactsRefreshLock], and a plain read-modify-write there loses to a
+        // concurrent refresh that is writing the same flow — whichever finishes
+        // last wins with a snapshot taken before the other started. That was
+        // survivable while this only appended; it is not now, because a full body
+        // clobbered this way has ALREADY moved `rosterEtag`, so the next refresh
+        // answers 304, the 304 branch only folds the foreign half, and the island
+        // rows lost to the clobber do not come back until an account switch.
+        // #1024 again, by a different road. `fold` is pure, so the retry a
+        // contended CAS costs is a re-fold of the list that just landed.
+        val next = _contacts.updateAndGet { CrossIslandRoster.fold(it, rows) }
+        synchronized(ciFoldLock) {
+            ciFoldedRev = rev
+            ciFoldedList = next
+        }
     }
+
+    /** Guards the memo in [syncCrossIslandContacts]: the store's rows as last
+     *  mapped for display, and the (revision, published list) pair the last fold
+     *  ran on.
+     *
+     *  ⚠⚠ Why a memo at all. Every `presence` websocket frame runs
+     *  [refreshContacts], the island answers 304 to almost all of them, and that
+     *  branch now folds the cross-island half (it has to: report #1024). The
+     *  uncached fold reads the whole [CrossIslandStore] back out of
+     *  SharedPreferences and Gson-parses it, so a burst — a whole island coming
+     *  back, several refreshes queued behind [contactsRefreshLock] — paid one
+     *  full parse per frame on the exact hot path #909 and the presence-storm
+     *  work were about. Keyed on [CrossIslandStore.revision], which moves on
+     *  every write and on every account rebind, so a stale snapshot cannot
+     *  outlive the rows it was taken from.
+     *
+     *  Its own monitor rather than [msgFlowLock]: this is read from the websocket
+     *  reader thread and from refreshes on the session scope, and it protects
+     *  nothing those two share. */
+    private val ciFoldLock = Any()
+    private var ciRowsRev: Int = -1
+    private var ciRows: List<Contact> = emptyList()
+    private var ciFoldedRev: Int = -1
+    private var ciFoldedList: List<Contact>? = null
 
     /** Accept a cross-island request: save the sender as a contact FIRST (so the
      *  held payloads pass the consent gate), then re-ingest them so the messages
@@ -11022,7 +11120,7 @@ class Session(context: Context) {
                     // Added here, but the accept did not leave. The row stays
                     // and says so, and the poll deposits it again.
                     CrossIslandRequestsStore.updateRow(me, uin, host) { it.copy(srvAcceptTries = it.srvAcceptTries + 1, viaKeyChanged = false) }
-                    mergeCrossIslandContacts()
+                    syncCrossIslandContacts()
                     refreshCiRequests()
                 }
                 GuestPendingRequests.AfterAccept.FAILED -> return CiAccept.FAILED
@@ -11033,7 +11131,7 @@ class Session(context: Context) {
         // Released under the island the row was held under: a row that came off
         // a guest mailbox without a foreign host of its own was attributed to it.
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
-        mergeCrossIslandContacts()
+        syncCrossIslandContacts()
         // My other devices hold their own copy of this request and would offer
         // to accept it a second time, which re-TOFUs the peer. Hand them the
         // answer and the card just pinned instead.
@@ -11125,7 +11223,7 @@ class Session(context: Context) {
                 // quiet, and the next message from an accepted contact flows
                 // normally either way.
                 CrossIslandRequestsStore.clear(me, ack.uin, ack.host)
-                mergeCrossIslandContacts()
+                syncCrossIslandContacts()
             }
             else -> return
         }
@@ -11388,7 +11486,7 @@ class Session(context: Context) {
     private suspend fun completeServerAccept(me: Int, uin: Int, host: String, id: Int) {
         CrossIslandRequestsStore.markAnswered(me, host, id)
         CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
-        mergeCrossIslandContacts()
+        syncCrossIslandContacts()
         CrossIslandStore.get(uin, host)?.let { c -> sendCiAck(uin, host, "accept", ciCardOf(c), srv = srvOf(host, id)) }
         refreshCiRequests()
         depositProfileToNewContact(uin, host)
@@ -11553,7 +11651,22 @@ class Session(context: Context) {
         // refresh it triggered answers 304, and the stored snapshot painted
         // them offline again half a second later. Report #909, "the flower
         // goes green for a second and then red", on 0.173 within hours.
-        if (answer.rows == null) return@withLock
+        if (answer.rows == null) {
+            // ⚠⚠ ...but the cross-island half is not the island's to change, and
+            // leaving THAT alone was report #1024. A local add or remove moves
+            // nothing on our island, so the ETag never moves, so this branch is
+            // where such an account lives permanently: the list went stale here
+            // and only an account switch (which drops the ETag) ever fixed it.
+            // Safe against the presence flicker above because this touches only
+            // rows with a non-null host, and presence for those is not served
+            // by this island at all.
+            //
+            // Behind the same epoch guard as the full body below: an account
+            // switch mid-fetch must not fold this account's foreign contacts
+            // into the next account's screen.
+            if (stillOn(ep)) syncCrossIslandContacts()
+            return@withLock
+        }
         val fetched = answer.rows
         rosterServed = answer.rows
         rosterEtag = answer.etag
@@ -11622,7 +11735,17 @@ class Session(context: Context) {
         }
         mirrorContactsToVault(_contacts.value, fetchedFor)
         // Cross-island contacts aren't in the server roster — surface them too.
-        mergeCrossIslandContacts()
+        //
+        // ⚠ Behind the epoch guard, same as the 304 branch above and for a
+        // stronger reason than the merge this replaced had. `mirrorContactsToVault`
+        // does not suspend, but [accountEpoch] is bumped from `bindPerAccountStores`
+        // on another thread (rebindTo, and the duress path), so the window since
+        // the check at the top of this block is real. The old append could only
+        // put the outgoing account's foreign rows on the incoming account's
+        // screen; the fold can also DROP the incoming account's rows, because
+        // CrossIslandStore has already been rebound and answers for the new slot
+        // while `_contacts` still holds the old list.
+        if (stillOn(ep)) syncCrossIslandContacts()
     }
 
     /** Stage 4, mirror phase: the list the island just served is sealed into
@@ -12536,7 +12659,7 @@ class Session(context: Context) {
                     .getOrNull()?.let { arr -> _groups.value = arr.toList() }
             }
         }
-        mergeCrossIslandContacts()
+        syncCrossIslandContacts()
     }
 
     /** True when a 1:1 envelope arrived from MY OWN number — i.e. another

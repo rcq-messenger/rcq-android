@@ -69,6 +69,28 @@ object CrossIslandStore {
     /** Active account id; null before any account is bound (all reads empty). */
     private var acct: String? = null
 
+    /** Bumped by every write that goes through this object, and by [bindAccount],
+     *  which changes every answer the store gives without a single row being
+     *  written. A change TOKEN and not a count of anything: a reader compares it
+     *  against the value it last acted on and never looks at the number itself.
+     *
+     *  ⚠ Why a reader needs one at all. [list] is a prefs `getString` plus a Gson
+     *  parse of the WHOLE map, and [app.rcq.android.Session] folds the
+     *  cross-island half of the visible roster after every roster refresh — which
+     *  means after every `presence` websocket frame, and several times over for a
+     *  burst (a whole island coming back). Without a way to ask "could the rows
+     *  have moved at all", that burst re-parses this store once per frame, on the
+     *  hot path report #909 was about.
+     *
+     *  ⚠ In-process only, exactly like the SharedPreferences instance it stands
+     *  for. The push receiver's headless [getFor] opens its own handle: it
+     *  neither sees this counter nor is seen by it, and nothing here is a
+     *  cross-process cache. */
+    private val rev = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** The current value of the change token, see [rev]. */
+    fun revision(): Int = rev.get()
+
     fun init(ctx: Context) {
         if (!::prefs.isInitialized) {
             prefs = ctx.applicationContext.getSharedPreferences("rcq_crossisland", Context.MODE_PRIVATE)
@@ -78,6 +100,7 @@ object CrossIslandStore {
     /** Point the store at [accountId]'s slot. null = no account (empty store). */
     fun bindAccount(accountId: String?) {
         acct = accountId
+        rev.incrementAndGet()
     }
 
     private fun storageKey(accountId: String) = "$accountId.$KEY"
@@ -129,6 +152,7 @@ object CrossIslandStore {
             .putString(storageKey(accountId), gson.toJson(m))
             .putString(gravesKey(accountId), gson.toJson(graves))
             .apply()
+        rev.incrementAndGet()
     }
 
     private fun ciKey(uin: Int, host: String) = "$uin@${host.lowercase()}"
@@ -143,6 +167,7 @@ object CrossIslandStore {
     private fun saveAll(m: Map<String, Contact>) {
         val a = acct ?: return
         prefs.edit().putString(storageKey(a), gson.toJson(m)).apply()
+        rev.incrementAndGet()
     }
 
     fun save(c: Contact) {
@@ -209,6 +234,7 @@ object CrossIslandStore {
         if (next == cur) return false
         m[k] = next
         prefs.edit().putString(storageKey(a), gson.toJson(m)).commit()
+        rev.incrementAndGet()
         notify()
         return true
     }
@@ -243,6 +269,7 @@ object CrossIslandStore {
     fun wipeAccount(accountId: String) {
         if (::prefs.isInitialized) {
             prefs.edit().remove(storageKey(accountId)).remove(gravesKey(accountId)).apply()
+            rev.incrementAndGet()
         }
     }
 }

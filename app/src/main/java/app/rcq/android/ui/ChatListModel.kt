@@ -45,7 +45,7 @@ internal data class HomeLists(
  *
  *  ⚠ The uin ALONE is not unique and never was. Islands number independently,
  *  so two cross-island contacts living on two different islands can both be
- *  #5, and `mergeCrossIslandContacts` only de-duplicates the foreign list
+ *  #5, and `syncCrossIslandContacts` only de-duplicates the foreign list
  *  against the LOCAL roster, not against itself. Two rows with the same key in
  *  one LazyColumn is not a cosmetic problem: Compose throws on the duplicate
  *  and the whole chat list goes down with it. The island is part of who the

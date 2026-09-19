@@ -251,11 +251,30 @@
             </intent-filter>
         </receiver>
 
+        <!-- ⚠⚠ Three actions, and the two added ones are a silent-push defect,
+             not a nicety. QUICKBOOT_POWERON is what BootReceiver has always
+             checked for (some OEM fast-boot paths send it instead of
+             BOOT_COMPLETED) and the filter never delivered it, so that branch
+             was dead code. MY_PACKAGE_REPLACED is the update case: Android kills
+             the process when the apk is replaced under it and does NOT restart
+             a START_STICKY service, so after every in-place update the push
+             socket stayed down until somebody opened RCQ by hand, which is
+             exactly the shape of "no notifications since the new version". Both
+             are exempt from the background foreground-service restriction the
+             way BOOT_COMPLETED is, and EmbeddedDistributor.ensureRunning
+             swallows a refusal anyway. -->
         <receiver
             android:name=".push.embedded.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+            <!-- Its own filter: MY_PACKAGE_REPLACED is delivered to this app
+                 only and needs no permission, and keeping it apart from the boot
+                 pair keeps that difference visible. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

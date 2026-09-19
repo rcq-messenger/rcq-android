@@ -445,13 +445,90 @@ object SoundService {
      *  [MIN_GAP_MS] exists to prevent, and because it keeps [playOnce]
      *  single-threaded by construction.
      *
-     *  ⚠ What it costs, and it is not nothing: the caller no longer learns
-     *  whether the tone played, and a process killed in the window between this
-     *  dispatch and `prepare()` loses that tone silently. A chime lost in a
-     *  few-millisecond window is the cheaper end of the trade against up to
-     *  865ms of the main thread on every woken message. */
+     *  ⚠⚠ What it costs, and it is not nothing: the caller no longer learns
+     *  whether the tone played, and anything that stops this thread between the
+     *  dispatch and `prepare()` loses that tone silently. The first cut of this
+     *  named only one such thing, a process killed in the window, and missed the
+     *  one that made report #1028: with the screen off there is no guarantee the
+     *  CPU stays up at all. A wake arrives over the socket, the kernel holds the
+     *  SoC awake for the network packet and for the binder call that posts the
+     *  notification, this dispatch returns immediately, every stack unwinds, and
+     *  the device suspends before `prepare()` (50-110ms typical, 865ms cold) plus
+     *  the ~450ms of wav have run. The cached-app freezer does the same thing to
+     *  a backgrounded process for the same reason. Both are ordinary Android; the
+     *  defect was moving the sound into our process without holding the CPU for
+     *  it, since before v3 the channel's own sound was played by system_server,
+     *  which suspend cannot reach. So the dispatch takes a [PARTIAL_WAKE_LOCK]
+     *  ([acquireToneWake]) and holds it until the player really finishes.
+     *
+     *  ⚠ The lock alone is not enough either, and the second half of #1028 says
+     *  why: the reporter heard the missing chimes arrive when the screen came
+     *  back on, which is this queue draining at once. A tone is about an event
+     *  that just happened, so one that waited longer than
+     *  [TONE_DISPATCH_MAX_AGE_MS] is dropped rather than played late
+     *  ([toneStillWanted]). */
     private val toneThread: java.util.concurrent.ExecutorService by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "rcq-tone") }
+    }
+
+    /** How long the tone's wake lock may be held, as a safety net and nothing
+     *  more: the lock is released the moment the player reports it is done. Only
+     *  a MediaPlayer that neither completes nor errors ever reaches this, and 3s
+     *  is comfortably longer than the ~450ms wav plus the worst measured cold
+     *  `prepare()`. */
+    private const val TONE_WAKE_MS = 3_000L
+
+    /** How stale a dispatched tone may be and still be worth playing.
+     *
+     *  Above [MIN_GAP_MS] on purpose: a tone that lost its gap was never
+     *  dispatched, so this window only ever cuts off a dispatch the DEVICE
+     *  delayed, and it has to be wide enough that an ordinary cold wake (the
+     *  865ms `prepare()` case, measured once in eight) still chimes. */
+    internal const val TONE_DISPATCH_MAX_AGE_MS = 1_500L
+
+    /** Whether a tone dispatched at [dispatchedAt] is still worth playing at
+     *  [now], both on [android.os.SystemClock.elapsedRealtime]'s clock, which
+     *  counts time the device spent suspended and is the whole reason this
+     *  question can be asked.
+     *
+     *  ⚠ A negative age plays. elapsedRealtime is monotonic so it should not
+     *  happen, and "the clock did something we do not understand" must not be a
+     *  reason to swallow the alert for an arriving message. */
+    internal fun toneStillWanted(dispatchedAt: Long, now: Long): Boolean =
+        now - dispatchedAt <= TONE_DISPATCH_MAX_AGE_MS
+
+    /** One dispatch's CPU lock, released exactly once however the tone ends.
+     *
+     *  ⚠ Idempotent by construction and not by convention: the release is
+     *  reached from the completion listener (MAIN looper, see [playOnce]), from
+     *  the error listener, and from [toneThread] when the player never started,
+     *  and a WakeLock released twice throws. */
+    private class ToneWake(private val lock: android.os.PowerManager.WakeLock?) {
+        private val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun release() {
+            if (!done.compareAndSet(false, true)) return
+            runCatching { if (lock?.isHeld == true) lock.release() }
+        }
+    }
+
+    /** Hold the CPU for one notification tone. Never throws and never returns
+     *  null: a phone that refuses the lock still gets the chime attempt it would
+     *  have got before, it just keeps the old odds of losing it to suspend.
+     *
+     *  PARTIAL and not SCREEN_BRIGHT: this is a sound, and a message must not
+     *  light up a dark room. The screen lock exists on the call path only
+     *  ([app.rcq.android.push.Push.wakeScreenForRing]), where the point IS to be
+     *  looked at. WAKE_LOCK is already declared for that one. */
+    private fun acquireToneWake(ctx: Context): ToneWake {
+        val lock = runCatching {
+            ctx.getSystemService(android.os.PowerManager::class.java)
+                ?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "rcq:notif-tone")
+        }.getOrNull()
+        // Not reference counted: every release below has to be able to be the
+        // last one, and each dispatch holds its own lock object anyway.
+        runCatching { lock?.setReferenceCounted(false) }
+        runCatching { lock?.acquire(TONE_WAKE_MS) }
+        return ToneWake(lock)
     }
 
     /** True when a tone was DISPATCHED for this notification, not when one was
@@ -490,10 +567,28 @@ object SoundService {
         if (level <= 0f) return false
         // applicationContext, because this outlives the caller's frame now.
         val app = ctx.applicationContext
+        // ⚠⚠ Both of these are taken HERE, on the delivering thread, and not
+        // inside the task: the whole point is that the task may not run for a
+        // while, and a lock acquired after the device suspended is too late
+        // (#1028). The stamp is the dispatch moment for the same reason.
+        val wake = acquireToneWake(app)
+        val dispatchedAt = android.os.SystemClock.elapsedRealtime()
         return runCatching {
-            toneThread.execute { playOnce(app, R.raw.snd_message, level) }
+            toneThread.execute {
+                if (!toneStillWanted(dispatchedAt, android.os.SystemClock.elapsedRealtime())) {
+                    wake.release()
+                    return@execute
+                }
+                // playOnce releases through the listener it is handed; this
+                // covers the case where nothing was ever started to listen to.
+                if (!playOnce(app, R.raw.snd_message, level) { wake.release() }) wake.release()
+            }
             true
-        }.getOrDefault(false)
+        }.getOrElse {
+            // The executor refused the task, so nothing will ever release it.
+            wake.release()
+            false
+        }
     }
 
     /** The player the notification tone uses, and the one thing held between
@@ -535,7 +630,7 @@ object SoundService {
      *  message chime off mid-note. Cosmetic, in a window that needs two different
      *  kinds of event inside half a second, and the alternative is a second player
      *  to hold the overlap. */
-    private fun playOnce(ctx: Context, resId: Int, vol: Float): Boolean {
+    private fun playOnce(ctx: Context, resId: Int, vol: Float, onDone: () -> Unit = {}): Boolean {
         val uri = android.net.Uri.parse("android.resource://${ctx.packageName}/$resId")
         runCatching { notificationPlayer?.release() }
         notificationPlayer = null
@@ -544,13 +639,18 @@ object SoundService {
             mp.setAudioAttributes(notificationAttributes())
             mp.setDataSource(ctx.applicationContext, uri)
             mp.setVolume(vol, vol)
+            // ⚠ [onDone] is what keeps the CPU held for the ~450ms of wav and
+            // not merely for the prepare() (#1028), so it belongs on every
+            // terminal edge of the player and on no other.
             mp.setOnCompletionListener {
                 runCatching { it.release() }
                 if (notificationPlayer === it) notificationPlayer = null
+                onDone()
             }
             mp.setOnErrorListener { p, _, _ ->
                 runCatching { p.release() }
                 if (notificationPlayer === p) notificationPlayer = null
+                onDone()
                 true
             }
             mp.prepare()
@@ -559,6 +659,7 @@ object SoundService {
             true
         }.getOrElse {
             runCatching { mp.release() }
+            onDone()
             false
         }
     }
