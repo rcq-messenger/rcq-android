@@ -1785,9 +1785,9 @@ class Session(context: Context) {
                 // rotated, with a token for it, and writing it off as gone.
                 val already = runCatching {
                     Multihome.recoverOn(target.host, identity.signingPrivate, identity.signingPublic)
-                }.getOrNull() ?: return@withContext ReissueCascade.Outcome.GONE
-                rememberCopyCreds(target, already.uin, already.token)
-                return@withContext ReissueCascade.Outcome.DONE
+                }.getOrNull()
+                if (already != null) rememberCopyCreds(target, already.uin, already.token)
+                return@withContext ReissueCascade.afterOldKeyMissing(already != null)
             }
             token = rec.token
             uinThere = rec.uin
@@ -1826,12 +1826,8 @@ class Session(context: Context) {
         val onNew = runCatching {
             Multihome.recoverOn(target.host, identity.signingPrivate, identity.signingPublic)
         }.getOrNull()
-        if (onNew != null) {
-            rememberCopyCreds(target, onNew.uin, onNew.token)
-            ReissueCascade.Outcome.DONE
-        } else {
-            ReissueCascade.Outcome.DIFFERENT_KEY
-        }
+        if (onNew != null) rememberCopyCreds(target, onNew.uin, onNew.token)
+        ReissueCascade.afterRefusal(out, onNew != null)
     }
 
     /** Keep the fresh token for a rotated copy in whichever store named it. */

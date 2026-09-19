@@ -162,6 +162,33 @@ object ReissueCascade {
     /** [classify] straight from what an RcqApi call threw. */
     fun classify(message: String?): Outcome = classify(statusOf(message), codeOf(message))
 
+    /**
+     * What "there is no account for the old key here" means, once the new key
+     * has been asked too.
+     *
+     * ⚠ An island that has ALREADY taken the new key answers the old one with
+     * "that key moved" — the same answer as a copy that was deleted. Telling
+     * them apart is one more question, and getting it wrong means either
+     * writing off a copy that is fine or keeping the old key alive for a copy
+     * that no longer exists.
+     */
+    fun afterOldKeyMissing(newKeyOpens: Boolean): Outcome =
+        if (newKeyOpens) Outcome.DONE else Outcome.GONE
+
+    /**
+     * What a refusal means once the new key has been asked.
+     *
+     * Only [Outcome.DIFFERENT_KEY] is worth a second question: it is what an
+     * island says both when somebody else's key sits on that row and when our
+     * OWN rotation already went through (a lost reply, another device). Every
+     * other outcome is already as certain as it will get.
+     */
+    fun afterRefusal(refusal: Outcome, newKeyOpens: Boolean): Outcome = when {
+        refusal != Outcome.DIFFERENT_KEY -> refusal
+        newKeyOpens -> Outcome.DONE
+        else -> Outcome.DIFFERENT_KEY
+    }
+
     /** True when every island is settled, so the old signing key may be
      *  destroyed. A copy nobody could reach keeps the old key alive: without
      *  it that island can never be rotated, and the old phrase keeps opening

@@ -156,6 +156,30 @@ class ReissueCascadeTest {
     }
 
     @Test
+    fun aCopyAlreadyOnTheNewKeyIsDoneAndNotGone() {
+        // ⚠ The one that decides whether a lost reply costs somebody their copy
+        // on another island: "no account for the old key" is ALSO what an
+        // island says once it has taken the new one.
+        assertEquals(ReissueCascade.Outcome.DONE, ReissueCascade.afterOldKeyMissing(newKeyOpens = true))
+        assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.afterOldKeyMissing(newKeyOpens = false))
+    }
+
+    @Test
+    fun onlyNotTheKeyIHoldIsWorthASecondQuestion() {
+        val refused = ReissueCascade.Outcome.DIFFERENT_KEY
+        assertEquals(ReissueCascade.Outcome.DONE, ReissueCascade.afterRefusal(refused, newKeyOpens = true))
+        assertEquals(refused, ReissueCascade.afterRefusal(refused, newKeyOpens = false))
+        // An island nobody could reach stays unreached, whatever a second
+        // question would have answered: it never heard the rotation.
+        assertEquals(ReissueCascade.Outcome.UNREACHABLE,
+            ReissueCascade.afterRefusal(ReissueCascade.Outcome.UNREACHABLE, newKeyOpens = true))
+        assertEquals(ReissueCascade.Outcome.REFUSED,
+            ReissueCascade.afterRefusal(ReissueCascade.Outcome.REFUSED, newKeyOpens = true))
+        assertEquals(ReissueCascade.Outcome.GONE,
+            ReissueCascade.afterRefusal(ReissueCascade.Outcome.GONE, newKeyOpens = false))
+    }
+
+    @Test
     fun theOldKeyLivesUntilEveryIslandIsSettled() {
         assertTrue(ReissueCascade.settled(listOf(ReissueCascade.Outcome.DONE, ReissueCascade.Outcome.GONE)))
         assertTrue("nothing to settle", ReissueCascade.settled(emptyList()))
