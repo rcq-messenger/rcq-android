@@ -1025,6 +1025,10 @@
     <string name="chat_play_voice">Play voice</string>
     <string name="chat_play_audio">Play audio</string>
     <string name="chat_pause_audio">Pause</string>
+    <string name="video_prev">Previous clip</string>
+    <string name="video_next">Next clip</string>
+    <string name="video_rotate_landscape">Turn sideways</string>
+    <string name="video_rotate_portrait">Back to upright</string>
     <string name="chat_play_video">Play video</string>
     <string name="chat_pause_video">Pause video</string>
     <string name="chat_prev_photo">Photo</string>

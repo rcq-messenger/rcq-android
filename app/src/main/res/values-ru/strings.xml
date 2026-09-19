@@ -1021,6 +1021,10 @@
     <string name="chat_play_voice">Воспроизвести голос</string>
     <string name="chat_play_audio">Воспроизвести</string>
     <string name="chat_pause_audio">Пауза</string>
+    <string name="video_prev">Предыдущее видео</string>
+    <string name="video_next">Следующее видео</string>
+    <string name="video_rotate_landscape">Повернуть набок</string>
+    <string name="video_rotate_portrait">Вернуть вертикально</string>
     <string name="chat_play_video">Воспроизвести видео</string>
     <string name="chat_pause_video">Пауза</string>
     <string name="chat_prev_photo">Фото</string>

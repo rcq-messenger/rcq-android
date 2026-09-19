@@ -36,6 +36,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.StayCurrentPortrait
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -155,6 +162,11 @@ internal fun FullscreenVideoViewer(
     onDamaged: () -> Unit = {},
     senderName: String? = null,
     onSenderClick: (() -> Unit)? = null,
+    /** The clip before and after this one in the same conversation, or null at
+     *  either end. A swipe walks them, and the two arrows say they are there:
+     *  a gesture nothing hints at is a gesture nobody finds (#1027). */
+    onPrev: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     // ⚠⚠ `dismissOnClickOutside = false`, and it is not paranoia. A tap on the
@@ -192,6 +204,29 @@ internal fun FullscreenVideoViewer(
         var scrubMs by remember(source) { mutableFloatStateOf(-1f) }
         var ratio by remember(source) { mutableFloatStateOf(16f / 9f) }
         var surface by remember(source) { mutableStateOf<Surface?>(null) }
+
+        // ⚠ NOT keyed on `source`: paging to the next clip inside the viewer
+        // must not throw the person back into portrait mid-watch.
+        var landscape by remember { mutableStateOf(false) }
+        val activity = LocalContext.current.findActivity()
+        DisposableEffect(landscape, activity) {
+            val before = activity?.requestedOrientation
+            if (activity != null) {
+                activity.requestedOrientation =
+                    if (landscape) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+            onDispose {
+                // Whatever the app asked for before this viewer opened, and
+                // UNSPECIFIED when there was nothing to restore: a viewer that
+                // left the activity pinned sideways would take the chat, the
+                // list and the settings with it.
+                if (activity != null) {
+                    activity.requestedOrientation =
+                        before ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                }
+            }
+        }
 
         val toggle = {
             if (prepared) {
@@ -330,6 +365,35 @@ internal fun FullscreenVideoViewer(
                         chrome.show()
                         if (wasVisible) toggle()
                     },
+                )
+                // Swipe to the clip before or after this one (#1027). Applied
+                // AFTER the click so the tap still reaches the ground, and
+                // settled on DRAG END rather than per pixel: a scrub of the bar
+                // below, or the vertical pull that closes the viewer, must not
+                // turn into a page change halfway through.
+                //
+                // ⚠ The threshold is in pixels of a screen that may have just
+                // rotated, so it is taken from the density here rather than
+                // hardcoded: 64dp is about a thumb's width, far enough that a
+                // wobble during a tap is not a swipe.
+                .then(
+                    if (onPrev == null && onNext == null) Modifier
+                    else Modifier.pointerInput(onPrev, onNext) {
+                        val threshold = 64.dp.toPx()
+                        var travelled = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { travelled = 0f },
+                            onDragEnd = {
+                                // Dragging RIGHT (positive) reaches back for the
+                                // older clip, the way a page turns.
+                                if (travelled >= threshold) onPrev?.invoke()
+                                else if (travelled <= -threshold) onNext?.invoke()
+                            },
+                        ) { change, dragAmount ->
+                            travelled += dragAmount
+                            change.consume()
+                        }
+                    },
                 ),
         ) {
             // Letterbox by hand. A TextureView does not preserve the aspect
@@ -371,6 +435,30 @@ internal fun FullscreenVideoViewer(
                 )
             }
 
+            // The two neighbours, drawn only when they exist. Tap targets in
+            // their own right, and the only visible sign that a swipe does
+            // anything here.
+            if (onPrev != null) {
+                ViewerChrome(chrome, Modifier.align(Alignment.CenterStart)) {
+                    ViewerAction(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        stringResource(R.string.video_prev),
+                        Modifier.padding(12.dp),
+                        onPrev,
+                    )
+                }
+            }
+            if (onNext != null) {
+                ViewerChrome(chrome, Modifier.align(Alignment.CenterEnd)) {
+                    ViewerAction(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        stringResource(R.string.video_next),
+                        Modifier.padding(12.dp),
+                        onNext,
+                    )
+                }
+            }
+
             // ⚠ The dialog draws edge to edge, so every control needs the system
             // bars added by hand — without this the scrub bar sits under the
             // gesture pill and the close button under the clock.
@@ -390,6 +478,16 @@ internal fun FullscreenVideoViewer(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.statusBarsPadding().padding(16.dp),
                 ) {
+                    // Watch it the way it was filmed (#1027). The phone's own
+                    // auto-rotate is off on most phones and a clip wider than
+                    // it is tall then plays in a letterbox two fingers high;
+                    // this asks the ACTIVITY to turn, which the dialog follows
+                    // because its window is pinned to the screen. Restored on
+                    // the way out, so the chat behind it never ends up sideways.
+                    ViewerAction(
+                        if (landscape) Icons.Filled.StayCurrentPortrait else Icons.Filled.ScreenRotation,
+                        stringResource(if (landscape) R.string.video_rotate_portrait else R.string.video_rotate_landscape),
+                    ) { landscape = !landscape }
                     ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) { onSave(source) }
                     ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) { onShare(source) }
                 }
@@ -470,6 +568,18 @@ internal fun FullscreenVideoViewer(
 }
 
 /// m:ss, or h:mm:ss past the hour, from milliseconds.
+/** The Activity behind a Compose context, through whatever ContextWrappers a
+ *  theme or a dialog put in the way. Null is a real answer (a preview, a
+ *  service): every caller here treats it as "cannot turn the screen". */
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var ctx: android.content.Context? = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is android.app.Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 private fun clockOf(ms: Int): String {
     val total = (ms / 1000).coerceAtLeast(0)
     val h = total / 3600

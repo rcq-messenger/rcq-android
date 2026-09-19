@@ -987,6 +987,10 @@
     <string name="chat_play_voice">Слухати голосове</string>
     <string name="chat_play_audio">Слухати аудіо</string>
     <string name="chat_pause_audio">Пауза</string>
+    <string name="video_prev">Попереднє відео</string>
+    <string name="video_next">Наступне відео</string>
+    <string name="video_rotate_landscape">Повернути набік</string>
+    <string name="video_rotate_portrait">Повернути вертикально</string>
     <string name="chat_play_video">Дивитися відео</string>
     <string name="chat_pause_video">Пауза</string>
     <string name="chat_prev_photo">Фото</string>

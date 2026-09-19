@@ -787,7 +787,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         ViewerMedia(bytes, viewerSenderUin(m), viewerSenderName(m))
 
     fun viewerVideoOf(m: ChatMessage, source: VideoSource): ViewerVideo =
-        ViewerVideo(source, viewerSenderUin(m), viewerSenderName(m))
+        ViewerVideo(source, viewerSenderUin(m), viewerSenderName(m), m.id)
 
     // Item 9(c): the name at the top of a viewer opens that person's card.
     //
@@ -2372,9 +2372,23 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     }
 
     fullscreenVideo?.let { media ->
+        // Every clip in this conversation, oldest first, so the viewer can walk
+        // to the next one instead of sending the person back to the chat to
+        // find it (#1027: "свайпом чтоб можно было перелестнуть на следующее,
+        // если несколько видосов отправлено"). Built from the list already on
+        // screen; a clip whose bytes are gone is skipped by `openVideo`, which
+        // says why in a toast rather than opening a black rectangle.
+        val (prevClip, nextClip) = remember(messages, media.messageId) {
+            app.rcq.android.data.VideoNeighbours.around(messages, media.messageId)
+        }
+        val walkTo: (ChatMessage?) -> (() -> Unit)? = { m ->
+            if (m == null) null else ({ openVideo(m) { src -> fullscreenVideo = viewerVideoOf(m, src) } })
+        }
         FullscreenVideoViewer(
             media.source,
             senderName = media.senderName,
+            onPrev = walkTo(prevClip),
+            onNext = walkTo(nextClip),
             // The album goes too: a clip played FROM the album has the pager
             // still standing behind it, and leaving that up would put the
             // album back over the card.
@@ -5728,6 +5742,9 @@ private class ViewerVideo(
     val source: VideoSource,
     val senderUin: Int?,
     val senderName: String?,
+    /** The message this clip came from, so the viewer can find the next one in
+     *  the conversation without the caller holding a second list (#1027). */
+    val messageId: String,
 )
 
 /** Something to save or share: what to call it, what it is, and how to write

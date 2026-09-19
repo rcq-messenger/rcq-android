@@ -987,6 +987,10 @@
     <string name="chat_play_voice">播放语音</string>
     <string name="chat_play_audio">播放音频</string>
     <string name="chat_pause_audio">暂停</string>
+    <string name="video_prev">上一个视频</string>
+    <string name="video_next">下一个视频</string>
+    <string name="video_rotate_landscape">横屏观看</string>
+    <string name="video_rotate_portrait">恢复竖屏</string>
     <string name="chat_play_video">播放视频</string>
     <string name="chat_pause_video">暂停视频</string>
     <string name="chat_prev_photo">照片</string>
