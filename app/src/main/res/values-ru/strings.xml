@@ -797,6 +797,9 @@
     <string name="gi_closed">Закрытая группа</string>
     <string name="gi_closed_desc">Новые участники не могут вступить через поиск</string>
     <string name="gi_open">Открытая группа</string>
+    <string name="gi_media">Фото и видео · %1$d</string>
+    <string name="gi_media_all">Показать все %1$d</string>
+    <string name="gi_media_less">Свернуть</string>
     <string name="gi_hide">Скрыть список участников</string>
     <string name="gi_hide_desc">Только вы видите полный список</string>
     <string name="gi_members_hidden">Список участников скрыт владельцем.</string>

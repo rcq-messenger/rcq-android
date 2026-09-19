@@ -770,6 +770,9 @@
     <string name="gi_post_owner">仅群主</string>
     <string name="gi_closed">封闭群组</string>
     <string name="gi_closed_desc">新成员无法通过搜索自行加入</string>
+    <string name="gi_media">照片和视频 · %1$d</string>
+    <string name="gi_media_all">显示全部 %1$d</string>
+    <string name="gi_media_less">收起</string>
     <string name="gi_hide">隐藏成员列表</string>
     <string name="gi_hide_desc">只有你能看到完整名单</string>
     <string name="gi_members_hidden">成员列表已被群主隐藏。</string>

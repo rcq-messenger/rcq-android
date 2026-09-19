@@ -5757,7 +5757,10 @@ private class MediaPayload(
 )
 
 /** What came back when a clip was asked for. */
-private sealed class PlayableVideo {
+// `internal` since the group's media grid (GroupMediaGrid.kt) opens clips
+// too: one way to turn a message into something the player can read, not a
+// second copy of the fetch-verify-fall-back dance.
+internal sealed class PlayableVideo {
     class Ready(val source: VideoSource) : PlayableVideo()
 
     /** A single-seal blob from before the chunked container existed, too heavy
@@ -5776,7 +5779,7 @@ private sealed class PlayableVideo {
  *  into a silent null: "long videos do not download", with nothing on screen
  *  to say so. This streams the container to disk and opens it a chunk at a
  *  time. */
-private suspend fun playableVideo(session: Session, m: ChatMessage): PlayableVideo {
+internal suspend fun playableVideo(session: Session, m: ChatMessage): PlayableVideo {
     val mid = m.mediaId ?: return PlayableVideo.Failed
     val key = m.mediaKey ?: return PlayableVideo.Failed
     val host = m.groupId?.let { session.groupHost(it) }
@@ -5790,7 +5793,7 @@ private suspend fun playableVideo(session: Session, m: ChatMessage): PlayableVid
 
 /** Say what went wrong, in the person's own terms. Both cases used to be
  *  silence. */
-private fun sayVideoFailure(context: Context, r: PlayableVideo) {
+internal fun sayVideoFailure(context: Context, r: PlayableVideo) {
     val text = when (r) {
         is PlayableVideo.TooOld -> context.getString(R.string.media_video_too_old, (r.bytes / (1024 * 1024)).toInt())
         else -> context.getString(R.string.media_fetch_failed)

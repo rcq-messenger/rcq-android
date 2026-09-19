@@ -801,6 +801,9 @@
     <string name="gi_closed">Closed group</string>
     <string name="gi_closed_desc">New members can\'t self-join via search</string>
     <string name="gi_open">Open group</string>
+    <string name="gi_media">Photos and videos · %1$d</string>
+    <string name="gi_media_all">Show all %1$d</string>
+    <string name="gi_media_less">Show fewer</string>
     <string name="gi_hide">Hide member list</string>
     <string name="gi_hide_desc">Only you see the full roster</string>
     <string name="gi_members_hidden">The member list is hidden by the owner.</string>

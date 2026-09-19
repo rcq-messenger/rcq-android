@@ -770,6 +770,9 @@
     <string name="gi_post_owner">Лише власник</string>
     <string name="gi_closed">Закрита група</string>
     <string name="gi_closed_desc">Нові учасники не зайдуть самі через пошук</string>
+    <string name="gi_media">Фото та відео · %1$d</string>
+    <string name="gi_media_all">Показати всі %1$d</string>
+    <string name="gi_media_less">Згорнути</string>
     <string name="gi_hide">Приховати список учасників</string>
     <string name="gi_hide_desc">Повний список бачиш лише ти</string>
     <string name="gi_members_hidden">Власник приховав список учасників.</string>

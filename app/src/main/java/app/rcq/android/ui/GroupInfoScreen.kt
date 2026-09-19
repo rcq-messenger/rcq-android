@@ -509,6 +509,18 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             }
         }
 
+        // The room's pictures and clips, above the member list: somebody who
+        // opens this card to find a photo from yesterday should not have to
+        // scroll the feed for it (#989). Draws nothing at all in a room that
+        // has never carried media, and costs no network either way — the tiles
+        // are the thumbnails already in the rows.
+        item {
+            GroupMediaGrid(
+                session, groupId,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.gi_members), color = c.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
