@@ -720,8 +720,12 @@
     <string name="snd_master_desc">所有应用提示音的总开关。来电仍会响铃。</string>
     <string name="snd_message_title">消息提示音</string>
     <string name="snd_message_desc">提示新消息：应用打开时播放提示音，未打开时发送通知。</string>
-    <string name="snd_presence_title">联系人上线 / 下线</string>
-    <string name="snd_presence_desc">「全部」对任何联系人都播放提示音，「收藏」只对你标了星标的人播放，「关闭」则从不播放。</string>
+    <string name="snd_presence_title">联系人上线或离线时的提示音</string>
+    <string name="snd_presence_desc">「全部」：任何联系人都会响。「收藏」：只有加星标的人才会响。「关闭」：从不响。这里与群组无关，只涉及你的联系人。</string>
+    <string name="snd_presence_leave_title">离线时也提示</string>
+    <string name="snd_presence_leave_desc">关闭后只保留上线提示音，离线提示音不再播放。</string>
+    <string name="snd_presence_try_online">试听上线提示音</string>
+    <string name="snd_presence_try_offline">试听离线提示音</string>
     <string name="snd_volume_title">RCQ 提示音音量</string>
     <string name="snd_volume_desc">缩放 RCQ 为消息播放的提示音：应用打开时和通知里的消息提示音、未接来电，以及联系人上线和下线的提示音。只能比手机的通知音量更轻，不能更响：那个音量由 Android 决定。为零时这些提示音都不响。来电不在其中：无论这里怎么设置，它都按手机的铃声音量响铃。</string>
     <string name="snd_volume_legacy">这个音量是在滑块只管应用打开时设置的。在你移动滑块之前，通知仍按手机的音量播放。</string>

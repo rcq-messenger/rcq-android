@@ -231,6 +231,11 @@ object SoundService {
      *  chime says "something arrived" just as well. */
     private const val MIN_GAP_MS = 1_200L
 
+    /** Shortest gap between two tones of ANY kind: enough that two samples
+     *  never start on top of each other, and short enough that a presence
+     *  chime and a message tone can both be heard when both are true. */
+    private const val MIN_OVERLAP_MS = 250L
+
     /** Which throttle a tone belongs to. Separate clocks, because a throttle is
      *  about one sound arriving on top of another sound of the SAME kind. */
     internal enum class ToneClock {
@@ -250,6 +255,18 @@ object SoundService {
          *  abuse report. Their own clock, so a security notice landing a second
          *  after a message is never swallowed as a duplicate of it. */
         NOTICE,
+
+        /** Somebody appeared or disappeared.
+         *
+         *  ⚠ ITS OWN CLOCK SINCE #1030, and the missing clock is half of why
+         *  that report says "хаотично". Presence used to pass `null` here,
+         *  which meant it was throttled by [lastPlayedAt] alone — the one
+         *  counter every kind of tone stamps. So a message arriving within
+         *  1200 ms of a roster refresh swallowed the presence chime, and a
+         *  presence chime swallowed the next message's in-app tone, and the
+         *  same transition therefore made a sound or no sound depending on
+         *  traffic that had nothing to do with it. */
+        PRESENCE,
     }
 
     /** When the last tone of ANY kind started. The in-app throttle's clock, and
@@ -274,9 +291,37 @@ object SoundService {
      *  answer for a message. Guarded by this object's monitor. */
     private var lastMessageToneAt = 0L
     private var lastNoticeToneAt = 0L
+    private var lastPresenceToneAt = 0L
 
-    private fun lastToneOn(clock: ToneClock): Long =
-        if (clock == ToneClock.MESSAGE) lastMessageToneAt else lastNoticeToneAt
+    private fun lastToneOn(clock: ToneClock): Long = when (clock) {
+        ToneClock.MESSAGE -> lastMessageToneAt
+        ToneClock.NOTICE -> lastNoticeToneAt
+        ToneClock.PRESENCE -> lastPresenceToneAt
+    }
+
+    /**
+     * The slider position as a GAIN, and the reason it is not the position
+     * itself.
+     *
+     * Loudness is roughly logarithmic and a player's volume parameter is
+     * linear amplitude, so passing the slider straight through means the whole
+     * upper half of its travel spans about 6 dB: drag it from the end to the
+     * middle and almost nothing happens. That is one of the three mechanisms
+     * behind "пробовал ползунком уменьшить звук, и всё равно... то как
+     * заорёт" (#1030). Squaring turns the same travel into about 12 dB and
+     * makes the middle of the slider sound like the middle.
+     *
+     * 1.0 still means 1.0 and 0 still means silence, so nobody who left the
+     * slider where it was hears a change.
+     */
+    internal fun toneGain(level: Float): Float {
+        // ⚠ CLAMP FIRST. Squaring a negative makes it positive, so a level
+        // below zero — which is what a legacy preference or a bad write can
+        // hold — came back as a quiet but audible tone instead of as silence.
+        // Caught by the test that pins zero as silence.
+        val clamped = level.coerceIn(0f, 1f)
+        return clamped * clamped
+    }
 
     /** Start [id] on the pool at [vol]. False when no stream started.
      *
@@ -295,12 +340,25 @@ object SoundService {
         // Presence chirps during a call are pure interruption: the person is
         // talking, and "someone came online" can wait.
         if (inAnyCall()) return
-        val vol = LocalStores.soundVolumeLevel()
+        val vol = toneGain(LocalStores.soundVolumeLevel())
         if (vol <= 0f) return
         if (!throttle) { start(id, vol); return }
         synchronized(this) {
             val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastPlayedAt < MIN_GAP_MS) return
+            // TWO gates, and they answer different questions (#1030).
+            //
+            // [MIN_OVERLAP_MS] is about STREAMS: two samples starting in the
+            // same instant read as a stutter whatever they mean, so nothing
+            // may start on top of anything else. It is short.
+            //
+            // [MIN_GAP_MS] is about MEANING: a burst of four messages is one
+            // "something arrived". That one belongs to the kind of tone, not
+            // to the speaker, so it is measured per clock. Measuring it
+            // globally — which is what a single counter did — let an unrelated
+            // message tone decide whether a contact's arrival was audible.
+            if (now - lastPlayedAt < MIN_OVERLAP_MS) return
+            if (clock != null && now - lastToneOn(clock) < MIN_GAP_MS) return
+            if (clock == null && now - lastPlayedAt < MIN_GAP_MS) return
             // Stamped only when a stream really started, so a tone lost to a
             // pool that is not up yet does not eat the next second of gap.
             if (start(id, vol)) stampTone(now, clock)
@@ -314,6 +372,7 @@ object SoundService {
         when (clock) {
             ToneClock.MESSAGE -> lastMessageToneAt = now
             ToneClock.NOTICE -> lastNoticeToneAt = now
+            ToneClock.PRESENCE -> lastPresenceToneAt = now
             null -> Unit
         }
     }
@@ -326,6 +385,15 @@ object SoundService {
      *  purpose and by the dozen; letting those count as "this message has been
      *  announced" would mean a message arriving mid-drag posts silently. */
     fun previewMessage() = play(msg, throttle = false)
+
+    /** Play a presence sample on demand, from the settings screen.
+     *
+     *  Unthrottled, because the person asked for it, and the same wav at the
+     *  same gain they will hear in the wild: the volume slider's own preview
+     *  plays the MESSAGE tone, which is a different and objectively louder
+     *  sample, so "turn that online-offline sound down" was being judged
+     *  against a sound that is never used in that role (#1030). */
+    fun previewPresence(online: Boolean) = play(if (online) this.online else offline, throttle = false)
 
     /** The level to play a NOTIFICATION's tone at, 0f meaning "no tone".
      *
@@ -397,7 +465,11 @@ object SoundService {
         // ringtone level, and neither this slider nor the master switch reaches
         // it. The description names that exception instead of implying zero
         // silences a call.
-        return volume.coerceIn(0f, 1f)
+        // ⚠ The same curve the open app applies ([toneGain]), for the same
+        // reason and so the two cannot drift: one slider, one meaning. Linear
+        // amplitude spent the top half of the travel on about 6 dB, which is
+        // why "ползунком... всё равно... как заорёт" (#1030).
+        return toneGain(volume)
     }
 
     /** Sound an arriving MESSAGE's notification. True when a tone was played.
@@ -668,19 +740,16 @@ object SoundService {
      *  screen. */
     fun message() { if (LocalStores.soundMessagesOn()) play(msg, clock = ToneClock.MESSAGE) }
 
-    /** Whether an online/offline transition for a contact is worth a chime
-     *  under the current [LocalStores.PresenceSoundMode]. [favorite] is that
-     *  contact's favourite flag; the caller has the roster, we do not. */
-    private fun presenceAudible(favorite: Boolean): Boolean =
-        when (LocalStores.presenceSoundMode()) {
-            LocalStores.PresenceSoundMode.ALL -> true
-            LocalStores.PresenceSoundMode.FAVORITES -> favorite
-            LocalStores.PresenceSoundMode.OFF -> false
-        }
+    /** A contact appeared.
+     *
+     *  ⚠ NO POLICY HERE ANY MORE. Who is worth a sound, whether the direction
+     *  is wanted, whether the thread is muted, whether this refresh moved one
+     *  person or forty — all of it is [app.rcq.android.data.PresenceChime],
+     *  which is pure and tested. This object's remaining job is the speaker.
+     *  The split is the fix for #1030: the old code asked one question per
+     *  transition and let a shared throttle silently answer for the rest. */
+    fun contactOnline() = play(online, clock = ToneClock.PRESENCE)
 
-    /** A contact transitioned to online. */
-    fun contactOnline(favorite: Boolean) { if (presenceAudible(favorite)) play(online) }
-
-    /** A contact transitioned to offline. */
-    fun contactOffline(favorite: Boolean) { if (presenceAudible(favorite)) play(offline) }
+    /** A contact disappeared. */
+    fun contactOffline() = play(offline, clock = ToneClock.PRESENCE)
 }

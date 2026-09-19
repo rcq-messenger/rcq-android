@@ -285,6 +285,19 @@ object LocalStores {
     private val _presenceSound = MutableStateFlow(PresenceSoundMode.ALL)
     val presenceSound: StateFlow<PresenceSoundMode> = _presenceSound.asStateFlow()
 
+    /** Whether somebody LEAVING is worth a sound, separately from somebody
+     *  arriving.
+     *
+     *  One setting used to govern both, so a person who liked the knock when a
+     *  contact appeared and could not stand the descending tone when they left
+     *  had one choice: silence the pair. Two reports asked for this in one
+     *  week, and #1030 spelled out why the two are not the same event: an
+     *  arrival is something you might act on, a departure is never anything
+     *  but a notice. Default ON, because an update must not silently take away
+     *  a sound somebody relies on. */
+    private val _presenceDeparture = MutableStateFlow(true)
+    val presenceDeparture: StateFlow<Boolean> = _presenceDeparture.asStateFlow()
+
     /** When on, the app window gets FLAG_SECURE: screenshots/screen-recording
      *  are blocked and content is hidden in the app switcher. Device-global,
      *  applied by MainActivity. */
@@ -440,6 +453,7 @@ object LocalStores {
             prefs.getString(K_SND_PRES_MODE, null)?.let { PresenceSoundMode.valueOf(it) }
         }.getOrNull()
             ?: if (prefs.getBoolean(K_SND_PRES, true)) PresenceSoundMode.ALL else PresenceSoundMode.OFF
+        _presenceDeparture.value = prefs.getBoolean(K_SND_PRES_LEAVE, true)
         _soundVolume.value = prefs.getFloat(K_SND_VOL, 1f).coerceIn(0f, 1f)
         // A level this install has never written is not an inherited one: a
         // fresh install starts at 1f, where the question does not arise. Only a
@@ -942,6 +956,15 @@ object LocalStores {
     fun soundMasterOn() = _soundMaster.value
     fun soundMessagesOn() = _soundMessages.value
     fun presenceSoundMode() = _presenceSound.value
+
+    /** See [_presenceDeparture]. Read on the roster-refresh path, so it must
+     *  not touch disk. */
+    fun presenceDepartureOn() = _presenceDeparture.value
+
+    fun setPresenceDeparture(on: Boolean) {
+        _presenceDeparture.value = on
+        if (::prefs.isInitialized) prefs.edit().putBoolean(K_SND_PRES_LEAVE, on).apply()
+    }
     fun setSoundMaster(on: Boolean) { _soundMaster.value = on; prefs.edit().putBoolean(K_SND_MASTER, on).apply() }
     fun setSoundMessages(on: Boolean) { _soundMessages.value = on; prefs.edit().putBoolean(K_SND_MSG, on).apply() }
     fun setPresenceSoundMode(mode: PresenceSoundMode) {
@@ -1733,6 +1756,7 @@ object LocalStores {
     private const val K_SND_MASTER = "sound_master"
     private const val K_SND_MSG = "sound_messages"
     private const val K_SND_PRES = "sound_presence"          // legacy boolean
+    private const val K_SND_PRES_LEAVE = "snd_presence_leave"
     private const val K_SND_PRES_MODE = "sound_presence_mode" // ALL/FAVORITES/OFF
     private const val K_SND_VOL = "sound_volume"
     private const val K_SND_VOL_SHADE = "sound_volume_covers_shade" // see _soundVolumeForShade

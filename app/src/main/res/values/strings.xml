@@ -747,8 +747,12 @@
     <string name="snd_master_desc">Master switch for all app tones. Incoming calls still ring.</string>
     <string name="snd_message_title">Message sounds</string>
     <string name="snd_message_desc">Announce a new message: a tone while the app is open, a notification when it is not.</string>
-    <string name="snd_presence_title">Contact online / offline</string>
-    <string name="snd_presence_desc">Everyone plays a tone for any contact. Favourites plays only for the people you starred. Off never plays one.</string>
+    <string name="snd_presence_title">Sound when a contact comes online or leaves</string>
+    <string name="snd_presence_desc">Everyone plays a tone for any contact. Favourites plays only for the people you starred. Off never plays one. Groups are never announced here: this is about your contacts.</string>
+    <string name="snd_presence_leave_title">Also play it when they leave</string>
+    <string name="snd_presence_leave_desc">Off keeps the tone for somebody arriving and drops the one for somebody leaving.</string>
+    <string name="snd_presence_try_online">Play the arrival tone</string>
+    <string name="snd_presence_try_offline">Play the departure tone</string>
     <string name="snd_volume_title">RCQ tone volume</string>
     <string name="snd_volume_desc">Scales the tones RCQ plays for messages: the message tone in the open app and in the notification, missed calls, and the contact online and offline chimes. Quieter than the phone’s notification level, never louder: that level is Android’s. At zero those tones are silent. An incoming call is not one of them: it rings at the phone’s ringtone volume whatever this says.</string>
     <string name="snd_volume_legacy">This level was set when the slider covered only the open app. The notification keeps the phone’s level until you move the slider.</string>

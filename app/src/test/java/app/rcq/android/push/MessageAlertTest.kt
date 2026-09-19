@@ -198,10 +198,28 @@ class MessageAlertTest {
         volume, chosenForShade, masterOn, perKindOn, phoneSilent, telephonyCall, sinceLastTone,
     )
 
+    /** The slider decides the notification's level — and since #1030 it does so
+     *  through a curve rather than as a raw amplitude.
+     *
+     *  Loudness is roughly logarithmic while a player's volume parameter is
+     *  linear amplitude, so passing the position straight through spent the
+     *  whole top half of the travel on about 6 dB: dragging from the end to the
+     *  middle changed almost nothing, and two reporters said so in one week.
+     *  Squaring gives the same travel about 12 dB. The ENDS are what people
+     *  actually rely on and they are untouched: 1 is 1 and 0 is silence. */
     @Test fun theSliderIsTheNotificationsLevel() {
         assertEquals(1f, level(1f), 0f)
-        assertEquals(0.5f, level(0.5f), 0f)
-        assertEquals(0.05f, level(0.05f), 0f)
+        assertEquals(0.25f, level(0.5f), 1e-6f)
+        assertEquals(0.0025f, level(0.05f), 1e-6f)
+        // Monotonic, or the slider would stop meaning "more to the right".
+        var prev = -1f
+        for (i in 0..20) {
+            val here = level(i / 20f)
+            assertTrue("level must not go down between stops", here >= prev)
+            prev = here
+        }
+        // And it never asks for more than the stream allows.
+        assertEquals(1f, level(1.5f), 0f)
     }
 
     /** #978 in its purest form: the slider at zero used to mean the shade shouted
@@ -273,7 +291,7 @@ class MessageAlertTest {
     @Test fun aBurstIsOneChime() {
         assertEquals(0f, level(0.4f, sinceLastTone = 0L), 0f)
         assertEquals(0f, level(0.4f, sinceLastTone = 1_199L), 0f)
-        assertEquals(0.4f, level(0.4f, sinceLastTone = 1_200L), 0f)
+        assertEquals(0.16f, level(0.4f, sinceLastTone = 1_200L), 1e-6f)
         // And the deferred population is throttled the same way, at the phone's
         // level rather than at the slider's.
         assertEquals(0f, level(0.4f, chosenForShade = false, sinceLastTone = 0L), 0f)
@@ -286,6 +304,6 @@ class MessageAlertTest {
      *  duplicate of it. The parameter name is the contract; this pins the only
      *  behaviour that can express it here. */
     @Test fun aClockFromAnotherKindNeverSilencesThisOne() {
-        assertEquals(0.4f, level(0.4f, sinceLastTone = 3_600_000L), 0f)
+        assertEquals(0.16f, level(0.4f, sinceLastTone = 3_600_000L), 1e-6f)
     }
 }

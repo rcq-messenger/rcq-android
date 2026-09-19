@@ -1032,6 +1032,13 @@ class Session(context: Context) {
     // of the disk-cached roster (which forces everyone offline), not something
     // that happened, and must stay silent. See refreshContacts() and #422.
     private var presenceBaselineLive = false
+
+    /** When each contact last made a presence sound, by `elapsedRealtime`.
+     *  The flap guard: with a 60 s freshness window over a 25 s heartbeat, one
+     *  contact on a bad connection can cross the line every couple of minutes
+     *  forever, and the twentieth crossing is what makes somebody write "бьёт
+     *  по ушам" (#1030). Pruned as it is written; see [PresenceChime]. */
+    private val presenceChimedAt = mutableMapOf<Int, Long>()
     /** The island's validator for the roster and the rows it came with, so a
      *  refresh that finds nothing changed (304) still has a list to fold.
      *  Cleared with the presence baseline on an account switch. */
@@ -2396,6 +2403,16 @@ class Session(context: Context) {
                 // the dot green. Without this the duress view sits on a
                 // permanent "Connecting…", which is itself something to explain.
                 _connected.value = up || duressViewUp
+                // ⚠ The link going down freezes the roster's presence column at
+                // whatever it was, and the first refresh after it comes back
+                // compares live values against that frozen snapshot. Everybody
+                // who arrived or left while we were away then looks like a
+                // transition that just happened, and the phone announces one of
+                // them the moment the person picks it up — the loudest and most
+                // reproducible false chime in #1030, and the same reasoning the
+                // PIN lock already applies to its own snapshot. The next
+                // refresh re-seeds the baseline and arms itself again.
+                if (!up) presenceBaselineLive = false
                 // When the link went down, so the watchdog below can tell a
                 // blip (the socket's own backoff handles those) from a network
                 // that has started blocking us and needs the whole route
@@ -11716,14 +11733,52 @@ class Session(context: Context) {
         }
         presenceBaselineLive = true
         if (armed) {
-            _contacts.value.forEach { ct ->
-                val before = prevPresence[ct.uin] ?: return@forEach
+            // ONE decision for the whole refresh, taken by a pure rule and then
+            // played at most once (#1030). The loop used to call the player per
+            // transition and let a throttle shared with the message tone pick a
+            // survivor, so the sound a person heard belonged to an arbitrary
+            // row in an order the island does not sort. See PresenceChime for
+            // the whole story, and PresenceChimeTest for the cases.
+            val flips = _contacts.value.mapNotNull { ct ->
+                // ⚠ Only rows that live HERE. A cross-island row carries a
+                // hardcoded "offline" (the island serves no presence for one),
+                // so a contact who appears on our island after being a foreign
+                // row reads as "came online" although nothing about them
+                // changed. `prevPresence` holds foreign rows too, which is what
+                // made that flip possible.
+                if (ct.host != null) return@mapNotNull null
+                val before = prevPresence[ct.uin] ?: return@mapNotNull null
                 val wasOnline = before != UserStatus.OFFLINE
                 val isOnline = ct.presence != UserStatus.OFFLINE
-                if (wasOnline == isOnline) return@forEach
-                val fav = LocalStores.isFavorite(LocalStores.peerThread(ct.uin))
-                if (isOnline) app.rcq.android.media.SoundService.contactOnline(fav)
-                else app.rcq.android.media.SoundService.contactOffline(fav)
+                if (wasOnline == isOnline) return@mapNotNull null
+                val thread = LocalStores.peerThread(ct.uin)
+                app.rcq.android.data.PresenceChime.Flip(
+                    uin = ct.uin,
+                    online = isOnline,
+                    favorite = LocalStores.isFavorite(thread),
+                    muted = LocalStores.isMuted(thread),
+                )
+            }
+            if (flips.isNotEmpty()) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                val pick = app.rcq.android.data.PresenceChime.decide(
+                    flips,
+                    LocalStores.presenceSoundMode(),
+                    LocalStores.presenceDepartureOn(),
+                    presenceChimedAt,
+                    now,
+                )
+                if (pick != null) {
+                    presenceChimedAt[pick.uin] = now
+                    // Keep the map from growing with every contact who ever
+                    // flapped: anything past the cooldown can never hold a
+                    // chime back again.
+                    presenceChimedAt.entries.removeAll { (_, at) ->
+                        now - at >= app.rcq.android.data.PresenceChime.PER_CONTACT_COOLDOWN_MS
+                    }
+                    if (pick.online) app.rcq.android.media.SoundService.contactOnline()
+                    else app.rcq.android.media.SoundService.contactOffline()
+                }
             }
         }
         // Seed the identity cache so sends to contacts skip a lookup.

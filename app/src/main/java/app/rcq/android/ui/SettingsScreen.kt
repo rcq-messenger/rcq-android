@@ -251,7 +251,14 @@ private fun SettingsFind.row(): SettingsFindRow = when (this) {
     SettingsFind.NOTIFICATIONS -> SettingsFindRow(this, Icons.Filled.Notifications, R.string.settings_row_notifications, R.string.settings_sec_privacy, SettingsRoute.NOTIFICATIONS,
         "notifications push alerts уведомления пуш пуши оповещения")
     SettingsFind.SOUNDS -> SettingsFindRow(this, Icons.AutoMirrored.Filled.VolumeUp, R.string.settings_row_sounds, R.string.settings_sec_privacy, SettingsRoute.SOUNDS,
-        "sound volume ringtone mute звук звуки громкость сигнал беззвучно")
+        // ⚠ The words a REPORTER typed, not the words the screen uses. #1029 asked
+        // for a setting that has existed since #552 because searching "звук
+        // онлайн" returned nothing: the row is called "контакт в сети", the
+        // index held neither "онлайн" nor "оффлайн" nor "присутствие", and a
+        // person who cannot find a setting reasonably concludes it is missing.
+        "sound volume ringtone mute online offline presence away chime tone contact came left " +
+            "звук звуки громкость сигнал беззвучно онлайн оффлайн офлайн в сети не в сети " +
+            "присутствие появился вышел зашёл зашел ушёл ушел уведомление нанана")
     SettingsFind.BLOCKED -> SettingsFindRow(this, Icons.Outlined.Block, R.string.settings_row_blocked, R.string.settings_sec_privacy, SettingsRoute.BLOCKED,
         "blocked block ban spam блок блокировка чёрный черный список бан спам")
     SettingsFind.PIN_CODES -> SettingsFindRow(this, Icons.Filled.Password, R.string.settings_row_pin_codes, R.string.settings_row_privacy, SettingsRoute.PIN_CODES,
@@ -2752,6 +2759,7 @@ private fun SoundsScreen(onBack: () -> Unit) {
     val masterOn by LocalStores.soundMaster.collectAsState()
     val msgOn by LocalStores.soundMessages.collectAsState()
     val presenceMode by LocalStores.presenceSound.collectAsState()
+    val presenceLeave by LocalStores.presenceDeparture.collectAsState()
     val volume by LocalStores.soundVolume.collectAsState()
     // False only on an install that stored a level before the slider reached the
     // notification's tone (#978). The row below says so while it is true, because
@@ -2776,6 +2784,47 @@ private fun SoundsScreen(onBack: () -> Unit) {
                     )
                     SegmentedPresenceSound(presenceMode, enabled = masterOn) { LocalStores.setPresenceSoundMode(it) }
                     Text(stringResource(R.string.snd_presence_desc), color = c.textSecondary, fontSize = 11.sp)
+                    // The second half of #1029 and the whole of one complaint in
+                    // #1030: the knock when somebody appears is fine, the tone
+                    // when they leave is not, and the only way to lose the
+                    // second one was to lose both.
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.snd_presence_leave_title),
+                                color = if (masterOn && presenceMode != LocalStores.PresenceSoundMode.OFF) c.textPrimary else c.textSecondary,
+                                fontSize = 14.sp,
+                            )
+                            Text(stringResource(R.string.snd_presence_leave_desc), color = c.textSecondary, fontSize = 11.sp)
+                        }
+                        Switch(
+                            checked = presenceLeave,
+                            onCheckedChange = { LocalStores.setPresenceDeparture(it) },
+                            enabled = masterOn && presenceMode != LocalStores.PresenceSoundMode.OFF,
+                            colors = SwitchDefaults.colors(checkedTrackColor = c.accent),
+                        )
+                    }
+                    // Hear the sound being configured, at the volume that is set
+                    // right now. The volume slider below previews the MESSAGE
+                    // tone, which is a different wav and a louder one, so
+                    // somebody tuning "that online-offline sound" was tuning by
+                    // a sample they would never hear in that role (#1030).
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(
+                            stringResource(R.string.snd_presence_try_online),
+                            color = if (masterOn) c.accent else c.textSecondary, fontSize = 12.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                .clickable(enabled = masterOn) { app.rcq.android.media.SoundService.previewPresence(online = true) }
+                                .padding(vertical = 4.dp),
+                        )
+                        Text(
+                            stringResource(R.string.snd_presence_try_offline),
+                            color = if (masterOn) c.accent else c.textSecondary, fontSize = 12.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                .clickable(enabled = masterOn) { app.rcq.android.media.SoundService.previewPresence(online = false) }
+                                .padding(vertical = 4.dp),
+                        )
+                    }
                 }
             }
             // ONE scale factor for every tone RCQ plays FOR A MESSAGE since
