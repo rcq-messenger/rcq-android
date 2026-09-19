@@ -1721,14 +1721,24 @@ class Session(context: Context) {
         var uinThere = target.uin
         var token = target.token
         if (token.isNullOrEmpty() || uinThere == null) {
-            // No usable token: prove the OLD key to get one. A null answer is
-            // the island saying there is no such account, which for a rotation
-            // is as good as done.
+            // No usable token: prove the OLD key to get one.
             val rec = try {
                 Multihome.recoverOn(target.host, oldSigningPriv, oldSigningPub)
             } catch (e: java.io.IOException) {
                 return@withContext ReissueCascade.classify(e.message)
-            } ?: return@withContext ReissueCascade.Outcome.GONE
+            }
+            if (rec == null) {
+                // ⚠ "No account for that key" is ALSO what an island says once
+                // it has taken the new one — a retry whose first reply was
+                // lost, or another device that got there first. Asking with the
+                // new key is the difference between recording the copy as
+                // rotated, with a token for it, and writing it off as gone.
+                val already = runCatching {
+                    Multihome.recoverOn(target.host, identity.signingPrivate, identity.signingPublic)
+                }.getOrNull() ?: return@withContext ReissueCascade.Outcome.GONE
+                rememberCopyCreds(target, already.uin, already.token)
+                return@withContext ReissueCascade.Outcome.DONE
+            }
             token = rec.token
             uinThere = rec.uin
         }

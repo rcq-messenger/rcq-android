@@ -44,8 +44,17 @@ object ReissueCascade {
         DIFFERENT_KEY,
 
         /** The island could not be reached or refused for a reason that heals:
-         *  a timeout, a 5xx, a rate limit. Worth another try. */
+         *  a timeout, a 5xx, a rate limit, a token that went stale. Worth
+         *  another try, and the next one re-proves the key. */
         UNREACHABLE,
+
+        /** The island understood and said no, in a way that repeating the same
+         *  request cannot change: it does not answer to the name we dialled,
+         *  it wants a proof version this build does not speak, or it could not
+         *  read what we sent. Kept apart from UNREACHABLE so the record does
+         *  not promise that another tap will fix it — and still not settled,
+         *  because the copy there is still on the old key. */
+        REFUSED,
     }
 
     /**
@@ -100,10 +109,33 @@ object ReissueCascade {
      */
     fun classify(status: Int?, code: String?): Outcome = when {
         status == null -> Outcome.UNREACHABLE
+        // ⚠ Including a retry of a request that already went through: the
+        // island compares the keys it holds against the ones being set and
+        // answers 200 rather than refusing, so a reply lost in flight costs
+        // nothing (verified against a live island, 19.09).
         status in 200..299 -> Outcome.DONE
-        code == "identity_not_found" || code == "user_not_found" || status == 404 -> Outcome.GONE
-        code == "old_key_mismatch" || status == 409 -> Outcome.DIFFERENT_KEY
-        code == "bad_signature" || status == 403 -> Outcome.DIFFERENT_KEY
+
+        // ⚠⚠ THE CODES ARE THE ISLAND'S, SPELLED THE ISLAND'S WAY. They are
+        // `reissue_*`, and reading them as the short names this once did meant
+        // every refusal fell through to the status alone.
+        code == "user_not_found" || code == "identity_not_found" -> Outcome.GONE
+        code == "reissue_old_key_mismatch" -> Outcome.DIFFERENT_KEY
+        // The proof was spent already, which is what a first attempt that DID
+        // land looks like from here. The caller checks with the new key before
+        // believing either way.
+        code == "reissue_replayed" || code == "reissue_bad_signature" -> Outcome.DIFFERENT_KEY
+        // A refusal that repeating cannot change.
+        code == "reissue_wrong_host" || code == "reissue_proof_version" ||
+            code == "reissue_proof_malformed" || code == "reissue_proof_required" ||
+            code == "key_proof_required" || code == "bad_key" -> Outcome.REFUSED
+        // The island's own "come back later", and the clock, which the next
+        // attempt rebuilds from a fresh timestamp.
+        code == "reissue_unavailable" || code == "reissue_clock_skew" -> Outcome.UNREACHABLE
+
+        status == 404 -> Outcome.GONE
+        status == 409 -> Outcome.DIFFERENT_KEY
+        status == 403 -> Outcome.DIFFERENT_KEY
+        status == 400 -> Outcome.REFUSED
         status == 401 -> Outcome.UNREACHABLE          // a stale token, not a stale key
         status == 429 || status >= 500 -> Outcome.UNREACHABLE
         else -> Outcome.UNREACHABLE
@@ -122,6 +154,10 @@ object ReissueCascade {
      *  HTML, and a rotation must not fall over on the shape of an error. */
     fun codeOf(message: String?): String? =
         Regex(""""code"\s*:\s*"([a-z_]{1,64})"""").find(message.orEmpty())?.groupValues?.get(1)
+
+    /** True when another attempt is worth offering. A refusal the island will
+     *  repeat is not, and neither is a copy that is finished with. */
+    fun retryable(outcome: Outcome): Boolean = outcome == Outcome.UNREACHABLE
 
     /** [classify] straight from what an RcqApi call threw. */
     fun classify(message: String?): Outcome = classify(statusOf(message), codeOf(message))

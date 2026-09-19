@@ -73,16 +73,45 @@ class ReissueCascadeTest {
     }
 
     @Test
-    fun theIslandsAnswersAreReadTheWayTheSpecReadsThem() {
+    fun theIslandsAnswersAreReadTheWayTheISLANDSpellsThem() {
+        // ⚠ Every one of these codes was read off the live route
+        // (routers/auth.py, `reissue`) and checked against two running islands
+        // on 19.09. They are `reissue_*`: the short spellings this once looked
+        // for matched nothing at all.
         assertEquals(ReissueCascade.Outcome.DONE, ReissueCascade.classify(200, null))
+        assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(404, "user_not_found"))
         assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(404, "identity_not_found"))
         assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(404, null))
-        assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(409, "old_key_mismatch"))
-        assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(403, "bad_signature"))
+        assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(409, "reissue_old_key_mismatch"))
+        assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(409, "reissue_replayed"))
+        assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(403, "reissue_bad_signature"))
+        assertEquals(ReissueCascade.Outcome.REFUSED, ReissueCascade.classify(400, "reissue_wrong_host"))
+        assertEquals(ReissueCascade.Outcome.REFUSED, ReissueCascade.classify(400, "reissue_proof_version"))
+        assertEquals(ReissueCascade.Outcome.REFUSED, ReissueCascade.classify(400, "reissue_proof_malformed"))
+        assertEquals(ReissueCascade.Outcome.REFUSED, ReissueCascade.classify(403, "reissue_proof_required"))
+        assertEquals(ReissueCascade.Outcome.REFUSED, ReissueCascade.classify(403, "key_proof_required"))
+        assertEquals(ReissueCascade.Outcome.REFUSED, ReissueCascade.classify(400, "bad_key"))
+        assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(503, "reissue_unavailable"))
+        assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(400, "reissue_clock_skew"))
         assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(401, null))
         assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(429, null))
         assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(503, null))
         assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(null, null))
+    }
+
+    @Test
+    fun aRefusalTheIslandWillRepeatIsNotOfferedAsARetry() {
+        assertTrue(ReissueCascade.retryable(ReissueCascade.Outcome.UNREACHABLE))
+        assertFalse(ReissueCascade.retryable(ReissueCascade.Outcome.REFUSED))
+        assertFalse(ReissueCascade.retryable(ReissueCascade.Outcome.DIFFERENT_KEY))
+        assertFalse(ReissueCascade.retryable(ReissueCascade.Outcome.DONE))
+    }
+
+    @Test
+    fun aRefusedIslandStillKeepsTheOldKeyAlive() {
+        // ⚠ The copy there is on the old key, whatever the island's reason was:
+        // destroying it would strand that copy for ever.
+        assertFalse(ReissueCascade.settled(listOf(ReissueCascade.Outcome.DONE, ReissueCascade.Outcome.REFUSED)))
     }
 
     @Test
