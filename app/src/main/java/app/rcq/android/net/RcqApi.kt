@@ -301,7 +301,22 @@ class RcqApi(
     )
     // In-place identity key rotation for the current (authed) account: replaces
     // the long-term X25519 identity + Ed25519 signing keys; the UIN is unchanged.
-    data class ReissueRequest(val identity_key: String, val signing_key: String)
+    /** `POST /auth/reissue`. The six proof fields are all-or-none (spec
+     *  2026-09-15, F3): an island that requires the proof refuses a body
+     *  without them, and one that does not yet require it accepts either.
+     *  ⚠ [host] is which island the client believes it is sending to, and the
+     *  island checks it against its OWN name — that is what stops a proof made
+     *  for the home island from rotating the copy on somebody else's. */
+    data class ReissueRequest(
+        val identity_key: String,
+        val signing_key: String,
+        val proof_v: Int? = null,
+        val host: String? = null,
+        val old_signing_key: String? = null,
+        val ts: Long? = null,
+        val nonce: String? = null,
+        val signature: String? = null,
+    )
 
     // ── libsignal prekey bundle (v=2 forward secrecy) ─────────────────
     // JSON key is "public" (a Kotlin keyword) → @SerializedName.

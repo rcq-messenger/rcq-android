@@ -251,6 +251,10 @@
     <string name="reissue_confirm_title">Re-issue keys?</string>
     <string name="reissue_confirm_body">Your old recovery phrase stops working and is replaced by a new one, so write the new one down. Your contacts will see a \"security code changed\" warning, and messages sent to you during the switch may not arrive. Your UIN stays the same.</string>
     <string name="reissue_done">Keys re-issued. Write down your new recovery phrase.</string>
+    <string name="reissue_pending">The phrase has not changed yet on: %1$s. Until it does, the old phrase still opens your copy there.</string>
+    <string name="reissue_retry">Finish on the remaining islands</string>
+    <string name="reissue_done_islands">Keys re-issued here and on %1$d other island(s). Write down your new recovery phrase.</string>
+    <string name="reissue_partial">Keys re-issued here, but not yet on: %1$s. The old phrase still opens the copy there. Try again from this screen.</string>
     <string name="reissue_failed">Couldn\'t re-issue keys. Check your connection and try again.</string>
     <string name="restore_title">Restore account</string>
     <string name="restore_hint">Enter your recovery phrase (24 words, or 48 for an older account) to restore your account on this device.</string>

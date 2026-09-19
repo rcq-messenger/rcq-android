@@ -1,0 +1,24 @@
+{
+  "description": "rcq-reissue-v1 proof vector (spec 2026-09-15, F3). bytes = UTF-8 lines joined by \\n, no trailing newline: prefix, host (lowercase, :port only when not 443), uin (decimal), old_sk, new_ik, new_sk (standard padded base64 of 32 bytes), ts (unix seconds), nonce (16 bytes base64url no padding). signature = Ed25519 by the OLD signing key over bytes, standard base64. Throwaway test keys only: every seed below is public.",
+  "version": 1,
+  "host": "api.rcq.app",
+  "host_spellings_same_binding": [
+    "API.RCQ.APP",
+    "api.rcq.app:443",
+    "api.rcq.app."
+  ],
+  "host_with_port_example": {
+    "input": "Island.Example:8443",
+    "canonical": "island.example:8443"
+  },
+  "uin": 123456,
+  "old_signing_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "old_signing_key": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "new_identity_key": "eaYx7t4b+cmPEgMs3q3Q56B5OY/HhriMyEbsia+FpRo=",
+  "new_signing_key": "Kay64UG8yvCyLhqU000LxzYeUm0L/hLIl5S8kyKWbdc=",
+  "ts": 1789430400,
+  "nonce": "yMnKy8zNzs_Q0dLT1NXW1w",
+  "bytes_text": "rcq-reissue-v1\napi.rcq.app\n123456\nA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=\neaYx7t4b+cmPEgMs3q3Q56B5OY/HhriMyEbsia+FpRo=\nKay64UG8yvCyLhqU000LxzYeUm0L/hLIl5S8kyKWbdc=\n1789430400\nyMnKy8zNzs_Q0dLT1NXW1w",
+  "bytes_hex": "7263712d726569737375652d76310a6170692e7263712e6170700a3132333435360a41364548762f504f454c3464634e3059353076416d57666b316a436270513166486479475a424a564d62673d0a65615978377434622b636d5045674d7333713351353642354f592f486872694d7945627369612b4670526f3d0a4b61793634554738797643794c6871553030304c787a5965556d304c2f684c496c3553386b794b576264633d0a313738393433303430300a794d6e4b79387a4e7a735f5130644c54314e58573177",
+  "signature": "NzIcioPy0CALqDu3U/thzF8TsWJ4zZK9XlQFuC1KeKA5VjB6OML+L4x+1ESf0VIECnJTHq5DS94vfXkYgl5LDA=="
+}

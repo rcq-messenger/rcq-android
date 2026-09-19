@@ -233,6 +233,10 @@
     <string name="reissue_confirm_title">重新签发密钥？</string>
     <string name="reissue_confirm_body">旧的恢复短语会失效，由一条新的取代，所以要把新的抄下来。你的联系人会看到“安全码已更改”的提示，切换期间发给你的消息可能收不到。你的 UIN 保持不变。</string>
     <string name="reissue_done">密钥已重新签发。请抄下新的恢复短语。</string>
+    <string name="reissue_pending">这些岛上的短语还没有更换：%1$s。在更换之前，那里的副本仍然能用旧短语打开。</string>
+    <string name="reissue_retry">在剩下的岛上完成</string>
+    <string name="reissue_done_islands">本岛以及另外 %1$d 座岛上的密钥都已重新签发。请抄下新的恢复短语。</string>
+    <string name="reissue_partial">本岛的密钥已重新签发，但这些岛还没有：%1$s。那里的副本仍然能用旧短语打开。请在此页面重试。</string>
     <string name="reissue_failed">无法重新签发密钥。检查网络后重试。</string>
     <string name="restore_title">恢复账号</string>
     <string name="restore_hint">输入恢复短语（24 个词，旧账号是 48 个），在这台设备上恢复你的账号。</string>

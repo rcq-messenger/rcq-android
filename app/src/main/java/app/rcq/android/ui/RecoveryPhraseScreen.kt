@@ -99,6 +99,9 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
         val scope = rememberCoroutineScope()
         var confirmReissue by remember { mutableStateOf(false) }
         var rotating by remember { mutableStateOf(false) }
+        // Islands a previous rotation could not reach. Read once per visit: it
+        // only changes through the button right below it.
+        var pending by remember { mutableStateOf(session.rotationPending()) }
         // Blurred until asked for, the way iOS and the web already do it. The
         // phrase is the whole account, and it was being painted the instant the
         // screen opened: a glance over a shoulder, a screen recording or a
@@ -157,11 +160,39 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
             Spacer(Modifier.height(4.dp))
             Text(stringResource(R.string.reissue_title), color = c.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text(stringResource(R.string.reissue_explain), color = c.textSecondary, fontSize = 12.sp)
-            CapsuleButton(
-                if (rotating) stringResource(R.string.reissue_working) else stringResource(R.string.reissue_cta),
-                enabled = !rotating,
-                modifier = Modifier.fillMaxWidth(),
-            ) { confirmReissue = true }
+            // ⚠ An island the last rotation could not reach still answers to
+            // the OLD phrase, so this cannot be left to a toast that scrolled
+            // away: it stays on the screen with a retry until it is finished.
+            if (pending.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.reissue_pending, pending.joinToString(", ")),
+                    color = c.textSecondary, fontSize = 12.sp,
+                )
+                CapsuleButton(
+                    if (rotating) stringResource(R.string.reissue_working) else stringResource(R.string.reissue_retry),
+                    enabled = !rotating,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    rotating = true
+                    scope.launch {
+                        runCatching { session.retryRotation() }
+                            .onSuccess { r ->
+                                pending = session.rotationPending()
+                                Toast.makeText(context, sayRotation(context, r), Toast.LENGTH_LONG).show()
+                            }
+                            .onFailure {
+                                Toast.makeText(context, context.getString(R.string.reissue_failed), Toast.LENGTH_LONG).show()
+                            }
+                        rotating = false
+                    }
+                }
+            } else {
+                CapsuleButton(
+                    if (rotating) stringResource(R.string.reissue_working) else stringResource(R.string.reissue_cta),
+                    enabled = !rotating,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { confirmReissue = true }
+            }
         }
 
         if (confirmReissue) {
@@ -174,10 +205,11 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
                         confirmReissue = false
                         rotating = true
                         scope.launch {
-                            runCatching { session.reissueKeys() }
-                                .onSuccess { newPhrase ->
-                                    phrase = newPhrase
-                                    Toast.makeText(context, context.getString(R.string.reissue_done), Toast.LENGTH_LONG).show()
+                            runCatching { session.rotateEverywhere() }
+                                .onSuccess { r ->
+                                    phrase = r.phrase
+                                    pending = session.rotationPending()
+                                    Toast.makeText(context, sayRotation(context, r), Toast.LENGTH_LONG).show()
                                 }
                                 .onFailure {
                                     Toast.makeText(context, context.getString(R.string.reissue_failed), Toast.LENGTH_LONG).show()
@@ -228,4 +260,17 @@ private fun PinGate(onVerified: () -> Unit) {
 private fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("recovery phrase", text))
+}
+
+/**
+ * What to say after a rotation.
+ *
+ * ⚠ Never "done" when an island was missed: the old phrase still opens the
+ * copy there, and a green tick over a half-finished rotation is the exact
+ * false promise report #986 is about.
+ */
+private fun sayRotation(context: android.content.Context, r: app.rcq.android.Session.Rotation): String = when {
+    r.failed.isEmpty() && r.done.isEmpty() -> context.getString(R.string.reissue_done)
+    r.failed.isEmpty() -> context.getString(R.string.reissue_done_islands, r.done.size)
+    else -> context.getString(R.string.reissue_partial, r.failed.joinToString(", ") { it.first })
 }

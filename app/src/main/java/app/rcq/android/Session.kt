@@ -6,6 +6,7 @@ import app.rcq.android.crypto.Envelope
 import app.rcq.android.crypto.IdentityKeys
 import app.rcq.android.crypto.MediaCrypto
 import app.rcq.android.crypto.MediaStream
+import app.rcq.android.crypto.ReissueProof
 import app.rcq.android.crypto.Reply
 import app.rcq.android.crypto.SealedSender
 import app.rcq.android.crypto.SenderKeyStore
@@ -21,6 +22,7 @@ import app.rcq.android.data.DecoyStore
 import app.rcq.android.data.LocalStores
 import app.rcq.android.data.ProfileKeyVault
 import app.rcq.android.data.MessageDb
+import app.rcq.android.data.PendingRotation
 import app.rcq.android.data.SecureStore
 import app.rcq.android.model.ChatMessage
 import app.rcq.android.model.Contact
@@ -41,6 +43,7 @@ import app.rcq.android.net.GuestCardStore
 import app.rcq.android.net.VisitedIslandsStore
 import app.rcq.android.net.GroupLogPage
 import app.rcq.android.net.Multihome
+import app.rcq.android.net.ReissueCascade
 import app.rcq.android.net.CrossIslandRequestsStore
 import app.rcq.android.net.CrossIslandGate
 import app.rcq.android.net.GuestCopies
@@ -1516,26 +1519,317 @@ class Session(context: Context) {
         return resp.uin
     }
 
+    /** What a rotation reached. [failed] is the islands whose copy still
+     *  answers to the OLD phrase, with the reason, so the screen can say which
+     *  ones and offer a retry rather than claiming a clean sweep. */
+    data class Rotation(
+        val phrase: List<String>,
+        val done: List<String>,
+        val failed: List<Pair<String, ReissueCascade.Outcome>>,
+    )
+
     /** Rotate the active account's long-term identity to a fresh seed/keypair
-     *  while KEEPING the same UIN. Derives new X25519 + Ed25519 keys from a new
-     *  recovery seed (so the recovery phrase changes), pushes the new public
-     *  keys to the server via /auth/reissue, persists them locally, and rebuilds
-     *  the libsignal bundle (new safety number → contacts get a "safety number
-     *  changed" warning on their next key sync). Returns the NEW 24-word phrase.
-     *  For users who fear key compromise or just want a fresh phrase.
-     *  Throws IllegalStateException("not_registered") with no active identity. */
-    suspend fun reissueKeys(): List<String> = withContext(Dispatchers.IO) {
+     *  while KEEPING the same UIN — on the home island AND on every island that
+     *  holds a copy of this identity (#986, spec 2026-09-15 F3).
+     *
+     *  ⚠⚠ THE OLD SIGNING KEY IS THE ONLY WAY INTO A COPY THAT WAS MISSED, so
+     *  it is written to the pending-rotation record BEFORE the first request
+     *  and destroyed only once every island is settled. A rotation that reached
+     *  the home island and lost the old key would leave every unreached copy
+     *  answering to the old phrase for ever, which is precisely the complaint
+     *  this fixes.
+     *
+     *  Derives new X25519 + Ed25519 keys from a new recovery seed (so the
+     *  phrase changes), pushes the new public keys, persists them locally, and
+     *  rebuilds the libsignal bundle (new safety number → contacts get a
+     *  "safety number changed" warning on their next key sync).
+     *  Throws IllegalStateException("not_registered") with no active identity,
+     *  or ("rotation_pending") when one is already half done. */
+    suspend fun rotateEverywhere(): Rotation = withContext(Dispatchers.IO) {
+        if (duressViewUp) throw IllegalStateException("duress")
+        if (store.hasPendingRotation) throw IllegalStateException("rotation_pending")
+        val meUin = store.uin ?: throw IllegalStateException("not_registered")
+        val homeHost = serverHost()
+        // ⚠ Read BEFORE the home call rewrites the store: after it,
+        // `signingPriv()` is the NEW key and no copy would accept a proof
+        // signed with it.
+        val oldSigningPriv = signingPriv()
+        val oldSigningPub = ed25519Pub(oldSigningPriv)
+        val oldIdentityPriv = store.identityPrivate
+        val targets = ReissueCascade.plan(
+            backups = runCatching { MultihomeStore.list(meUin).map { Triple(it.host, it.uin, it.jwt) } }.getOrElse { emptyList() },
+            visited = runCatching { VisitedIslandsStore.list().map { Triple(it.host, it.uin, it.jwt) } }.getOrElse { emptyList() },
+            ownHost = homeHost,
+            skipHost = { app.rcq.android.net.RelayConfigStore.isFrontHost(it) },
+        )
+        val seed = IdentityKeys.newSeed()
+        val identity = IdentityKeys.fromSeed(seed)
+        val startedAt = System.currentTimeMillis()
+        fun b64(b: ByteArray?): String = Base64.encodeToString(b ?: ByteArray(0), Base64.NO_WRAP)
+        // ⚠ commit(), before the wire. A record written after a reply that
+        // never came back is a rotation the island applied and this device
+        // cannot finish.
+        store.savePendingRotation(
+            PendingRotation(
+                id = java.util.UUID.randomUUID().toString(),
+                startedAt = startedAt,
+                deadlineAt = startedAt + 30L * 24 * 60 * 60 * 1000,
+                oldIdentityPriv = b64(oldIdentityPriv),
+                oldSigningPriv = b64(oldSigningPriv),
+                newSeed = b64(seed),
+                homeHost = homeHost,
+                homeUin = meUin,
+                phase = PendingRotation.Phase.PREPARED,
+                homeProof = null,
+                targets = targets.map {
+                    PendingRotation.Target(
+                        kind = if (it.backup) PendingRotation.Target.Kind.BACKUP else PendingRotation.Target.Kind.VISITED,
+                        host = it.host, uin = it.uin,
+                        status = PendingRotation.Target.Status.PENDING,
+                        reason = null, attempts = 0, lastTryAt = null, proof = null,
+                    )
+                },
+                retiredIdentityUntil = null,
+                sibling = false,
+            )
+        )
+        val phrase = try {
+            reissueHome(seed, identity)
+        } catch (e: Throwable) {
+            // Nothing on the home island changed, so nothing is stranded: drop
+            // the record rather than leaving a banner over a rotation that
+            // never started.
+            store.clearPendingRotation()
+            throw e
+        }
+        val results = targets.map { t ->
+            t.host to rotateCopyOn(t, oldSigningPriv, oldSigningPub, identity)
+        }
+        if (ReissueCascade.settled(results.map { it.second })) {
+            // Every copy is on the new key or gone: the old one has no use left
+            // and no reason to survive.
+            store.clearPendingRotation()
+        } else {
+            PendingRotation.decode(store.pendingRotationRaw)?.let { rec ->
+                val by = results.toMap()
+                store.savePendingRotation(
+                    rec.copy(
+                        phase = PendingRotation.Phase.HOME_DONE,
+                        targets = rec.targets.map { tg ->
+                            when (by[tg.host]) {
+                                ReissueCascade.Outcome.DONE, ReissueCascade.Outcome.GONE ->
+                                    tg.copy(status = PendingRotation.Target.Status.DONE, attempts = tg.attempts + 1, lastTryAt = System.currentTimeMillis())
+                                null -> tg
+                                else -> tg.copy(
+                                    status = PendingRotation.Target.Status.FAILED,
+                                    reason = by[tg.host]?.name?.lowercase(),
+                                    attempts = tg.attempts + 1,
+                                    lastTryAt = System.currentTimeMillis(),
+                                )
+                            }
+                        },
+                    )
+                )
+            }
+        }
+        Rotation(
+            phrase = phrase,
+            done = results.filter { it.second == ReissueCascade.Outcome.DONE || it.second == ReissueCascade.Outcome.GONE }.map { it.first },
+            failed = results.filter { it.second != ReissueCascade.Outcome.DONE && it.second != ReissueCascade.Outcome.GONE },
+        )
+    }
+
+    /** The islands a half-finished rotation has still not reached, newest
+     *  record first. Empty when nothing is pending, which is the normal state. */
+    fun rotationPending(): List<String> =
+        PendingRotation.decode(store.pendingRotationRaw)
+            ?.targets.orEmpty()
+            .filter { it.status != PendingRotation.Target.Status.DONE && it.status != PendingRotation.Target.Status.FORGOTTEN }
+            .map { it.host }
+
+    /**
+     * Try the islands a rotation could not reach, with the keys it saved.
+     *
+     * ⚠⚠ THE OLD KEY COMES OUT OF THE RECORD, not out of the store: the store
+     * holds the NEW key now, and a copy that never heard about the rotation
+     * only accepts a proof signed by the one it still has. This is the whole
+     * reason the record keeps it.
+     */
+    suspend fun retryRotation(): Rotation = withContext(Dispatchers.IO) {
+        if (duressViewUp) throw IllegalStateException("duress")
+        val rec = PendingRotation.decode(store.pendingRotationRaw)
+            ?: throw IllegalStateException("no_rotation")
+        val oldPriv = runCatching { Base64.decode(rec.oldSigningPriv ?: "", Base64.NO_WRAP) }.getOrNull()
+            ?.takeIf { it.size == 32 }
+            ?: throw IllegalStateException("old_key_gone")
+        val seed = runCatching { Base64.decode(rec.newSeed, Base64.NO_WRAP) }.getOrNull()
+            ?.takeIf { it.size == 32 }
+            ?: throw IllegalStateException("new_seed_gone")
+        val identity = IdentityKeys.fromSeed(seed)
+        val oldPub = ed25519Pub(oldPriv)
+        val left = rec.targets.filter {
+            it.status != PendingRotation.Target.Status.DONE && it.status != PendingRotation.Target.Status.FORGOTTEN
+        }
+        val results = left.map { tg ->
+            val target = ReissueCascade.Target(
+                host = tg.host, uin = tg.uin, token = null,
+                backup = tg.kind == PendingRotation.Target.Kind.BACKUP,
+            )
+            tg.host to rotateCopyOn(target, oldPriv, oldPub, identity)
+        }
+        val by = results.toMap()
+        val merged = rec.targets.map { tg ->
+            when (by[tg.host]) {
+                ReissueCascade.Outcome.DONE, ReissueCascade.Outcome.GONE ->
+                    tg.copy(status = PendingRotation.Target.Status.DONE, attempts = tg.attempts + 1, lastTryAt = System.currentTimeMillis())
+                null -> tg
+                else -> tg.copy(
+                    status = PendingRotation.Target.Status.FAILED,
+                    reason = by[tg.host]?.name?.lowercase(),
+                    attempts = tg.attempts + 1,
+                    lastTryAt = System.currentTimeMillis(),
+                )
+            }
+        }
+        if (merged.all { it.status == PendingRotation.Target.Status.DONE || it.status == PendingRotation.Target.Status.FORGOTTEN }) {
+            store.clearPendingRotation()
+        } else {
+            store.savePendingRotation(rec.copy(phase = PendingRotation.Phase.HOME_DONE, targets = merged))
+        }
+        Rotation(
+            phrase = app.rcq.android.crypto.RecoveryPhrase.encode(seed, appCtx),
+            done = results.filter { it.second == ReissueCascade.Outcome.DONE || it.second == ReissueCascade.Outcome.GONE }.map { it.first },
+            failed = results.filter { it.second != ReissueCascade.Outcome.DONE && it.second != ReissueCascade.Outcome.GONE },
+        )
+    }
+
+    /**
+     * One copy on one island, with the OLD signing key as the only credential
+     * that counts.
+     *
+     * ⚠ The proof names THIS island and THIS number: a proof made for the home
+     * island is refused here, by design, which is why the cascade signs one per
+     * target rather than reusing the home one.
+     */
+    private suspend fun rotateCopyOn(
+        target: ReissueCascade.Target,
+        oldSigningPriv: ByteArray,
+        oldSigningPub: ByteArray,
+        identity: app.rcq.android.crypto.GeneratedIdentity,
+    ): ReissueCascade.Outcome = withContext(Dispatchers.IO) {
+        val api = RcqApi("https://${target.host}", isPrimary = false)
+        var uinThere = target.uin
+        var token = target.token
+        if (token.isNullOrEmpty() || uinThere == null) {
+            // No usable token: prove the OLD key to get one. A null answer is
+            // the island saying there is no such account, which for a rotation
+            // is as good as done.
+            val rec = try {
+                Multihome.recoverOn(target.host, oldSigningPriv, oldSigningPub)
+            } catch (e: java.io.IOException) {
+                return@withContext ReissueCascade.classify(e.message)
+            } ?: return@withContext ReissueCascade.Outcome.GONE
+            token = rec.token
+            uinThere = rec.uin
+        }
+        api.setToken(token)
+        val ts = System.currentTimeMillis() / 1000
+        val nonce = ReissueProof.newNonce()
+        val sig = ReissueProof.sign(
+            oldSigningPriv,
+            ReissueProof.proofBytes(
+                host = target.host, uin = uinThere, oldSigningKey = oldSigningPub,
+                newIdentityKey = identity.identityPublic, newSigningKey = identity.signingPublic,
+                ts = ts, nonce = nonce,
+            ),
+        )
+        val out = try {
+            val resp = api.reissue(
+                RcqApi.ReissueRequest(
+                    identity_key = Base64.encodeToString(identity.identityPublic, Base64.NO_WRAP),
+                    signing_key = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP),
+                    proof_v = ReissueProof.VERSION,
+                    host = ReissueProof.canonicalHost(target.host),
+                    old_signing_key = ReissueProof.canonicalKey(oldSigningPub),
+                    ts = ts, nonce = nonce, signature = sig,
+                )
+            )
+            rememberCopyCreds(target, resp.uin, resp.token)
+            ReissueCascade.Outcome.DONE
+        } catch (e: java.io.IOException) {
+            ReissueCascade.classify(e.message)
+        }
+        if (out != ReissueCascade.Outcome.DIFFERENT_KEY) return@withContext out
+        // "Not the key I hold" is also what an island that ALREADY took the new
+        // key says — a retry whose reply was lost, or another device that got
+        // there first. Ask with the new key before calling it a failure.
+        val onNew = runCatching {
+            Multihome.recoverOn(target.host, identity.signingPrivate, identity.signingPublic)
+        }.getOrNull()
+        if (onNew != null) {
+            rememberCopyCreds(target, onNew.uin, onNew.token)
+            ReissueCascade.Outcome.DONE
+        } else {
+            ReissueCascade.Outcome.DIFFERENT_KEY
+        }
+    }
+
+    /** Keep the fresh token for a rotated copy in whichever store named it. */
+    private fun rememberCopyCreds(target: ReissueCascade.Target, uinThere: Int, token: String) {
+        val me = store.uin
+        runCatching { VisitedIslandsStore.updateCreds(target.host, uinThere, token) }
+        if (target.backup && me != null) {
+            runCatching { MultihomeStore.updateCreds(me, target.host, uinThere, token) }
+        }
+    }
+
+    /** The HOME half of a rotation: the island this account lives on. Returns
+     *  the NEW 24-word phrase. */
+    private suspend fun reissueHome(seed: ByteArray, identity: app.rcq.android.crypto.GeneratedIdentity): List<String> = withContext(Dispatchers.IO) {
         val uin = store.uin ?: throw IllegalStateException("not_registered")
         val nick = store.nickname ?: "user-$uin"
         val host = store.serverHost
-        val seed = IdentityKeys.newSeed()
-        val identity = IdentityKeys.fromSeed(seed)
-        // Push the new long-term public keys (the bearer token already authorises
-        // the change; UIN unchanged). Returns a fresh-but-equivalent token.
+        // ⚠ THE PROOF, NOT THE TOKEN, IS WHAT AUTHORISES THIS. A bearer token
+        // alone once rewrote an account's keys, so anybody holding a stolen one
+        // could rotate the row onto keys of their own and lock the owner out
+        // for good. The signature is by the OLD signing key over the exact
+        // change, bound to THIS island and THIS number (spec 2026-09-15, F3).
+        // Sent unconditionally: an island that does not know the proof ignores
+        // the extra fields, and one that requires it refuses a body without
+        // them.
+        val oldSigningPriv = signingPriv()
+        // ⚠ The island the proof names is the one this session actually talks
+        // to, which is `serverHost()` and not the nullable column: a proof made
+        // for "" is a proof no island accepts.
+        val proofHost = serverHost()
+        val proofTs = System.currentTimeMillis() / 1000
+        val proofNonce = ReissueProof.newNonce()
+        val proofSig = runCatching {
+            ReissueProof.sign(
+                oldSigningPriv,
+                ReissueProof.proofBytes(
+                    host = proofHost,
+                    uin = uin,
+                    oldSigningKey = ed25519Pub(oldSigningPriv),
+                    newIdentityKey = identity.identityPublic,
+                    newSigningKey = identity.signingPublic,
+                    ts = proofTs,
+                    nonce = proofNonce,
+                ),
+            )
+        }.getOrNull()
+        // Push the new long-term public keys (UIN unchanged). Returns a
+        // fresh-but-equivalent token.
         val resp = api.reissue(
             RcqApi.ReissueRequest(
                 identity_key = Base64.encodeToString(identity.identityPublic, Base64.NO_WRAP),
                 signing_key = Base64.encodeToString(identity.signingPublic, Base64.NO_WRAP),
+                proof_v = proofSig?.let { ReissueProof.VERSION },
+                host = proofSig?.let { ReissueProof.canonicalHost(proofHost) },
+                old_signing_key = proofSig?.let { ReissueProof.canonicalKey(ed25519Pub(oldSigningPriv)) },
+                ts = proofSig?.let { proofTs },
+                nonce = proofSig?.let { proofNonce },
+                signature = proofSig,
             )
         )
         // Persist the new identity + seed under the active account (same UIN /
