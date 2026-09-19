@@ -35,7 +35,8 @@ Permissive:
 
 Bundled non-code assets:
 
-  - KOLOBOK emoticon set — app/src/main/assets/emoticons/ (60 GIFs) — the
+  - KOLOBOK emoticon set — app/src/main/assets/emoticons/ (258 GIFs; 259 on
+    iOS, which carries one extra) — the
     mid-2000s community "smiles" set, redistributed by its authors under a
     non-commercial / attribution-respected grant stated on the original site.
     The same files ship on iOS; see that repository's NOTICE for the identical
