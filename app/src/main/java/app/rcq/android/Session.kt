@@ -1859,6 +1859,13 @@ class Session(context: Context) {
         // Old sessions/cache referenced the previous identity — drop them.
         peerIdentityCache.clear()
         peerDeviceCache.clear()
+        // ⚠ THE SOCKET IS STILL HOLDING THE OLD TOKEN. Without this the app sat
+        // offline after a rotation until somebody killed and reopened it: the
+        // dot stayed amber, the island's `last_seen` stopped moving, and
+        // nothing said why. Not `start()` either — that returns at once on an
+        // already-started session, so a disconnect followed by it is a socket
+        // that never comes back.
+        socket.retoken(resp.token)
         app.rcq.android.crypto.RecoveryPhrase.encode(seed, appCtx)
     }
 

@@ -222,6 +222,20 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         reconnectNow()
     }
 
+    /** A new bearer for the SAME account on a live socket.
+     *
+     *  ⚠ The token is captured at [connect] time, so a rotation that mints a
+     *  fresh one leaves this dialling with the old one for ever: the island
+     *  answers 401, the dot sits on "connecting", and nothing in the app says
+     *  why. Seen after a key re-issue, which is exactly when a token changes
+     *  under a running session.
+     */
+    fun retoken(token: String) {
+        if (!shouldStayConnected) return
+        this.token = token
+        reconnectNow()
+    }
+
     /** Tear down the current socket and dial again right away. Used when the
      *  network path changed (VPN dropped/joined, Wi-Fi ↔ cellular): the old
      *  socket is bound to the vanished route and OkHttp's protocol ping takes
