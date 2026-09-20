@@ -569,7 +569,35 @@ private fun SettingsRoot(
     var bugError by remember { mutableStateOf<String?>(null) }
     // Bug-report attachments (#28): picked photo/video URIs (max 3), shown as
     // thumbnails; sealed + uploaded only on send.
-    var bugAttachments by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    //
+    // ⚠⚠ SAVED, like the text beside them. They used to be a plain `remember`,
+    // reasoned as "the grants do not survive the process anyway" — true, and
+    // the wrong half of the problem. Leaving the sheet for any other settings
+    // page drops this composable while the grants are perfectly alive, so a
+    // person who attached a screenshot, went to look at "my reports" and came
+    // back sent the text with nothing attached and no sign that anything was
+    // lost. That is how #1033 arrived: a screenshot report with no screenshot,
+    // filed by somebody who had attached one (#1035).
+    var bugAttachments by rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.listSaver<List<android.net.Uri>, String>(
+            save = { it.map(android.net.Uri::toString) },
+            restore = { it.map(android.net.Uri::parse) },
+        ),
+    ) { mutableStateOf<List<android.net.Uri>>(emptyList()) }
+    // The other half of the old reasoning, kept honest: a grant CAN be dead
+    // after the process was killed, and a row that cannot be read would go out
+    // as a silent nothing at send time. Checked once, here, so the sheet shows
+    // what it will actually send.
+    LaunchedEffect(Unit) {
+        if (bugAttachments.isNotEmpty()) {
+            val live = withContext(Dispatchers.IO) {
+                bugAttachments.filter { u ->
+                    runCatching { context.contentResolver.openInputStream(u)?.use { true } }.getOrNull() == true
+                }
+            }
+            if (live.size != bugAttachments.size) bugAttachments = live
+        }
+    }
     val bugPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null && bugAttachments.size < 3) bugAttachments = bugAttachments + uri
     }
@@ -4716,8 +4744,26 @@ private fun ResidentInvitesRow(
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var quota by remember(session.uin) { mutableStateOf<app.rcq.android.net.RcqApi.ResidentInvites?>(null) }
-    LaunchedEffect(session.uin, tick) { quota = session.residentInvites() }
+    // ⚠ Seeded from the last answer, not from null: the row used to exist only
+    // after `/invites` came back, so Settings drew itself, the person started
+    // reading, and the list jumped as "Access codes" appeared between two rows
+    // (#1033). The cached numbers are replaced by the fresh ones a moment
+    // later; being one refresh stale is invisible, a jumping list is not.
+    val gson = remember { com.google.gson.Gson() }
+    var quota by remember(session.uin) {
+        mutableStateOf(
+            runCatching {
+                app.rcq.android.data.LocalStores.cachedInvitesJson()
+                    ?.let { gson.fromJson(it, app.rcq.android.net.RcqApi.ResidentInvites::class.java) }
+            }.getOrNull()
+        )
+    }
+    LaunchedEffect(session.uin, tick) {
+        session.residentInvites()?.let { fresh ->
+            quota = fresh
+            runCatching { app.rcq.android.data.LocalStores.setCachedInvitesJson(gson.toJson(fresh)) }
+        }
+    }
     val q = quota ?: return
     if (!q.enabled || !q.eligible) return
 

@@ -393,8 +393,8 @@
     <string name="sites_key_changed_accept">Trust the new key</string>
     <string name="stealth_shield_turn_off">Turn relays off</string>
     <string name="home_menu_bypass_title">RCQ relays</string>
-    <string name="home_menu_bypass_enable">Route the app through RCQ relays</string>
-    <string name="home_menu_bypass_disable">Stop routing through RCQ relays</string>
+    <string name="home_menu_bypass_enable">Route the app through them</string>
+    <string name="home_menu_bypass_disable">Stop routing through them</string>
 
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
     <string name="radio_title">Radio</string>

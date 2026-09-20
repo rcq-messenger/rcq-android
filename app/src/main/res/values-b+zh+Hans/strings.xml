@@ -374,8 +374,8 @@
     <string name="sites_key_changed_accept">Trust the new key</string>
     <string name="stealth_shield_turn_off">关闭中继</string>
     <string name="home_menu_bypass_title">RCQ 中继</string>
-    <string name="home_menu_bypass_enable">让应用走 RCQ 中继</string>
-    <string name="home_menu_bypass_disable">不再走 RCQ 中继</string>
+    <string name="home_menu_bypass_enable">让应用走中继</string>
+    <string name="home_menu_bypass_disable">不再走中继</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
     <string name="radio_title">电台</string>
     <string name="radio_on_air">广播身份</string>

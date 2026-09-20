@@ -1510,6 +1510,19 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_CONTACTS_CACHE), json).apply()
     }
 
+    // ── access codes cache (the invites row in Settings) ─────────────
+    // The row is drawn from `/invites`, and until it answered there was no row
+    // at all: the person opened Settings, read the list, and a moment later it
+    // jumped as "Access codes" appeared between two rows they were looking at
+    // (#1033, and #1026 before it for the island block). Per account, because
+    // an allowance belongs to one.
+    fun cachedInvitesJson(): String? =
+        if (::prefs.isInitialized && acct != null) prefs.getString(pk(K_INVITES_CACHE), null) else null
+
+    fun setCachedInvitesJson(json: String) {
+        if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_INVITES_CACHE), json).apply()
+    }
+
     // ── island description cache (the "this island" block) ───────────
     // `/server/info` was held in a map that lives and dies with the process,
     // so the FIRST visit to Settings after every launch drew the island block
@@ -1689,7 +1702,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
             // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
             // the profile key of every contact, stored BY NUMBER, so leaving it
             // behind keeps a plaintext roster of the burned identity plus the
@@ -1768,6 +1781,7 @@ object LocalStores {
     private const val K_SECURE_PEER = "secure_threads_peer"
     private const val K_SECTION_FLAGS = "section_flags"
     private const val K_PRIVACY_CACHE = "privacy_cache"
+    private const val K_INVITES_CACHE = "invites_cache"
     private const val K_CONTACTS_CACHE = "contacts_cache"
     private const val K_GROUPS_CACHE = "groups_cache"
     private const val K_VAULT_CONTACTS_VERSION = "vault_contacts_version"

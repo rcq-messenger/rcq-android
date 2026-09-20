@@ -374,8 +374,8 @@
     <string name="sites_key_changed_accept">Trust the new key</string>
     <string name="stealth_shield_turn_off">Вимкнути релеї</string>
     <string name="home_menu_bypass_title">Релеї RCQ</string>
-    <string name="home_menu_bypass_enable">Пускати застосунок через релеї RCQ</string>
-    <string name="home_menu_bypass_disable">Не пускати через релеї RCQ</string>
+    <string name="home_menu_bypass_enable">Пускати застосунок через релеї</string>
+    <string name="home_menu_bypass_disable">Не пускати через релеї</string>
     <!-- Radio (offline BLE + Wi-Fi Direct) -->
     <string name="radio_title">Рація</string>
     <string name="radio_on_air">В ефірі як</string>
