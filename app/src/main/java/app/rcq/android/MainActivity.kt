@@ -1790,7 +1790,9 @@ private fun Failed(
             CapsuleButton(
                 stringResource(R.string.boot_connect_retry),
                 enabled = invite.isNotBlank(),
-                onClick = { onRetryWithInvite(invite.trim()) },
+                // ⚠ The sheet that GIVES somebody this code copies a link, and
+                // this field asks for a code: it takes either (#1034).
+                onClick = { app.rcq.android.data.InviteCode.of(invite)?.let(onRetryWithInvite) },
             )
         } else {
             CapsuleButton(stringResource(R.string.boot_connect_retry), onClick = onRetry)

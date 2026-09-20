@@ -81,7 +81,10 @@ class ReissueCascadeTest {
         assertEquals(ReissueCascade.Outcome.DONE, ReissueCascade.classify(200, null))
         assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(404, "user_not_found"))
         assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(404, "identity_not_found"))
-        assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(404, null))
+        // ⚠ A bare 404 is somebody else's answer, not the island's: a front, a
+        // CDN, a route not up yet. Reading it as "gone" would settle that
+        // island and let the old key die while the copy still holds it.
+        assertEquals(ReissueCascade.Outcome.UNREACHABLE, ReissueCascade.classify(404, null))
         assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(409, "reissue_old_key_mismatch"))
         assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(409, "reissue_replayed"))
         assertEquals(ReissueCascade.Outcome.DIFFERENT_KEY, ReissueCascade.classify(403, "reissue_bad_signature"))
@@ -153,6 +156,9 @@ class ReissueCascadeTest {
     fun aCopyThatIsGoneIsReadOffTheBodyNotTheStatusAlone() {
         val m = """HTTP 404: {"detail":{"code":"identity_not_found"}}"""
         assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.classify(m))
+        // The same status without the island's own word settles nothing.
+        assertEquals(ReissueCascade.Outcome.UNREACHABLE,
+            ReissueCascade.classify("HTTP 404: <html>Not Found</html>"))
     }
 
     @Test
@@ -162,6 +168,12 @@ class ReissueCascadeTest {
         // island says once it has taken the new one.
         assertEquals(ReissueCascade.Outcome.DONE, ReissueCascade.afterOldKeyMissing(newKeyOpens = true))
         assertEquals(ReissueCascade.Outcome.GONE, ReissueCascade.afterOldKeyMissing(newKeyOpens = false))
+        // ⚠ And an island that never answered has claimed nothing: reading its
+        // silence as "gone" would settle it and let the old key die.
+        assertEquals(ReissueCascade.Outcome.UNREACHABLE,
+            ReissueCascade.afterOldKeyMissing(newKeyOpens = false, islandAnswered = false))
+        assertEquals(ReissueCascade.Outcome.DONE,
+            ReissueCascade.afterOldKeyMissing(newKeyOpens = true, islandAnswered = false))
     }
 
     @Test

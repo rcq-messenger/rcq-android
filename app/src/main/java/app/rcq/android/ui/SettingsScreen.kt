@@ -4789,6 +4789,27 @@ private fun ResidentInvitesRow(
                         Icon(Icons.Filled.ContentCopy, null, tint = c.accent, modifier = Modifier.size(16.dp))
                         Text(stringResource(R.string.invites_copy), color = c.accent, fontSize = 14.sp)
                     }
+                    // ⚠ THE CODE ON ITS OWN, because the other end asks for a
+                    // code. Handing out only the link is what put the first
+                    // person a paying resident invited in front of "already
+                    // used, expired, or meant for another island" (#1034). The
+                    // join fields take the link now too, but somebody reading
+                    // a label that says "access code" should be able to copy
+                    // exactly that.
+                    app.rcq.android.data.InviteCode.of(link)?.takeIf { it != link }?.let { bare ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("RCQ access code", bare))
+                                Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                            }.padding(vertical = 6.dp, horizontal = 4.dp),
+                        ) {
+                            Icon(Icons.Filled.ContentCopy, null, tint = c.textSecondary, modifier = Modifier.size(16.dp))
+                            Text(stringResource(R.string.invites_copy_code), color = c.textSecondary, fontSize = 14.sp)
+                        }
+                    }
                     Text(stringResource(R.string.invites_once), color = c.textSecondary, fontSize = 11.sp)
                 }
                 if (q.remaining > 0) {

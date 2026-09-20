@@ -1434,6 +1434,7 @@
     <string name="invites_mint">Створити код доступу</string>
     <string name="invites_minting">Створюємо…</string>
     <string name="invites_copy">Скопіювати посилання</string>
+    <string name="invites_copy_code">Скопіювати тільки код</string>
     <string name="invites_once">Показується один раз. Острів копії не зберігає: закриєте, не скопіювавши, і код доступу витрачено намарно.</string>
     <string name="invites_failed">Острів не видав код доступу.</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->

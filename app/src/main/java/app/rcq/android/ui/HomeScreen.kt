@@ -3280,7 +3280,9 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
                     stringResource(R.string.add_account_create),
                     enabled = invite.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
-                ) { onAdd(pendingClosed, invite) }
+                    // ⚠ The field says "access code" and the app hands out a
+                    // LINK, so both have to be taken here (#1034).
+                ) { onAdd(pendingClosed, app.rcq.android.data.InviteCode.of(invite)) }
                 // Two ways back, because they are two different intentions:
                 // pick a different island, or leave altogether. Neither of them
                 // existed on the iOS sheet this replaces (founder, item 1).
@@ -3436,11 +3438,11 @@ private fun AddAccountDialog(onAdd: (String?, String?) -> Unit, onRestore: () ->
                             if (res is app.rcq.android.net.RedeemResult.BadToken) {
                                 err = ctx.getString(R.string.access_token_bad)
                             } else {
-                                onAdd(h, invite.ifBlank { null })
+                                onAdd(h, app.rcq.android.data.InviteCode.of(invite))
                             }
                         }
                     } else {
-                        onAdd(h, invite.ifBlank { null })
+                        onAdd(h, app.rcq.android.data.InviteCode.of(invite))
                     }
                 }) {
                     Text(stringResource(R.string.add_account_create), color = c.accent)

@@ -1482,6 +1482,7 @@
     <string name="invites_mint">Create an access code</string>
     <string name="invites_minting">Creating…</string>
     <string name="invites_copy">Copy the link</string>
+    <string name="invites_copy_code">Copy the code alone</string>
     <string name="invites_once">Shown once. The island keeps no copy of it: close this without copying and the access code is spent on nothing.</string>
     <string name="invites_failed">The island did not give out an access code.</string>
     <!-- Residency on an existing account, and the smaller drip for accounts

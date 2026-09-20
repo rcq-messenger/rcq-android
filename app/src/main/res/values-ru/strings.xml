@@ -1477,6 +1477,7 @@
     <string name="invites_mint">Создать код доступа</string>
     <string name="invites_minting">Создаём…</string>
     <string name="invites_copy">Скопировать ссылку</string>
+    <string name="invites_copy_code">Скопировать только код</string>
     <string name="invites_once">Показывается один раз. Остров копию не хранит: закроете, не скопировав, и код доступа потрачен впустую.</string>
     <string name="invites_failed">Остров не выдал код доступа.</string>
     <!-- Residency on an existing account, and the smaller drip for accounts

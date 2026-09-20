@@ -1428,6 +1428,7 @@
     <string name="invites_mint">创建访问代码</string>
     <string name="invites_minting">正在创建…</string>
     <string name="invites_copy">复制链接</string>
+    <string name="invites_copy_code">只复制代码</string>
     <string name="invites_once">只显示一次。岛屿不保留副本：不复制就关闭，这个访问代码就白白用掉了。</string>
     <string name="invites_failed">岛屿没有发出访问代码。</string>
     <!-- #901: the pace of a document coming down, "2.4 MB/s"; %s is the size already formatted. -->
