@@ -1072,6 +1072,10 @@ private fun RcqApp(session: Session) {
                     onOpenProfile = { showProfile = true },
                     onOpenPeerInfo = { peerInfoUin = it; peerInfoHost = null },
                     onOpenPeerInfoHere = { peerInfoUin = it; peerInfoHost = session.currentServer },
+                    // `uin@host` from the Add sheet: their card lives on THEIR
+                    // island, and the screen renders it from the open card
+                    // rather than from our roster (#1032).
+                    onOpenPeerInfoAt = { u, h -> peerInfoUin = u; peerInfoHost = h },
                     onOpenNews = { showNews = true },
                     onOpenOutgoing = { showOutgoing = true },
                     onOpenSaved = { session.uin?.let { chatTarget = ChatTarget.Peer(it) } },

@@ -263,6 +263,10 @@ internal fun HomeScreen(
     // nothing else, so it must not resolve to a same-numbered contact from
     // somewhere else — the whole of report #433.
     onOpenPeerInfoHere: (Int) -> Unit = {},
+    // Same again, pinned to a NAMED island: `uin@host` on somebody else's
+    // island. Their card lives there, so the screen has to be told where to
+    // ask rather than deduce it from a roster row that does not exist yet.
+    onOpenPeerInfoAt: (Int, String) -> Unit = { _, _ -> },
     onOpenNews: () -> Unit = {},
     onOpenOutgoing: () -> Unit = {},
     onOpenSaved: () -> Unit = {},
@@ -1327,6 +1331,7 @@ internal fun HomeScreen(
             // or send the request from the profile.
             onOpenProfile = { u -> onOpenPeerInfo(u) },
             onOpenProfileHere = { u -> onOpenPeerInfoHere(u) },
+            onOpenProfileAt = { u, h -> onOpenPeerInfoAt(u, h) },
             onOpenGroup = { g -> AddSheet.close(); onOpenGroup(g) },
             onDismiss = { AddSheet.close() },
         )
@@ -2637,6 +2642,10 @@ private fun AddContactDialog(
     onOpenChat: (Int) -> Unit,
     onOpenProfile: (Int) -> Unit,
     onOpenProfileHere: (Int) -> Unit,
+    /** Somebody on ANOTHER island, by address. Opens their card the way a
+     *  same-island hit opens a profile, so the decision to add is taken there
+     *  and not on a tap in a result list (#1032). */
+    onOpenProfileAt: (Int, String) -> Unit,
     onOpenGroup: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -2938,9 +2947,10 @@ private fun AddContactDialog(
                             }
                         }
                         // Federation (F2): an explicit `uin@host` whose host is NOT
-                        // our OWN island → add it as a cross-island contact. Compared
-                        // to our own island, not the flagship: a self-hoster on is2
-                        // adding `911@api.rcq.app` must see the flagship as cross-island.
+                        // our OWN island → open their card, where a cross-island
+                        // contact can be added. Compared to our own island, not the
+                        // flagship: a self-hoster on is2 adding `911@api.rcq.app`
+                        // must see the flagship as cross-island.
                         val ci = remember(query) {
                             query.trim().takeIf { it.contains("@") }
                                 ?.let { runCatching { RcqFederation.parseAddress(it) }.getOrNull() }
@@ -2979,26 +2989,25 @@ private fun AddContactDialog(
                                         // one roster: the conversation store still
                                         // keys a thread by the bare number, so the
                                         // two would share one history. Say so
-                                        // instead of adding.
+                                        // instead of opening a card that offers to
+                                        // add them.
                                         if (session.clashesWithKnownNumber(ci.uin, ci.host)) {
                                             android.widget.Toast.makeText(context, context.getString(R.string.add_ci_number_clash, ci.uin), android.widget.Toast.LENGTH_LONG).show()
                                             return@launch
                                         }
-                                        // §5f: adding `uin@host` deposits a contact
-                                        // request to their island. Open the chat
-                                        // either way (the row is ours), but do not
-                                        // stay silent when the request never left.
-                                        when (session.addCrossIslandContactDetailed(ci.uin, ci.host)) {
-                                            Session.CiAdd.SENT -> onOpenChat(ci.uin)
-                                            Session.CiAdd.ADDED_ONLY -> {
-                                                android.widget.Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), android.widget.Toast.LENGTH_LONG).show()
-                                                onOpenChat(ci.uin)
-                                            }
-                                            Session.CiAdd.CLOSED_ISLAND ->
-                                                android.widget.Toast.makeText(context, context.getString(R.string.ci_closed_island), android.widget.Toast.LENGTH_LONG).show()
-                                            Session.CiAdd.FAILED ->
-                                                android.widget.Toast.makeText(context, context.getString(R.string.ci_request_failed), android.widget.Toast.LENGTH_LONG).show()
-                                        }
+                                        // ⚠ OPEN THE CARD, do not add. The tap used
+                                        // to deposit the §5f request and put them
+                                        // in the contact list on the spot, so you
+                                        // found somebody on another island and they
+                                        // were your contact before you had read a
+                                        // word about them (#1032). Every other row
+                                        // in this list already works the other way:
+                                        // a same-island hit opens the profile, and
+                                        // a group hit stopped joining on the tap in
+                                        // #589. The card has the add button, the
+                                        // name, the status and the address, which
+                                        // is what "is this the right person" needs.
+                                        onOpenProfileAt(ci.uin, ci.host)
                                     }
                                 }
                             }
