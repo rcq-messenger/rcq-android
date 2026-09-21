@@ -1102,6 +1102,37 @@ object Push {
         }
     }
 
+    /**
+     * Tell ONE account's island to stop waking this device.
+     *
+     * ⚠⚠ THE ONE CALL NOBODY WAS MAKING. A push row is (account, token), and
+     * the token is this installation's. Registering iterates every local
+     * account, so a phone that has carried three accounts has three rows
+     * pointing at it — and when an account LEAVES the phone, it leaves
+     * `AccountManager.accounts` and every sweep that walks that list, so
+     * nothing ever removes its row. The island goes on waking the device for
+     * that account's groups, and the person cannot stop it from their own
+     * account, because it is not their account doing it. Reinstalling does not
+     * help either: the row is on the server, filed under a number they no
+     * longer hold. Report #1037, open for months; measured on the flagship the
+     * same day: 52 such rows across 43 accounts, all of them in groups.
+     *
+     * ⚠ Called with the account's OWN credentials, which means BEFORE its
+     * SecureStore is wiped. Reads them synchronously for that reason and only
+     * then goes to the network.
+     */
+    fun deregisterAccount(ctx: Context, accountId: String) {
+        val endpoint = savedEndpoint(ctx) ?: return
+        val store = SecureStore(ctx, accountId)
+        val token = store.token ?: return
+        val host = store.serverHost ?: RcqApi.DEFAULT_HOST
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                RcqApi("https://$host").apply { setToken(token) }.deletePushToken(endpoint)
+            }
+        }
+    }
+
     /** DELETE [endpoint] from every local account's island — used when the user
      *  resets or switches the push provider so the server stops trying to wake a
      *  now-dead endpoint. Fire-and-forget, headless-safe. */

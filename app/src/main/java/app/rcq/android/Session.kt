@@ -3858,6 +3858,7 @@ class Session(context: Context) {
         // mark it so the plaintext-migration probe never opens it keyless.
         SecureStore.setMsgDbMigrated(appCtx, shellId)
         AccountManager.accounts.value.forEach { acc ->
+            runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, acc.id) }
             runCatching {
                 SecureStore.wipeAccount(appCtx, acc.id)
                 MessageDb.wipeAccount(appCtx, acc.id)
@@ -3973,6 +3974,7 @@ class Session(context: Context) {
         everConnected = false
         if (::db.isInitialized) runCatching { db.close() }
         AccountManager.accounts.value.forEach { acc ->
+            runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, acc.id) }
             runCatching {
                 SecureStore.wipeAccount(appCtx, acc.id)
                 MessageDb.wipeAccount(appCtx, acc.id)
@@ -7149,6 +7151,11 @@ class Session(context: Context) {
 
     /** Phase W for a same-key roster account that is not the active one. */
     private fun wipeSiblingLocally(accountId: String, uin: Int?) {
+        // ⚠ BEFORE the store is wiped: the island only takes this off its own
+        // account's authority, and after the wipe there is nothing to
+        // authenticate with. A row left behind keeps waking this phone for an
+        // account that is no longer on it (#1037).
+        runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, accountId) }
         runCatching {
             SecureStore.wipeAccount(appCtx, accountId)
             MessageDb.wipeAccount(appCtx, accountId)
@@ -7201,6 +7208,12 @@ class Session(context: Context) {
         // `burnedId` afterwards.
         val burnedUin = store.uin
         if (burnedId != null) {
+            // ⚠ Before the wipe, for the same reason as wipeSiblingLocally: a
+            // burned account's push row would otherwise go on waking this
+            // phone for its groups for ever (#1037). The island has already
+            // been asked to delete the account; this is the row that belongs to
+            // THIS device and is not covered by that.
+            runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, burnedId) }
             SecureStore.wipeAccount(appCtx, burnedId)
             MessageDb.wipeAccount(appCtx, burnedId)
             SignalStoreDb.wipeAccount(appCtx, burnedId)
