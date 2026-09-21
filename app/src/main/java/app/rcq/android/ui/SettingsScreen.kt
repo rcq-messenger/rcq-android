@@ -48,6 +48,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.ChevronRight
@@ -2827,6 +2828,24 @@ private fun SoundsScreen(onBack: () -> Unit) {
     // a slider that claims to set the notification's volume and does not is the
     // report we are answering.
     val volumeCoversShade by LocalStores.soundVolumeForShade.collectAsState()
+    var askResetChannel by remember { mutableStateOf(false) }
+    if (askResetChannel) {
+        RcqAskSheet(
+            onDismiss = { askResetChannel = false },
+            title = stringResource(R.string.snd_reset_confirm_title),
+            body = stringResource(R.string.snd_reset_confirm_body),
+            actions = listOf(
+                SheetAction(stringResource(R.string.snd_reset_confirm_action), destructive = true) {
+                    askResetChannel = false
+                    app.rcq.android.push.Push.resetMessageChannel(context)
+                    android.widget.Toast.makeText(
+                        context, context.getString(R.string.snd_reset_done),
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                },
+            ),
+        )
+    }
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_sounds), onBack)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2930,6 +2949,16 @@ private fun SoundsScreen(onBack: () -> Unit) {
                 SettingsRow(Icons.Filled.Notifications, stringResource(R.string.snd_system_channel)) {
                     app.rcq.android.push.Push.openMessageChannelSettings(context)
                 }
+                // ⚠ The way back from the screen above. Android hands a
+                // notification's sound to the person the moment the channel
+                // exists, and RCQ's tone is a resource uri the system's picker
+                // does not list — so one tap in there and "О-оу" is gone with
+                // no way to choose it again (#1036). Recreating under a new id
+                // is the only remedy the platform offers.
+                SettingsRow(
+                    Icons.Filled.Refresh,
+                    stringResource(R.string.snd_reset_title),
+                ) { askResetChannel = true }
             }
             SectionFooter(stringResource(R.string.snd_footer))
         }

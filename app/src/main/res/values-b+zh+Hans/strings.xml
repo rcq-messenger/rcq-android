@@ -740,7 +740,13 @@
     <string name="snd_presence_favorites">收藏</string>
     <string name="snd_presence_off">关闭</string>
     <string name="snd_system_channel">Android 通知设置</string>
-    <string name="snd_footer">应用打开时播放自己的提示音；应用在后台时，同一个提示音以系统通知的形式到达，这一个也由 RCQ 播放，所以滑块同时管得到两者。手机的通知音量是上限，用音量键调整。两者都在静音和振动模式下、以及通话过程中保持安静。在勿扰模式下也同样安静，即使你为该通知设置了例外：勿扰只放行 Android 自己的声音，而 RCQ 无法读取你的勿扰规则，判断消息本来是否会被放行。提示音到底是不是我们的，由上面的 Android 设置决定：给该通知设置自己的声音、选择“无”或把它设为静音，提示音就交回 Android，滑块之后只管应用打开时。在那里于本版本之前选过的自定义声音或锁屏设置也一样，而且是永久的，因为 RCQ 无法把它们复制到自己的渠道上。勿扰例外或被关掉的渠道同样如此，直到你撤销为止；撤销之后，RCQ 会在下次启动时接回提示音。单个聊天的静音（在主屏幕长按聊天）会同时关掉两者。</string>
+    <string name="snd_reset_title">重置 RCQ 的通知设置</string>
+    <string name="snd_reset_desc">把消息通知恢复成 RCQ 出厂的样子，包括提示音</string>
+    <string name="snd_reset_confirm_title">重置通知？</string>
+    <string name="snd_reset_confirm_body">通知渠道一经创建，提示音就归你掌管，而 RCQ 自己的提示音并不在系统的铃声列表里，所以除此之外没有别的办法：通知会被重新创建。\n\n你在它上面设置的一切都会一并重置，不只是声音：静音与「弹出显示」、震动、角标圆点、锁屏显示、「勿扰」例外，以及你曾经的屏蔽。通知栏里已有的消息提醒会消失一次。</string>
+    <string name="snd_reset_confirm_action">重置</string>
+    <string name="snd_reset_done">已完成。通知恢复为 RCQ 的设置。</string>
+    <string name="snd_footer">应用打开时播放自己的提示音；应用在后台时，同一个提示音以系统通知的形式到达，这一个也由 RCQ 播放，所以滑块同时管得到两者。手机的通知音量是上限，用音量键调整。两者都在静音和振动模式下、以及通话过程中保持安静。在勿扰模式下也同样安静，即使你为该通知设置了例外：勿扰只放行 Android 自己的声音，而 RCQ 无法读取你的勿扰规则，判断消息本来是否会被放行。提示音到底是不是我们的，由上面的 Android 设置决定：给该通知设置自己的声音、选择“无”或把它设为静音，提示音就交回 Android，滑块之后只管应用打开时。在那里于本版本之前选过的自定义声音或锁屏设置也一样，因为 RCQ 无法把它们复制到自己的渠道上；不过上面的重置按钮可以撤销。勿扰例外或被关掉的渠道同样如此，直到你撤销为止；撤销之后，RCQ 会在下次启动时接回提示音。单个聊天的静音（在主屏幕长按聊天）会同时关掉两者。</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">翻译会逐步推出。未翻译的文字会回退到英文。</string>
     <string name="notif_push">推送通知</string>

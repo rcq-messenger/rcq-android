@@ -197,6 +197,31 @@ object Push {
      *  push, relaunched, it is on again" report. */
     private const val K_USER_DISABLED = "user_disabled"
 
+    /** How many times the person has asked for the message channel to be put
+     *  back the way RCQ ships it.
+     *
+     *  ⚠⚠ THE ONLY WAY BACK. Android hands a channel's sound to the person the
+     *  moment the channel exists, and RCQ's own tone is an
+     *  `android.resource://app.rcq.android/...` uri that the system's sound
+     *  picker does not list: once somebody picks anything else, "О-оу" is not
+     *  among the choices any more, and `setSound` on a live channel is ignored.
+     *  Recreating under the SAME id does not help either — the platform keeps a
+     *  deleted channel with all its fields and resurrects it (visible in
+     *  /data/system/notification_policy.xml, where this install's retired
+     *  `rcq_messages_v2` still sits with its old sound). A NEW id is the whole
+     *  remedy, so the id carries a generation (#1036). */
+    private const val K_CHANNEL_GEN = "message_channel_gen"
+
+    private fun channelGen(ctx: Context): Int = prefs(ctx).getInt(K_CHANNEL_GEN, 0)
+
+    /** The message channel id for this install's generation. Generation 0 is
+     *  plain [CHANNEL_MESSAGES], so nobody who has never pressed the button
+     *  sees anything change. */
+    private fun messageChannelIdFor(ctx: Context): String {
+        val gen = channelGen(ctx)
+        return if (gen == 0) CHANNEL_MESSAGES else "${CHANNEL_MESSAGES}_r$gen"
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** Endpoint as a flow so a screen sees the async arrival. `register()` only
@@ -234,6 +259,41 @@ object Push {
         app.rcq.android.push.embedded.EmbeddedDistributor.stop(ctx)
         app.rcq.android.push.embedded.EmbeddedDistributor.clear(ctx)
         if (stale != null) deregisterWithBackend(ctx, stale)
+    }
+
+    /**
+     * Put the message channel back the way RCQ ships it (#1036).
+     *
+     * ⚠⚠ A NEW ID, because that is the only thing that works. Android gives a
+     * channel's sound to the person the moment it exists, and RCQ's tone is an
+     * `android.resource://` uri the system picker does not list — once
+     * somebody picks another sound, "О-оу" is not among the choices any more,
+     * `setSound` on a live channel is ignored, and recreating under the same id
+     * resurrects the settings the platform kept. So the id carries a
+     * generation and this mints the next one.
+     *
+     * ⚠ EVERYTHING the person set on the old channel goes with it, not just
+     * the sound: Silent and "Pop on screen", vibration and its pattern, the
+     * badge dot, the lock-screen setting, the Do-Not-Disturb exception, and a
+     * block if the channel was blocked. The caller has to say so before asking.
+     * Deleting the channel also clears whatever it has in the shade right now.
+     *
+     * Deliberately only the message channel. The other six either have no
+     * sound or use a system ringtone, both of which the picker offers back; and
+     * the foreground-service channel has a "Hide" action that walks people into
+     * blocking it on purpose, so re-minting it would put a permanent
+     * notification back in front of somebody who removed it.
+     */
+    fun resetMessageChannel(ctx: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        val old = messageChannelIdFor(ctx)
+        prefs(ctx).edit().putInt(K_CHANNEL_GEN, channelGen(ctx) + 1).apply()
+        // `from = null`: carrying anything over is precisely what is being
+        // undone here.
+        createMessageChannel(ctx, nm, from = null)
+        if (old != messageChannelIdFor(ctx)) nm.deleteNotificationChannel(old)
+        nm.deleteNotificationChannel(CHANNEL_MESSAGES_V2)
     }
 
     /** Create the message notification channel. Idempotent; safe from
@@ -443,7 +503,12 @@ object Push {
         // An install [mayMoveMessageChannel] refused to move still posts on v2,
         // whose sound Android plays for us. Playing ours on top would be two
         // chimes for one message.
-        if (channelId != CHANNEL_MESSAGES) return false
+        // ⚠ `startsWith`, not equality: a channel reset mints
+        // `rcq_messages_v3_r1` and so on, and an equality test would make the
+        // very button that restores the tone the thing that silences it — the
+        // channel's own sound is 50ms of nothing, so RCQ playing nothing on top
+        // is a mute messenger. v2 does not share the prefix.
+        if (!channelId.startsWith(CHANNEL_MESSAGES)) return false
         // Blocked, Silent or Minimised. Android is making no noise for this
         // channel, and a silence the person asked for is not ours to fill in.
         // IMPORTANCE_DEFAULT is deliberately INCLUDED: turning Android's
@@ -525,6 +590,16 @@ object Push {
      *  v3 already exists: a process killed between the two steps would
      *  otherwise leave a dead "Messages" row in Android's settings forever. */
     private fun migrateMessageChannel(ctx: Context, nm: NotificationManager) {
+        // ⚠ A reset ends the migration. Past generation 0 this function would
+        // otherwise recreate `rcq_messages_v3` beside the reset one on the next
+        // process start, and Android's settings would show two rows called
+        // "Messages", one of them dead.
+        if (channelGen(ctx) > 0) {
+            if (nm.getNotificationChannel(messageChannelIdFor(ctx)) == null) {
+                createMessageChannel(ctx, nm, from = null)
+            }
+            return
+        }
         if (nm.getNotificationChannel(CHANNEL_MESSAGES) != null) {
             nm.deleteNotificationChannel(CHANNEL_MESSAGES_V2)
             return
@@ -576,7 +651,7 @@ object Push {
     private fun createMessageChannel(ctx: Context, nm: NotificationManager, from: NotificationChannel?) {
         nm.createNotificationChannel(
             NotificationChannel(
-                CHANNEL_MESSAGES,
+                messageChannelIdFor(ctx),
                 ctx.getString(R.string.push_channel_messages),
                 from?.importance ?: NotificationManager.IMPORTANCE_HIGH,
             ).apply {
@@ -612,6 +687,12 @@ object Push {
     private fun messageChannelId(ctx: Context): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_MESSAGES
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return CHANNEL_MESSAGES
+        // ⚠ The generation FIRST. After a reset neither CHANNEL_MESSAGES nor v2
+        // exists, and answering v2 would post every message onto a channel that
+        // is not there: no crash (the notify is wrapped), just messages that
+        // silently stop arriving in the shade.
+        val current = messageChannelIdFor(ctx)
+        if (nm.getNotificationChannel(current) != null) return current
         return if (nm.getNotificationChannel(CHANNEL_MESSAGES) != null) {
             CHANNEL_MESSAGES
         } else {
@@ -636,7 +717,9 @@ object Push {
      *  only this side can read the channel, only that side can make a noise. */
     private fun mayPlayOurTone(ctx: Context, channelId: String): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-        if (channelId != CHANNEL_MESSAGES) return false
+        // See [ownsToneOn]: a reset generation keeps the prefix and must keep
+        // the tone with it.
+        if (!channelId.startsWith(CHANNEL_MESSAGES)) return false
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return false
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return false
         val ch = nm.getNotificationChannel(channelId) ?: return false

@@ -729,6 +729,12 @@
     <string name="snd_presence_favorites">Favoritos</string>
     <string name="snd_presence_off">Desligado</string>
     <string name="snd_system_channel">Configurações de notificação do Android</string>
+    <string name="snd_reset_title">Repor as definições de notificação do RCQ</string>
+    <string name="snd_reset_desc">Devolve a notificação de mensagens ao estado em que o RCQ a cria, com o som</string>
+    <string name="snd_reset_confirm_title">Repor a notificação?</string>
+    <string name="snd_reset_confirm_body">O Android entrega-lhe o som de uma notificação assim que o canal existe, e o tom do próprio RCQ não está na lista de sons do sistema, por isso não há outro caminho de volta: a notificação é criada de novo.\n\nPerde-se tudo o que tiver definido nela, não só o som: Silencioso e «Mostrar no ecrã», a vibração, o ponto no ícone, o ecrã de bloqueio, a exceção de Não incomodar e o bloqueio, se a tiver bloqueado. Os avisos que já estiverem na barra desaparecem uma vez.</string>
+    <string name="snd_reset_confirm_action">Repor</string>
+    <string name="snd_reset_done">Pronto. A notificação voltou às definições do RCQ.</string>
     <string name="snd_footer">O app aberto toca o próprio sinal; em segundo plano o mesmo sinal chega como notificação do sistema, e esse também é tocado pelo RCQ, então o controle vale para os dois. O nível de notificação do telefone é o teto e muda com as teclas de volume. Os dois ficam quietos nos modos silencioso e vibrar e durante uma chamada telefônica. No Não perturbe também ficam quietos, mesmo que você tenha dado uma exceção a essa notificação: pelo Não perturbe o Android só deixa passar os próprios sons, e o RCQ não pode ler suas regras do Não perturbe para saber se uma mensagem teria passado. Se o sinal é nosso ou não se decide nas configurações do Android acima: dê a essa notificação um som próprio, ou escolha «Nenhum» ou o modo silencioso, e o Android retoma o sinal e o controle passa a valer só para o app aberto. Um som ou uma configuração de tela de bloqueio escolhidos ali antes desta versão fazem o mesmo, e para sempre, porque o RCQ não pode copiá-los para um canal próprio. Uma exceção ao Não perturbe ou um canal bloqueado fazem o mesmo até você desfazer, e então o RCQ retoma o sinal na próxima inicialização. Silenciar uma conversa (toque longo na tela inicial) cala os dois.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">As traduções saem aos poucos. O que faltar aparece em inglês.</string>

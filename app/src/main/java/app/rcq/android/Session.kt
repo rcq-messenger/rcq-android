@@ -11099,10 +11099,30 @@ class Session(context: Context) {
                 }
             }
             Envelope.ACT_DECLINE -> {
-                // Silent: drop the pending row we hold for them and say nothing.
-                // Their contact row (and its pinned keys) is the user's own add
-                // and is not touched from the wire.
+                // ⚠ Signed by the key we pinned for that address, or nothing
+                // happens. Without this a stranger who can reach the address
+                // could clear a pending row somebody else opened — web and iOS
+                // have always checked; this branch did not read `match` at all.
+                if (CrossIslandStore.get(uin, host) != null &&
+                    match != CrossIslandGate.ContactMatch.VERIFIED
+                ) return
+                // Drop the pending row we hold for them, silently.
                 CrossIslandRequestsStore.clear(me, uin, host)
+                // ⚠⚠ AND THE CONTACT ROW. It used to be left alone, reasoned as
+                // "their row is the user's own add and is not touched from the
+                // wire" — which made receiving a refusal a complete no-op, since
+                // the side that ASKED holds no pending row to clear. So somebody
+                // who explicitly said no stayed in the contact list for ever,
+                // looking exactly like somebody who had said yes. That is the
+                // thing behind #1032: cross-island has no "waiting" state, so
+                // the only honest signal it can carry is the answer, and the
+                // answer was being thrown away. A cross-island row is a local
+                // record, so removing it is ours to do; §5d then stops treating
+                // them as mutual, which is what a refusal means.
+                if (CrossIslandStore.get(uin, host) != null) {
+                    CrossIslandStore.remove(uin, host)
+                    scope.launch { runCatching { syncCrossIslandContacts() } }
+                }
                 refreshCiRequests()
             }
             else -> Unit // unknown act from a newer client

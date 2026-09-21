@@ -729,6 +729,12 @@
     <string name="snd_presence_favorites">Favoriler</string>
     <string name="snd_presence_off">Kapalı</string>
     <string name="snd_system_channel">Android bildirim ayarları</string>
+    <string name="snd_reset_title">RCQ bildirim ayarlarını sıfırla</string>
+    <string name="snd_reset_desc">Mesaj bildirimini, sesi dahil, RCQ\'nun kurduğu hâline döndürür</string>
+    <string name="snd_reset_confirm_title">Bildirim sıfırlansın mı?</string>
+    <string name="snd_reset_confirm_body">Android, kanal oluşturulur oluşturulmaz bildirimin sesini size devreder ve RCQ\'nun kendi tonu sistemin ses listesinde yoktur; bu yüzden geri dönüşün başka yolu yok: bildirim sıfırdan yeniden oluşturulur.\n\nOnun üzerinde ayarladığınız her şey de gider, yalnızca ses değil: Sessiz ve «Ekranda göster», titreşim, simge noktası, kilit ekranı, Rahatsız Etmeyin istisnası ve engellediyseniz engel. Bildirim panelinde bekleyen mesaj uyarıları bir kez kaybolur.</string>
+    <string name="snd_reset_confirm_action">Sıfırla</string>
+    <string name="snd_reset_done">Tamam. Bildirim yeniden RCQ\'nun ayarlarında.</string>
     <string name="snd_footer">Açık uygulama kendi sesini çalar; arka plandayken aynı ses sistem bildirimi olarak gelir ve onu da RCQ çalar, böylece kaydırıcı ikisini birden kapsar. Telefonun bildirim düzeyi üst sınırdır ve ses tuşlarıyla değişir. İkisi de sessiz ve titreşim modlarında ve telefon görüşmesi sırasında susar. Rahatsız etmeyin modunda da susarlar, o bildirime bir istisna tanımış olsanız bile: Rahatsız etmeyin’den Android yalnızca kendi seslerini geçirir ve RCQ, bir mesajın geçip geçmeyeceğini anlamak için Rahatsız etmeyin kurallarınızı okuyamaz. Sesin bizim olup olmadığı yukarıdaki Android ayarlarında belirlenir: o bildirime kendi sesini verirseniz, «Yok» derseniz ya da sessize alırsanız sesi Android geri alır ve kaydırıcı yalnızca açık uygulama için kalır. Orada bu sürümden önce seçilmiş bir ses ya da bir kilit ekranı ayarı da aynısını yapar, kalıcı olarak, çünkü RCQ bunları kendi kanalına kopyalayamaz. Bir Rahatsız etmeyin istisnası ya da engellenmiş bir kanal da geri alana kadar aynısını yapar; geri alırsanız RCQ sesi bir sonraki açılışta üstlenir. Sohbet başına susturma (ana ekranda bir sohbete uzun basarak) ikisini birden susturur.</string>
     <!-- Settings: language / notifications / blocked -->
     <string name="lang_footer">Çeviriler yavaş yavaş ekleniyor. Çevrilmemiş metinler İngilizce görünür.</string>
