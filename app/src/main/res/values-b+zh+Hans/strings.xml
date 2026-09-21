@@ -913,6 +913,7 @@
     <string name="media_saved">已保存</string>
     <string name="media_saved_to">已保存到 %1$s</string>
     <string name="media_save_failed">保存失败</string>
+    <string name="avatar_upload_failed">没能设置照片，请再试一次。</string>
     <string name="media_fetching">正在下载文件…</string>
     <string name="media_fetch_failed">没能下载文件。检查一下网络再试。</string>
     <string name="media_video_too_old">这个视频用旧格式发送，太大了打不开（%1$d MB）。请对方用新版本重新发一次。</string>

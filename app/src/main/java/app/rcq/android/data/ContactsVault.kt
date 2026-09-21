@@ -61,9 +61,21 @@ object ContactsVault {
     /** [stillOurs] is asked after every await: an account switch mid-flight
      *  rebinds the stores, and neither the floor nor the slot may then be
      *  touched on behalf of the account the list belonged to. */
+    /** This account's contacts slot. Exposed so the floor can be forgotten by
+     *  NAME when a `vault_reset` retires the derivation. */
+    fun slotOf(identityPriv: ByteArray): String = Vault.slotId(identityPriv, Vault.CONTACTS)
+
     suspend fun mirror(api: RcqApi, identityPriv: ByteArray, list: List<Contact>, now: Long = System.currentTimeMillis(), stillOurs: () -> Boolean = { true }): Outcome {
         val slot = Vault.slotId(identityPriv, Vault.CONTACTS)
-        var floor = LocalStores.vaultContactsVersion()
+        // ⚠⚠ KEYED BY THE SLOT NAME, not by the account. A recovery-phrase
+        // change does not move this slot to a new VERSION, it moves it to a new
+        // NAME, and the island empties the vault in the same transaction. A
+        // floor filed under the account outlives the derivation it belonged to:
+        // the fresh name answers at version 1, `1 < 12` reads as a rollback, the
+        // floor is persisted, and the contacts mirror is then dead on that
+        // device for ever. Every other slot has been keyed by name since that
+        // was found; this one was missed. See LocalStores.vaultSlotVersion.
+        var floor = LocalStores.vaultSlotVersion(slot)
         return try {
             repeat(5) {
                 val cur = api.vaultGet(slot)
@@ -86,14 +98,14 @@ object ContactsVault {
                 val remote = cur.blob?.let { decode(Vault.open(identityPriv, slot, cur.version, Base64.decode(it, Base64.NO_WRAP))) } ?: Blob()
                 val next = fold(remote, list, now)
                 if (next == null) {
-                    LocalStores.setVaultContactsVersion(cur.version)
+                    LocalStores.setVaultSlotVersion(slot, cur.version)
                     return Outcome.Unchanged
                 }
                 val sealed = Vault.seal(identityPriv, slot, cur.version + 1, gson.toJson(next).toByteArray(Charsets.UTF_8))
                 val w = api.vaultPut(slot, Base64.encodeToString(sealed, Base64.NO_WRAP), cur.version)
                 if (!stillOurs()) return Outcome.Skipped
                 if (w.version != null) {
-                    LocalStores.setVaultContactsVersion(w.version)
+                    LocalStores.setVaultSlotVersion(slot, w.version!!)
                     return Outcome.Written
                 }
                 // Stale: somebody else's write landed between our read and ours.
@@ -115,10 +127,10 @@ object ContactsVault {
     suspend fun read(api: RcqApi, identityPriv: ByteArray): Blob? {
         val slot = Vault.slotId(identityPriv, Vault.CONTACTS)
         val cur = api.vaultGet(slot)
-        if (cur.version < LocalStores.vaultContactsVersion()) return null
+        if (cur.version < LocalStores.vaultSlotVersion(slot)) return null
         val blob = cur.blob ?: return null
         val out = decode(Vault.open(identityPriv, slot, cur.version, Base64.decode(blob, Base64.NO_WRAP)))
-        LocalStores.setVaultContactsVersion(cur.version)
+        LocalStores.setVaultSlotVersion(slot, cur.version)
         return out
     }
 

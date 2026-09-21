@@ -945,6 +945,7 @@
     <string name="media_saved_to">Сохранено в %1$s</string>
     <string name="media_load_failed">Не удалось загрузить. Нажмите, чтобы повторить.</string>
     <string name="media_save_failed">Не удалось сохранить</string>
+    <string name="avatar_upload_failed">Не удалось поставить фото. Попробуйте ещё раз.</string>
     <string name="media_fetching">Скачиваем файл…</string>
     <string name="media_fetch_failed">Не удалось скачать файл. Проверьте связь и попробуйте ещё раз.</string>
     <string name="media_video_too_old">Это видео отправлено в старом формате и слишком большое, чтобы открыть его здесь (%1$d МБ). Попросите отправителя прислать заново из новой версии.</string>

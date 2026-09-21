@@ -143,12 +143,16 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         rosterHost = contact?.host,
         storeHost = storeHost,
     )
-    // The blob a cross-island contact's picture lives in is on THEIR island and
-    // our media endpoint has never held it, so the card draws the glyph for
-    // them — which is why the id is gated here rather than at the avatar alone:
-    // the fullscreen viewer below must make exactly the same decision, or a tap
-    // would open an empty black screen for people who visibly have no photo.
-    val avatarMediaId = contact?.avatarMediaId?.takeIf { crossIslandHost == null }
+    // ⚠⚠ NO LONGER GATED ON THE ISLAND. This comment used to say the blob
+    // lives on THEIR island and ours has never held it. §5e changed that from
+    // both ends: a cross-island contact DEPOSITS the encrypted blob to our
+    // island under the same id and hands us the key in a sealed envelope, so
+    // it resolves from our own media endpoint like any other picture — and
+    // keeps resolving while their island is down, which is the whole reason it
+    // is deposited rather than pulled. The gate was simply left behind, and it
+    // showed a flower for people whose face we were holding. Presence stays
+    // cross-island below, because presence really does not cross.
+    val avatarMediaId = contact?.avatarMediaId
     val avatarMediaKey = contact?.avatarMediaKey
     // ⚠ "The island answered 404" is a different fact from "the island did not
     // answer", and this screen used to lose the difference: loadPeerProfile

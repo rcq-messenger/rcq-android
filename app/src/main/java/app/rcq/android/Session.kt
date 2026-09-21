@@ -2080,6 +2080,35 @@ class Session(context: Context) {
             publishHomeIslandRecord()
             pushHomeRecordToContacts()
         }
+        // ⚠⚠ THE VAULT WENT WITH THE OLD IDENTITY, AND THE PROFILE KEY LIVED
+        // IN IT. `/auth/reissue` empties every slot in the same transaction and
+        // the slot NAMES are derived from the identity key, so after this line
+        // the account's key to its own face exists in exactly one place: this
+        // install's LocalStores. The island's own comment states the contract
+        // ("the client reads its slots BEFORE and writes them back AFTER") and
+        // no client was keeping it. The cost of not keeping it is not a lost
+        // mirror: the contacts and sections slots rebuild from the island, but
+        // the profile key is not derivable from anything — the next install of
+        // this account would find an empty slot, mint a RIVAL key, and every
+        // contact holding the real one would be left looking at a face that no
+        // longer opens.
+        //
+        // Republished under the NEW derivation, from the copy in hand. Nothing
+        // is fetched: the key never changes across a rotation, only the slot it
+        // lives in does.
+        LocalStores.myProfileKey()?.takeIf { it.isNotBlank() }?.let { k ->
+            runCatching {
+                val slot = app.rcq.android.crypto.Vault.slotId(
+                    identity.identityPrivate, app.rcq.android.crypto.Vault.PKEY,
+                )
+                val sealed = app.rcq.android.crypto.Vault.seal(
+                    identity.identityPrivate, slot, 1L, k.toByteArray(Charsets.UTF_8),
+                )
+                api.vaultPut(slot, Base64.encodeToString(sealed, Base64.NO_WRAP), 0L)
+            }.onFailure {
+                android.util.Log.w("RCQvault", "profile key not republished after reissue: ${it.message}")
+            }
+        }
         app.rcq.android.crypto.RecoveryPhrase.encode(seed, appCtx)
     }
 
@@ -5963,8 +5992,15 @@ class Session(context: Context) {
         // contact who already holds it keeps seeing me without a second
         // fan-out. Vault-first, so a second install adopts what this one
         // published rather than minting a rival key.
+        // ⚠⚠ NO FALLBACK KEY. This used to mint a throwaway when the vault
+        // could not be reached, and that key went nowhere: not into the vault,
+        // not into LocalStores. The picture was then sealed under a key NOBODY
+        // has, the owner included — a face that opens for no one, published as
+        // if it had worked. `ensureMyKey` now returns null only when the island
+        // did not answer at all, which is a "try again", not a reason to
+        // publish something unreadable.
         val keyB64 = ProfileKeyVault.ensureMyKey(api, store.identityPrivate ?: ByteArray(0))
-            ?: Base64.encodeToString(MediaCrypto.newKey(), Base64.NO_WRAP)
+            ?: throw java.io.IOException("profile key unavailable")
         val key = Base64.decode(keyB64, Base64.NO_WRAP)
         val blob = MediaCrypto.seal(bytes, key)
         val upload = api.uploadBlob(blob)
@@ -12539,7 +12575,7 @@ class Session(context: Context) {
                 }
                 if (!ctx.stillOurs()) return@launch
                 val contactsSlot = app.rcq.android.crypto.Vault.slotId(ctx.identityPriv, app.rcq.android.crypto.Vault.CONTACTS)
-                if ((byName[contactsSlot] ?: 0L) > LocalStores.vaultContactsVersion()) {
+                if ((byName[contactsSlot] ?: 0L) > LocalStores.vaultSlotVersion(contactsSlot)) {
                     // Still a MIRROR of the island's own list in this phase, so
                     // re-reading it does not change what the chat list draws.
                     // What it does do is move the floor up to what another
@@ -12595,7 +12631,7 @@ class Session(context: Context) {
             return
         }
         if (slot == app.rcq.android.crypto.Vault.slotId(ctx.identityPriv, app.rcq.android.crypto.Vault.CONTACTS)) {
-            if (version > 0L && version <= LocalStores.vaultContactsVersion()) return
+            if (version > 0L && version <= LocalStores.vaultSlotVersion(slot)) return
             scope.launch {
                 runCatching { app.rcq.android.data.ContactsVault.read(ctx.api, ctx.identityPriv) }
                 vaultMirrored = null
@@ -12632,7 +12668,7 @@ class Session(context: Context) {
         val ik = store.identityPrivate ?: return
         val who = store.uin ?: return
         LocalStores.forgetVaultSlotVersion(app.rcq.android.data.SectionsVault.slotOf(ik))
-        LocalStores.setVaultContactsVersion(0)
+        LocalStores.forgetVaultSlotVersion(app.rcq.android.data.ContactsVault.slotOf(ik))
         LocalStores.forgetVaultSlotVersion(app.rcq.android.data.CrossIslandVault.slotOf(ik))
         app.rcq.android.data.SectionsVault.retire(who)
         app.rcq.android.data.CrossIslandVault.retire(who)

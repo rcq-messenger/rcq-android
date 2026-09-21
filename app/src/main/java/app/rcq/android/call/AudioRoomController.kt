@@ -56,7 +56,13 @@ class AudioRoomController(
         nickname = m.get("nickname")?.takeIf { !it.isJsonNull }?.asString ?: "$uin",
         mutedByOwner = m.get("muted_by_owner")?.takeIf { !it.isJsonNull }?.asBoolean ?: false,
         avatarMediaId = m.get("avatar_media_id")?.takeIf { !it.isJsonNull }?.asString,
-        avatarMediaKey = m.get("avatar_media_key")?.takeIf { !it.isJsonNull }?.asString,
+        // ⚠ The island holds no key for a picture set under the profile-key
+        // model, so the roster serves null and a room full of people drew
+        // plain discs. Rooms are on OUR island, so the bare number is enough
+        // to look up what its owner sealed to us. Same fallback the contacts
+        // and group-member mappers carry.
+        avatarMediaKey = m.get("avatar_media_key")?.takeIf { !it.isJsonNull }?.asString
+            ?: app.rcq.android.data.LocalStores.profileKey(uin),
     )
 
     private val _rooms = MutableStateFlow<List<Room>>(emptyList())

@@ -1485,7 +1485,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 // Animated here and only here: one avatar on screen, so a
                 // moving GIF costs nothing, while a list of them would.
                 PersonAvatar(
-                    peerContact?.avatarMediaId?.takeIf { !isCrossIsland }, peerContact?.avatarMediaKey,
+                    // §5e deposits a cross-island contact's picture to OUR
+                    // island under the same id, so it resolves here like any
+                    // other. Only presence stays cross-island.
+                    peerContact?.avatarMediaId, peerContact?.avatarMediaKey,
                     peerContact?.presence ?: UserStatus.OFFLINE, session, 26.dp,
                     animated = true, crossIsland = isCrossIsland,
                 )

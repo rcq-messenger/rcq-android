@@ -79,7 +79,18 @@ object ProfileKeyVault {
         val floor = LocalStores.vaultSlotVersion(slot)
 
         // 1. Adopt what a sibling install already published.
-        val cur = runCatching { api.vaultGet(slot) }.getOrNull()
+        // ⚠⚠ A THROW IS NOT AN EMPTY SLOT. `vaultGet` maps a 404 to
+        // `VaultSlotRead(null, version)` — the island saying "nothing here" —
+        // and throws for everything else: a 5xx, a rate limit, a dead
+        // connection, a certificate we refused. Swallowing the throw with
+        // `getOrNull()` made those indistinguishable from an empty slot, and
+        // the code below then MINTS and pins a rival key. That is permanent:
+        // the account already has a key, every contact holds it, and half of
+        // them now hold one that opens nothing. The web takes the same line
+        // (profile-key.ts: only a VaultError is tolerated, anything else is
+        // rethrown) and for the same reason — a retry costs one tap, a rival
+        // key cannot be taken back.
+        val cur = runCatching { api.vaultGet(slot) }.getOrElse { return null }
         if (cur != null && cur.version >= floor) {
             val existing = cur.blob
                 ?.let { runCatching { Vault.open(identityPriv, slot, cur.version, Base64.decode(it, Base64.NO_WRAP)) }.getOrNull() }

@@ -1411,7 +1411,18 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
                         .getOrNull()?.takeIf { it.size <= 2_000_000 }
                 } else compressImageFor(context, uri)
             }
-            if (bytes != null) runCatching { session.setOwnAvatar(bytes) }
+            // ⚠ Say so when it did not work. The picture is sealed under the
+            // account's own profile key, and when the island cannot be asked
+            // for that key there is nothing safe to publish — the old code
+            // minted a throwaway and sealed the face under a key nobody has,
+            // including its owner. A failure is a "try again", and it has to
+            // look like one.
+            if (bytes != null && runCatching { session.setOwnAvatar(bytes) }.isFailure) {
+                android.widget.Toast.makeText(
+                    context, context.getString(R.string.avatar_upload_failed),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
             avatarBusy = false
         }
     }
