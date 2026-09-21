@@ -48,6 +48,9 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private var shouldStayConnected = false
     private var attempt = 0
 
+    /** When [reconnectNow] last wiped [attempt]. See the comment there. */
+    private var lastBackoffResetAt = 0L
+
     /** When the current socket opened, or null if none is up. A socket that
      *  lived past [STABLE_CONNECTION_MS] is what clears the backoff. */
     private var connectedAt: Long? = null
@@ -243,7 +246,26 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
      *  Flips the state to "connecting" immediately and resets the backoff. */
     fun reconnectNow() {
         if (!shouldStayConnected) return
-        attempt = 0
+        // ⚠⚠ The clean slate is EARNED, and this is the other half of the loop
+        // measured on the flagship 21.09. A route change deserves an immediate
+        // dial — that part is unconditional below — but it does not also
+        // deserve the backoff wiped, because a path that changes every few
+        // seconds then defeats the backoff completely. That is what happened:
+        // one device dialled the socket once every 4.8 seconds for hours, and
+        // 4.8s is not a coincidence, it is Session.NETWORK_REDIAL_GAP_MS. The
+        // connectivity callback fired, this line reset `attempt` to zero, the
+        // exponential curve went back to its first step, and the socket the
+        // path could not hold for more than 7.6 seconds was rebuilt forever.
+        //
+        // So the reset is throttled while the immediate dial is not. A person
+        // walking out of wifi onto cellular changes network once and gets both.
+        // A phone on a tunnel that keeps collapsing gets the dial every time
+        // and the clean slate once a minute, so the curve can actually climb.
+        val now = System.currentTimeMillis()
+        if (now - lastBackoffResetAt >= BACKOFF_RESET_FLOOR_MS) {
+            lastBackoffResetAt = now
+            attempt = 0
+        }
         believedConnected = false
         onState(false)
         open()
@@ -318,6 +340,14 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         // than the 25s heartbeat, so "opened, pinged once, died" does not count
         // as a healthy session.
         private const val STABLE_CONNECTION_MS = 60_000L
+
+        /** Floor between two backoff resets ordered by [reconnectNow].
+         *
+         *  Matches [STABLE_CONNECTION_MS] on purpose: a minute is already this
+         *  class's definition of "a connection that held", so a route change
+         *  cannot buy a clean slate more often than an actual good socket
+         *  would have earned one. */
+        private const val BACKOFF_RESET_FLOOR_MS = 60_000L
 
         private const val SUPERSEDED_BACKOFF_MS = 30_000L
         private const val SUPERSEDED_JITTER_MS = 30_000L

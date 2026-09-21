@@ -3001,7 +3001,28 @@ class Session(context: Context) {
                     // a roster that failed to load earlier recovers without a
                     // cold start. The first connect is skipped — start() below
                     // already kicked the initial load.
-                    if (everConnected) syncGraph()
+                    //
+                    // ⚠⚠ THROTTLED, and this one was expensive to learn.
+                    // syncGraph() fires a dozen independent calls, so doing it
+                    // on EVERY reconnect with no floor turns a flapping path
+                    // into a flood. Measured on the flagship 21.09: one account
+                    // whose VPN kept dropping produced ~7000 requests an hour,
+                    // a THIRD of everything the island served that afternoon,
+                    // 600 sockets in three hours with a median life of 7.6
+                    // seconds. Nothing was wrong with the account and nothing
+                    // was hostile: the network callback redials (resetting the
+                    // socket's backoff by design, a route change deserves an
+                    // immediate try), the socket opens, this line fires twelve
+                    // requests, the path kills the socket seconds later, repeat.
+                    // The island was the cheap victim; the phone paid in battery
+                    // and mobile data, on exactly the kind of network this app
+                    // exists to work on.
+                    //
+                    // ⚠ Nothing here can delay a message. The mailbox is still
+                    // drained on every push, on foreground, and every 30s by the
+                    // disconnected-poll loop — the floor is deliberately shorter
+                    // than that loop's period, so the worst case is unchanged.
+                    if (everConnected && earnedReconnectSync()) syncGraph()
                     // The first connect is covered by start()'s sync, except
                     // when that sync ran with no network: the island's
                     // capabilities then still say what the cache said (or
@@ -3133,6 +3154,23 @@ class Session(context: Context) {
      *  soft-failing independently. A transient failure at launch used to
      *  strand the UI with an empty roster until the next cold start; the
      *  retry (and the reconnect-driven re-call) make it recover on its own. */
+    /** When the last reconnect-driven [syncGraph] ran, for the floor below. */
+    private var lastReconnectSyncAt = 0L
+
+    /** Has this reconnect earned a full graph re-pull?
+     *
+     *  A healthy session never notices: its reconnects are minutes or hours
+     *  apart, so the floor is never in the way. It bites exactly where it was
+     *  meant to, on a path that cannot hold a socket for more than a few
+     *  seconds, and there a second re-pull five seconds after the first cannot
+     *  have anything new to find. */
+    private fun earnedReconnectSync(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastReconnectSyncAt < RECONNECT_SYNC_FLOOR_MS) return false
+        lastReconnectSyncAt = now
+        return true
+    }
+
     private fun syncGraph() {
         if (duressViewUp) return
         // Stage 5: the room log is drained right after the legacy queue, in the
@@ -14069,6 +14107,14 @@ class Session(context: Context) {
          *  Long enough to swallow a VPN client rebuilding its tunnel, short
          *  enough that walking out of wifi still reconnects immediately. */
         const val NETWORK_REDIAL_GAP_MS = 5_000L
+        /** Floor between two graph re-pulls ordered by a reconnect.
+         *
+         *  Deliberately shorter than the 30s disconnected-poll period: the
+         *  mailbox is never asked for less often than it was before, so no
+         *  message can arrive later because of this. And comfortably longer
+         *  than [NETWORK_REDIAL_GAP_MS], which is the cadence a flapping VPN
+         *  was redialling at when this was measured. */
+        const val RECONNECT_SYNC_FLOOR_MS = 15_000L
         /** How long after a random session ends a message from that stranger
          *  is still treated as belonging to the session that is over. */
         const val RANDOM_ENDED_GRACE_MS = 24 * 60 * 60 * 1000L
