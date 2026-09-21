@@ -1523,6 +1523,13 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_INVITES_CACHE), json).apply()
     }
 
+    /** Forget the cached allowance. Called when the island did not answer at
+     *  all: the cache exists to bridge one round trip, not to remember an
+     *  allowance the island no longer serves. */
+    fun clearCachedInvites() {
+        if (::prefs.isInitialized && acct != null) prefs.edit().remove(pk(K_INVITES_CACHE)).apply()
+    }
+
     // ── island description cache (the "this island" block) ───────────
     // `/server/info` was held in a map that lives and dies with the process,
     // so the FIRST visit to Settings after every launch drew the island block

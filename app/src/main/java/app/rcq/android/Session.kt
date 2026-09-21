@@ -4896,7 +4896,7 @@ class Session(context: Context) {
             LocalStores.roomKey(g.id)?.second,
         )
 
-    private fun mapGroupRaw(g: RcqApi.GroupOut): RcqGroup = RcqGroup(
+    private fun mapGroupRaw(g: RcqApi.GroupOut, onHost: String? = null): RcqGroup = RcqGroup(
         id = g.id,
         name = g.name ?: "Group ${g.id}",
         badge = g.badge,
@@ -4927,7 +4927,24 @@ class Session(context: Context) {
                 permissions = it.permissions,
                 senderKeys = it.sender_keys,
                 avatarMediaId = it.avatar_media_id,
-                avatarMediaKey = it.avatar_media_key,
+                // ⚠ Same fallback as the contacts mapper, and for the same
+                // reason: the island holds no key for a picture set under the
+                // profile-key model, so it serves null here and a member's face
+                // simply stopped rendering anywhere a roster row draws it (the
+                // group card, the member list, the sender avatar on a bubble).
+                // The contacts mapper got this when the model shipped; the
+                // member mapper did not, and there are two of them.
+                // ⚠ `g.host` and not the member: a room on ANOTHER island is a
+                // different numbering space, so its members' numbers must not
+                // be looked up in a store keyed by ours, and must not be asked
+                // either (maybeAskProfileKey refuses a non-null host anyway).
+                avatarMediaKey = (it.avatar_media_key ?: if (onHost == null) LocalStores.profileKey(it.uin) else null)
+                    ?: run {
+                        if (!it.avatar_media_id.isNullOrEmpty()) {
+                            maybeAskProfileKey(it.uin, it.identity_key ?: "", onHost)
+                        }
+                        null
+                    },
                 guest = it.guest,
                 invited = it.invited,
             )
@@ -5239,7 +5256,7 @@ class Session(context: Context) {
     private fun mapForeignGroup(g: RcqApi.GroupOut, host: String): RcqGroup {
         val alias = VisitedIslandsStore.aliasFor(host, g.id)
         return app.rcq.android.crypto.GroupState.overlay(
-            mapGroupRaw(g).copy(id = alias, host = host),
+            mapGroupRaw(g, onHost = host).copy(id = alias, host = host),
             LocalStores.roomKey(alias)?.second,
         )
     }
@@ -10249,6 +10266,22 @@ class Session(context: Context) {
                     // wire claimed, or one account could publish a face as
                     // another. Refreshing the roster repaints the avatars.
                     if (LocalStores.putProfileKey(dec.senderUin, env.key)) {
+                        // ⚠⚠ PAINT IT HERE. This used to lean on the roster
+                        // refresh below, and that refresh is CONDITIONAL: the
+                        // island answers 304 whenever its own list has not
+                        // moved, which is exactly the case when the only thing
+                        // that changed is a key it never had. So the answer to
+                        // our own `pkeyask` landed, was filed, and the face
+                        // stayed a flower until something unrelated moved the
+                        // roster. The key belongs to us, not to the island, so
+                        // the rows are ours to fill in.
+                        _contacts.value = _contacts.value.map { c ->
+                            if (c.uin == dec.senderUin && c.host == null && c.avatarMediaKey == null)
+                                c.copy(avatarMediaKey = env.key) else c
+                        }
+                        // Still refreshed: a key arriving is often the first
+                        // sign they changed their picture, and the id for it
+                        // does come from the island.
                         scope.launch { runCatching { refreshContacts() } }
                     } else Unit
                 is Envelope.PKeyAsk ->
@@ -10266,6 +10299,26 @@ class Session(context: Context) {
                     scope.launch {
                         runCatching {
                             if (LocalStores.isBlocked(dec.senderUin)) return@runCatching
+                            // ⚠⚠ AND ONLY AN ACCEPTED CONTACT. The block test
+                            // alone let anybody who merely knows the number ask
+                            // once and be handed the key to the face. The key is
+                            // account-wide and deliberately never rotates, so
+                            // that one answer is every picture the account will
+                            // ever publish, and removing the person afterwards
+                            // takes nothing back. The design doc says it plainly:
+                            // "Every accepted contact ... Nobody else. That IS the
+                            // visibility rule." The sibling room-key path has
+                            // carried its own membership test all along; this one
+                            // had none. iOS gates on the roster; the web did not
+                            // either, and both were fixed together.
+                            // ⚠ Same-island rows only: the key store is keyed by
+                            // bare number, and a cross-island contact wearing the
+                            // same digits is a different person. And above the
+                            // vault read, so a stranger cannot even make us go
+                            // and fetch it.
+                            if (_contacts.value.none { it.uin == dec.senderUin && it.host == null }) {
+                                return@runCatching
+                            }
                             val nowAsk = System.currentTimeMillis()
                             if (nowAsk - (answeredProfileKeyAt[dec.senderUin] ?: 0L) < 6L * 3600_000L) {
                                 return@runCatching

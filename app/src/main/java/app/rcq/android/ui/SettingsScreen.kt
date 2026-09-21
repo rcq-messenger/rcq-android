@@ -589,13 +589,35 @@ private fun SettingsRoot(
     // as a silent nothing at send time. Checked once, here, so the sheet shows
     // what it will actually send.
     LaunchedEffect(Unit) {
-        if (bugAttachments.isNotEmpty()) {
-            val live = withContext(Dispatchers.IO) {
-                bugAttachments.filter { u ->
-                    runCatching { context.contentResolver.openInputStream(u)?.use { true } }.getOrNull() == true
-                }
+        val checked = bugAttachments
+        if (checked.isNotEmpty()) {
+            // ⚠⚠ ONLY A DEAD GRANT COUNTS. The first version of this check
+            // dropped a row on ANY failure to open it, and that is not the same
+            // question: `PickVisualMedia` can hand back a cloud-backed provider
+            // (Google Photos), where opening fetches bytes and throws offline.
+            // Treating that as "the grant died" silently removed a perfectly
+            // good screenshot — which is #1035 again, from the other side.
+            // SecurityException is the one that means the permission is gone.
+            val dead = withContext(Dispatchers.IO) {
+                checked.filter { u ->
+                    try {
+                        context.contentResolver.openInputStream(u)?.use { }
+                        false
+                    } catch (e: SecurityException) {
+                        true
+                    } catch (e: Exception) {
+                        // Could not read it right now for some other reason.
+                        // Keep it: the send path will say so out loud if it
+                        // still cannot, which is better than a thumbnail that
+                        // vanishes without a word.
+                        false
+                    }
+                }.toSet()
             }
-            if (live.size != bugAttachments.size) bugAttachments = live
+            // ⚠ Filtered against the CURRENT list, not the one captured above:
+            // a picture attached while the check was in flight must not be
+            // thrown away by this assignment.
+            if (dead.isNotEmpty()) bugAttachments = bugAttachments.filterNot { it in dead }
         }
     }
     val bugPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -4759,9 +4781,20 @@ private fun ResidentInvitesRow(
         )
     }
     LaunchedEffect(session.uin, tick) {
-        session.residentInvites()?.let { fresh ->
+        val fresh = session.residentInvites()
+        if (fresh != null) {
             quota = fresh
             runCatching { app.rcq.android.data.LocalStores.setCachedInvitesJson(gson.toJson(fresh)) }
+        } else {
+            // ⚠ The cache is a bridge across the few hundred milliseconds
+            // between drawing Settings and the island answering, not a record
+            // of an allowance. An island that stops answering /invites at all
+            // (the feature switched off on a self-hosted one, the route gone,
+            // the account no longer passing its gate) would otherwise keep
+            // re-seeding a row with numbers that no longer exist, every launch,
+            // until somebody taps mint and gets an error. Forget it, and leave
+            // what is already on screen alone so nothing jumps mid-session.
+            runCatching { app.rcq.android.data.LocalStores.clearCachedInvites() }
         }
     }
     val q = quota ?: return

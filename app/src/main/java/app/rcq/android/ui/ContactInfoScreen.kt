@@ -190,11 +190,22 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             // the only thing that may be swallowed. Wrapping the withContext
             // itself would swallow the CancellationException too, and this effect
             // is cancelled every time the card is closed mid-fetch.
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val card = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { CrossIslandSender.fetchCard(crossIslandHost, uin) }.getOrNull()
-            }?.let { card ->
+            }
+            if (card != null) {
                 ciCardName = card.nickname
                 ciCardStatus = card.statusMessage
+            } else {
+                // ⚠⚠ THE ANSWER MATTERS HERE TOO. This branch used to swallow
+                // the failed fetch and draw on: a mistyped `номер@остров`
+                // opened a card showing the bare digits, offline, with an Add
+                // button, and nothing said the island had refused. That is
+                // the same defect the ⚠ above records for our OWN island
+                // (#483) — the fix simply never covered this branch, and it
+                // started mattering the moment the search row began opening a
+                // card instead of adding on the tap (#1032).
+                notFound = true
             }
         }
     }
@@ -296,10 +307,16 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     Text(stringResource(R.string.ci_message), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(12.dp))
-            } else if (contact == null && crossIslandHost == null && notFound && !guestMember) {
+            } else if (contact == null && notFound && !guestMember) {
                 // Nobody holds this number. Say so instead of offering to write
                 // to them: the island will refuse the request anyway, and the
                 // refusal used to be swallowed silently.
+                // ⚠ The `crossIslandHost == null` that used to be in this
+                // condition is gone on purpose: an address on ANOTHER island
+                // that does not resolve is the same fact, and it now reaches
+                // here (the card fetch above records it). Without that, a
+                // typo'd `номер@остров` drew a person who does not exist with
+                // a button offering to add them.
                 Text(
                     stringResource(
                         if (uin.toString().length < 3) R.string.ci_number_too_short
