@@ -1523,6 +1523,16 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_INVITES_CACHE), json).apply()
     }
 
+    /** When this install last tried to move the account's picture off the
+     *  island's key (Session.migrateOwnAvatarToProfileKey). Per account: the
+     *  picture belongs to one. */
+    fun avatarMigrationTriedAt(): Long =
+        if (::prefs.isInitialized && acct != null) prefs.getLong(pk(K_AVATAR_MIGRATED), 0L) else 0L
+
+    fun setAvatarMigrationTriedAt(at: Long) {
+        if (::prefs.isInitialized && acct != null) prefs.edit().putLong(pk(K_AVATAR_MIGRATED), at).apply()
+    }
+
     /** Forget the cached allowance. Called when the island did not answer at
      *  all: the cache exists to bridge one round trip, not to remember an
      *  allowance the island no longer serves. */
@@ -1709,7 +1719,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
             // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
             // the profile key of every contact, stored BY NUMBER, so leaving it
             // behind keeps a plaintext roster of the burned identity plus the
@@ -1789,6 +1799,7 @@ object LocalStores {
     private const val K_SECTION_FLAGS = "section_flags"
     private const val K_PRIVACY_CACHE = "privacy_cache"
     private const val K_INVITES_CACHE = "invites_cache"
+    private const val K_AVATAR_MIGRATED = "avatar_migrated_at"
     private const val K_CONTACTS_CACHE = "contacts_cache"
     private const val K_GROUPS_CACHE = "groups_cache"
     private const val K_VAULT_CONTACTS_VERSION = "vault_contacts_version"

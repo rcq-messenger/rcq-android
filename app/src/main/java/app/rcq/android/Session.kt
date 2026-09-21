@@ -3618,6 +3618,13 @@ class Session(context: Context) {
                 }
             }
         }
+        // And, once, move a picture still in the OLD shape off the island's
+        // key. A no-op for an account that has no picture or has already
+        // moved; the old one keeps working until the new one is published.
+        // See [migrateOwnAvatarToProfileKey].
+        if (!profile.avatar_media_key.isNullOrEmpty()) {
+            scope.launch { runCatching { migrateOwnAvatarToProfileKey() } }
+        }
     }
 
     fun stop() = socket.disconnect()
@@ -6180,6 +6187,56 @@ class Session(context: Context) {
         LocalStores.cachedProfileJson()?.let {
             runCatching { profileGson.fromJson(it, RcqApi.MeProfile::class.java) }.getOrNull()
         }
+
+    /**
+     * Take the key to my own face off the island, for a picture that was set
+     * before that was possible (docs/profile-key-design.md, migration phase 3).
+     *
+     * ⚠⚠ WHY. The profile-key model only ever applied to pictures set AFTER it
+     * shipped. Everything older kept the old shape: a per-upload key sitting in
+     * `users.avatar_media_key`, in the same row as the number and the nickname,
+     * with the ciphertext behind an unauthenticated GET on the same disk.
+     * Counted on 21.09 across both production islands: of 80 pictures, 63 were
+     * still openable by the island. Nothing was going to fix those on its own,
+     * because the shape only changes when somebody happens to set a NEW
+     * picture, and most people set one once.
+     *
+     * So: fetch my own blob, open it with the key the island still holds,
+     * and hand the plaintext to [setOwnAvatar], which re-seals it under my
+     * profile key and gives the island the id ALONE — which is what makes the
+     * island drop the key column.
+     *
+     * ⚠ Safe to interrupt. Nothing changes until [setOwnAvatar] succeeds; the
+     * old id and the old blob keep working until then, so a failure anywhere
+     * leaves the picture exactly as it was.
+     *
+     * ⚠ Safe to race with another device: both seal under the SAME profile key
+     * (both read it from the vault), so whichever id lands last is a blob every
+     * contact can open with the key they already hold.
+     */
+    suspend fun migrateOwnAvatarToProfileKey() {
+        val me = store.uin ?: return
+        if (!migratedAvatarThisSession.add(me)) return
+        // Once a day at most. The condition that starts it clears itself the
+        // moment it works (the island stops returning a key), so this only
+        // bounds the FAILING case.
+        val last = LocalStores.avatarMigrationTriedAt()
+        if (last > 0L && System.currentTimeMillis() - last < 24L * 3600_000L) return
+        val p = runCatching { api.getMe(me) }.getOrNull() ?: return
+        val id = p.avatar_media_id?.takeIf { it.isNotBlank() } ?: return
+        // No key means it is already sealed under the profile key: nothing to
+        // do, and nothing to remember either — that is the resting state.
+        val oldKey = p.avatar_media_key?.takeIf { it.isNotBlank() } ?: return
+        LocalStores.setAvatarMigrationTriedAt(System.currentTimeMillis())
+        val bytes = runCatching { fetchImage(id, oldKey) }.getOrNull() ?: return
+        val ep = epochNow()
+        runCatching { setOwnAvatar(bytes) }
+            .onFailure { android.util.Log.w("RCQavatar", "migration deferred: ${it.message}") }
+        if (!stillOn(ep)) return
+    }
+
+    /** One attempt per account per process, on top of the daily guard. */
+    private val migratedAvatarThisSession = java.util.Collections.synchronizedSet(HashSet<Int>())
 
     suspend fun loadProfile(): RcqApi.MeProfile? {
         val me = store.uin ?: return null
