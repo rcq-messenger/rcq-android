@@ -119,6 +119,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     var profile by remember { mutableStateOf<RcqApi.MeProfile?>(null) }
     var requestSent by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
+    var removePin by remember { mutableStateOf(false) }
     var showSafety by remember { mutableStateOf(false) }
     var safetyNumber by remember { mutableStateOf<String?>(null) }
     var safetyLoading by remember { mutableStateOf(false) }
@@ -538,7 +539,12 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             if (contact != null && !guestMember) {
                 Spacer(Modifier.height(16.dp))
                 Box(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).clickable { confirmRemove = true }.padding(vertical = 14.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).clickable {
+                        // A locked chat's person, with the history if ticked,
+                        // is removed through the PIN (#1045 review).
+                        if (chatLockHolds(context, app.rcq.android.data.LocalStores.peerThread(uin))) removePin = true
+                        else confirmRemove = true
+                    }.padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -580,6 +586,15 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         }
     }
 
+    if (removePin) {
+        SectionPinSheet(
+            title = nickname,
+            actionLabel = stringResource(R.string.home_remove),
+            realOnly = false,
+            onUnlocked = { confirmRemove = true },
+            onDismiss = { removePin = false },
+        )
+    }
     if (confirmRemove) {
         // Same dialog as the home screen. This one used to skip the question
         // entirely and keep the history by default, so where you tapped Remove

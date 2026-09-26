@@ -1326,7 +1326,13 @@ internal fun HomeScreen(
                             lockedChatAction = Triple(session.contactName(t.uin), context.getString(R.string.home_clear_chat)) { clearPeerTarget = t }
                         } else clearPeerTarget = t
                     },
-                    onRemove = { removeTarget = it },
+                    // Deleting a locked chat's person (with the messages, if
+                    // ticked) is behind the PIN as well (#1045 review).
+                    onRemove = { t ->
+                        if (chatLockHolds(context, LocalStores.peerThread(t.uin))) {
+                            lockedChatAction = Triple(session.contactName(t.uin), context.getString(R.string.home_remove)) { removeTarget = t }
+                        } else removeTarget = t
+                    },
                     onUnlockChat = { thread -> chatUnlockPrompt = thread to session.contactName(ct.uin) }),
                 onDismiss = { previewContact = null },
                 locked = chatLockHolds(context, LocalStores.peerThread(ct.uin)),
@@ -1354,7 +1360,11 @@ internal fun HomeScreen(
                         previewGroup = null
                         leaveWarnTarget = room to warning
                     },
-                    onUnlockChat = { thread -> chatUnlockPrompt = thread to g.name }),
+                    onUnlockChat = { thread -> chatUnlockPrompt = thread to g.name },
+                    guardLocked = { label, action ->
+                        if (chatLockHolds(context, LocalStores.groupThread(g.id))) lockedChatAction = Triple(g.name, label, action)
+                        else action()
+                    }),
                 onDismiss = { previewGroup = null },
                 locked = chatLockHolds(context, LocalStores.groupThread(g.id)),
             )
@@ -1814,6 +1824,10 @@ private fun groupActions(
     onLastResident: (RcqGroup, String) -> Unit,
     /** Asked to turn this chat's lock OFF: the caller asks for the PIN. */
     onUnlockChat: (thread: String) -> Unit,
+    /** Run [action] (labelled [label]), through the PIN when the chat is
+     *  locked: deleting or leaving a locked room erases it here like
+     *  clearing it does (#1045 review). */
+    guardLocked: (label: String, action: () -> Unit) -> Unit = { _, action -> action() },
 ): List<ContextAction> {
     val thread = LocalStores.groupThread(group.id)
     val fav = LocalStores.isFavorite(thread)
@@ -1839,9 +1853,11 @@ private fun groupActions(
         // Wipe the local copy of a group conversation without leaving it.
         ContextAction(s(R.string.home_clear_chat), Icons.Filled.DeleteSweep, destructive = true) { onClearThread(group) },
         if (isOwner)
-            ContextAction(s(R.string.home_delete_group), Icons.Filled.Delete, destructive = true) { scope.launch { session.deleteGroup(group.id) } }
+            ContextAction(s(R.string.home_delete_group), Icons.Filled.Delete, destructive = true) {
+                guardLocked(s(R.string.home_delete_group)) { scope.launch { session.deleteGroup(group.id) } }
+            }
         else
-            ContextAction(s(R.string.home_leave_group), Icons.AutoMirrored.Filled.ExitToApp, destructive = true) {
+            ContextAction(s(R.string.home_leave_group), Icons.AutoMirrored.Filled.ExitToApp, destructive = true) { guardLocked(s(R.string.home_leave_group)) {
                 // Decision E4: the roster decides, and it is FETCHED when the
                 // one we hold cannot answer, which on this screen is the usual
                 // case, because a room on another island carries no roster
@@ -1853,7 +1869,7 @@ private fun groupActions(
                     if (warning != null) onLastResident(group, warning)
                     else session.leaveGroup(group.id)
                 }
-            },
+            } },
     )
 }
 
