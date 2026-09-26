@@ -243,6 +243,13 @@ private object ChatDrafts {
      *  thread on the way back in, and a quote that has since been deleted
      *  simply does not come back. */
     val replyByThread = mutableMapOf<String, String>()
+
+    /** A quote handed back by a send that produced nothing ([ChatScreen]'s
+     *  `giveReplyBack`), as (thread, message id), for whichever screen of that
+     *  thread is live when it lands: the one that took the quote may be gone,
+     *  and waiting for the next change to the message list put the quote back
+     *  at some random later moment (#1048 review). */
+    val returned = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>(null)
 }
 
 /** "Show in chat" from a viewer that is not inside the chat (#1042): the
@@ -286,6 +293,22 @@ private fun ChatJumpEffect(threadKey: String, ready: () -> Boolean, onJump: (Str
                 if (jump(r.messageId)) return@collect
                 delay(100)
             }
+        }
+    }
+}
+
+/** Hands a quote returned by a failed send ([ChatDrafts.returned]) to the
+ *  live screen of its thread. Its own composable for the same reason as
+ *  [ChatJumpEffect]: ChatScreen is at the verifier's limit. */
+@Composable
+private fun ReplyReturnEffect(threadKey: String, messages: List<ChatMessage>, onReturn: (ChatMessage) -> Unit) {
+    val take by rememberUpdatedState(onReturn)
+    val rows by rememberUpdatedState(messages)
+    LaunchedEffect(threadKey) {
+        ChatDrafts.returned.collect { r ->
+            if (r == null || r.first != threadKey) return@collect
+            ChatDrafts.returned.value = null
+            rows.firstOrNull { it.id == r.second }?.let(take)
         }
     }
 }
@@ -481,7 +504,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Long-pressing a reaction chip opens a "who reacted" sheet for that message.
     var whoReactedMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var editMsg by remember { mutableStateOf<ChatMessage?>(null) }
-    var replyTarget by remember(threadKey) { mutableStateOf<ChatMessage?>(null) }
+    // Seeded from the parked note in the SAME frame the chat appears, so a
+    // quote waiting for this thread is on the composer on entry rather than
+    // whenever the restore effect below next runs (#1048 review).
+    var replyTarget by remember(threadKey) {
+        mutableStateOf(ChatDrafts.replyByThread[threadKey]?.let { id -> messages.firstOrNull { it.id == id } })
+    }
     // Bring the parked reply back with the draft it belongs to. Runs on the
     // thread's messages because the list arrives asynchronously — on the first
     // composition it can still be empty.
@@ -492,7 +520,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // цитированием эта цитата остаётся для следующего сообщения" (#582). The
     // flag makes restoring what it says it is: bringing a parked reply back
     // when you walk into the thread.
-    var replyRestored by remember(threadKey) { mutableStateOf(false) }
+    var replyRestored by remember(threadKey) { mutableStateOf(replyTarget != null) }
     LaunchedEffect(threadKey, messages) {
         if (replyRestored) return@LaunchedEffect
         val parked = ChatDrafts.replyByThread[threadKey] ?: return@LaunchedEffect
@@ -842,14 +870,30 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // thread, because the sends fail on the session's IO scope, and written to
     // the parked note too, because the chat may be gone by then (#473 made the
     // sends outlive it) and the note is what brings the quote back.
-    fun giveReplyBack(quoted: ChatMessage?) {
+    //
+    // ⚠ And only when nothing carrying it was written. A group send stores its
+    // row before the fan-out, and a step between the two can still throw: the
+    // row is there with the quote on it (red, retryable), and handing the quote
+    // back as well answered the message twice (#1048 review). [since] is when
+    // the quote was taken, so an earlier answer to the same message does not
+    // count.
+    fun giveReplyBack(quoted: ChatMessage?, since: Long) {
         quoted ?: return
+        val thread = threadKey
+        val gid = groupId
+        val p = peer
+        val group = isGroup
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            if (replyTarget != null || ChatDrafts.replyByThread[threadKey] != null) return@post
-            ChatDrafts.replyByThread[threadKey] = quoted.id
-            replyTarget = quoted
+            if (ChatDrafts.replyByThread[thread] != null) return@post
+            val rows = if (group) session.groupMessages.value[gid].orEmpty() else session.messages.value[p].orEmpty()
+            if (rows.any { it.fromMe && it.replyToId == quoted.id && it.sentAt >= since }) return@post
+            ChatDrafts.replyByThread[thread] = quoted.id
+            ChatDrafts.returned.value = thread to quoted.id
         }
     }
+    // The live screen of this thread takes a returned quote as it lands,
+    // unless the person has picked another message to answer since.
+    ReplyReturnEffect(threadKey, messages) { m -> if (replyTarget == null) replyTarget = m }
 
     // Item 9(b/c): who a full-screen viewer names at the top, and whose card
     // that name opens.
@@ -937,13 +981,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
             if (!fileFitsIsland(context, session, picked.bytes.size.toLong())) return@launch
             val quoted = replyTarget
+            val since = System.currentTimeMillis()
             val reply = takeReply()
             session.sendMediaDetached("file") {
                 try {
                     if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime, reply)
                     else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime, reply)
                 } catch (e: Exception) {
-                    giveReplyBack(quoted)
+                    giveReplyBack(quoted, since)
                     throw e
                 }
             }
@@ -975,6 +1020,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // an album answers once rather than N times. Taken here, on the main
         // thread, because it is composer state.
         val quoted = replyTarget
+        val since = System.currentTimeMillis()
         var reply = if (uris.isNotEmpty()) takeReply() else null
         if (uris.isNotEmpty()) session.sendMediaDetached("album", uris.size) { oneDone ->
             val albumId = if (uris.size > 1) java.util.UUID.randomUUID().toString().uppercase() else null
@@ -1011,7 +1057,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             }
             // Nothing went, so nothing carried the quote: it goes back.
-            if (reply != null) giveReplyBack(quoted)
+            if (reply != null) giveReplyBack(quoted, since)
             // One failure toast for the batch, raised by the wrapper.
             if (failed > 0) throw IllegalStateException("$failed of ${uris.size} album items failed")
         }
@@ -1085,11 +1131,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // batch above: the strip, surviving the user leaving, and a word
             // when something fails (#691, #473).
             //
-            // The quote rides the first item that goes, as in the album
-            // picker (#1048 review): a parked answer came back with the chat,
-            // and the batch left without it, the chip still promising one.
-            val quoted = replyTarget
-            var reply = takeReply()
+            // ⚠ No quote. The batch goes without a preview, so a parked quote
+            // the person did not choose in this action would ride it without
+            // their seeing it (#1048 review); it stays on the composer for
+            // what they write next. A single shared picture goes through the
+            // preview, where the chip is in view, and takes it there.
             session.sendMediaDetached("share", uris.size) { oneDone ->
                 var failed = 0
                 for ((i, uri) in uris.withIndex()) {
@@ -1099,22 +1145,21 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             mime.startsWith("video/") -> {
                                 val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                                 if (v == null) { failed += 1; continue }
-                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch, replyTo = reply)
+                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch)
                             }
                             mime.startsWith("image/") -> {
                                 val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
                                 if (data == null) { failed += 1; continue }
-                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch, replyTo = reply)
-                                else session.sendPhoto(peer!!, data, null, albumId = albumId, replyTo = reply)
+                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch)
+                                else session.sendPhoto(peer!!, data, null, albumId = albumId)
                             }
                             else -> {
                                 val f = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
                                 if (f == null) { failed += 1; continue }
-                                if (isGroup) session.sendGroupFile(groupId!!, f.bytes, f.name, f.mime, reply)
-                                else session.sendFile(peer!!, f.bytes, f.name, f.mime, reply)
+                                if (isGroup) session.sendGroupFile(groupId!!, f.bytes, f.name, f.mime)
+                                else session.sendFile(peer!!, f.bytes, f.name, f.mime)
                             }
                         }
-                        reply = null
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Throwable) {
@@ -1124,7 +1169,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         oneDone()
                     }
                 }
-                if (reply != null) giveReplyBack(quoted)
                 if (failed > 0) throw IllegalStateException("$failed of ${uris.size} shared items failed")
             }
         }
@@ -1209,12 +1253,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         recording = false
         val res = recorder.stop() ?: return
         val quoted = replyTarget
+        val since = System.currentTimeMillis()
         val reply = takeReply()
-        scope.launch {
-            runCatching {
+        // Detached, like every other attachment (#473): on this screen's scope
+        // leaving the chat cancelled the send, and for a group that could land
+        // after the fan-out, so the quote came back for a voice note that had
+        // already gone with it (#1048 review).
+        session.sendMediaDetached("voice") {
+            try {
                 if (isGroup) session.sendGroupVoice(groupId!!, res.first, res.second, reply)
                 else session.sendVoice(peer!!, res.first, res.second, reply)
-            }.onFailure { giveReplyBack(quoted) }
+            } catch (e: Exception) {
+                giveReplyBack(quoted, since)
+                throw e
+            }
         }
     }
     // ⚠⚠ ONE place that speaks a refusal, for all eight send paths. Both sends
@@ -2799,6 +2851,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 // The picture answers what the chip above the composer says it
                 // answers (#1048); Cancel above leaves the chip where it was.
                 val quoted = replyTarget
+                val since = System.currentTimeMillis()
                 val reply = takeReply()
                 // NOT on this screen's scope: leaving the chat used to cancel the
                 // upload and lose the picture without a word (#473).
@@ -2812,7 +2865,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler, replyTo = reply)
                         }
                     } catch (e: Exception) {
-                        giveReplyBack(quoted)
+                        giveReplyBack(quoted, since)
                         throw e
                     }
                 }
