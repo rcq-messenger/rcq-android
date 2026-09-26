@@ -518,6 +518,14 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             GroupMediaGrid(
                 session, groupId,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                // #1042: "чтоб можно было эту картинку/видео найти в чате". The
+                // card is only ever opened from the room's own chat, so going
+                // back IS going to the chat, and the chat picks the request up
+                // as it reappears (ChatJump).
+                onShowInChat = { m ->
+                    ChatJump.request("g:$groupId", m.id)
+                    onBack()
+                },
             )
         }
 

@@ -918,6 +918,7 @@
     <string name="chat_reply">回复</string>
     <string name="chat_copy">复制</string>
     <string name="media_share">分享</string>
+    <string name="media_show_in_chat">在聊天中显示</string>
     <string name="media_save">保存</string>
     <string name="media_saved">已保存</string>
     <string name="media_saved_to">已保存到 %1$s</string>

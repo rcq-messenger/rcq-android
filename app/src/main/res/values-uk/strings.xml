@@ -918,6 +918,7 @@
     <string name="chat_reply">Відповісти</string>
     <string name="chat_copy">Копіювати</string>
     <string name="media_share">Поділитися</string>
+    <string name="media_show_in_chat">Показати в чаті</string>
     <string name="media_save">Зберегти</string>
     <string name="media_saved">Збережено</string>
     <string name="media_saved_to">Збережено в %1$s</string>

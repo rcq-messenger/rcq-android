@@ -61,7 +61,13 @@ import kotlinx.coroutines.launch
  * bitmaps and not twelve full-resolution ones.
  */
 @Composable
-internal fun GroupMediaGrid(session: Session, groupId: Int, modifier: Modifier = Modifier) {
+internal fun GroupMediaGrid(
+    session: Session,
+    groupId: Int,
+    modifier: Modifier = Modifier,
+    /** "Show in chat" on the page being looked at (#1042). */
+    onShowInChat: ((ChatMessage) -> Unit)? = null,
+) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -74,37 +80,17 @@ internal fun GroupMediaGrid(session: Session, groupId: Int, modifier: Modifier =
     // draw a card somebody opened to change the slowmode. Twelve fills three
     // rows on every phone; the rest is one tap away.
     val shown = if (expanded) media else media.take(GroupMedia.PREVIEW)
-    var fetching by remember { mutableStateOf<String?>(null) }
-    var photo by remember { mutableStateOf<ByteArray?>(null) }
+    // ⚠⚠ THE WALL IS THE PAGER'S PAGES, not the one tile (#1042: "в инфо группы
+    // заходишь в медиа, не перелистывает свайпом, ни видео ни картинки"). A
+    // tap opened a single picture or a single clip, and the only way to the
+    // next one was out, back to the wall, and in again. The album pager the
+    // chat already uses turns through pictures and clips alike, fetches a
+    // picture only when its page comes into view and a clip only when its
+    // play disc is tapped, so handing it the whole wall costs nothing up
+    // front. All of it, not only the tiles drawn: "show all" folds the wall,
+    // not what a swipe may reach. Same order as the wall, newest first.
+    var paging by remember { mutableStateOf<Int?>(null) }
     var clip by remember { mutableStateOf<VideoSource?>(null) }
-
-    fun open(m: ChatMessage) {
-        if (fetching != null) return
-        fetching = m.id
-        scope.launch {
-            try {
-                if (m.kind == "video") {
-                    when (val r = playableVideo(session, m)) {
-                        is PlayableVideo.Ready -> clip = r.source
-                        else -> sayVideoFailure(context, r)
-                    }
-                } else {
-                    val id = m.mediaId
-                    val key = m.mediaKey
-                    val bytes = if (id == null || key == null) null
-                                else session.fetchImage(id, key, session.groupHost(groupId))
-                    if (bytes == null) {
-                        android.widget.Toast.makeText(
-                            context, context.getString(R.string.media_fetch_failed),
-                            android.widget.Toast.LENGTH_LONG,
-                        ).show()
-                    } else photo = bytes
-                }
-            } finally {
-                fetching = null
-            }
-        }
-    }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -118,9 +104,9 @@ internal fun GroupMediaGrid(session: Session, groupId: Int, modifier: Modifier =
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 row.forEach { m ->
                     MediaTile(
-                        session, m, groupId, busy = fetching == m.id,
+                        session, m, groupId, busy = false,
                         modifier = Modifier.weight(1f),
-                        onOpen = { open(m) },
+                        onOpen = { paging = media.indexOfFirst { it.id == m.id }.coerceAtLeast(0) },
                     )
                 }
                 // The last row of an incomplete grid keeps its tiles square by
@@ -138,19 +124,22 @@ internal fun GroupMediaGrid(session: Session, groupId: Int, modifier: Modifier =
         }
     }
 
-    photo?.let { bytes ->
-        FullscreenImageViewer(
-            bytes,
-            onShare = { b -> MediaSaver.share(context, b, "RCQ_${System.currentTimeMillis()}.jpg", "image/jpeg") },
-            onSave = { b ->
+    paging?.let { start ->
+        AlbumPagerViewer(
+            session, media, start,
+            onShare = { _, payload -> MediaSaver.share(context, payload.write, payload.name, payload.mime) },
+            onSave = { m, payload ->
                 scope.launch {
-                    val ok = MediaSaver.saveToGallery(context, b, "RCQ_${System.currentTimeMillis()}.jpg", "image/jpeg")
-                    val said = if (ok) context.getString(R.string.media_saved_to, "Pictures/RCQ")
+                    val ok = MediaSaver.saveToGallery(context, payload.write, payload.name, payload.mime)
+                    val dir = if (m.kind == "video") "Movies/RCQ" else "Pictures/RCQ"
+                    val said = if (ok) context.getString(R.string.media_saved_to, dir)
                                else context.getString(R.string.media_save_failed)
                     android.widget.Toast.makeText(context, said, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
-            onDismiss = { photo = null },
+            onPlayVideo = { _, src -> clip = src },
+            onShowInChat = onShowInChat?.let { show -> { m -> paging = null; show(m) } },
+            onDismiss = { paging = null },
         )
     }
     clip?.let { src ->

@@ -904,6 +904,7 @@
     <string name="chat_reply">Responder</string>
     <string name="chat_copy">Copiar</string>
     <string name="media_share">Compartilhar</string>
+    <string name="media_show_in_chat">Mostrar na conversa</string>
     <string name="media_save">Salvar</string>
     <string name="media_saved">Salvo</string>
     <string name="media_saved_to">Salvo em %1$s</string>

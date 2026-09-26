@@ -245,6 +245,38 @@ private object ChatDrafts {
     val replyByThread = mutableMapOf<String, String>()
 }
 
+/** "Show in chat" from a viewer that is not inside the chat (#1042): the
+ *  group card's media wall hands over the thread ("g:<id>", the [ChatDrafts]
+ *  key) and the message, the card closes, and the chat that appears under it
+ *  jumps there. A request nobody picked up within a few seconds is dropped
+ *  rather than surprising the next visit to that chat. */
+internal object ChatJump {
+    class Req(val threadKey: String, val messageId: String, val at: Long)
+    val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+    fun request(threadKey: String, messageId: String) {
+        pending.value = Req(threadKey, messageId, android.os.SystemClock.elapsedRealtime())
+    }
+}
+
+/** Picks up a [ChatJump] for this thread. Its own composable, and not inline in
+ *  [ChatScreen], because that method is at the verifier's limit (see
+ *  MessageLongPressOverlay's kdoc). */
+@Composable
+private fun ChatJumpEffect(threadKey: String, onJump: (String) -> Unit) {
+    val jump by rememberUpdatedState(onJump)
+    LaunchedEffect(threadKey) {
+        ChatJump.pending.collect { r ->
+            if (r == null || r.threadKey != threadKey) return@collect
+            ChatJump.pending.value = null
+            if (android.os.SystemClock.elapsedRealtime() - r.at > 10_000) return@collect
+            // The chat's own opening position (last read, or the bottom) lands
+            // first; jumping before it would be undone by it.
+            delay(300)
+            jump(r.messageId)
+        }
+    }
+}
+
 /** Disappearing messages (founder item 20): the per-thread timer the user
  *  picks, and the option set, mirrored one-for-one from iOS
  *  (`ChatSettingsStore.ttlOptions`) so the two clients offer the same choices
@@ -1412,6 +1444,19 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             idx >= 0
         }
     }
+    // Jump from something laid OVER the thread (the search, the media wall, a
+    // viewer): the overlay closing re-pins the list to the newest message, so
+    // pinning is held off for the length of the scroll and the flash.
+    fun jumpToMessage(id: String) {
+        autoPinToBottom.value = false
+        onTapReply(id)
+        scope.launch {
+            kotlinx.coroutines.delay(700)
+            autoPinToBottom.value = true
+        }
+    }
+    // "Show in chat" from the group card's media wall (#1042).
+    ChatJumpEffect(threadKey) { jumpToMessage(it) }
 
     // Mention-jump (Telegram-style @-FAB): ordered ids of messages in THIS open
     // thread that @mention me and aren't mine. Group-only by nature — a 1:1 body
@@ -2370,7 +2415,29 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             },
             onPlayVideo = { m, src -> fullscreenVideo = viewerVideoOf(m, src) },
-            onMore = { m, batch -> albumViewer = null; actionMsg = m; actionAlbum = batch },
+            // The media wall goes too when the pager came from it: the message
+            // menu is drawn over the thread, and left under the wall it was
+            // invisible while still holding Back (found on the emulator).
+            //
+            // ⚠⚠ And from the wall the pager's pages are NOT a batch. They are
+            // every picture in the chat, and handing them over as one offered
+            // "delete all N photos" for the whole wall. The batch is the
+            // message's own album, if it has one.
+            onMore = { m, batch ->
+                val wall = showAllMedia
+                albumViewer = null
+                showAllMedia = false
+                actionMsg = m
+                actionAlbum = if (!wall) batch
+                              else m.albumId?.let { a -> messages.filter { it.albumId == a } }
+            },
+            // Only when the pager came from the media wall; from an album
+            // bubble the message is already behind the viewer.
+            onShowInChat = if (!showAllMedia) null else ({ m ->
+                albumViewer = null
+                showAllMedia = false
+                jumpToMessage(m.id)
+            }),
             onDismiss = { albumViewer = null },
         )
     }
@@ -2784,18 +2851,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 // [onTapReply] already resolves a message id against the rows,
                 // leaves the return anchor for the jump-down arrow and flashes
                 // the message, which is exactly what a search hit wants too.
-                autoPinToBottom.value = false
-                onTapReply(msg.id)
                 // Closing the overlay closes the keyboard and shrinks the
                 // composer back, and both of those re-pin the list to the
-                // newest message; without this the jump above landed and was
-                // immediately undone. Long enough for the IME animation plus
-                // the scroll, short enough to fall well inside the 1400 ms
-                // highlight so pinning is back before the flash ends.
-                scope.launch {
-                    kotlinx.coroutines.delay(700)
-                    autoPinToBottom.value = true
-                }
+                // newest message; without the hold in [jumpToMessage] the jump
+                // landed and was immediately undone. 700 ms: long enough for
+                // the IME animation plus the scroll, short enough to fall well
+                // inside the 1400 ms highlight so pinning is back before the
+                // flash ends.
+                jumpToMessage(msg.id)
             },
         )
     }
@@ -2805,8 +2868,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             session = session,
             messages = messages,
             onClose = { showAllMedia = false },
-            onOpenPhoto = { m -> mediaBytes(m) { fullscreenImage = viewerMediaOf(m, it) } },
-            onOpenVideo = { m -> openVideo(m) { fullscreenVideo = viewerVideoOf(m, it) } },
+            // The whole wall as pages, not the one tile (#1042): the album
+            // pager already turns through pictures and clips alike.
+            onOpen = { list, idx -> albumViewer = list to idx },
         )
     }
     if (confirmLocation) {
@@ -5428,7 +5492,7 @@ private fun blurForSpoiler(src: Bitmap): Bitmap {
  *  shown but not tappable (see viewerSenderClick in ChatScreen). */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumPagerViewer(
+internal fun AlbumPagerViewer(
     session: Session,
     items: List<ChatMessage>,
     startIndex: Int,
@@ -5443,6 +5507,10 @@ private fun AlbumPagerViewer(
     /// pager is the one place every page is reachable, so the menu opens from
     /// here. Null hides the disc, which keeps the clearance arithmetic honest.
     onMore: ((ChatMessage, List<ChatMessage>) -> Unit)? = null,
+    /// "Show in chat" for the page you are on (#1042). Given only where the
+    /// pager is opened AWAY from the message itself (a media wall), since from
+    /// an album bubble the message is already right behind the viewer.
+    onShowInChat: ((ChatMessage) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) { onDismiss(); return }
@@ -5626,7 +5694,7 @@ private fun AlbumPagerViewer(
                 ViewerChrome(chrome, Modifier.align(Alignment.TopCenter)) {
                     ViewerSenderLabel(
                         senderName,
-                        trailingActions = if (onMore != null) 3 else 2,
+                        trailingActions = 2 + (if (onMore != null) 1 else 0) + (if (onShowInChat != null) 1 else 0),
                         onClick = current?.let(onSenderClick),
                     )
                 }
@@ -5649,6 +5717,11 @@ private fun AlbumPagerViewer(
                             ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
                                 actionBusy = true
                                 scope.launch { try { payloadOf(current)?.let { onShare(current, it) } } finally { actionBusy = false } }
+                            }
+                            onShowInChat?.let { show ->
+                                ViewerAction(Icons.AutoMirrored.Filled.Message, stringResource(R.string.media_show_in_chat)) {
+                                    show(current)
+                                }
                             }
                             onMore?.let { more ->
                                 ViewerAction(Icons.Filled.MoreVert, stringResource(R.string.chat_menu_cd)) {
@@ -5831,7 +5904,9 @@ private class ViewerVideo(
 /** Something to save or share: what to call it, what it is, and how to write
  *  it out. A writer rather than a ByteArray so the same two buttons work on a
  *  picture and on a film. */
-private class MediaPayload(
+// `internal` for the group card's media wall, which opens the same pager
+// (GroupMediaGrid.kt, #1042).
+internal class MediaPayload(
     val name: String,
     val mime: String,
     val write: (java.io.OutputStream) -> Boolean,
@@ -6577,14 +6652,14 @@ private fun fileFitsIsland(context: Context, session: Session, sizeBytes: Long):
  *  FileProvider URI (chooser fallback so the user can always save it). */
 /** "Show all media" gallery: a 3-column grid of every photo/video in the
  *  thread (newest first), built from the in-memory message list (iOS parity).
- *  Photo tap opens the fullscreen viewer; video tap opens the external player. */
+ *  A tap opens the album pager on that tile with the whole wall as its pages,
+ *  in the grid's order, so a swipe goes to the next tile (#1042). */
 @Composable
 private fun AllMediaOverlay(
     session: Session,
     messages: List<ChatMessage>,
     onClose: () -> Unit,
-    onOpenPhoto: (ChatMessage) -> Unit,
-    onOpenVideo: (ChatMessage) -> Unit,
+    onOpen: (List<ChatMessage>, Int) -> Unit,
 ) {
     val c = RcqTheme.colors
     val media = remember(messages) {
@@ -6614,7 +6689,7 @@ private fun AllMediaOverlay(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 gridItems(media, key = { it.id }) { m ->
-                    MediaTile(session, m) { if (m.kind == "video") onOpenVideo(m) else onOpenPhoto(m) }
+                    MediaTile(session, m) { onOpen(media, media.indexOf(m)) }
                 }
             }
         }

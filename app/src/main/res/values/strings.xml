@@ -953,6 +953,7 @@
     <string name="chat_quote_collapse_cd">Collapse the quote</string>
     <string name="chat_copy">Copy</string>
     <string name="media_share">Share</string>
+    <string name="media_show_in_chat">Show in chat</string>
     <string name="media_save">Save</string>
     <string name="media_saved">Saved</string>
     <string name="media_saved_to">Saved to %1$s</string>

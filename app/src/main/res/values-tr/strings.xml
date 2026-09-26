@@ -904,6 +904,7 @@
     <string name="chat_reply">Yanıtla</string>
     <string name="chat_copy">Kopyala</string>
     <string name="media_share">Paylaş</string>
+    <string name="media_show_in_chat">Sohbette göster</string>
     <string name="media_save">Kaydet</string>
     <string name="media_saved">Kaydedildi</string>
     <string name="media_saved_to">%1$s klasörüne kaydedildi</string>
