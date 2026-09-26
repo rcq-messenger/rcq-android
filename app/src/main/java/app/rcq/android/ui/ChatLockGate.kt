@@ -139,7 +139,7 @@ fun PinGate(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(20.dp))
-        Button(onClick = { submit() }, enabled = pin.isNotEmpty() && !gate.busy && lockedSec == null, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { submit() }, enabled = pin.length >= app.rcq.android.crypto.PinVault.MIN_PIN_LENGTH && !gate.busy && lockedSec == null, modifier = Modifier.fillMaxWidth()) {
             if (gate.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             else Text(stringResource(R.string.pin_unlock))
         }
@@ -182,7 +182,9 @@ internal class PinGateController(
         }
 
     fun submit(pin: String, onOk: () -> Unit, onWrong: () -> Unit = {}) {
-        if (busy || pin.isEmpty() || remainingSec != null) return
+        // Shorter than any PIN can be: not an attempt, and not charged to the
+        // shared counter (the lock screen never submits one either).
+        if (busy || pin.length < app.rcq.android.crypto.PinVault.MIN_PIN_LENGTH || remainingSec != null) return
         busy = true
         wrong = false
         scope.launch {
@@ -238,6 +240,11 @@ internal fun gateBiometricAvailable(context: Context): Boolean =
 internal fun askGateBiometric(context: Context, title: String, subtitle: String, onOk: () -> Unit) {
     val act = context.findFragmentActivity() ?: return
     BiometricGate.unlock(act, title, subtitle, context.getString(R.string.pin_biometric_cancel)) { blob ->
-        if (blob != null) onOk()
+        if (blob != null) {
+            // The person proved it is them, as the lock screen's biometric
+            // unlock does, and it clears the count the same way.
+            app.rcq.android.crypto.PinVault.clearAttempts(context)
+            onOk()
+        }
     }
 }

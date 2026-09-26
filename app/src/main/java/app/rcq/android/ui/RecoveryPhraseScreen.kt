@@ -294,7 +294,7 @@ private fun PinGate(onVerified: () -> Unit) {
         }
         CapsuleButton(
             if (gate.busy) stringResource(R.string.pin_busy) else stringResource(R.string.recovery_pin_unlock),
-            enabled = !gate.busy && lockedSec == null && pin.isNotEmpty(),
+            enabled = !gate.busy && lockedSec == null && pin.length >= app.rcq.android.crypto.PinVault.MIN_PIN_LENGTH,
             modifier = Modifier.fillMaxWidth(),
         ) {
             gate.submit(pin, onOk = onVerified, onWrong = { pin = "" })
