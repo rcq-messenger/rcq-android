@@ -50,6 +50,9 @@ class CallController(
      *  (`call_offline` / `call_unreachable`), whatever the contact list says
      *  about them. #1047(b): the list is told too. */
     private val peerUnreachable: (peerUin: Int) -> Unit = {},
+    /** [peerUin] just showed they are there after all: they answered, or they
+     *  are calling. Whatever [peerUnreachable] said about them is over. */
+    private val peerReached: (peerUin: Int) -> Unit = {},
 ) {
     enum class Media(val wire: String) {
         AUDIO("audio"), VIDEO("video");
@@ -524,7 +527,7 @@ class CallController(
         val from = obj.get("from_uin")?.takeIf { !it.isJsonNull }?.asInt ?: return
         val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
         when (type) {
-            "call_offer" -> handleIncomingOffer(from, callId, obj)
+            "call_offer" -> { peerReached(from); handleIncomingOffer(from, callId, obj) }
             "call_answer" -> handleAnswer(callId, obj.get("sdp")?.asString ?: "")
             "call_ice" -> {
                 // Cross-island calls may batch a burst of trickle candidates
@@ -680,6 +683,7 @@ class CallController(
         // media dying, and a call somebody answered must never afterwards be
         // deposited on their phone as one they missed.
         remoteAnswered = true
+        peerReached(call.peerUin)
         scope.launch {
             try {
                 rtc.handleAnswer(sdp)

@@ -389,6 +389,7 @@ class Session(context: Context) {
             }
         },
         peerUnreachable = { markOfflineByCall(it) },
+        peerReached = { releaseCallHold(it) },
     )
 
     /** Contacts a call just found offline, and when (elapsedRealtime).
@@ -404,13 +405,44 @@ class Session(context: Context) {
      *  which the island's word stands again. */
     private val callSaysOffline = java.util.concurrent.ConcurrentHashMap<Int, Long>()
 
+    /** Holds just released and not yet seen through a full roster read, see
+     *  [releaseCallHold]. */
+    private val callHoldReleased: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     private fun markOfflineByCall(uin: Int) {
-        callSaysOffline[uin] = android.os.SystemClock.elapsedRealtime()
+        val at = android.os.SystemClock.elapsedRealtime()
+        callSaysOffline[uin] = at
         _contacts.update { list ->
             list.map { c ->
                 if (c.uin == uin && c.host == null && c.presence != UserStatus.OFFLINE) c.copy(status = "offline") else c
             }
         }
+        // The hold ends by itself, and ending it has to be SEEN (#1047 review).
+        // Waiting for the next roster read to notice the deadline was not
+        // enough: our grey is a local repaint the island never heard of, so
+        // while the person stays online the island's list does not change and
+        // every read answers 304, which by design leaves the list alone. The
+        // row stayed grey for hours. Only this hold's own timer releases it,
+        // so a newer call's hold is not cut short by an older one's.
+        scope.launch {
+            delay(CALL_OFFLINE_HOLD_MS)
+            if (callSaysOffline[uin] == at) releaseCallHold(uin)
+        }
+    }
+
+    /** End [uin]'s hold, if there is one, and put the island's word back on
+     *  screen: the ETag goes so the next read is a full body (a 304 would keep
+     *  the grey), and the read happens now. Called when the hold expires, when
+     *  the island says anything about them (`presence`), and when they show up
+     *  live: they answer our call, they call us, a message or typing arrives
+     *  from them over the socket. */
+    private fun releaseCallHold(uin: Int) {
+        if (callSaysOffline.remove(uin) == null) return
+        // Our own grey going back to the island's green is not somebody
+        // coming online: the refresh below must not chime for it.
+        callHoldReleased.add(uin)
+        rosterEtag = null
+        scope.launch { runCatching { refreshContacts() } }
     }
 
     /** The status a roster row from the island should show, after [callSaysOffline]. */
@@ -10110,6 +10142,10 @@ class Session(context: Context) {
         var why: String? = null
         runCatching {
             val dec = attributeToMailbox(decryptInbound(payloadB64), mailboxHost)
+            // A row that came over the LIVE socket from somebody a call found
+            // offline: they are here after all (#1047 hold). Not for a drained
+            // backlog row, which says nothing about now.
+            if (drainDepth.get() == 0 && callSaysOffline.containsKey(dec.senderUin)) releaseCallHold(dec.senderUin)
             // Opened, so now we know whether the wake for this row (if it came
             // as one we could not open) was a message at all. A caller's sealed
             // `call_end` was the "New message" that led nowhere (#1047). Same
@@ -12497,7 +12533,10 @@ class Session(context: Context) {
         val prevPresence = _contacts.value.associate { it.uin to it.presence }
         // Rows a call greyed out: their "offline" was ours, not the island's,
         // so the island disagreeing now is not somebody coming online (#1047).
-        val heldByCall = callSaysOffline.keys.toHashSet()
+        // Including the ones released a moment ago, whose grey is still on the
+        // list this read replaces.
+        val releasedNow = callHoldReleased.toHashSet()
+        val heldByCall = callSaysOffline.keys.toHashSet() + releasedNow
         // Whose roster this is: an account switch while the fetch is in the
         // air rebinds `store`, and the list must not be sealed into the new
         // account's vault (the mirror checks the pin before it starts).
@@ -12576,6 +12615,7 @@ class Session(context: Context) {
             )
         }
         presenceBaselineLive = true
+        callHoldReleased.removeAll(releasedNow)
         if (armed) {
             // ONE decision for the whole refresh, taken by a pure rule and then
             // played at most once (#1030). The loop used to call the player per
@@ -13285,6 +13325,8 @@ class Session(context: Context) {
             "typing" -> {
                 val from = obj.get("from_uin")?.asInt
                 val active = obj.get("active")?.asBoolean ?: false
+                // Typing is somebody demonstrably here (#1047 hold).
+                if (from != null && callSaysOffline.containsKey(from)) releaseCallHold(from)
                 if (active && from != null) {
                     _typingFrom.value = from
                     val seq = ++typingSeq
@@ -13309,10 +13351,12 @@ class Session(context: Context) {
                 audioRooms.onSignal(type, obj)
             "presence" -> {
                 // Whatever the island now says about this person is newer than
-                // what a call found out about them (#1047).
-                obj.get("uin")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asInt } }?.getOrNull()
-                    ?.let { callSaysOffline.remove(it) }
-                scope.launch { runCatching { refreshContacts() } }
+                // what a call found out about them (#1047). Releasing drops the
+                // ETag too, so the read below cannot come back 304 and keep the
+                // grey; with no hold it is the plain refresh it always was.
+                val who = obj.get("uin")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asInt }.getOrNull() }
+                if (who != null && callSaysOffline.containsKey(who)) releaseCallHold(who)
+                else scope.launch { runCatching { refreshContacts() } }
             }
             // A contact changed their name. Nothing announced this before, so
             // the new name only appeared whenever the roster happened to be
