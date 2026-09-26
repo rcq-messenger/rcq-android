@@ -309,7 +309,18 @@ object PinVault {
     }
 
     // ── brute-force throttle ─────────────────────────────────────────
-    data class AttemptState(val failedCount: Int = 0, val lockoutUntil: Long? = null)
+    /** [lockoutUntil] is wall-clock epoch ms, kept for a lockout that has to
+     *  outlive a reboot. [lockoutElapsed] is the same deadline on
+     *  `SystemClock.elapsedRealtime`, which the clock in Settings cannot move,
+     *  valid only on the boot [bootCount] names (see
+     *  [app.rcq.android.security.PanicPinService.lockedOutUntilElapsed]). Both new
+     *  fields are missing from records written before them. */
+    data class AttemptState(
+        val failedCount: Int = 0,
+        val lockoutUntil: Long? = null,
+        val lockoutElapsed: Long? = null,
+        val bootCount: Int? = null,
+    )
 
     /** Escalating lockout (ms) mirroring iOS: <5 free, then 30s/60s/5m/15m/1h. */
     fun lockoutMillis(failedCount: Int): Long = when {

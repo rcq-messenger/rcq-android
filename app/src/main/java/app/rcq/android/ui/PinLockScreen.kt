@@ -54,12 +54,14 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var lockedOutUntil by remember { mutableStateOf(PanicPinService.lockedOutUntil(context)) }
-    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    // Both on the monotonic clock ([PanicPinService.lockedOutUntilElapsed]):
+    // a clock changed in Settings neither ends the countdown nor stretches it.
+    var lockedOutUntil by remember { mutableStateOf(PanicPinService.lockedOutUntilElapsed(context)) }
+    var nowMs by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(lockedOutUntil) {
-        while (lockedOutUntil != null && lockedOutUntil!! > System.currentTimeMillis()) {
-            nowMs = System.currentTimeMillis()
+        while (lockedOutUntil != null && lockedOutUntil!! > android.os.SystemClock.elapsedRealtime()) {
+            nowMs = android.os.SystemClock.elapsedRealtime()
             delay(500)
         }
         lockedOutUntil = null
@@ -147,11 +149,11 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
                 PanicPinService.SubmitResult.WRONG -> {
                     error = context.getString(R.string.pin_wrong)
                     pin = ""
-                    lockedOutUntil = PanicPinService.lockedOutUntil(context)
+                    lockedOutUntil = PanicPinService.lockedOutUntilElapsed(context)
                 }
                 PanicPinService.SubmitResult.LOCKED_OUT -> {
                     pin = ""
-                    lockedOutUntil = PanicPinService.lockedOutUntil(context)
+                    lockedOutUntil = PanicPinService.lockedOutUntilElapsed(context)
                 }
             }
         }

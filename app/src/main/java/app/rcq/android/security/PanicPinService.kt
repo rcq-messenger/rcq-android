@@ -112,22 +112,70 @@ object PanicPinService {
         pendingWipeServer = false
     }
 
-    /** Epoch-ms the lockout lasts until, or null if not locked out. */
-    fun lockedOutUntil(context: Context): Long? =
-        PinVault.loadAttempts(context).lockoutUntil?.takeIf { it > System.currentTimeMillis() }
+    /** When the lockout ends, on the `SystemClock.elapsedRealtime` clock, or
+     *  null if not locked out. Countdowns on screen tick against that same
+     *  clock, so a clock changed in Settings moves neither the lockout nor the
+     *  number shown for it.
+     *
+     *  ⚠ Not the wall clock (#1045 review). The deadline used to be
+     *  `currentTimeMillis() + lockout` and the check `> now`, so moving the
+     *  clock forward in Settings lifted a lockout and moving it back stretched
+     *  one without bound; and since every in-app gate now counts on it, that
+     *  was a way round all of them for somebody holding the phone. On the boot
+     *  it was set on, the monotonic clock decides. After a reboot (monotonic
+     *  time starts again) the wall-clock deadline is used, never longer than
+     *  the escalation step it came from, and re-anchored on the new boot so
+     *  the clock cannot move it from then on either. */
+    fun lockedOutUntilElapsed(context: Context): Long? {
+        val s = PinVault.loadAttempts(context)
+        val ceiling = PinVault.lockoutMillis(s.failedCount)
+        if (ceiling <= 0) return null
+        val now = System.currentTimeMillis()
+        val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        val boot = bootCount(context)
+        if (s.lockoutElapsed != null && boot != null && s.bootCount == boot) {
+            val left = (s.lockoutElapsed - nowElapsed).coerceAtMost(ceiling)
+            return if (left > 0) nowElapsed + left else null
+        }
+        val until = s.lockoutUntil ?: return null
+        val left = (until - now).coerceAtMost(ceiling)
+        if (left <= 0) return null
+        if (boot != null) {
+            PinVault.saveAttempts(context, s.copy(lockoutElapsed = nowElapsed + left, bootCount = boot))
+        }
+        return nowElapsed + left
+    }
+
+    /** One more wrong PIN on the shared counter, with the lockout it earns. */
+    private fun recordFailure(context: Context) {
+        val n = PinVault.loadAttempts(context).failedCount + 1
+        val lo = PinVault.lockoutMillis(n)
+        PinVault.saveAttempts(
+            context,
+            if (lo > 0) {
+                PinVault.AttemptState(
+                    n,
+                    lockoutUntil = System.currentTimeMillis() + lo,
+                    lockoutElapsed = android.os.SystemClock.elapsedRealtime() + lo,
+                    bootCount = bootCount(context),
+                )
+            } else PinVault.AttemptState(n),
+        )
+    }
+
+    /** Which boot this is, to tell whether a stored monotonic deadline still
+     *  means anything. Null where the platform will not say. */
+    private fun bootCount(context: Context): Int? = runCatching {
+        android.provider.Settings.Global.getInt(context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+    }.getOrNull()?.takeIf { it >= 0 }
 
     /** Try [pin] at the lock screen. On [SubmitResult.REAL] the dataKey is set
      *  and [locked] clears; the caller then (re)binds the message DB. */
     fun submit(context: Context, pin: String): SubmitResult {
-        if (lockedOutUntil(context) != null) return SubmitResult.LOCKED_OUT
+        if (lockedOutUntilElapsed(context) != null) return SubmitResult.LOCKED_OUT
         val unlock = PinVault.unlock(context, pin)
         if (unlock == null) {
-            val n = PinVault.loadAttempts(context).failedCount + 1
-            val lo = PinVault.lockoutMillis(n)
-            PinVault.saveAttempts(
-                context,
-                PinVault.AttemptState(n, if (lo > 0) System.currentTimeMillis() + lo else null),
-            )
+            recordFailure(context)
             return SubmitResult.WRONG
         }
         PinVault.clearAttempts(context)
@@ -207,18 +255,13 @@ object PanicPinService {
      *
      *  ⚠ PBKDF2 over 400k rounds: call it off the main thread. */
     fun checkGatePin(context: Context, pin: String, realOnly: Boolean = false): GateCheck {
-        if (lockedOutUntil(context) != null) return GateCheck.LOCKED_OUT
+        if (lockedOutUntilElapsed(context) != null) return GateCheck.LOCKED_OUT
         val ok = if (realOnly) verifyRealPin(context, pin) else verifySessionPin(context, pin)
         if (ok) {
             PinVault.clearAttempts(context)
             return GateCheck.OK
         }
-        val n = PinVault.loadAttempts(context).failedCount + 1
-        val lo = PinVault.lockoutMillis(n)
-        PinVault.saveAttempts(
-            context,
-            PinVault.AttemptState(n, if (lo > 0) System.currentTimeMillis() + lo else null),
-        )
+        recordFailure(context)
         return GateCheck.WRONG
     }
 

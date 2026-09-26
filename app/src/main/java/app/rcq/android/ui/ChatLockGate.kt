@@ -168,9 +168,11 @@ internal class PinGateController(
     var busy by mutableStateOf(false)
         private set
     var wrong by mutableStateOf(false)
-    var lockedOutUntil by mutableStateOf(PanicPinService.lockedOutUntil(context))
+    /** On the `elapsedRealtime` clock, as is [nowMs]
+     *  ([PanicPinService.lockedOutUntilElapsed]). */
+    var lockedOutUntil by mutableStateOf(PanicPinService.lockedOutUntilElapsed(context))
         private set
-    var nowMs by mutableLongStateOf(System.currentTimeMillis())
+    var nowMs by mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
         internal set
 
     /** Seconds left of a lockout, or null when there is none. */
@@ -190,16 +192,16 @@ internal class PinGateController(
         scope.launch {
             val r = withContext(Dispatchers.Default) { PanicPinService.checkGatePin(context, pin, realOnly) }
             busy = false
-            nowMs = System.currentTimeMillis()
+            nowMs = android.os.SystemClock.elapsedRealtime()
             when (r) {
                 PanicPinService.GateCheck.OK -> onOk()
                 PanicPinService.GateCheck.WRONG -> {
                     wrong = true
-                    lockedOutUntil = PanicPinService.lockedOutUntil(context)
+                    lockedOutUntil = PanicPinService.lockedOutUntilElapsed(context)
                     onWrong()
                 }
                 PanicPinService.GateCheck.LOCKED_OUT -> {
-                    lockedOutUntil = PanicPinService.lockedOutUntil(context)
+                    lockedOutUntil = PanicPinService.lockedOutUntilElapsed(context)
                     onWrong()
                 }
             }
@@ -218,7 +220,7 @@ internal fun rememberPinGate(realOnly: Boolean = false): PinGateController {
     LaunchedEffect(gate.lockedOutUntil) {
         while (true) {
             val until = gate.lockedOutUntil ?: break
-            gate.nowMs = System.currentTimeMillis()
+            gate.nowMs = android.os.SystemClock.elapsedRealtime()
             if (gate.nowMs >= until) break
             delay(500)
         }
