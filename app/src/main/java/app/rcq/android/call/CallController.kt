@@ -814,6 +814,16 @@ class CallController(
     fun handleRemoteEnd(callId: String, reason: String) {
         val call = _state.value.info ?: return
         if (call.id != callId) return
+        // A call that was ANSWERED is not ended by a "declined", "no answer" or
+        // "expired": that is another of the callee's devices saying it did
+        // not pick up, and it arriving after the one that did is ordinary.
+        // The island drops such an end on the socket; a sealed copy (the
+        // same-island hang-up's belt, #724) goes round it, so the caller makes
+        // the same check (#1047 review).
+        if (call.outgoing && remoteAnswered && reason in STALE_AFTER_ANSWER) {
+            android.util.Log.i("RCQcall", "ignoring '$reason' for answered call ${call.id.take(8)}")
+            return
+        }
         finishEnded(call, reason)
     }
 
@@ -1492,6 +1502,11 @@ class CallController(
         /** Reasons [endLocally] only ever sends because the user pressed
          *  something: the red button while calling or talking, or Decline. */
         private val USER_ENDED_REASONS = setOf("cancelled", "hangup", "declined")
+        /** End reasons that cannot apply to a call the callee answered: see
+         *  handleRemoteEnd. The island's gate (ws.py) drops three of them on
+         *  the socket (no_answer, declined, expired); the other two are the
+         *  names the apps give the same two ends. */
+        private val STALE_AFTER_ANSWER = setOf("declined", "declinedElsewhere", "no_answer", "unanswered", "expired")
     }
 }
 

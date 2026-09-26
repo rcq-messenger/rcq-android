@@ -520,6 +520,13 @@ class Session(context: Context) {
         val to = p.toUin ?: return
         if (to != store.uin) return
         if (calls.state.value.info?.id == p.callId) return
+        // ⚠ Over the socket only, never the sealed copy an ordinary hang-up
+        // leaves (#1047 review). The island drops a "declined" for a call that
+        // one of this account's devices has already answered; the sealed copy
+        // goes round that check, and an Android caller believes a same-island
+        // `call_end` envelope, so a decline from the phone in the pocket would
+        // cut the call just picked up on the desk. A lost frame costs only the
+        // caller ringing out, and the marker it then leaves is dropped here.
         routeCallSignal(
             JsonObject().apply {
                 addProperty("type", "call_end")
@@ -527,11 +534,12 @@ class Session(context: Context) {
                 addProperty("call_id", p.callId)
                 addProperty("reason", "declined")
             },
+            sealedCopy = false,
         )
     }
 
     /** §5d: WS for same-island peers, sealed deposit for cross-island ones. */
-    private fun routeCallSignal(obj: JsonObject) {
+    private fun routeCallSignal(obj: JsonObject, sealedCopy: Boolean = true) {
         val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
         val ci = toUin?.let { CrossIslandStore.findByUin(it) }
         // ⚠ `call_missed` is the one call signal that must NOT ride the socket
@@ -563,7 +571,7 @@ class Session(context: Context) {
             // frozen before any reconnect. A double delivery is idempotent:
             // [CallController.handleRemoteEnd] checks the call id and drops
             // an end for a call that is already gone.
-            if (toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_end") {
+            if (sealedCopy && toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_end") {
                 socket.ensureAlive()
                 val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
                 val data = mutableMapOf<String, String>()
@@ -10288,6 +10296,10 @@ class Session(context: Context) {
                 // row signed by the key pinned for them is that contact: the
                 // address in the envelope is not signed.
                 if (!isVerifiedCrossIslandContact(dec.senderUin, host, dec.senderSigningPub)) return@runCatching
+                // An offer this phone already turned down (from the ring its
+                // wake raised) neither rings again when the queue hands it
+                // over nor becomes a missed call later (#1047 review).
+                if (cs.sig == "call_offer" && app.rcq.android.call.DeclinedCalls.wasDeclined(appCtx, cs.cid)) return@runCatching
                 if (cs.sig == "call_offer" && System.currentTimeMillis() / 1000 - cs.ts > callOfferTtlSec) {
                     // Same dedupe as the marker above: a cross-island offer can
                     // reach us twice (the live drain and a later one), and the

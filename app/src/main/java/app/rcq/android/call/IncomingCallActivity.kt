@@ -187,6 +187,11 @@ class IncomingCallActivity : ComponentActivity() {
      *  screen must close whether or not anything answered the broadcast. */
     private fun onDecline() {
         val id = callId
+        // Read before [dismiss] clears it: the broadcast below is delivered
+        // after this handler returns, so the manifest receiver finds the parked
+        // offer already gone and cannot tell the caller (#1047 review). The
+        // caller is told from here; the receiver still records the decline.
+        val parked = IncomingCallStore.pending?.takeIf { it.callId == id }
         runCatching {
             sendBroadcast(
                 Intent(Push.ACTION_DECLINE_CALL)
@@ -194,6 +199,7 @@ class IncomingCallActivity : ComponentActivity() {
                     .putExtra(Push.EXTRA_CALL_ID, id),
             )
         }
+        parked?.let { p -> runCatching { app.rcq.android.Session.live?.declineParkedCall(p) } }
         dismiss()
     }
 
@@ -253,6 +259,10 @@ class IncomingCallActivity : ComponentActivity() {
                     addProperty("sdp", p.sdp)
                     addProperty("media", p.media)
                     addProperty("nickname", p.nickname)
+                    // Kept, or the re-parked offer forgets which account it
+                    // rang for and a Decline from the notification can no
+                    // longer answer the caller (#1047 review).
+                    p.toUin?.let { addProperty("to_uin", it) }
                 },
             )
         }
