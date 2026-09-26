@@ -255,6 +255,9 @@
     <string name="pin_on">Увімкнено</string>
     <string name="pin_codes_title">PIN-коди</string>
     <string name="pin_codes_footer">PIN шифрує історію повідомлень на цьому пристрої, і його треба вводити щоразу при відкритті застосунку. Бережи його: якщо забудеш, відновити нічого не вийде.</string>
+    <string name="pin_reauth_title">Введи поточний PIN</string>
+    <string name="pin_reauth_hint">Підтверди, що це ти, перш ніж змінювати налаштування PIN.</string>
+    <string name="pin_reauth_wrong">Хибний PIN. Спробуй ще раз.</string>
     <string name="pin_autolock_title">Автоблокування</string>
     <string name="pin_autolock_now">Одразу</string>
     <string name="pin_autolock_1m">1 хв</string>

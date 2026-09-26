@@ -162,6 +162,7 @@ import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.security.BiometricGate
+import app.rcq.android.security.PanicPinService
 import app.rcq.android.data.LanguageManager
 import app.rcq.android.data.LocalStores
 import app.rcq.android.net.MultihomeStore
@@ -4476,6 +4477,34 @@ private fun PinCodesScreen(session: Session, onBack: () -> Unit) {
     var bioEnabled by remember { mutableStateOf(session.biometricEnabled) }
 
     fun onlyDigits(s: String) = s.length <= 12 && s.all { it.isDigit() }
+
+    // ⚠⚠ THE PIN SETTINGS ASK FOR THE PIN (#1045). Everything on this screen
+    // opened without it: "Remove PIN" was one tap, "Change PIN" asked only for
+    // the NEW one, and the wipe and decoy PINs came off the same way. So the
+    // PIN guarded nothing from the one person it exists for, somebody holding
+    // the phone after it was unlocked: two taps took it off, and with it every
+    // chat locked behind it, since a chat lock with no PIN to ask for is not
+    // a lock (MainActivity's gate needs both). iOS has asked here all along
+    // (PINSettingsView re-auth). Session-aware, like iOS: in a decoy session
+    // it is the decoy PIN that opens this screen, so a coerced person is not
+    // betrayed by the only PIN they have given failing here. Asked on every
+    // visit: the flag lives in this screen's own state and leaves with it.
+    var reauthed by remember { mutableStateOf(!PanicPinService.isConfigured(context)) }
+    if (!reauthed) {
+        Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
+            SettingsTopBar(stringResource(R.string.pin_codes_title), onBack)
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                PinGate(
+                    title = stringResource(R.string.pin_reauth_title),
+                    hint = stringResource(R.string.pin_reauth_hint),
+                    wrongHint = stringResource(R.string.pin_reauth_wrong),
+                    onBack = onBack,
+                    onUnlocked = { reauthed = true },
+                )
+            }
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.pin_codes_title), onBack)

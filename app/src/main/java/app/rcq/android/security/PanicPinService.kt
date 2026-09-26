@@ -174,6 +174,22 @@ object PanicPinService {
         return unlock.payload.mode == PinVault.MODE_REAL
     }
 
+    /** Verify [pin] is the PIN that opened THIS session: the real PIN in a
+     *  real session, the decoy PIN in a decoy one. Same no-side-effects rule
+     *  as [verifyRealPin]; a wipe PIN is simply wrong here and wipes nothing.
+     *
+     *  ⚠ For the gates that guard the lock itself (a chat's "ask for a PIN",
+     *  the PIN settings), not for anything that reveals the real account. A
+     *  person made to open the app with the decoy PIN is then asked for "the
+     *  PIN" again, and if only the real one were accepted, the decoy PIN
+     *  failing in front of whoever is watching is exactly the tell a decoy
+     *  exists to avoid (iOS `verifySessionPIN`, report #237). */
+    fun verifySessionPin(context: Context, pin: String): Boolean {
+        val unlock = PinVault.unlock(context, pin) ?: return false
+        return if (inDecoySession) unlock.payload.mode == PinVault.MODE_DECOY
+        else unlock.payload.mode == PinVault.MODE_REAL
+    }
+
     /** Create the real PIN (no PIN currently). Returns the new vault dataKey,
      *  or null if [pin] is too short. The caller rekeys the message DBs from
      *  the device key to this one. */

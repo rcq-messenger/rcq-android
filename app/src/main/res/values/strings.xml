@@ -273,6 +273,9 @@
     <string name="pin_on">On</string>
     <string name="pin_codes_title">PIN codes</string>
     <string name="pin_codes_footer">A PIN encrypts your message history on this device and is required every time you open the app. Keep it safe: there is no recovery if you forget it.</string>
+    <string name="pin_reauth_title">Enter your current PIN</string>
+    <string name="pin_reauth_hint">Confirm it\'s you before changing PIN settings.</string>
+    <string name="pin_reauth_wrong">Wrong PIN. Try again.</string>
     <string name="pin_autolock_title">Auto-lock</string>
     <string name="pin_autolock_now">Immediately</string>
     <string name="pin_autolock_1m">1 min</string>

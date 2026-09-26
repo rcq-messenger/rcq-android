@@ -412,6 +412,9 @@ internal fun HomeScreen(
         previewGroup = it
     }
     var reportTarget by remember { mutableStateOf<Contact?>(null) }
+    // A chat whose "ask for a PIN" is being switched off: thread to title.
+    // The switch waits for the PIN (#1045).
+    var chatUnlockPrompt by remember { mutableStateOf<Pair<String, String>?>(null) }
     // Irreversible-on-this-device actions, each behind a confirmation.
     var clearPeerTarget by remember { mutableStateOf<Contact?>(null) }
     var clearGroupTarget by remember { mutableStateOf<RcqGroup?>(null) }
@@ -1278,8 +1281,10 @@ internal fun HomeScreen(
                 actions = contactActions(ct, session, scope, context, onOpenChat,
                     onReport = { reportTarget = it },
                     onClearThread = { clearPeerTarget = it },
-                    onRemove = { removeTarget = it }),
+                    onRemove = { removeTarget = it },
+                    onUnlockChat = { thread -> chatUnlockPrompt = thread to session.contactName(ct.uin) }),
                 onDismiss = { previewContact = null },
+                locked = chatLockHolds(context, LocalStores.peerThread(ct.uin)),
             )
         }
         previewGroup?.let { g ->
@@ -1299,8 +1304,10 @@ internal fun HomeScreen(
                     onLastResident = { room, warning ->
                         previewGroup = null
                         leaveWarnTarget = room to warning
-                    }),
+                    },
+                    onUnlockChat = { thread -> chatUnlockPrompt = thread to g.name }),
                 onDismiss = { previewGroup = null },
+                locked = chatLockHolds(context, LocalStores.groupThread(g.id)),
             )
         }
         // The first-use notice (design §5.1): non-blocking, dismissible, once
@@ -1527,6 +1534,20 @@ internal fun HomeScreen(
             onDismiss = { sectionPinPrompt = null },
         )
     }
+    // ⚠⚠ Turning a chat's lock OFF asks for the PIN first (#1045). It was one
+    // tap in the long-press menu, "Don't require PIN", with no check at all:
+    // anyone holding the unlocked phone took the lock off and walked in, which
+    // made the lock a sticker. Turning it ON stays one tap, the way the
+    // section gate treats it: closing a door needs no key.
+    chatUnlockPrompt?.let { (thread, name) ->
+        SectionPinSheet(
+            title = name,
+            actionLabel = stringResource(R.string.home_unlock_chat),
+            verify = PanicPinService::verifySessionPin,
+            onUnlocked = { LocalStores.setLocked(thread, false) },
+            onDismiss = { chatUnlockPrompt = null },
+        )
+    }
     sectionPicker?.let { id ->
         val rec = remember(sectionsTree, id) { Sections.recordFor(sectionsTree, id) }
         // ⚠ Seeded ONCE per opening of the sheet, keyed on the section and not
@@ -1658,6 +1679,12 @@ internal fun AccountAvatar(
 private fun AccountAvatar(row: AccountRow, session: Session, size: Dp) =
     AccountAvatar(row.avatarMediaId, row.avatarMediaKey, row.host, row.active, session, size)
 
+/** Whether [thread]'s "ask for a PIN" is in force on this device: the flag is
+ *  set AND there is a PIN to ask for. The same two conditions the chat gate in
+ *  MainActivity checks, so what the gate hides nothing else shows. */
+internal fun chatLockHolds(context: android.content.Context, thread: String): Boolean =
+    LocalStores.isLocked(thread) && PanicPinService.isConfigured(context)
+
 private fun contactActions(
     contact: Contact,
     session: Session,
@@ -1667,6 +1694,8 @@ private fun contactActions(
     onReport: (Contact) -> Unit,
     onClearThread: (Contact) -> Unit,
     onRemove: (Contact) -> Unit,
+    /** Asked to turn this chat's lock OFF: the caller asks for the PIN. */
+    onUnlockChat: (thread: String) -> Unit,
 ): List<ContextAction> {
     val thread = LocalStores.peerThread(contact.uin)
     val fav = LocalStores.isFavorite(thread)
@@ -1679,9 +1708,12 @@ private fun contactActions(
         ContextAction(s(if (fav) R.string.home_remove_fav else R.string.home_add_fav), if (fav) Icons.Filled.Star else Icons.Filled.StarBorder) { LocalStores.toggleFavorite(thread) },
         ContextAction(s(if (muted) R.string.home_unmute else R.string.home_mute), if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff) { LocalStores.toggleMute(thread) },
         ContextAction(s(if (archived) R.string.home_unarchive else R.string.home_archive), if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive) { LocalStores.toggleArchive(thread) },
-        // Per-chat PIN lock — only offered when an app PIN is set.
+        // Per-chat PIN lock — only offered when an app PIN is set. Off goes
+        // through the PIN (#1045), on is immediate.
         if (PanicPinService.isConfigured(context))
-            ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) { LocalStores.toggleLocked(thread) }
+            ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) {
+                if (locked) onUnlockChat(thread) else LocalStores.setLocked(thread, true)
+            }
         else null,
         ContextAction(s(if (contact.blocked) R.string.home_unblock else R.string.home_block), if (contact.blocked) Icons.Outlined.Block else Icons.Filled.Block, destructive = !contact.blocked) { scope.launch { session.toggleBlock(contact.uin) } },
         ContextAction(s(R.string.home_report), Icons.Filled.Flag, destructive = true) { onReport(contact) },
@@ -1705,6 +1737,8 @@ private fun groupActions(
     /** Leaving [RcqGroup] would delete it for everyone left in it: ask first,
      *  with this sentence (decision E4). */
     onLastResident: (RcqGroup, String) -> Unit,
+    /** Asked to turn this chat's lock OFF: the caller asks for the PIN. */
+    onUnlockChat: (thread: String) -> Unit,
 ): List<ContextAction> {
     val thread = LocalStores.groupThread(group.id)
     val fav = LocalStores.isFavorite(thread)
@@ -1719,7 +1753,9 @@ private fun groupActions(
         ContextAction(s(if (muted) R.string.home_unmute else R.string.home_mute), if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff) { LocalStores.toggleMute(thread) },
         ContextAction(s(if (archived) R.string.home_unarchive else R.string.home_archive), if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive) { LocalStores.toggleArchive(thread) },
         if (PanicPinService.isConfigured(context))
-            ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) { LocalStores.toggleLocked(thread) }
+            ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) {
+                if (locked) onUnlockChat(thread) else LocalStores.setLocked(thread, true)
+            }
         else null,
         // Wipe the local copy of a group conversation without leaving it.
         ContextAction(s(R.string.home_clear_chat), Icons.Filled.DeleteSweep, destructive = true) { onClearThread(group) },

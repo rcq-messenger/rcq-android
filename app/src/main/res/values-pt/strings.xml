@@ -248,6 +248,9 @@
     <string name="pin_on">Ligado</string>
     <string name="pin_codes_title">Códigos PIN</string>
     <string name="pin_codes_footer">Um PIN criptografa seu histórico de mensagens neste aparelho e é pedido toda vez que você abre o app. Guarde bem: não há como recuperar se você esquecer.</string>
+    <string name="pin_reauth_title">Digite seu PIN atual</string>
+    <string name="pin_reauth_hint">Confirme que é você antes de mexer nas configurações do PIN.</string>
+    <string name="pin_reauth_wrong">PIN errado. Tente de novo.</string>
     <string name="pin_autolock_title">Bloqueio automático</string>
     <string name="pin_autolock_now">Na hora</string>
     <string name="pin_autolock_1m">1 min</string>

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Place
@@ -79,6 +80,8 @@ internal fun PreviewOverlay(
     senderName: (Int) -> String,
     actions: List<ContextAction>,
     onDismiss: () -> Unit,
+    /** The chat asks for a PIN: show that it does, never what is in it. */
+    locked: Boolean = false,
 ) {
     // Back closes the preview, not the app: with the home content blurred
     // behind it this reads as a modal, and a modal that lets Back fall
@@ -95,7 +98,11 @@ internal fun PreviewOverlay(
     val dim = if (android.os.Build.VERSION.SDK_INT >= 31) 0.35f else 0.45f
     // The last ~30 are plenty for a peek and keep the list trivial. Reversed
     // because the LazyColumn below lays out bottom-up (newest anchored).
-    val recent = remember(messages) { messages.takeLast(30).asReversed() }
+    // ⚠⚠ NOTHING of a locked chat (#1045). The long-press that carries the
+    // lock switch used to open on the last thirty messages of the chat it
+    // protects, so the gate in front of the chat was a formality: holding the
+    // row read it. The capsule still names the chat, as the row itself does.
+    val recent = remember(messages, locked) { if (locked) emptyList() else messages.takeLast(30).asReversed() }
     val previewMaxH = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)).clickable(onClick = onDismiss)) {
@@ -114,7 +121,7 @@ internal fun PreviewOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            PreviewMessagesCard(title, subtitle, avatar, recent, isGroup, senderName, previewMaxH)
+            PreviewMessagesCard(title, subtitle, avatar, recent, isGroup, senderName, previewMaxH, locked)
             Spacer(Modifier.height(14.dp))
             PreviewActionsCard(actions, onDismiss)
         }
@@ -132,6 +139,7 @@ private fun PreviewMessagesCard(
     isGroup: Boolean,
     senderName: (Int) -> String,
     maxHeight: Dp,
+    locked: Boolean = false,
 ) {
     val c = RcqTheme.colors
     Box(
@@ -157,6 +165,16 @@ private fun PreviewMessagesCard(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(recent, key = { it.id }) { m -> PreviewBubble(m, isGroup, senderName) }
+        }
+        if (locked) {
+            Row(
+                Modifier.align(Alignment.Center).padding(top = 40.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.Lock, null, tint = c.textSecondary, modifier = Modifier.size(16.dp))
+                Text(stringResource(R.string.chat_locked_title), color = c.textSecondary, fontSize = 13.sp)
+            }
         }
         IdentityCapsule(title, subtitle, avatar, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }

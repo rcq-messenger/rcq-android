@@ -200,12 +200,18 @@ internal fun SectionNameSheet(
  * no dataKey swap, no decoy routing, no wipe. A device with no PIN configured
  * cannot honour the flag another device set, so it says so in one line and
  * offers to open anyway rather than pretending to check something.
+ *
+ * Also the gate in front of turning a CHAT's lock off (#1045), which is why
+ * the button's words and the check can be swapped: [actionLabel] says what the
+ * PIN is for, and [verify] is the session-aware check there.
  */
 @Composable
 internal fun SectionPinSheet(
     title: String,
     onUnlocked: () -> Unit,
     onDismiss: () -> Unit,
+    actionLabel: String? = null,
+    verify: (android.content.Context, String) -> Boolean = PanicPinService::verifyRealPin,
 ) {
     val c = RcqTheme.colors
     val context = LocalContext.current
@@ -214,7 +220,7 @@ internal fun SectionPinSheet(
     var wrong by remember { mutableStateOf(false) }
 
     fun submit() {
-        if (PanicPinService.verifyRealPin(context, pin)) {
+        if (verify(context, pin)) {
             onUnlocked()
             onDismiss()
         } else {
@@ -249,7 +255,7 @@ internal fun SectionPinSheet(
                 Text(stringResource(R.string.sections_locked_wrong), color = Color(0xFFE5484D), fontSize = 13.sp)
             }
             Spacer(Modifier.height(16.dp))
-            SectionSheetRow(SheetAction(stringResource(R.string.sections_locked_open), icon = Icons.Filled.Check) { submit() })
+            SectionSheetRow(SheetAction(actionLabel ?: stringResource(R.string.sections_locked_open), icon = Icons.Filled.Check) { submit() })
         }
         SectionSheetRow(SheetAction(stringResource(R.string.common_cancel), dimmed = true, onClick = onDismiss))
     }

@@ -35,12 +35,36 @@ import app.rcq.android.security.PanicPinService
 
 /**
  * PIN gate shown before opening a per-chat-locked conversation. Verifies the
- * user's REAL PIN ([PanicPinService.verifyRealPin] — never the panic PIN, so this
- * never triggers a wipe). On success [onUnlocked] reveals the chat; back returns
- * to the list without opening it.
+ * PIN that opened this session ([PanicPinService.verifySessionPin] — never the
+ * wipe PIN, so this never triggers a wipe). On success [onUnlocked] reveals the
+ * chat; back returns to the list without opening it.
+ *
+ * ⚠ The chat lock is the app PIN asked a second time, not a PIN of its own
+ * (#1045 asked why they are the same). That is the design: the vault has one
+ * real slot, and a second secret per chat would need slots, a lockout and a
+ * recovery story of its own.
  */
 @Composable
 fun ChatLockGate(onBack: () -> Unit, onUnlocked: () -> Unit) {
+    val context = LocalContext.current
+    PinGate(
+        title = context.getString(R.string.chat_locked_title),
+        hint = context.getString(R.string.chat_locked_hint),
+        onBack = onBack,
+        onUnlocked = onUnlocked,
+    )
+}
+
+/** The body of [ChatLockGate] for any screen that asks for the session's PIN
+ *  before it shows itself: the locked chat, and the PIN settings (#1045). */
+@Composable
+fun PinGate(
+    title: String,
+    hint: String,
+    onBack: () -> Unit,
+    onUnlocked: () -> Unit,
+    wrongHint: String? = null,
+) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     var pin by remember { mutableStateOf("") }
@@ -48,7 +72,7 @@ fun ChatLockGate(onBack: () -> Unit, onUnlocked: () -> Unit) {
     BackHandler { onBack() }
 
     fun submit() {
-        if (PanicPinService.verifyRealPin(context, pin)) onUnlocked() else { error = true; pin = "" }
+        if (PanicPinService.verifySessionPin(context, pin)) onUnlocked() else { error = true; pin = "" }
     }
 
     Column(
@@ -58,9 +82,16 @@ fun ChatLockGate(onBack: () -> Unit, onUnlocked: () -> Unit) {
     ) {
         Icon(Icons.Filled.Lock, contentDescription = null, tint = c.accent, modifier = Modifier.height(40.dp))
         Spacer(Modifier.height(16.dp))
-        Text(context.getString(R.string.chat_locked_title), color = c.textPrimary, fontSize = 20.sp)
+        Text(title, color = c.textPrimary, fontSize = 20.sp)
         Spacer(Modifier.height(6.dp))
-        Text(context.getString(R.string.chat_locked_hint), color = c.textSecondary, fontSize = 14.sp)
+        Text(
+            if (error && wrongHint != null) wrongHint else hint,
+            color = if (error && wrongHint != null) androidx.compose.ui.graphics.Color(0xFFE5484D) else c.textSecondary,
+            fontSize = 14.sp,
+            // A hint that wraps (the PIN settings one does) reads as a ragged
+            // left edge under a centred title otherwise.
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
         Spacer(Modifier.height(24.dp))
         // ⚠ Keeps the Material field: it is the only one with keyboardActions
         // (Done submits the PIN), which RcqField does not carry. A lock screen

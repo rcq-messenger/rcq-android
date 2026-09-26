@@ -1407,6 +1407,19 @@ object Push {
         // time and the fallbacks did the leaking.
         val quiet = app.rcq.android.security.PanicPinService.isLocked ||
             app.rcq.android.security.DuressGate.isActive
+        // A chat that asks for a PIN says who wrote and nothing of what (#1045):
+        // the words of a locked chat on the lock screen would walk round the
+        // gate the chat is behind. Same rule as the live-socket path
+        // (Session.notifyInBackground) and the in-app banner.
+        val lockedThread = when {
+            acctId == null -> null
+            groupId != null -> app.rcq.android.data.LocalStores.groupThread(groupId)
+            peerUin != null -> app.rcq.android.data.LocalStores.peerThread(peerUin)
+            else -> null
+        }
+        val chatLocked = lockedThread != null &&
+            app.rcq.android.data.LocalStores.isLockedFor(acctId!!, lockedThread) &&
+            app.rcq.android.security.PanicPinService.isConfigured(ctx)
         val title = when {
             quiet -> ctx.getString(R.string.app_name)
             groupName != null -> groupName
@@ -1417,6 +1430,7 @@ object Push {
             // Generic on purpose, and NOT the server's `body` either — that is
             // the message text on an older backend.
             quiet -> ctx.getString(R.string.push_new_message)
+            chatLocked -> ctx.getString(if (isGroup) R.string.push_new_group_message else R.string.push_new_message)
             opened?.preview == null || opened.quarantined -> str("body") ?: ctx.getString(
                 if (isGroup) R.string.push_new_group_message else R.string.push_new_message,
             )

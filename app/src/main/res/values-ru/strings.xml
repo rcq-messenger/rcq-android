@@ -272,6 +272,9 @@
     <string name="pin_on">Вкл</string>
     <string name="pin_codes_title">PIN-коды</string>
     <string name="pin_codes_footer">PIN шифрует историю сообщений на этом устройстве и запрашивается при каждом открытии приложения. Запомните его: восстановления нет.</string>
+    <string name="pin_reauth_title">Введите текущий PIN</string>
+    <string name="pin_reauth_hint">Подтвердите, что это вы, перед изменением настроек PIN.</string>
+    <string name="pin_reauth_wrong">Неверный PIN. Попробуйте ещё раз.</string>
     <string name="pin_autolock_title">Автоблокировка</string>
     <string name="pin_autolock_now">Сразу</string>
     <string name="pin_autolock_1m">1 мин</string>

@@ -13683,6 +13683,11 @@ class Session(context: Context) {
         // the shade would walk straight around the panic PIN. Same rule the wake
         // path follows (PushEnvelope refuses to open anything while locked).
         val locked = app.rcq.android.security.PanicPinService.isLocked
+        // A chat that asks for a PIN keeps its words out of the shade too
+        // (#1045): the gate in front of the chat is worth nothing if the lock
+        // screen reads the message out. Who wrote stays, as the row in the
+        // list already says who is there.
+        val chatLocked = chatLockHolds(if (gid != null) LocalStores.groupThread(gid) else LocalStores.peerThread(msg.peerUin))
         val preview = notificationPreview(msg)
         return app.rcq.android.push.Push.showLocalMessage(
             ctx = appCtx,
@@ -13692,7 +13697,7 @@ class Session(context: Context) {
                 else -> contactName(msg.peerUin)
             },
             body = when {
-                locked -> appCtx.getString(
+                locked || chatLocked -> appCtx.getString(
                     if (gid != null) app.rcq.android.R.string.push_new_group_message
                     else app.rcq.android.R.string.push_new_message,
                 )
@@ -13752,15 +13757,25 @@ class Session(context: Context) {
 
     private fun emitBanner(msg: ChatMessage, thread: String) {
         val gid = msg.groupId
+        // A locked chat's banner says a message came, not what it says
+        // (#1045). An empty body of no known kind is drawn as the generic
+        // "Message" by the banner itself.
+        val chatLocked = chatLockHolds(thread)
+        val body = if (chatLocked) "" else msg.body
+        val kind = if (chatLocked) "locked" else msg.kind
         if (gid != null) {
             val sender = _contacts.value.firstOrNull { it.uin == msg.senderUin }?.nickname
                 ?: msg.senderUin?.let { "$it" }
-            _banner.value = InAppBanner(thread, groupName(gid), sender, msg.body, msg.kind, null, gid)
+            _banner.value = InAppBanner(thread, groupName(gid), sender, body, kind, null, gid)
         } else {
             val name = _contacts.value.firstOrNull { it.uin == msg.peerUin }?.nickname ?: "${msg.peerUin}"
-            _banner.value = InAppBanner(thread, name, null, msg.body, msg.kind, msg.peerUin, null)
+            _banner.value = InAppBanner(thread, name, null, body, kind, msg.peerUin, null)
         }
     }
+
+    /** [app.rcq.android.ui.chatLockHolds] for the session's own paths. */
+    private fun chatLockHolds(thread: String): Boolean =
+        LocalStores.isLocked(thread) && app.rcq.android.security.PanicPinService.isConfigured(appCtx)
 
     /** The thread the user currently has open (or null). Set by the UI so
      *  inbound messages to it don't raise a badge, and so a message that

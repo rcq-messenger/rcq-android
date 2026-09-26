@@ -255,6 +255,9 @@
     <string name="pin_on">开</string>
     <string name="pin_codes_title">PIN 码</string>
     <string name="pin_codes_footer">PIN 会加密这台设备上的聊天记录，每次打开应用都要输入。请记牢：忘记后无法找回。</string>
+    <string name="pin_reauth_title">输入当前 PIN</string>
+    <string name="pin_reauth_hint">修改 PIN 设置前，先确认是你本人。</string>
+    <string name="pin_reauth_wrong">PIN 不对，请重试。</string>
     <string name="pin_autolock_title">自动锁定</string>
     <string name="pin_autolock_now">立即</string>
     <string name="pin_autolock_1m">1 分钟</string>

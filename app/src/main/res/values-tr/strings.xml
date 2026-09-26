@@ -248,6 +248,9 @@
     <string name="pin_on">Açık</string>
     <string name="pin_codes_title">PIN kodları</string>
     <string name="pin_codes_footer">PIN, mesaj geçmişini bu cihazda şifreler ve uygulamayı her açışında istenir. Kaybetme: unutursan geri getirmenin yolu yok.</string>
+    <string name="pin_reauth_title">Şimdiki PIN\'ini gir</string>
+    <string name="pin_reauth_hint">PIN ayarlarını değiştirmeden önce senin olduğunu doğrula.</string>
+    <string name="pin_reauth_wrong">Yanlış PIN. Tekrar dene.</string>
     <string name="pin_autolock_title">Otomatik kilit</string>
     <string name="pin_autolock_now">Hemen</string>
     <string name="pin_autolock_1m">1 dk</string>

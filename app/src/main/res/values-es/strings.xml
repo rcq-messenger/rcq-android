@@ -248,6 +248,9 @@
     <string name="pin_on">Activado</string>
     <string name="pin_codes_title">Códigos PIN</string>
     <string name="pin_codes_footer">El PIN cifra tu historial de mensajes en este dispositivo y hace falta cada vez que abres la app. Guárdalo bien: si lo olvidas, no hay forma de recuperarlo.</string>
+    <string name="pin_reauth_title">Escribe tu PIN actual</string>
+    <string name="pin_reauth_hint">Confirma que eres tú antes de cambiar los ajustes del PIN.</string>
+    <string name="pin_reauth_wrong">PIN incorrecto. Inténtalo de nuevo.</string>
     <string name="pin_autolock_title">Bloqueo automático</string>
     <string name="pin_autolock_now">Al momento</string>
     <string name="pin_autolock_1m">1 min</string>

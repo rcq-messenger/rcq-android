@@ -740,6 +740,20 @@ object LocalStores {
     fun isLocked(thread: String) = thread in _locked.value
     fun toggleLocked(thread: String) = toggle(_locked, K_LOCKED, thread)
 
+    /** Set, not flip: the "off" half runs after a PIN sheet (#1045), and a
+     *  toggle there would lock a chat again if anything had already unlocked
+     *  it while the sheet was up. */
+    fun setLocked(thread: String, on: Boolean) {
+        if (isLocked(thread) != on) toggle(_locked, K_LOCKED, thread)
+    }
+
+    /** Headless [isLocked] for [accountId] (companion to [isMutedFor]): the
+     *  push service decides what a wake may SAY about a locked chat without an
+     *  account binding. False when prefs are not up yet, which errs towards a
+     *  preview — the gate in front of the chat itself is unaffected. */
+    fun isLockedFor(accountId: String, thread: String): Boolean =
+        ::prefs.isInitialized && prefs.getStringSet("$accountId.$K_LOCKED", emptySet())!!.contains(thread)
+
     fun isRemoved(uin: Int) = uin in _removed.value
 
     /** Un-hide a thread the user had deleted. Nothing used to do this, so a
