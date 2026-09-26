@@ -1334,24 +1334,43 @@ private fun RcqApp(session: Session) {
         // hands web access to THIS account — then seal the account into the
         // one-time relay slot for the web to pick up + log in.
         val linkReq by WebLinkRequest.pending.collectAsState()
+        // ⚠ A linked session reads everything from now on, locked chats
+        // included (#1045 review), and the confirm was one tap: somebody
+        // holding the unlocked phone could scan their own QR and walk away
+        // with every future message the chat locks keep off this screen. With
+        // an app PIN, the PIN (or the biometric the app accepts) comes first.
+        var linkPinFor by remember { mutableStateOf<WebLinkRequest.Req?>(null) }
+        fun doLink(req: WebLinkRequest.Req) {
+            scope.launch {
+                val err = runCatching { session.linkWeb(req.token, req.webPub, req.clientLabel) }.exceptionOrNull()
+                val msg = when {
+                    err == null -> R.string.weblink_done
+                    // 409 = the one-time slot is already filled: a
+                    // re-confirm of an old link, not an expiry.
+                    err.message?.contains("HTTP 409") == true -> R.string.weblink_taken
+                    else -> R.string.weblink_failed
+                }
+                Toast.makeText(context, context.getString(msg), Toast.LENGTH_LONG).show()
+            }
+        }
         if (s is UiState.Registered && !locked) {
             linkReq?.let { req ->
                 WebLinkDialog(
                     onConfirm = {
                         WebLinkRequest.pending.value = null
-                        scope.launch {
-                            val err = runCatching { session.linkWeb(req.token, req.webPub, req.clientLabel) }.exceptionOrNull()
-                            val msg = when {
-                                err == null -> R.string.weblink_done
-                                // 409 = the one-time slot is already filled: a
-                                // re-confirm of an old link, not an expiry.
-                                err.message?.contains("HTTP 409") == true -> R.string.weblink_taken
-                                else -> R.string.weblink_failed
-                            }
-                            Toast.makeText(context, context.getString(msg), Toast.LENGTH_LONG).show()
-                        }
+                        if (app.rcq.android.security.PanicPinService.isConfigured(context)) linkPinFor = req
+                        else doLink(req)
                     },
                     onDismiss = { WebLinkRequest.pending.value = null },
+                )
+            }
+            linkPinFor?.let { req ->
+                app.rcq.android.ui.SectionPinSheet(
+                    title = stringResource(R.string.weblink_title),
+                    actionLabel = stringResource(R.string.weblink_confirm),
+                    realOnly = false,
+                    onUnlocked = { doLink(req) },
+                    onDismiss = { linkPinFor = null },
                 )
             }
         }

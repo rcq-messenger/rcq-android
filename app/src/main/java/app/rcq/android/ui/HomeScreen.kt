@@ -420,6 +420,9 @@ internal fun HomeScreen(
     // A chat whose "ask for a PIN" is being switched off: thread to title.
     // The switch waits for the PIN (#1045).
     var chatUnlockPrompt by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Something a locked chat guards, waiting for the PIN before it happens:
+    // the chat's name, what the button says, and what it then does (#1045).
+    var lockedChatAction by remember { mutableStateOf<Triple<String, String, () -> Unit>?>(null) }
     // Irreversible-on-this-device actions, each behind a confirmation.
     var clearPeerTarget by remember { mutableStateOf<Contact?>(null) }
     var clearGroupTarget by remember { mutableStateOf<RcqGroup?>(null) }
@@ -1297,7 +1300,14 @@ internal fun HomeScreen(
                 senderName = { session.contactName(it) },
                 actions = contactActions(ct, session, scope, context, onOpenChat,
                     onReport = { reportTarget = it },
-                    onClearThread = { clearPeerTarget = it },
+                    // Deleting a locked chat is behind its PIN like opening it
+                    // (#1045 review): somebody holding the phone could not read
+                    // it, but could make it disappear.
+                    onClearThread = { t ->
+                        if (chatLockHolds(context, LocalStores.peerThread(t.uin))) {
+                            lockedChatAction = Triple(session.contactName(t.uin), context.getString(R.string.home_clear_chat)) { clearPeerTarget = t }
+                        } else clearPeerTarget = t
+                    },
                     onRemove = { removeTarget = it },
                     onUnlockChat = { thread -> chatUnlockPrompt = thread to session.contactName(ct.uin) }),
                 onDismiss = { previewContact = null },
@@ -1315,7 +1325,11 @@ internal fun HomeScreen(
                 // so a member who left is not a number here either.
                 senderName = { u -> session.memberDisplayName(g, u, groupMsgs[g.id] ?: emptyList()) },
                 actions = groupActions(g, uin, session, scope, context, onOpenGroup,
-                    onClearThread = { clearGroupTarget = it },
+                    onClearThread = { t ->
+                        if (chatLockHolds(context, LocalStores.groupThread(t.id))) {
+                            lockedChatAction = Triple(t.name, context.getString(R.string.home_clear_chat)) { clearGroupTarget = t }
+                        } else clearGroupTarget = t
+                    },
                     // Decision E4: asked, not told. The preview closes so the
                     // question is not left standing behind it.
                     onLastResident = { room, warning ->
@@ -1565,6 +1579,15 @@ internal fun HomeScreen(
             onDismiss = { chatUnlockPrompt = null },
         )
     }
+    lockedChatAction?.let { (name, label, action) ->
+        SectionPinSheet(
+            title = name,
+            actionLabel = label,
+            realOnly = false,
+            onUnlocked = action,
+            onDismiss = { lockedChatAction = null },
+        )
+    }
     sectionPicker?.let { id ->
         val rec = remember(sectionsTree, id) { Sections.recordFor(sectionsTree, id) }
         // ⚠ Seeded ONCE per opening of the sheet, keyed on the section and not
@@ -1729,7 +1752,13 @@ private fun contactActions(
         // through the PIN (#1045), on is immediate.
         if (PanicPinService.isConfigured(context))
             ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) {
-                if (locked) onUnlockChat(thread) else LocalStores.setLocked(thread, true)
+                if (locked) onUnlockChat(thread)
+                else {
+                    LocalStores.setLocked(thread, true)
+                    // What is already in the shade was posted before the lock
+                    // and says what the chat says (#1045 review): it goes.
+                    app.rcq.android.push.Push.cancelMessageThread(context, null, contact.uin)
+                }
             }
         else null,
         ContextAction(s(if (contact.blocked) R.string.home_unblock else R.string.home_block), if (contact.blocked) Icons.Outlined.Block else Icons.Filled.Block, destructive = !contact.blocked) { scope.launch { session.toggleBlock(contact.uin) } },
@@ -1771,7 +1800,11 @@ private fun groupActions(
         ContextAction(s(if (archived) R.string.home_unarchive else R.string.home_archive), if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive) { LocalStores.toggleArchive(thread) },
         if (PanicPinService.isConfigured(context))
             ContextAction(s(if (locked) R.string.home_unlock_chat else R.string.home_lock_chat), if (locked) Icons.Filled.LockOpen else Icons.Filled.Lock) {
-                if (locked) onUnlockChat(thread) else LocalStores.setLocked(thread, true)
+                if (locked) onUnlockChat(thread)
+                else {
+                    LocalStores.setLocked(thread, true)
+                    app.rcq.android.push.Push.cancelMessageThread(context, group.id, null)
+                }
             }
         else null,
         // Wipe the local copy of a group conversation without leaving it.
