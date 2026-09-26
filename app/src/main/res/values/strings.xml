@@ -1163,6 +1163,13 @@
     <string name="notif_push_switch_builtin">Switch to RCQ\'s built-in delivery</string>
     <string name="notif_push_broken_title">Notifications are not arriving</string>
     <string name="notif_push_broken_507">Your push delivery service says this device is not connected to it, so it refuses to accept wakes. Open the ntfy app, turn on instant delivery (a permanent connection), and exclude it from battery optimisation.</string>
+    <string name="bg_limits_title">Notifications with the screen off</string>
+    <string name="bg_limits_body">Your phone may put RCQ to sleep while the screen is off. Messages and their sound then only arrive when you turn the screen on. Let RCQ run in the background without restrictions.</string>
+    <string name="bg_limits_fix">Allow in background</string>
+    <string name="bg_limits_open_vendor">Open phone settings</string>
+    <string name="bg_limits_hint_huawei">On Huawei and Honor, also open App launch, pick RCQ, switch it to manual and turn on all three options.</string>
+    <string name="bg_limits_hint_vivo">On vivo and iQOO, also allow RCQ high background power consumption in the battery settings.</string>
+    <string name="bg_limits_hint_other">This phone may also need RCQ allowed to auto-start and run in the background in its own settings.</string>
     <string name="notif_push_broken_429">Your push delivery service is rate-limiting your network, so some wakes are being dropped. A different delivery service, or your own ntfy server, fixes this.</string>
     <string name="notif_push_broken_other">Your push delivery service answered with an error (%1$s), so wakes are not getting through.</string>
     <string name="notif_push_off">Push is off</string>

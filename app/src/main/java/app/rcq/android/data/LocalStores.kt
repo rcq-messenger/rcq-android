@@ -313,6 +313,13 @@ object LocalStores {
     private val _pushNudgeDismissed = MutableStateFlow(false)
     val pushNudgeDismissed: StateFlow<Boolean> = _pushNudgeDismissed.asStateFlow()
 
+    /** The home-screen "notifications with the screen off" nudge (#1044), same
+     *  rules as [pushNudgeDismissed]: device-global, persisted, and gated off
+     *  anyway once RCQ is exempt, so dismissing it never hides a live need
+     *  from Settings → Notifications, where the same card stays. */
+    private val _bgNudgeDismissed = MutableStateFlow(false)
+    val bgNudgeDismissed: StateFlow<Boolean> = _bgNudgeDismissed.asStateFlow()
+
     /** PIN re-lock grace in SECONDS (#10): 0 = lock the moment the app
      *  backgrounds (current behaviour); >0 = only re-lock if away longer than
      *  this, so quick app switches don't demand the PIN every time. */
@@ -462,6 +469,7 @@ object LocalStores {
         _soundVolumeForShade.value = prefs.getBoolean(K_SND_VOL_SHADE, !prefs.contains(K_SND_VOL))
         _screenSecurity.value = prefs.getBoolean(K_SCREEN_SEC, false)
         _pushNudgeDismissed.value = prefs.getBoolean(K_PUSH_NUDGE_DISMISSED, false)
+        _bgNudgeDismissed.value = prefs.getBoolean(K_BG_NUDGE_DISMISSED, false)
         // Stored as comma-joined asset names (asset names never contain commas).
         // Panel: absent/"" → empty (the CTA shows). Reactions: absent → the
         // default six; "" → the user deliberately cleared them all.
@@ -1027,6 +1035,13 @@ object LocalStores {
         if (_pushNudgeDismissed.value) return
         _pushNudgeDismissed.value = true
         if (::prefs.isInitialized) prefs.edit().putBoolean(K_PUSH_NUDGE_DISMISSED, true).apply()
+    }
+
+    /** Permanently dismiss the background-limits nudge (see [bgNudgeDismissed]). */
+    fun dismissBgNudge() {
+        if (_bgNudgeDismissed.value) return
+        _bgNudgeDismissed.value = true
+        if (::prefs.isInitialized) prefs.edit().putBoolean(K_BG_NUDGE_DISMISSED, true).apply()
     }
 
     // ── home section fold flags (per-account, device-local) ───────────
@@ -1806,6 +1821,7 @@ object LocalStores {
     private const val K_SND_VOL_SHADE = "sound_volume_covers_shade" // see _soundVolumeForShade
     private const val K_SCREEN_SEC = "screen_security"
     private const val K_PUSH_NUDGE_DISMISSED = "push_nudge_dismissed"
+    private const val K_BG_NUDGE_DISMISSED = "bg_nudge_dismissed"
     private const val K_PRES_WIN = "presence_window"
     private const val K_PRES_RETIRED = "presence_retired"
     private const val K_SECURE = "secure_threads"

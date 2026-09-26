@@ -371,6 +371,11 @@ internal fun HomeScreen(
         app.rcq.android.push.Push.pushState(context) != app.rcq.android.push.Push.PushState.NO_DISTRIBUTOR
     }
     val showPushNudge = !pushNudgeDismissed && !hasDistributor
+    // #1044: a phone known to freeze restricted apps with the screen off, and
+    // RCQ still restricted on it. Re-read on resume (below): the answer is
+    // given on a system screen and comes back here.
+    val bgNudgeDismissed by LocalStores.bgNudgeDismissed.collectAsState()
+    var bgLimited by remember { mutableStateOf(app.rcq.android.push.BackgroundLimits.nudgeWanted(context)) }
     val favorites by LocalStores.favorites.collectAsState()
     val archived by LocalStores.archived.collectAsState()
     val unread by LocalStores.unread.collectAsState()
@@ -489,6 +494,9 @@ internal fun HomeScreen(
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) unlockedSections = emptySet()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                bgLimited = app.rcq.android.push.BackgroundLimits.nudgeWanted(context)
+            }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
@@ -910,6 +918,15 @@ internal fun HomeScreen(
                         PushNudgeBanner(
                             onSetup = { app.rcq.android.push.Push.openNtfyInstall(context) },
                             onDismiss = { LocalStores.dismissPushNudge() },
+                        )
+                    }
+                } else if (bgLimited && !bgNudgeDismissed) {
+                    // One nudge at a time: with no push at all, that is the
+                    // bigger hole and the one to name first.
+                    item(key = "bg-limits") {
+                        BackgroundLimitsBanner(
+                            onFix = { app.rcq.android.push.BackgroundLimits.requestExemption(context) },
+                            onDismiss = { LocalStores.dismissBgNudge() },
                         )
                     }
                 }
@@ -2339,6 +2356,37 @@ private fun FullScreenIntentBanner(onFix: () -> Unit, onDismiss: () -> Unit) {
             }
             TextButton(onClick = onFix) {
                 Text(stringResource(R.string.fsi_lost_fix), color = c.accent)
+            }
+        }
+    }
+}
+
+/// #1044, same shape as the push nudge: the phone may freeze RCQ with the
+/// screen off, and one tap asks Android to stop. The maker-specific half lives
+/// in Settings → Notifications, where there is room to say it.
+@Composable
+private fun BackgroundLimitsBanner(onFix: () -> Unit, onDismiss: () -> Unit) {
+    val c = RcqTheme.colors
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp)).background(c.bgSecondary.copy(alpha = LocalHomeVeil.current)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Notifications, null, tint = c.accent, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.bg_limits_title),
+                color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(stringResource(R.string.bg_limits_body), color = c.textSecondary, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.push_nudge_dismiss), color = c.textSecondary)
+            }
+            TextButton(onClick = onFix) {
+                Text(stringResource(R.string.bg_limits_fix), color = c.accent)
             }
         }
     }

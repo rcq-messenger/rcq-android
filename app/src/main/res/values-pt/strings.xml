@@ -1102,6 +1102,13 @@
     <string name="notif_push_switch_builtin">Passar para a entrega embutida do RCQ</string>
     <string name="notif_push_broken_title">As notificações não estão chegando</string>
     <string name="notif_push_broken_507">Seu serviço de entrega de push diz que este aparelho não está conectado a ele, então recusa os avisos. Abra o app ntfy, ligue a entrega instantânea (uma conexão permanente) e tire ele da otimização de bateria.</string>
+    <string name="bg_limits_title">Notificações com a tela apagada</string>
+    <string name="bg_limits_body">Seu celular pode colocar o RCQ para dormir enquanto a tela está apagada. Aí as mensagens e o som delas só chegam quando você acende a tela. Deixe o RCQ rodar em segundo plano sem restrições.</string>
+    <string name="bg_limits_fix">Permitir em segundo plano</string>
+    <string name="bg_limits_open_vendor">Abrir ajustes do celular</string>
+    <string name="bg_limits_hint_huawei">No Huawei e no Honor, abra também Inicialização de apps, escolha o RCQ, mude para manual e ligue as três opções.</string>
+    <string name="bg_limits_hint_vivo">No vivo e no iQOO, permita também ao RCQ alto consumo de energia em segundo plano nos ajustes de bateria.</string>
+    <string name="bg_limits_hint_other">Este celular também pode precisar que você permita ao RCQ iniciar sozinho e rodar em segundo plano nos ajustes dele.</string>
     <string name="notif_push_broken_429">Seu serviço de entrega de push está limitando a taxa da sua rede, então alguns avisos estão sendo descartados. Outro serviço de entrega, ou seu próprio servidor ntfy, resolve isto.</string>
     <string name="notif_push_broken_other">Seu serviço de entrega de push respondeu com um erro (%1$s), então os avisos não estão passando.</string>
     <string name="notif_push_off">O push está desligado</string>

@@ -28,6 +28,12 @@
          incoming call on a locked, sleeping phone was invisible whenever the
          full-screen intent did not launch. Normal permission, no prompt. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The one-tap "don't restrict RCQ in the background" dialog
+         (push/BackgroundLimits.kt, #1044). RCQ is its own push service: every
+         wake rides our own socket, so a phone that freezes RCQ with the screen
+         off delivers nothing until the screen comes on. Normal permission; the
+         dialog itself is the user's choice. The Play build removes it. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

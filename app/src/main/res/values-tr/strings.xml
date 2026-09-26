@@ -1102,6 +1102,13 @@
     <string name="notif_push_switch_builtin">RCQ\'nun dahili teslimine geç</string>
     <string name="notif_push_broken_title">Bildirimler gelmiyor</string>
     <string name="notif_push_broken_507">Bildirim teslim servisin, bu cihazın kendisine bağlı olmadığını söylüyor, bu yüzden uyandırmaları kabul etmiyor. ntfy uygulamasını aç, anlık teslimi (kalıcı bağlantı) aç ve pil eniyilemesinin dışında bırak.</string>
+    <string name="bg_limits_title">Ekran kapalıyken bildirimler</string>
+    <string name="bg_limits_body">Telefonun ekran kapalıyken RCQ\'yu uyutabilir. O zaman mesajlar ve sesleri ancak ekranı açtığında gelir. RCQ\'nun arka planda kısıtlamasız çalışmasına izin ver.</string>
+    <string name="bg_limits_fix">Arka planda izin ver</string>
+    <string name="bg_limits_open_vendor">Telefon ayarlarını aç</string>
+    <string name="bg_limits_hint_huawei">Huawei ve Honor\'da ayrıca Uygulama başlatma\'yı aç, RCQ\'yu seç, manuele al ve üç seçeneği de aç.</string>
+    <string name="bg_limits_hint_vivo">vivo ve iQOO\'da ayrıca pil ayarlarında RCQ\'ya arka planda yüksek güç tüketimi izni ver.</string>
+    <string name="bg_limits_hint_other">Bu telefonda ayrıca kendi ayarlarından RCQ\'ya otomatik başlatma ve arka planda çalışma izni vermen gerekebilir.</string>
     <string name="notif_push_broken_429">Bildirim teslim servisin ağını hız sınırına takıyor, bu yüzden bazı uyandırmalar düşüyor. Başka bir teslim servisi ya da kendi ntfy sunucun bunu çözer.</string>
     <string name="notif_push_broken_other">Bildirim teslim servisin bir hatayla cevap verdi (%1$s), bu yüzden uyandırmalar geçmiyor.</string>
     <string name="notif_push_off">Anlık bildirim kapalı</string>

@@ -1155,6 +1155,13 @@
     <string name="notif_push_switch_builtin">Перейти на встроенную доставку RCQ</string>
     <string name="notif_push_broken_title">Уведомления не доходят</string>
     <string name="notif_push_broken_507">Сервис доставки сообщает, что это устройство с ним не на связи, и отказывается принимать сигналы. Откройте приложение ntfy, включите постоянное соединение (instant delivery) и снимите ограничения энергосбережения.</string>
+    <string name="bg_limits_title">Уведомления при выключенном экране</string>
+    <string name="bg_limits_body">Телефон может усыплять RCQ, когда экран выключен. Тогда сообщения и их звук приходят, только когда вы включите экран. Разрешите RCQ работать в фоне без ограничений.</string>
+    <string name="bg_limits_fix">Разрешить работу в фоне</string>
+    <string name="bg_limits_open_vendor">Открыть настройки телефона</string>
+    <string name="bg_limits_hint_huawei">На Huawei и Honor ещё откройте «Запуск приложений», выберите RCQ, переключите на ручное управление и включите все три пункта.</string>
+    <string name="bg_limits_hint_vivo">На vivo и iQOO ещё разрешите RCQ высокое энергопотребление в фоне в настройках батареи.</string>
+    <string name="bg_limits_hint_other">На этом телефоне ещё может понадобиться разрешить RCQ автозапуск и работу в фоне в его собственных настройках.</string>
     <string name="notif_push_broken_429">Сервис доставки ограничивает запросы с вашей сети, часть сигналов теряется. Помогает другой сервис доставки или собственный сервер ntfy.</string>
     <string name="notif_push_broken_other">Сервис доставки ответил ошибкой (%1$s), сигналы не проходят.</string>
     <string name="notif_push_off">Push выключен</string>

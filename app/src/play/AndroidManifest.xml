@@ -5,4 +5,8 @@
          permission to. Google Play rejects apps that carry it without a
          core reason, and ours would be the very self-updater it forbids. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <!-- Play restricts the direct battery-exemption dialog to apps it has
+         reviewed for it; the Play build opens the system list instead
+         (BackgroundLimits.requestExemption). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:node="remove" />
 </manifest>

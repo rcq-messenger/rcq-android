@@ -3218,6 +3218,52 @@ private fun LanguageScreen(onBack: () -> Unit) {
     }
 }
 
+/** "Notifications with the screen off" (#1044): whether Android lets RCQ run
+ *  unrestricted in the background, and the way to let it. RCQ is its own push
+ *  service, so on a phone that freezes restricted apps with the screen off the
+ *  messages wait for the screen to come on. Re-read on every resume, since the
+ *  answer is given on a system screen and comes back here. See
+ *  [app.rcq.android.push.BackgroundLimits]. */
+@Composable
+private fun BackgroundLimitsCard() {
+    val c = RcqTheme.colors
+    val ctx = LocalContext.current
+    val limits = app.rcq.android.push.BackgroundLimits
+    var exempt by remember { mutableStateOf(limits.exempt(ctx)) }
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) exempt = limits.exempt(ctx)
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val hint = limits.vendorHintRes()
+    // Restricted: the standard request. Exempt already on a maker with its own
+    // list: only the door to that list, because the standard exemption is not
+    // the whole story there and the first half is done.
+    if (exempt && hint == null) return
+    SettingsGroup {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.bg_limits_title), color = c.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            if (!exempt) Text(stringResource(R.string.bg_limits_body), color = c.textSecondary, fontSize = 12.sp)
+            hint?.let { Text(stringResource(it), color = c.textSecondary, fontSize = 12.sp) }
+            if (!exempt) {
+                Text(
+                    stringResource(R.string.bg_limits_fix), color = c.accent, fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 4.dp).clickable { limits.requestExemption(ctx) },
+                )
+            }
+            if (hint != null) {
+                Text(
+                    stringResource(R.string.bg_limits_open_vendor), color = c.accent, fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 4.dp).clickable { limits.openVendorSettings(ctx) },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
     val c = RcqTheme.colors
@@ -3357,6 +3403,9 @@ private fun NotificationsScreen(session: Session, onBack: () -> Unit) {
                     }
                 }
             }
+            // #1044: the phone may freeze RCQ with the screen off. Shown only
+            // while RCQ is still restricted.
+            BackgroundLimitsCard()
             // Full-screen incoming-call access (Android 14+). Without it an
             // incoming call degrades to a heads-up banner that's easy to miss —
             // surface a one-tap grant only while it's actually ungranted.
