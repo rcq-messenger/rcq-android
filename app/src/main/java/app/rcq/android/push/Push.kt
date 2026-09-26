@@ -1004,6 +1004,7 @@ object Push {
         }
         if (peerUin != null) runCatching { nm.cancel("peer:$peerUin".hashCode()) }
         runCatching { nm.cancel("dm".hashCode()) }
+        AnonWakes.cleared()
     }
 
     /** Whether the app can present a full-screen incoming-call UI. On Android 14+
@@ -1286,6 +1287,10 @@ object Push {
         // (older server) so nothing legitimate is ever swallowed.
         val envType = str("envType") ?: "message"
         if (envType != "message" && envType != "gmsg") return
+        // Already opened by the drain and found to announce nothing (#1047):
+        // the wake for it lost the race to the socket, and posting it now is
+        // the "New message" that leads nowhere.
+        if (str("env")?.let { AnonWakes.knownSilent(it) } == true) return
 
         // ⚠ `group_name` is gone from the payload as of the island's 22.08
         // release: it travelled in the clear to Apple, to the UnifiedPush
@@ -1448,6 +1453,11 @@ object Push {
         // byte-identical `env`, so the ciphertext IS the identity of the wake.
         val repeat = str("env")?.let { !SeenWakes.firstTime(it) } ?: false
 
+        // Remember what went into the shared anonymous slot, so the drain can
+        // take it back if the envelope turns out to carry nothing (#1047).
+        if (groupId == null && peerUin == null && str("notif_kind")?.startsWith("device_") != true) {
+            AnonWakes.posted(str("env"))
+        }
         post(
             ctx,
             title = title,
@@ -1605,7 +1615,10 @@ object Push {
         // Same message, better title: replace the anonymous copy instead of
         // leaving both in the shade. Only inside the window, so an unrelated
         // sealed wake from an hour ago is not swept away with it.
-        if (supersedesAnon) runCatching { NotificationManagerCompat.from(ctx).cancel(anonId) }
+        if (supersedesAnon) {
+            runCatching { NotificationManagerCompat.from(ctx).cancel(anonId) }
+            AnonWakes.cleared()
+        }
         // The app in front makes its own noise (in-app tone + banner), so a
         // second, louder chime from the system on top of it is the "о-оу
         // несколько раз, тихо и громко" report. The notification is still
@@ -1724,6 +1737,67 @@ object Push {
      *  Written under the [lastAlertAt] monitor together with it. */
     private var lastDirectAlertAt: Long? = null
     private const val BURST_WINDOW_MS = 20_000L
+
+    /** The drain opened [envB64] and it announces nothing: a receipt, a
+     *  reaction, a call signal. If the wake for it could not be opened (every
+     *  v=2 envelope) it went into the shade as an anonymous "New message", and
+     *  this is the moment we learn there was never a message behind it.
+     *
+     *  ⚠ #1047, "a New message appears that is nowhere in the messenger, a tap
+     *  does nothing, it goes away when I open any private chat". That was a
+     *  caller's sealed `call_end`, labelled as content by 0.206 and older, so
+     *  the island pushed it and this phone, unable to open it, said "New
+     *  message" with no chat to open. New builds label it so the island does
+     *  not push it at all (Session.envelopeTypeFor); this is the half that
+     *  covers every build already out there, and any other control envelope
+     *  an older client still labels as a message.
+     *
+     *  Takes the notification down only when nothing ELSE is sitting in that
+     *  shared slot: the anonymous slot is one notification for every wake we
+     *  could not name, and the others may be real messages. Either order
+     *  works: a wake that lands after the drain already explained it is never
+     *  posted ([showMessage] checks [AnonWakes.knownSilent] first). */
+    fun noteSilentEnvelope(ctx: Context, envB64: String) {
+        if (AnonWakes.explained(envB64)) {
+            runCatching { NotificationManagerCompat.from(ctx).cancel("dm".hashCode()) }
+        }
+    }
+
+    /** Bookkeeping for the shared anonymous "dm" notification, see
+     *  [noteSilentEnvelope]. In memory and bounded: a process restart between
+     *  the wake and the drain only costs what happened before this existed. */
+    internal object AnonWakes {
+        private const val CAP = 128
+        /** Ciphertexts posted into the anonymous slot and not yet explained. */
+        private val pending = LinkedHashSet<Int>()
+        /** Ciphertexts the drain opened and found silent. */
+        private val silent = object : LinkedHashMap<Int, Unit>(16, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Unit>) = size > CAP
+        }
+        /** Something went into the slot that we cannot identify (a wake with
+         *  no `env`: a report reply, an older island). While it stands, the
+         *  slot is never taken down from here. */
+        private var opaque = false
+
+        @Synchronized fun posted(envB64: String?) {
+            if (envB64 == null) { opaque = true; return }
+            pending.add(envB64.hashCode())
+            if (pending.size > CAP) pending.remove(pending.first())
+        }
+
+        @Synchronized fun knownSilent(envB64: String): Boolean = silent.containsKey(envB64.hashCode())
+
+        /** True when [envB64] was the last thing keeping the slot up. */
+        @Synchronized fun explained(envB64: String): Boolean {
+            val h = envB64.hashCode()
+            silent[h] = Unit
+            if (!pending.remove(h)) return false
+            return pending.isEmpty() && !opaque
+        }
+
+        /** The slot was taken down some other way: start from nothing. */
+        @Synchronized fun cleared() { pending.clear(); opaque = false }
+    }
 
     /** Wakes already turned into a sound, keyed by the ciphertext they carry.
      *

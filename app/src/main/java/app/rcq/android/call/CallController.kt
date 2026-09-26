@@ -46,6 +46,10 @@ class CallController(
     /** False when this account may not place a call at all. Asked before
      *  anything rings or touches the network; it says why itself. */
     private val mayPlace: () -> Boolean = { true },
+    /** The island just told us [peerUin] has no live connection
+     *  (`call_offline` / `call_unreachable`), whatever the contact list says
+     *  about them. #1047(b): the list is told too. */
+    private val peerUnreachable: (peerUin: Int) -> Unit = {},
 ) {
     enum class Media(val wire: String) {
         AUDIO("audio"), VIDEO("video");
@@ -536,7 +540,10 @@ class CallController(
             // instead of playing a ringback for thirty seconds and calling it
             // "no answer" — the caller was being told they are being ignored
             // when they were not being reached (user request).
-            "call_unreachable" -> handleRemoteEnd(callId, "unreachable")
+            "call_unreachable" -> {
+                _state.value.info?.takeIf { it.id == callId && it.outgoing }?.let { peerUnreachable(it.peerUin) }
+                handleRemoteEnd(callId, "unreachable")
+            }
             // Reachable, but not connected: the offer went out as a push, and
             // until that push wakes their phone nothing is ringing anywhere.
             // The tone was inventing an alerting phone on the other end, so it
@@ -727,6 +734,10 @@ class CallController(
         val s = _state.value as? State.Outgoing ?: return
         if (s.info.id != callId) return
         _peerOffline.value = true
+        // The island's word on it is fresher than the green flower: the
+        // presence a roster row shows can be up to a window stale, and this
+        // is the island refusing to find a single live device of theirs.
+        peerUnreachable(s.info.peerUin)
         ringer.stop()
         // #686, the half that is not the missed-call row. This message IS the
         // island saying it has not rung them yet: it is only now handing the
@@ -757,20 +768,32 @@ class CallController(
      *  because over there every signal is a deposit and a stale offer is filed
      *  as missed when the queue drains.
      *
-     *  ⚠⚠ Only on `call_unreachable`, which is the island saying it has neither
-     *  a socket nor a push endpoint for them: nothing can possibly have rung.
-     *  NOT on `call_offline`. That one means the offer went out as a wake-up
-     *  push, so the callee may well be ringing this second and about to file
-     *  its own row, and depositing there is how the first attempt at this fix
-     *  produced two missed calls for one call. The dedupe would now survive
-     *  that, but a marker that is usually redundant is still a push and a queue
-     *  row per unanswered call, so the narrow trigger stands.
+     *  On `call_unreachable`, which is the island saying it has neither a
+     *  socket nor a push endpoint for them: nothing can possibly have rung.
+     *
+     *  ⚠⚠ And on `call_offline` when the call then went unanswered or the
+     *  caller gave up (#1047: "it says the other side is not connected and a
+     *  notification was sent, and when they come online nothing reaches
+     *  them"). This used to be excluded, because the offer went out as a wake
+     *  and the callee might be ringing and file its own row, which is how the
+     *  first cut of this produced two missed calls for one call. Both reasons
+     *  for the exclusion are gone: the callee's row id is derived from the
+     *  call id, so its own row and this marker collapse into one
+     *  ([Session.logCallHistory]); and the marker is labelled so the island
+     *  queues it without a push. Meanwhile the exclusion was costing exactly
+     *  the case in the report: a wake that reaches a phone whose app is not
+     *  running (swiped away on MIUI, frozen by a battery manager) rings
+     *  nothing, and a push-rung call that goes unanswered files nothing on the
+     *  callee either (Push.showIncomingCall keeps no row). The person was
+     *  called and was never told. A decline is not here: the callee chose.
      *
      *  ⚠ [remoteAnswered], not [answered]. `answered` is the receiving side's
      *  flag and is false for every outgoing call there has ever been, so
      *  testing it here would mean nothing at all. */
     private fun depositMissedIfUnreachable(call: CallInfo, reason: String, durationMs: Long) {
-        if (!call.outgoing || reason != "unreachable") return
+        if (!call.outgoing) return
+        val offlineThenGone = _peerOffline.value && (reason == "unanswered" || reason == "cancelled")
+        if (reason != "unreachable" && !offlineThenGone) return
         if (durationMs >= 1000 || remoteAnswered || answered) return
         send(
             signal(
@@ -830,10 +853,13 @@ class CallController(
      *  from "this call failed" into "calls do not work". */
     private fun endLocally(call: CallInfo, reason: String) {
         send(signal("call_end", call.peerUin, call.id, mapOf("reason" to reason)))
-        finishEnded(call, reason)
+        finishEnded(call, reason, local = true)
     }
 
-    private fun finishEnded(call: CallInfo, reason: String) {
+    /** [local]: this device decided the end ([endLocally]), as opposed to the
+     *  peer or the island telling us. Only changes how long the verdict stays
+     *  on screen. */
+    private fun finishEnded(call: CallInfo, reason: String, local: Boolean = false) {
         if (_state.value is State.Ended) return
         // "answered_elsewhere" is this account's OTHER device telling us it
         // took the call; this phone was only ringing in parallel. Nothing
@@ -896,8 +922,23 @@ class CallController(
             answered -> R.string.call_out_failed
             else -> endedLabelRes(reason, call.outgoing)
         }
+        // #1047(c): the caller was told "not connected, a notification was
+        // sent", pressed the red button, and then read "Cancelled" for two and
+        // a half seconds. They cancelled; the screen had already said the rest.
+        // Straight to Idle, like answered-elsewhere. Read before the reset of
+        // [_peerOffline] below.
+        val cancelledAfterNotice = call.outgoing && reason == "cancelled" &&
+            _peerOffline.value && !remoteAnswered
         _state.value =
-            if (answeredElsewhere) State.Idle else State.Ended(call, reason, endedLabel)
+            if (answeredElsewhere || cancelledAfterNotice) State.Idle else State.Ended(call, reason, endedLabel)
+        // How long the verdict stays up. A call that talked, or one the user
+        // ended with their own hand, has nothing left to tell them: a second
+        // to see the screen change is enough (it used to be 2.5 s whatever
+        // happened, "why do I have to look at this", #1047). A verdict the
+        // user did NOT cause (busy, declined, no answer, could not be reached,
+        // failed) is the only place that word is said (#683), so it keeps a
+        // moment to be read.
+        val lingerMs = if (duration >= 1000 || (local && reason in USER_ENDED_REASONS)) ENDED_BRIEF_MS else ENDED_VERDICT_MS
         rtc.close()
         ringer.stop()
         // Tear down any full-screen incoming-call UI we raised for a backgrounded
@@ -922,7 +963,7 @@ class CallController(
         _connectedAtMs.value = 0L
         resetRecoveryState()
         scope.launch {
-            delay(2500)
+            delay(lingerMs)
             if (_state.value is State.Ended) _state.value = State.Idle
         }
     }
@@ -1118,11 +1159,11 @@ class CallController(
         val peer = call.peerUin
         val media = call.media
         endLocally(call, "cancelled")
-        // finishEnded parks the state machine in Ended for a couple of seconds
-        // before Idle, and start() refuses while a call is active; wait it out
-        // rather than racing it.
+        // finishEnded parks the state machine in Ended for a moment before
+        // Idle (a local "cancelled" gets the brief linger), and the redial only
+        // goes from Idle; wait it out rather than racing it.
         scope.launch {
-            delay(2_600)
+            delay(ENDED_BRIEF_MS + 100)
             if (_state.value is State.Idle) start(peer, media)
         }
     }
@@ -1435,6 +1476,14 @@ class CallController(
          *  full ring window plus the time the wake is allowed to take to land.
          *  Past it the call ends however many more of those arrive. */
         private const val RING_TIMEOUT_MAX_MS = 120_000L
+        /** The ended screen after a call that talked, or one the user ended
+         *  themselves (see finishEnded). */
+        private const val ENDED_BRIEF_MS = 1_000L
+        /** The ended screen when it carries a verdict the user did not cause. */
+        private const val ENDED_VERDICT_MS = 2_000L
+        /** Reasons [endLocally] only ever sends because the user pressed
+         *  something: the red button while calling or talking, or Decline. */
+        private val USER_ENDED_REASONS = setOf("cancelled", "hangup", "declined")
     }
 }
 

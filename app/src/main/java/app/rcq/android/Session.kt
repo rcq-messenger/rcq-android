@@ -120,6 +120,12 @@ sealed interface RandomState {
  *  (fan-out live test 2026-08-20). */
 private const val TYPED_CONTROL_SENDS = true
 
+/** How long a contact a call found offline stays grey against a roster that
+ *  still says otherwise (see Session.callSaysOffline, #1047). Long enough to
+ *  cover the island's presence window and a ghost connection's sweep, short
+ *  enough that a wrong verdict does not stick. */
+private const val CALL_OFFLINE_HOLD_MS = 5 * 60_000L
+
 /** Frame types that carry a sealed envelope on the live socket. Anything not
  *  listed is dropped in silence, which is why the list has to cover every type
  *  ANY client deposits, not just the ones that draw a bubble.
@@ -382,7 +388,40 @@ class Session(context: Context) {
                 false
             }
         },
+        peerUnreachable = { markOfflineByCall(it) },
     )
+
+    /** Contacts a call just found offline, and when (elapsedRealtime).
+     *
+     *  #1047(b): "he was online before the call, the call said he is not;
+     *  will you force his status to offline for me?" The roster's presence
+     *  can trail the truth by up to the island's presence window, and longer
+     *  for a worker that died between its connect and disconnect bookkeeping,
+     *  while the call path asks for a live DEVICE and is the fresher of the
+     *  two. So the row goes grey here and now, and stays grey across roster
+     *  refreshes until the island says something new about this person (a
+     *  `presence` frame names them) or [CALL_OFFLINE_HOLD_MS] passes, after
+     *  which the island's word stands again. */
+    private val callSaysOffline = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    private fun markOfflineByCall(uin: Int) {
+        callSaysOffline[uin] = android.os.SystemClock.elapsedRealtime()
+        _contacts.update { list ->
+            list.map { c ->
+                if (c.uin == uin && c.host == null && c.presence != UserStatus.OFFLINE) c.copy(status = "offline") else c
+            }
+        }
+    }
+
+    /** The status a roster row from the island should show, after [callSaysOffline]. */
+    private fun statusAfterCall(uin: Int, status: String?): String? {
+        val at = callSaysOffline[uin] ?: return status
+        if (android.os.SystemClock.elapsedRealtime() - at > CALL_OFFLINE_HOLD_MS) {
+            callSaysOffline.remove(uin)
+            return status
+        }
+        return "offline"
+    }
 
     /** Same-island call signals owed to the peer while the socket is down.
      *
@@ -9417,12 +9456,24 @@ class Session(context: Context) {
         // row and raises the missed-call notification there, which is the
         // moment the person actually wanted to be told.
         //
-        // ⚠ ONLY this one signal. Every other CallSignal is a live cross-island
-        // signal that goes out through CrossIslandSender.deliverCall with its
-        // own type, and never reaches this function. But labelling the whole
-        // class "read" here would be one refactor away from silencing a
-        // cross-island call offer, so the test names the signal.
-        is Envelope.CallSignal -> if (env.sig == "call_missed") "read" else "message"
+        // ⚠ ONLY the signals named. The cross-island ones go out through
+        // CrossIslandSender.deliverCall with their own type and never reach
+        // this function, but labelling the whole class "read" here would be
+        // one refactor away from silencing a cross-island call offer, so the
+        // test names the signal.
+        //
+        // ⚠⚠ `call_end` too (#1047). The note above used to say every other
+        // CallSignal never gets here, and then the same-island hang-up grew a
+        // sealed copy ([routeCallSignal], #724) that does. Labelled "message",
+        // the island pushed it as content, and a callee who could not open it
+        // (v=2, which is every one now) got "New message" with no chat behind
+        // it, gone the moment any private chat was opened: exactly the second
+        // half of #1047. The copy exists to reach a peer whose socket missed the
+        // live frame, and the queue does that for a "read" row as well; a wake
+        // could never have done anything with it, because an end that arrives
+        // as a push is un-rung by the island's own `kind:"end"` wake, not by
+        // this envelope.
+        is Envelope.CallSignal -> if (env.sig == "call_missed" || env.sig == "call_end") "read" else "message"
         else -> "message"
     }.takeIf { TYPED_CONTROL_SENDS } ?: "message"
 
@@ -10030,6 +10081,16 @@ class Session(context: Context) {
         var why: String? = null
         runCatching {
             val dec = attributeToMailbox(decryptInbound(payloadB64), mailboxHost)
+            // Opened, so now we know whether the wake for this row (if it came
+            // as one we could not open) was a message at all. A caller's sealed
+            // `call_end` was the "New message" that led nowhere (#1047). Same
+            // rule the wake path applies when it CAN open: our own copies and
+            // control kinds announce nothing.
+            if (dec.senderUin == store.uin ||
+                !app.rcq.android.push.PushEnvelope.announces(appCtx, dec.envelope)
+            ) {
+                app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+            }
             // Our own number under somebody else's key is dropped before ANY
             // branch runs, whatever host it stamps. See [forgedOwnNumberRow].
             if (forgedOwnNumberRow(dec)) return@runCatching
@@ -12399,6 +12460,9 @@ class Session(context: Context) {
         // this session, so that is what we track. Reset in rebindTo().
         val armed = presenceBaselineLive
         val prevPresence = _contacts.value.associate { it.uin to it.presence }
+        // Rows a call greyed out: their "offline" was ours, not the island's,
+        // so the island disagreeing now is not somebody coming online (#1047).
+        val heldByCall = callSaysOffline.keys.toHashSet()
         // Whose roster this is: an account switch while the fetch is in the
         // air rebinds `store`, and the list must not be sealed into the new
         // account's vault (the mirror checks the pin before it starts).
@@ -12452,7 +12516,7 @@ class Session(context: Context) {
                 badge = it.badge,
                 identityKey = it.identity_key ?: "",
                 signingKey = it.signing_key,
-                status = it.status,
+                status = statusAfterCall(it.uin, it.status),
                 statusMessage = it.status_message,
                 blocked = it.blocked,
                 gender = it.gender,
@@ -12492,6 +12556,7 @@ class Session(context: Context) {
                 // changed. `prevPresence` holds foreign rows too, which is what
                 // made that flip possible.
                 if (ct.host != null) return@mapNotNull null
+                if (ct.uin in heldByCall) return@mapNotNull null
                 val before = prevPresence[ct.uin] ?: return@mapNotNull null
                 val wasOnline = before != UserStatus.OFFLINE
                 val isOnline = ct.presence != UserStatus.OFFLINE
@@ -13207,7 +13272,13 @@ class Session(context: Context) {
             "audio_room_key_rotated", "audio_room_member_muted",
             "audio_room_owner_only_changed", "audio_room_renamed" ->
                 audioRooms.onSignal(type, obj)
-            "presence" -> scope.launch { runCatching { refreshContacts() } }
+            "presence" -> {
+                // Whatever the island now says about this person is newer than
+                // what a call found out about them (#1047).
+                obj.get("uin")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asInt } }?.getOrNull()
+                    ?.let { callSaysOffline.remove(it) }
+                scope.launch { runCatching { refreshContacts() } }
+            }
             // A contact changed their name. Nothing announced this before, so
             // the new name only appeared whenever the roster happened to be
             // re-read next — "изменение произошло не сразу, в какой момент оно

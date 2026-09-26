@@ -184,6 +184,11 @@ internal object PushEnvelope {
         )
     }
 
+    /** Whether a wake for [env] would have been worth a banner had it opened:
+     *  the same test [open] applies, for the drain to use once it HAS opened
+     *  one the wake could not ([Push.noteSilentEnvelope], #1047). */
+    fun announces(ctx: Context, env: Envelope): Boolean = preview(ctx, env) != null
+
     /** One line of the message for the banner, or null when the envelope
      *  carries no new message at all. Mirrors [app.rcq.android.Session]'s
      *  in-app previews, localized rather than hardcoded English (the iOS NSE
