@@ -444,8 +444,9 @@ private fun RcqApp(session: Session) {
     // the home header's badge sits above the update dialog in the tree and
     // hands the found version back to it.
     var update by remember { mutableStateOf<app.rcq.android.net.UpdateChecker.Update?>(null) }
-    // Thread the user just unlocked via the per-chat PIN gate; reset on leaving
-    // the chat so a locked chat re-prompts every time it's opened.
+    // The chat the user just unlocked via the per-chat PIN gate, as
+    // "<uin>/<thread>" ([chatUnlockKey]). A locked chat re-prompts every time it
+    // is opened, and what enforces that is the effect below, not the callbacks.
     var unlockedChatThread by remember { mutableStateOf<String?>(null) }
     var groupInfoId by remember { mutableStateOf<Int?>(null) }
     var peerInfoUin by remember { mutableStateOf<Int?>(null) }
@@ -543,8 +544,28 @@ private fun RcqApp(session: Session) {
         }
     }
 
+    // ⚠⚠ THE UNLOCK LIVES AS LONG AS THE VISIT, AND NOTHING ELSE DECIDES THAT
+    // (#1045 review). It used to be cleared by two callbacks, the chat's own
+    // back arrow and its "open group", while every other way out of a chat
+    // (the system Back gesture, Back on the gate itself, a banner or a
+    // notification tap, a share pick, the contact card's Message, an account
+    // switch) left it set. A locked chat opened once then opened again with no
+    // PIN after a plain swipe back, which is the whole of "someone holding the
+    // unlocked phone". Now: whenever the chat on screen is not the one that
+    // was unlocked, the unlock is gone, in the same frame (SideEffect, not a
+    // coroutine a tap could beat). Keyed by account as well as thread, because
+    // "peer:5" in one account is somebody else in the next. And the app
+    // relocking takes it too: the PIN that opened the app is asked again, so
+    // is the one that opened the chat.
+    val openChatKey = chatTarget?.let { chatUnlockKey(session.uin, it) }
+    androidx.compose.runtime.SideEffect {
+        if (unlockedChatThread != null && unlockedChatThread != openChatKey) unlockedChatThread = null
+    }
+    LaunchedEffect(locked) { if (locked) unlockedChatThread = null }
+
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
+        unlockedChatThread = null
         chatTarget = null; groupInfoId = null; peerInfoUin = null
         showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; sitesAddress = null; sitesPage = null; showRestore = false; showOutgoing = false
     }
@@ -980,14 +1001,14 @@ private fun RcqApp(session: Session) {
                 val lockCtx = androidx.compose.ui.platform.LocalContext.current
                 if (app.rcq.android.data.LocalStores.isLocked(chatThread) &&
                     app.rcq.android.security.PanicPinService.isConfigured(lockCtx) &&
-                    unlockedChatThread != chatThread
+                    unlockedChatThread != chatUnlockKey(session.uin, target)
                 ) {
                     ChatLockGate(
                         // Backing out of the gate abandons a share picked
                         // into this thread too; left set, the next chat opened
                         // would be handed it (ChatScreen also checks `to`).
-                        onBack = { chatTarget = null; ShareIntake.deliver.value = null },
-                        onUnlocked = { unlockedChatThread = chatThread },
+                        onBack = { chatTarget = null; unlockedChatThread = null; ShareIntake.deliver.value = null },
+                        onUnlocked = { unlockedChatThread = chatUnlockKey(session.uin, target) },
                     )
                 } else {
                     stateHolder.SaveableStateProvider("chat:$chatThread") {
@@ -1869,3 +1890,12 @@ private fun AddAccountFailedSheet(
         }
     }
 }
+
+/** Which chat an unlock through the per-chat PIN gate belongs to: the account
+ *  and the thread, so it can never be read back for the same number in
+ *  another account (see `unlockedChatThread` in RcqApp). */
+private fun chatUnlockKey(ownUin: Int?, target: ChatTarget): String =
+    "$ownUin/" + when (target) {
+        is ChatTarget.Peer -> app.rcq.android.data.LocalStores.peerThread(target.uin)
+        is ChatTarget.Group -> app.rcq.android.data.LocalStores.groupThread(target.id)
+    }
