@@ -530,9 +530,9 @@ class Session(context: Context) {
      *  [app.rcq.android.call.IncomingCallStore], no controller holds it, and the
      *  caller would otherwise ring on to their own timeout and then leave a
      *  missed-call marker for a call that was refused (#1047 review). Sends the
-     *  same `call_end` reason=declined the controller sends for a call it holds,
-     *  over the same route (socket plus the sealed copy for a dead one, or the
-     *  cross-island deposit).
+     *  same `call_end` reason=declined the controller sends for a call it holds:
+     *  over the socket, probed first so a dead one hands the frame to the
+     *  outbox for the redial, or as the cross-island deposit.
      *
      *  ⚠ Only from the account the wake was addressed to, and only for a call
      *  the controller does not hold: a controller that holds it declines it
@@ -593,8 +593,17 @@ class Session(context: Context) {
             // frozen before any reconnect. A double delivery is idempotent:
             // [CallController.handleRemoteEnd] checks the call id and drops
             // an end for a call that is already gone.
-            if (sealedCopy && toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_end") {
-                socket.ensureAlive()
+            //
+            // The probe is for EVERY end, the sealed copy only where one may
+            // go ([declineParkedCall] sends none): a decline from a process a
+            // push just woke is exactly the one whose socket is a corpse, and
+            // without the probe it went into the corpse and was lost (#1047
+            // review). Probed, the refused frame waits in the outbox and the
+            // redial flushes it, over the socket, where the island's check for
+            // a call answered elsewhere still applies.
+            val isEnd = toUin != null && obj.get("type")?.takeIf { !it.isJsonNull }?.asString == "call_end"
+            if (isEnd) socket.ensureAlive()
+            if (sealedCopy && isEnd && toUin != null) {
                 val callId = obj.get("call_id")?.takeIf { !it.isJsonNull }?.asString ?: ""
                 val data = mutableMapOf<String, String>()
                 for ((k, v) in obj.entrySet()) {
