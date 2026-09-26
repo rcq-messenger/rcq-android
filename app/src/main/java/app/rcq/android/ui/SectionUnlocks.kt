@@ -65,15 +65,20 @@ internal data class SectionHidden(
 /** [SectionHidden] for the home screen's own slicing ([lists]): the same rule
  *  its section loop draws by, a PIN-gated record ([Sections.isPinnedRecord])
  *  with the gate on and not answered. Nothing is hidden in a decoy session,
- *  where nothing is gated. */
+ *  where nothing is gated, nor on a phone with no PIN ([pinSet] false): the
+ *  flag can arrive synced from a device that has one (iOS gates Archive by
+ *  itself once a PIN is set there), the chat gate lets such chats through
+ *  here, and the pickers hiding them anyway only made people vanish from the
+ *  new-group list with no reason given (#1045 review). */
 internal fun sectionHidden(
     tree: JsonObject,
     lists: HomeLists,
     gatingOn: Boolean,
     inDecoy: Boolean,
     unlocked: Set<String>,
+    pinSet: Boolean,
 ): SectionHidden {
-    if (!gatingOn || inDecoy) return SectionHidden()
+    if (!gatingOn || inDecoy || !pinSet) return SectionHidden()
     val cKeys = HashSet<String>()
     val gIds = HashSet<Int>()
     val gKeys = HashSet<String>()

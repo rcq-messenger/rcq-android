@@ -713,8 +713,8 @@ internal fun HomeScreen(
     // Everyone a PIN-gated section hides right now, for every surface that
     // lists people outside the sections themselves: search, the section
     // picker, the new-group picker (#1045 review, [sectionHidden]).
-    val sectionHide = remember(sectionsTree, lists, gatingOn, inDecoy, unlockedSections) {
-        sectionHidden(sectionsTree, lists, gatingOn, inDecoy, unlockedSections)
+    val sectionHide = remember(sectionsTree, lists, gatingOn, inDecoy, unlockedSections, canPin) {
+        sectionHidden(sectionsTree, lists, gatingOn, inDecoy, unlockedSections, pinSet = canPin)
     }
 
     /// The rendered order as one string, so a drag gesture can be keyed on it.
