@@ -1387,7 +1387,10 @@ private fun RcqApp(session: Session) {
         // holding the unlocked phone could scan their own QR and walk away
         // with every future message the chat locks keep off this screen. With
         // an app PIN, the PIN (or the biometric the app accepts) comes first.
-        var linkPinFor by remember { mutableStateOf<WebLinkRequest.Req?>(null) }
+        // Keyed on the account, the lock and the decoy view: a PIN sheet left
+        // up across any of them would link the wrong account, or ask a coerced
+        // person for the real PIN (#1045 review).
+        var linkPinFor by remember(session.uin, locked, session.inDecoySession) { mutableStateOf<WebLinkRequest.Req?>(null) }
         fun doLink(req: WebLinkRequest.Req) {
             scope.launch {
                 val err = runCatching { session.linkWeb(req.token, req.webPub, req.clientLabel) }.exceptionOrNull()
