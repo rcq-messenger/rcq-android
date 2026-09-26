@@ -764,6 +764,30 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     fun authorMember(m: ChatMessage): app.rcq.android.model.GroupMember? =
         if (isGroup && !m.fromMe) group?.members?.firstOrNull { it.uin == m.senderUin } else null
 
+    // The quote the next send carries, taken off the composer as it goes.
+    //
+    // ⚠⚠ EVERY send path takes it, not the text field alone (#1048). Only the
+    // text send read `replyTarget`: pick a message to answer, attach a picture,
+    // and the picture went into the chat as a plain message while the chip
+    // stayed above the composer, promising an answer that had already left
+    // without it. Photo, video, album, file, voice and location come through
+    // here now, and whichever of them goes first takes the quote with it.
+    //
+    // Carry the REAL author nick in the quote (never the literal "You") so
+    // other people see the nick; the viewer's own client localizes "You" via
+    // replyMine at render time. ⚠⚠ `wireAuthorName`, not `authorName`: the
+    // quote travels inside the sealed envelope and its label reaches the very
+    // person it names. My own alias for them is device-only.
+    fun takeReply(): Reply? {
+        val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), if (it.fromMe) session.nickname else wireAuthorName(it)) }
+        replyTarget = null
+        // Both, here and now. Clearing only the state left the parked note on
+        // disk for the moment it took the effect above to notice — long
+        // enough for it to be read back.
+        ChatDrafts.replyByThread.remove(threadKey)
+        return reply
+    }
+
     // Item 9(b/c): who a full-screen viewer names at the top, and whose card
     // that name opens.
     //
@@ -849,9 +873,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 return@launch
             }
             if (!fileFitsIsland(context, session, picked.bytes.size.toLong())) return@launch
+            val reply = takeReply()
             session.sendMediaDetached("file") {
-                if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime)
-                else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime)
+                if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime, reply)
+                else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime, reply)
             }
         }
     }
@@ -876,6 +901,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // nothing had been sent until the first upload finished (#691); leaving
         // the chat cancelled the rest mid-flight; and a failed file was simply
         // absent, with nothing said. Same hole #473 closed for a single picture.
+        // The quote rides on the first item that actually goes (iOS does the
+        // same: `consumeReplyContext` hands it to one send and clears it), so
+        // an album answers once rather than N times. Taken here, on the main
+        // thread, because it is composer state.
+        var reply = if (uris.isNotEmpty()) takeReply() else null
         if (uris.isNotEmpty()) session.sendMediaDetached("album", uris.size) { oneDone ->
             val albumId = if (uris.size > 1) java.util.UUID.randomUUID().toString().uppercase() else null
             // ⚠ One token for the whole album, so the island's slowmode charges it
@@ -890,13 +920,14 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (mime.startsWith("video/")) {
                         val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                         if (v == null) { failed += 1; continue }
-                        sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch)
+                        sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch, replyTo = reply)
                     } else {
                         val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
                         if (data == null) { failed += 1; continue }
-                        if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch)
-                        else session.sendPhoto(peer!!, data, null, albumId = albumId)
+                        if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch, replyTo = reply)
+                        else session.sendPhoto(peer!!, data, null, albumId = albumId, replyTo = reply)
                     }
+                    reply = null
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -1023,9 +1054,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     fun doShareLocation() {
         scope.launch {
             val loc = withContext(Dispatchers.IO) { currentLocation(context) } ?: return@launch
+            val reply = takeReply()
             runCatching {
-                if (isGroup) session.sendGroupLocation(groupId!!, loc.first, loc.second, null)
-                else session.sendLocation(peer!!, loc.first, loc.second, null)
+                if (isGroup) session.sendGroupLocation(groupId!!, loc.first, loc.second, null, reply)
+                else session.sendLocation(peer!!, loc.first, loc.second, null, reply)
             }
         }
     }
@@ -1096,10 +1128,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     fun stopAndSendVoice() {
         recording = false
         val res = recorder.stop() ?: return
+        val reply = takeReply()
         scope.launch {
             runCatching {
-                if (isGroup) session.sendGroupVoice(groupId!!, res.first, res.second)
-                else session.sendVoice(peer!!, res.first, res.second)
+                if (isGroup) session.sendGroupVoice(groupId!!, res.first, res.second, reply)
+                else session.sendVoice(peer!!, res.first, res.second, reply)
             }
         }
     }
@@ -1896,6 +1929,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         onViewVideo = { fullscreenVideo = viewerVideoOf(row.items.first(), it) },
                         onOpenAlbum = { idx -> albumViewer = row.items to idx },
                         linksEnabled = rowLinksEnabled(linksOff, group, row.items.first()),
+                        replyAuthorOverride = if (row.replyMine) youLabel else null,
+                        deletedQuoted = deletedQuoted,
+                        onTapReply = onTapReply,
                     )
                 }
             }
@@ -2268,18 +2304,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     }
                 },
                 onSend = { body ->
-                    // Carry the REAL author nick in the quote (never the literal
-                    // "You") so other people see the nick; the viewer's own
-                    // client localizes "You" via replyMine at render time.
-                    // ⚠⚠ `wireAuthorName`, not `authorName`: the quote travels
-                    // inside the sealed envelope and its label reaches the very
-                    // person it names. My own alias for them is device-only.
-                    val reply = replyTarget?.let { Reply(it.id, previewOf(it, context), if (it.fromMe) session.nickname else wireAuthorName(it)) }
-                    replyTarget = null
-                    // Both, here and now. Clearing only the state left the
-                    // parked note on disk for the moment it took the effect
-                    // above to notice — long enough for it to be read back.
-                    ChatDrafts.replyByThread.remove(threadKey)
+                    val reply = takeReply()
                     if (!isGroup && !isSelf && peer != null) { session.sendTyping(peer, false); lastTypingSent = false; lastTypingAt = 0L }
                     scope.launch {
                         runCatching {
@@ -2645,15 +2670,18 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onCancel = { pendingSend = null },
             onSend = { spoiler, caption ->
                 pendingSend = null
+                // The picture answers what the chip above the composer says it
+                // answers (#1048); Cancel above leaves the chip where it was.
+                val reply = takeReply()
                 // NOT on this screen's scope: leaving the chat used to cancel the
                 // upload and lose the picture without a word (#473).
                 session.sendMediaDetached(if (ps is PendingSend.Video) "video" else "photo") {
                     when (ps) {
                         is PendingSend.Photo ->
-                            if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler)
-                            else session.sendPhoto(peer!!, ps.bytes, caption, spoiler)
+                            if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler, replyTo = reply)
+                            else session.sendPhoto(peer!!, ps.bytes, caption, spoiler, replyTo = reply)
                         is PendingSend.Video ->
-                            sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler)
+                            sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler, replyTo = reply)
                     }
                 }
             },
@@ -4345,7 +4373,7 @@ private sealed interface ChatRow {
     @androidx.compose.runtime.Immutable
     data class Single(val m: ChatMessage, val showSender: Boolean = true, val replyMine: Boolean = false, val continued: Boolean = false) : ChatRow
     @androidx.compose.runtime.Immutable
-    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true, val ordinal: Int = 0, val continued: Boolean = false) : ChatRow
+    data class Album(val id: String, val items: List<ChatMessage>, val showSender: Boolean = true, val ordinal: Int = 0, val continued: Boolean = false, val replyMine: Boolean = false) : ChatRow
     /** A day separator between messages of different calendar dates (iOS parity). */
     data class DateLabel(val label: String, val key: Long) : ChatRow
     /** The "unread messages" marker, placed before the first unread message. */
@@ -4467,7 +4495,9 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
             }
             if (group.size >= 2) {
                 val n = albumRuns[alb] ?: 0; albumRuns[alb] = n + 1
-                out.add(ChatRow.Album(alb, group, showSender, n)); i = j; continue
+                // The quote an album carries rides on one of its items (#1048).
+                val albumReplyMine = group.firstOrNull { it.replyToSnippet != null }?.replyToId?.let { mineById[it] } ?: false
+                out.add(ChatRow.Album(alb, group, showSender, n, replyMine = albumReplyMine)); i = j; continue
             }
         }
         val replyMine = m.replyToId?.let { mineById[it] } ?: false
@@ -4554,7 +4584,7 @@ private fun UnreadDividerRow(count: Int = 0) {
  *  and a time/state footer. Long-press acts on the album's first message. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: (ChatMessage) -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true) {
+private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: String?, senderBadge: String? = null, senderAvatarId: String? = null, senderAvatarKey: String? = null, onLongPress: (ChatMessage) -> Unit, onSenderClick: (() -> Unit)? = null, onViewImage: (ByteArray) -> Unit = {}, onViewVideo: (VideoSource) -> Unit = {}, onOpenAlbum: (Int) -> Unit = {}, linksEnabled: Boolean = true, replyAuthorOverride: String? = null, deletedQuoted: Set<String> = emptySet(), onTapReply: ((String) -> Boolean)? = null) {
     val c = RcqTheme.colors
     val first = items.first()
     val last = items.last()
@@ -4579,6 +4609,11 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
                 // (founder, 08.09; iOS spaces its HStack once and looks right).
                 senderBadge?.let { BadgeMark(it, size = 11.dp) }
             }
+        }
+        // Like the caption below: the quote belongs to the item that carries
+        // it (the first one sent, #1048), and names the batch as a whole.
+        items.firstOrNull { it.replyToSnippet != null }?.let { q ->
+            MediaReplyQuote(q, replyAuthorOverride, q.replyToId != null && q.replyToId in deletedQuoted, onTapReply, ALBUM_GRID_W)
         }
         AlbumGrid(session, items, onLongPress, onViewImage, onViewVideo, onOpenAlbum)
         items.firstOrNull { it.body.isNotEmpty() }?.let { cap ->
@@ -4916,6 +4951,9 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 senderBadge?.let { BadgeMark(it, size = 11.dp) }
             }
         }
+        if (!isPlainText && groupLinkId == null && m.replyToSnippet != null) {
+            MediaReplyQuote(m, replyAuthorOverride, replyTargetDeleted, onTapReply, mediaBubbleMaxW())
+        }
         if (groupLinkId != null) {
             GroupLinkBubble(session, groupLinkId, onOpenGroup, onLongPress)
         } else if (m.kind == "photo") {
@@ -4965,58 +5003,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                     }
                 }
                 if (m.replyToSnippet != null) {
-                    val tappable = m.replyToId != null && onTapReply != null
-                    // ⚠ A BAR DOWN THE LEADING EDGE, not a tint alone. The tint
-                    // is 14% accent, which on a coloured bubble is a barely
-                    // different shade of the same colour: people were reading
-                    // the quote as the first two lines of the message and
-                    // answering the wrong thing (founder, 08.09 - "people do
-                    // not understand quotes; WhatsApp colours them"). The bar
-                    // is the part every messenger has in common and the part
-                    // that survives a dark theme, a coloured bubble and a
-                    // colour-blind reader, because it is a SHAPE.
-                    // Opened in place when the original is not on screen to
-                    // jump to. The quote carries up to 280 characters of it and
-                    // one line showed a dozen; a tap that scrolled nowhere was
-                    // the only other thing on offer (founder item 3, #964).
-                    var quoteExpanded by remember(m.id) { mutableStateOf(false) }
-                    val quoteCd = stringResource(if (quoteExpanded) R.string.chat_quote_collapse_cd else R.string.chat_quote_expand_cd)
-                    Row(
-                        Modifier.padding(bottom = 4.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(c.accent.copy(alpha = 0.14f))
-                            .then(
-                                if (tappable) Modifier.clickable {
-                                    if (!onTapReply!!.invoke(m.replyToId!!)) quoteExpanded = !quoteExpanded
-                                } else if (!replyTargetDeleted) Modifier.clickable { quoteExpanded = !quoteExpanded }
-                                else Modifier,
-                            )
-                            .semantics { contentDescription = quoteCd }
-                            .animateContentSize()
-                            .height(IntrinsicSize.Min),
-                    ) {
-                        Box(Modifier.width(3.dp).fillMaxHeight().background(c.accent))
-                        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            Text(replyAuthorOverride ?: m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            if (replyTargetDeleted) {
-                                // Italic and nothing else: the words are gone
-                                // from the chat, and this quote was the one
-                                // place they survived it.
-                                Text(
-                                    stringResource(R.string.chat_deleted),
-                                    color = c.textSecondary, fontSize = 12.sp,
-                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                )
-                            } else {
-                                Text(
-                                    m.replyToSnippet, color = c.textSecondary, fontSize = 12.sp,
-                                    maxLines = if (quoteExpanded) Int.MAX_VALUE else 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
+                    ReplyQuote(m, replyAuthorOverride, replyTargetDeleted, onTapReply, Modifier.padding(bottom = 4.dp))
                 }
                 // #2: collapse a very long body to ~14 lines with "Показать
                 // полностью" (Telegram-style). Only a long CANDIDATE collapses,
@@ -5121,6 +5108,97 @@ private const val PHOTO_FALLBACK_RATIO = 1f
 /** Shape of a clip whose poster frame is missing or will not decode. An empty
  *  box with a play disc in it reads as a player, and a player is 16:9. */
 private const val VIDEO_FALLBACK_RATIO = 16f / 9f
+
+/** The quote a message carries of the one it answers: accent bar, author,
+ *  one line of the words (a tap opens the rest, or jumps to the original when
+ *  it is on screen). Out of [MessageBubble] so the media kinds can draw the
+ *  same thing above a picture that a text bubble draws inside itself (#1048).
+ *
+ *  ⚠ A BAR DOWN THE LEADING EDGE, not a tint alone. The tint is 14% accent,
+ *  which on a coloured bubble is a barely different shade of the same colour:
+ *  people were reading the quote as the first two lines of the message and
+ *  answering the wrong thing (founder, 08.09 - "people do not understand
+ *  quotes; WhatsApp colours them"). The bar is the part every messenger has in
+ *  common and the part that survives a dark theme, a coloured bubble and a
+ *  colour-blind reader, because it is a SHAPE.
+ *
+ *  Opened in place when the original is not on screen to jump to. The quote
+ *  carries up to 280 characters of it and one line showed a dozen; a tap that
+ *  scrolled nowhere was the only other thing on offer (founder item 3, #964). */
+@Composable
+private fun ReplyQuote(
+    m: ChatMessage,
+    authorOverride: String?,
+    targetDeleted: Boolean,
+    onTapReply: ((String) -> Boolean)?,
+    modifier: Modifier = Modifier,
+) {
+    val c = RcqTheme.colors
+    val snippet = m.replyToSnippet ?: return
+    val tappable = m.replyToId != null && onTapReply != null
+    var quoteExpanded by remember(m.id) { mutableStateOf(false) }
+    val quoteCd = stringResource(if (quoteExpanded) R.string.chat_quote_collapse_cd else R.string.chat_quote_expand_cd)
+    Row(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(c.accent.copy(alpha = 0.14f))
+            .then(
+                if (tappable) Modifier.clickable {
+                    if (!onTapReply!!.invoke(m.replyToId!!)) quoteExpanded = !quoteExpanded
+                } else if (!targetDeleted) Modifier.clickable { quoteExpanded = !quoteExpanded }
+                else Modifier,
+            )
+            .semantics { contentDescription = quoteCd }
+            .animateContentSize()
+            .height(IntrinsicSize.Min),
+    ) {
+        Box(Modifier.width(3.dp).fillMaxHeight().background(c.accent))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(authorOverride ?: m.replyToAuthor.orEmpty(), color = c.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            if (targetDeleted) {
+                // Italic and nothing else: the words are gone from the chat,
+                // and this quote was the one place they survived it.
+                Text(
+                    stringResource(R.string.chat_deleted),
+                    color = c.textSecondary, fontSize = 12.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    snippet, color = c.textSecondary, fontSize = 12.sp,
+                    maxLines = if (quoteExpanded) Int.MAX_VALUE else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** [ReplyQuote] for a message that is not a text bubble: a photo, a clip, an
+ *  album, a voice note, a file, a point on a map. Those draw no bubble of
+ *  their own to put the quote inside, so it gets a small plate in the bubble
+ *  colour, as wide as the media under it and no wider, sitting directly on
+ *  top of it the way the sender name does. */
+@Composable
+private fun MediaReplyQuote(
+    m: ChatMessage,
+    authorOverride: String?,
+    targetDeleted: Boolean,
+    onTapReply: ((String) -> Boolean)?,
+    maxWidth: Dp,
+) {
+    val c = RcqTheme.colors
+    Box(
+        Modifier.padding(bottom = 3.dp)
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (m.fromMe) c.bubbleSelf else c.bubbleOther)
+            .padding(4.dp),
+    ) {
+        ReplyQuote(m, authorOverride, targetDeleted, onTapReply)
+    }
+}
 
 /** Box (width to height) for media of aspect [ratio] = width / height. */
 /** A caption drawn as PART of its picture, not as a message beside it.
@@ -6439,6 +6517,7 @@ private suspend fun sendPickedVideo(
     spoiler: Boolean = false,
     albumId: String? = null,
     batch: app.rcq.android.net.RcqApi.Batch? = null,
+    replyTo: Reply? = null,
 ) {
     if (session.needsStreamedSend(v.sizeBytes)) {
         // A fresh stream per attempt: the route ladder can run the upload again
@@ -6447,15 +6526,15 @@ private suspend fun sendPickedVideo(
             context.contentResolver.openInputStream(v.uri)
                 ?: throw java.io.IOException("cannot read ${v.uri}")
         }
-        if (isGroup) session.sendGroupVideoStreamed(groupId!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, batch = batch)
-        else session.sendVideoStreamed(peer!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+        if (isGroup) session.sendGroupVideoStreamed(groupId!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, batch = batch, replyTo = replyTo)
+        else session.sendVideoStreamed(peer!!, open, v.sizeBytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, replyTo = replyTo)
         return
     }
     val bytes = withContext(Dispatchers.IO) {
         context.contentResolver.openInputStream(v.uri)?.use { it.readBytes() }
     } ?: throw java.io.IOException("cannot read ${v.uri}")
-    if (isGroup) session.sendGroupVideo(groupId!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, batch = batch)
-    else session.sendVideo(peer!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId)
+    if (isGroup) session.sendGroupVideo(groupId!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, batch = batch, replyTo = replyTo)
+    else session.sendVideo(peer!!, bytes, v.thumbB64, v.durationSec, caption, spoiler, albumId, replyTo = replyTo)
 }
 
 /** Will the island take it? Say so in the composer, in MB, when it will not.

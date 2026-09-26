@@ -21,6 +21,26 @@ import java.util.UUID
  *  ({id, snippet, authorName}), carried under the "reply" key. */
 data class Reply(val id: String, val snippet: String, val authorName: String)
 
+/** The quote under the "reply" key, on every content kind that can answer
+ *  something: text, photo, video, voice, file, location.
+ *
+ *  ⚠ It used to ride on TEXT only (#1048). Picking a message to answer and then
+ *  attaching a picture sent the picture as a plain message into the chat and
+ *  left the quote hanging in the composer, as if the answer were still to
+ *  come. iOS and the web have always encoded `reply` on the media kinds too
+ *  (`CryptoService.swift` Envelope, `crypto.ts` encodeEnvelope), so their
+ *  quote on a photo reached this client and was dropped on the floor as well.
+ *  Same key, same three fields, optional everywhere: a build that does not
+ *  know about it still reads the photo. */
+private fun JsonObject.putReply(r: Reply?) {
+    r ?: return
+    add("reply", JsonObject().apply {
+        addProperty("id", r.id)
+        addProperty("snippet", r.snippet)
+        addProperty("authorName", r.authorName)
+    })
+}
+
 sealed interface Envelope {
     /** Disappearing-message TTL in seconds carried by the sender inside the
      *  encrypted envelope (iOS/web key "ttl"); null = permanent. Only the
@@ -59,7 +79,7 @@ sealed interface Envelope {
     /** Photo. `mediaId`/`mediaKey` point at the out-of-band encrypted
      *  blob (rcq-spec 9). caption may be empty. [spoiler] = sent blurred,
      *  the recipient taps to reveal (Android-only flag; iOS ignores it). */
-    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null, val ts: Long? = null) : Envelope
+    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null, val ts: Long? = null, val replyTo: Reply? = null) : Envelope
     /** A reaction to another message (iOS kind "reaction"). Carries no own
      *  message id; [targetId] is the reacted message's UUID, [asset] the
      *  emoji (null clears, currently treated as a no-op on receipt). */
@@ -100,6 +120,7 @@ sealed interface Envelope {
         val caption: String?,
         val ttl: Int? = null,
         val ts: Long? = null,
+        val replyTo: Reply? = null,
     ) : Envelope
     /** Voice note (iOS kind "voice"). Audio bytes live in an encrypted
      *  blob; [durationSec] drives the bubble timer. */
@@ -110,6 +131,7 @@ sealed interface Envelope {
         val durationSec: Double,
         val ttl: Int? = null,
         val ts: Long? = null,
+        val replyTo: Reply? = null,
     ) : Envelope
     /** Video (iOS kind "video"). Bytes in an encrypted blob; [thumbnailB64]
      *  is a base64 JPEG poster frame shown before download, [durationSec]
@@ -125,9 +147,10 @@ sealed interface Envelope {
         val albumId: String? = null,
         val ttl: Int? = null,
         val ts: Long? = null,
+        val replyTo: Reply? = null,
     ) : Envelope
     /** Shared location (iOS kind "location"). */
-    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null, val ts: Long? = null) : Envelope
+    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null, val ts: Long? = null, val replyTo: Reply? = null) : Envelope
     /** Profile-view ping (iOS kind "visit"). Fire-and-forget, no bubble:
      *  the recipient tallies it locally for the "profile views" stat.
      *  [at] is seconds since the 2001 reference date, matching the iOS
@@ -341,13 +364,7 @@ sealed interface Envelope {
                 // Beside the ttl and never on its own — see the interface note.
                 ts?.let { sec -> addProperty("ts", sec) }
             }
-            replyTo?.let {
-                add("reply", JsonObject().apply {
-                    addProperty("id", it.id)
-                    addProperty("snippet", it.snippet)
-                    addProperty("authorName", it.authorName)
-                })
-            }
+            putReply(replyTo)
             card?.takeIf { it.isNotBlank() }?.let { addProperty("card", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Photo -> JsonObject().apply {
@@ -363,6 +380,7 @@ sealed interface Envelope {
                 // Beside the ttl and never on its own — see the interface note.
                 ts?.let { sec -> addProperty("ts", sec) }
             }
+            putReply(replyTo)
         }.toString().toByteArray(Charsets.UTF_8)
         is Reaction -> JsonObject().apply {
             addProperty("kind", "reaction")
@@ -400,6 +418,7 @@ sealed interface Envelope {
                 // Beside the ttl and never on its own — see the interface note.
                 ts?.let { sec -> addProperty("ts", sec) }
             }
+            putReply(replyTo)
         }.toString().toByteArray(Charsets.UTF_8)
         is Voice -> JsonObject().apply {
             addProperty("kind", "voice")
@@ -412,6 +431,7 @@ sealed interface Envelope {
                 // Beside the ttl and never on its own — see the interface note.
                 ts?.let { sec -> addProperty("ts", sec) }
             }
+            putReply(replyTo)
         }.toString().toByteArray(Charsets.UTF_8)
         is Video -> JsonObject().apply {
             addProperty("kind", "video")
@@ -428,6 +448,7 @@ sealed interface Envelope {
                 // Beside the ttl and never on its own — see the interface note.
                 ts?.let { sec -> addProperty("ts", sec) }
             }
+            putReply(replyTo)
         }.toString().toByteArray(Charsets.UTF_8)
         is Location -> JsonObject().apply {
             addProperty("kind", "location")
@@ -440,6 +461,7 @@ sealed interface Envelope {
                 // Beside the ttl and never on its own — see the interface note.
                 ts?.let { sec -> addProperty("ts", sec) }
             }
+            putReply(replyTo)
         }.toString().toByteArray(Charsets.UTF_8)
         is Visit -> JsonObject().apply {
             addProperty("kind", "visit")
@@ -652,9 +674,9 @@ sealed interface Envelope {
             return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts, card = card)
         }
 
-        fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null): Photo {
+        fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null, replyTo: Reply? = null): Photo {
             val (t, ts) = dying(ttl)
-            return Photo(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, caption, spoiler, albumId, t, ts)
+            return Photo(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, caption, spoiler, albumId, t, ts, replyTo)
         }
 
         fun reaction(targetId: String, asset: String?): Reaction = Reaction(targetId, asset)
@@ -667,24 +689,24 @@ sealed interface Envelope {
 
         fun deliveredReceipt(targetIds: List<String>): DeliveredReceipt = DeliveredReceipt(targetIds)
 
-        fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?, ttl: Int? = null): File {
+        fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?, ttl: Int? = null, replyTo: Reply? = null): File {
             val (t, ts) = dying(ttl)
-            return File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption, t, ts)
+            return File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption, t, ts, replyTo)
         }
 
-        fun voice(mediaId: String, mediaKey: String, durationSec: Double, ttl: Int? = null): Voice {
+        fun voice(mediaId: String, mediaKey: String, durationSec: Double, ttl: Int? = null, replyTo: Reply? = null): Voice {
             val (t, ts) = dying(ttl)
-            return Voice(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, durationSec, t, ts)
+            return Voice(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, durationSec, t, ts, replyTo)
         }
 
-        fun video(mediaId: String, mediaKey: String, thumbnailB64: String, durationSec: Double, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null): Video {
+        fun video(mediaId: String, mediaKey: String, thumbnailB64: String, durationSec: Double, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null, replyTo: Reply? = null): Video {
             val (t, ts) = dying(ttl)
-            return Video(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, thumbnailB64, durationSec, caption, spoiler, albumId, t, ts)
+            return Video(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, thumbnailB64, durationSec, caption, spoiler, albumId, t, ts, replyTo)
         }
 
-        fun location(lat: Double, lng: Double, caption: String?, ttl: Int? = null): Location {
+        fun location(lat: Double, lng: Double, caption: String?, ttl: Int? = null, replyTo: Reply? = null): Location {
             val (t, ts) = dying(ttl)
-            return Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption, t, ts)
+            return Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption, t, ts, replyTo)
         }
 
         fun secureScreen(on: Boolean): SecureScreen = SecureScreen(on)
@@ -740,12 +762,13 @@ sealed interface Envelope {
             // arrive from a stranger on another island over an endpoint that is
             // unauthenticated by design. A malformed id is a missing id.
             val id = obj.get("id")?.takeIf { it.isJsonPrimitive }?.asString ?: UUID.randomUUID().toString()
-            val reply = obj.getAsJsonObject("reply")?.let {
-                Reply(
-                    id = it.get("id")?.asString.orEmpty(),
-                    snippet = it.get("snippet")?.asString.orEmpty(),
-                    authorName = it.get("authorName")?.asString.orEmpty(),
-                )
+            // Read for every content kind now, not text alone (#1048), so the
+            // same guards as the rest: a `reply` that is not an object, or a
+            // field in it that is not a string, is no quote rather than a
+            // throw that loses the photo it was attached to.
+            val reply = obj.get("reply")?.takeIf { it.isJsonObject }?.asJsonObject?.let {
+                fun str(k: String) = it.get(k)?.takeIf { v -> v.isJsonPrimitive }?.asString.orEmpty()
+                Reply(id = str("id"), snippet = str("snippet"), authorName = str("authorName"))
             }
             // Disappearing-message TTL (seconds) the sender packed into the
             // envelope; absent/JSON-null → permanent. Only the content kinds
@@ -775,6 +798,7 @@ sealed interface Envelope {
                     albumId = obj.get("album")?.asString,
                     ttl = ttl,
                     ts = ts,
+                    replyTo = reply,
                 )
                 "reaction" -> Reaction(
                     targetId = obj.get("targetID")?.asString.orEmpty(),
@@ -801,6 +825,7 @@ sealed interface Envelope {
                     caption = obj.get("caption")?.asString,
                     ttl = ttl,
                     ts = ts,
+                    replyTo = reply,
                 )
                 "voice" -> Voice(
                     id = id,
@@ -809,6 +834,7 @@ sealed interface Envelope {
                     durationSec = obj.get("durationSec")?.asDouble ?: 0.0,
                     ttl = ttl,
                     ts = ts,
+                    replyTo = reply,
                 )
                 "video" -> Video(
                     id = id,
@@ -821,6 +847,7 @@ sealed interface Envelope {
                     albumId = obj.get("album")?.asString,
                     ttl = ttl,
                     ts = ts,
+                    replyTo = reply,
                 )
                 "location" -> Location(
                     id = id,
@@ -829,6 +856,7 @@ sealed interface Envelope {
                     caption = obj.get("caption")?.asString,
                     ttl = ttl,
                     ts = ts,
+                    replyTo = reply,
                 )
                 "visit" -> Visit(obj.get("at")?.asDouble ?: 0.0)
                 "poll" -> Poll(
