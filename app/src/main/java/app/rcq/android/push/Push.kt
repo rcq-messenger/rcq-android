@@ -1883,7 +1883,7 @@ object Push {
                 ?.let { PushEnvelope.nameFor(ctx, it, fromUin, host = null) }
                 ?.takeIf { it.isNotBlank() }
             ?: "$fromUin"
-        ring(ctx, callId, fromUin, name, str("media") ?: "video", sdp)
+        ring(ctx, callId, fromUin, name, str("media") ?: "video", sdp, toUin)
     }
 
     /**
@@ -1964,7 +1964,7 @@ object Push {
         val name = call.senderName
             ?.takeIf { !app.rcq.android.security.PanicPinService.isLocked }
             ?: ctx.getString(R.string.call_incoming)
-        ring(ctx, call.callId, call.senderUin, name, call.media, call.sdp)
+        ring(ctx, call.callId, call.senderUin, name, call.media, call.sdp, toUin)
     }
 
     /** A call we know is arriving but cannot open: alert without a name and
@@ -2008,7 +2008,7 @@ object Push {
     /** Park the offer and raise the ring. Shared by the flat (same-island VoIP)
      *  wake and the §5d sealed one, so a cross-island call is answered through
      *  exactly the same surface as any other. */
-    private fun ring(ctx: Context, callId: String, fromUin: Int, nickname: String, media: String, sdp: String) {
+    private fun ring(ctx: Context, callId: String, fromUin: Int, nickname: String, media: String, sdp: String, toUin: Int? = null) {
         ensureChannels(ctx)
         val video = media == "video"
         IncomingCallStore.offer(
@@ -2018,6 +2018,7 @@ object Push {
                 nickname = nickname,
                 media = media,
                 sdp = sdp,
+                toUin = toUin,
             ),
         )
         // ⚠ TWO RINGTONES AT ONCE (#720). The park above is kept whatever

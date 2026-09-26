@@ -472,6 +472,32 @@ class Session(context: Context) {
         }
     }
 
+    /** Decline pressed on a ring that a PUSH raised: the call lives only in
+     *  [app.rcq.android.call.IncomingCallStore], no controller holds it, and the
+     *  caller would otherwise ring on to their own timeout and then leave a
+     *  missed-call marker for a call that was refused (#1047 review). Sends the
+     *  same `call_end` reason=declined the controller sends for a call it holds,
+     *  over the same route (socket plus the sealed copy for a dead one, or the
+     *  cross-island deposit).
+     *
+     *  ⚠ Only from the account the wake was addressed to, and only for a call
+     *  the controller does not hold: a controller that holds it declines it
+     *  itself on the same broadcast, and two ends for one call are harmless but
+     *  pointless. */
+    fun declineParkedCall(p: app.rcq.android.call.IncomingCallStore.Pending) {
+        val to = p.toUin ?: return
+        if (to != store.uin) return
+        if (calls.state.value.info?.id == p.callId) return
+        routeCallSignal(
+            JsonObject().apply {
+                addProperty("type", "call_end")
+                addProperty("to_uin", p.fromUin)
+                addProperty("call_id", p.callId)
+                addProperty("reason", "declined")
+            },
+        )
+    }
+
     /** §5d: WS for same-island peers, sealed deposit for cross-island ones. */
     private fun routeCallSignal(obj: JsonObject) {
         val toUin = obj.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
@@ -4104,6 +4130,9 @@ class Session(context: Context) {
             // left sitting on disk.
             app.rcq.android.data.UinInvoices.wipeAll(appCtx)
             app.rcq.android.data.EntryInvoices.wipeAll(appCtx)
+            // Call ids only, but "a call was refused here at some point" is
+            // still a trace of the erased account's calls.
+            app.rcq.android.call.DeclinedCalls.wipeAll(appCtx)
         }
         // The install id lived in its own prefs file that nothing above touches,
         // and the island keeps it next to the uin. Left alone, the number this
@@ -10134,6 +10163,12 @@ class Session(context: Context) {
                     // acks are best-effort: the same envelope redelivered would
                     // file the row again, every time, for ever.
                     if (cs.cid.isEmpty()) return@runCatching
+                    // Declined here, from a ring a push raised, which told the
+                    // caller nothing: their call timed out as "no answer" and
+                    // this marker is their client's honest guess. It is wrong,
+                    // and a "Missed call" for a call the person refused is the
+                    // one thing it must not become (#1047 review, DeclinedCalls).
+                    if (app.rcq.android.call.DeclinedCalls.wasDeclined(appCtx, cs.cid)) return@runCatching
                     // The dedupe the whole design rests on. This marker is a
                     // guess by the CALLER about what we do not know, and the
                     // island can be wrong about us: a registration that had

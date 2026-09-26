@@ -25,6 +25,10 @@ object IncomingCallStore {
         val nickname: String,
         val media: String,
         val sdp: String,
+        /** The local account the wake was addressed to (`to_uin`), or null when
+         *  it did not say. Declining answers the caller from THAT account only
+         *  (Session.declineParkedCall). */
+        val toUin: Int? = null,
         /** Monotonic arrival time — the drain drops an offer older than the
          *  caller's ring window so a late unlock doesn't answer a dead call. */
         val ts: Long = SystemClock.elapsedRealtime(),

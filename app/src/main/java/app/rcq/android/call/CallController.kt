@@ -437,6 +437,10 @@ class CallController(
 
     fun decline() {
         val s = _state.value as? State.Incoming ?: return
+        // The `call_end` below is how the caller learns it, and it can be lost
+        // (a socket that died in the pocket); a marker for this call that
+        // arrives later must still not become a missed call ([DeclinedCalls]).
+        DeclinedCalls.remember(appContext, s.info.id)
         endLocally(s.info, "declined")
     }
 
