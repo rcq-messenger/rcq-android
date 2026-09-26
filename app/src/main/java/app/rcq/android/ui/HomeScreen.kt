@@ -1280,8 +1280,36 @@ internal fun HomeScreen(
 
         if (showSearch) {
             BackHandler { showSearch = false }
+            // ⚠ Nobody filed in a section that is behind a PIN and not opened
+            // on this visit (#1045 review; the web had the same leak). The
+            // section exists to hide who is in it, and a search by name or
+            // number walked round it: typing a name found the person and the
+            // chat opened with no PIN at all. Same rule the list itself
+            // follows (a locked header, no members, no count), including the
+            // built-in sections a person can put behind a PIN. The per-chat
+            // lock needs nothing here: a hit on such a chat opens through its
+            // gate, and this search reads names, never message text.
+            val hiddenBySection = remember(renderedSections, unlockedSections, lists, gatingOn, inDecoy) {
+                val out = HashSet<Int>()
+                for (rec in renderedSections) {
+                    if (!(gatingOn && !inDecoy && Sections.isPinnedRecord(rec))) continue
+                    val sid = Sections.idOf(rec)
+                    if (sid in unlockedSections) continue
+                    val members = when (sid) {
+                        Sections.SYS_FAV -> favContacts
+                        Sections.SYS_CI -> crossIslandContacts
+                        Sections.SYS_ONLINE -> onlineContacts
+                        Sections.SYS_OFFLINE -> offlineContacts
+                        Sections.SYS_ARCHIVE -> archivedContacts
+                        Sections.SYS_GROUPS, Sections.SYS_SAVED -> emptyList()
+                        else -> filedContacts[sid].orEmpty()
+                    }
+                    members.forEach { out.add(it.uin) }
+                }
+                out
+            }
             SearchOverlay(
-                contacts = contacts,
+                contacts = contacts.filter { it.uin !in hiddenBySection },
                 onClose = { showSearch = false },
                 onSelect = { showSearch = false; onOpenChat(it.uin) },
             )
