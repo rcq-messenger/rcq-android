@@ -2549,6 +2549,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 showAllMedia = false
                 jumpToMessage(m.id)
             }),
+            isGone = goneFrom(messages),
             onDismiss = { albumViewer = null },
         )
     }
@@ -5593,6 +5594,15 @@ private fun blurForSpoiler(src: Bitmap): Bitmap {
     return Bitmap.createScaledBitmap(small, outW, outH, true)
 }
 
+/** [AlbumPagerViewer]'s `isGone` against the thread as it is now ([rows]):
+ *  a page whose message is no longer there (deleted), or whose timer has run
+ *  out and the ten-second sweep has not taken it yet (#1042 review). The ids
+ *  in a set, because the pager asks this for every page on every turn. */
+internal fun goneFrom(rows: List<ChatMessage>): (ChatMessage) -> Boolean {
+    val live = rows.mapTo(HashSet()) { it.id }
+    return { m -> m.id !in live || m.expiresAt?.let { it <= System.currentTimeMillis() } == true }
+}
+
 /** The whole album, full screen, one item per page.
  *
  *  ⚠ The grid draws four tiles however many items the batch holds, and a tap
@@ -5632,13 +5642,32 @@ internal fun AlbumPagerViewer(
     /// pager is opened AWAY from the message itself (a media wall), since from
     /// an album bubble the message is already right behind the viewer.
     onShowInChat: ((ChatMessage) -> Unit)? = null,
+    /// The page's message no longer exists (deleted, or its timer ran out)
+    /// since [items] were taken. Such pages are dropped (#1042 review: the
+    /// wall's snapshot kept them on screen and saveable), except the one you
+    /// are looking at, which says it is gone until you swipe off it.
+    isGone: (ChatMessage) -> Boolean = { false },
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) { onDismiss(); return }
     val scope = rememberCoroutineScope()
+    // The page you are on, by id, as of the last time the pager came to rest:
+    // the one gone page that stays, so it does not vanish from under your eyes
+    // or mid-swipe.
+    var restingOn by remember(items) { mutableStateOf(items[startIndex.coerceIn(0, items.size - 1)].id) }
+    val pages = items.filter { it.id == restingOn || !isGone(it) }
     val pager = androidx.compose.foundation.pager.rememberPagerState(
-        initialPage = startIndex.coerceIn(0, items.size - 1), pageCount = { items.size },
+        initialPage = startIndex.coerceIn(0, items.size - 1), pageCount = { pages.size },
     )
+    val pagesNow by rememberUpdatedState(pages)
+    // For the save and share that finish after a fetch: the page is asked
+    // again against the thread as it is THEN, not as it was at the tap.
+    val goneNow by rememberUpdatedState(isGone)
+    LaunchedEffect(pager) {
+        androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { p ->
+            pagesNow.getOrNull(p)?.let { restingOn = it.id }
+        }
+    }
     // One copy of each page's bytes, shared between the page and the
     // save/share buttons. Two produceState()s on the same id used to race
     // past the cache and download the same blob twice (found in review).
@@ -5652,9 +5681,9 @@ internal fun AlbumPagerViewer(
     // (several hundred KB each), even after the session's own bounded cache let
     // them go. Pages more than two away drop their bytes; coming back to one
     // fetches it again, from that cache when it still has it.
-    LaunchedEffect(pager, items) {
+    LaunchedEffect(pager, pages) {
         androidx.compose.runtime.snapshotFlow { pager.currentPage }.collect { cur ->
-            val keep = ((cur - 2)..(cur + 2)).mapNotNullTo(HashSet()) { items.getOrNull(it)?.id }
+            val keep = ((cur - 2)..(cur + 2)).mapNotNullTo(HashSet()) { pages.getOrNull(it)?.id }
             loaded.keys.filter { it !in keep }.forEach { loaded.remove(it) }
         }
     }
@@ -5705,14 +5734,35 @@ internal fun AlbumPagerViewer(
         ) {
             androidx.compose.foundation.pager.HorizontalPager(
                 state = pager,
+                // By id, so a page dropped before the one you are on does not
+                // slide the next picture under you: the pager holds its place
+                // by key.
+                key = { pages[it].id },
                 modifier = Modifier.fillMaxSize().graphicsLayer {
                     translationY = dismissDrag.dragPx
                     alpha = dismissDrag.contentAlpha
                 },
             ) { page ->
-                val m = items[page]
+                val m = pages[page]
                 val isVideo = m.kind == "video"
-                if (isVideo) {
+                if (isGone(m)) {
+                    // Tappable like every other page: with the chrome faded,
+                    // a tap is the only way back to the close button and the
+                    // counter.
+                    Box(
+                        Modifier.fillMaxSize().clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { chrome.toggle() },
+                        ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(R.string.chat_deleted), color = Color.White, fontSize = 14.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                    }
+                } else if (isVideo) {
                     // Poster from the bubble's own thumbnail; the clip itself
                     // is fetched only when the disc is tapped.
                     val poster = remember(m.id) {
@@ -5812,7 +5862,7 @@ internal fun AlbumPagerViewer(
                     }
                 }
             }
-            val current = items.getOrNull(pager.currentPage)
+            val current = pages.getOrNull(pager.currentPage)
             // ⚠ Close on the LEFT, the two actions on the right (#703). Back is
             // in the top-left corner of every screen in the system, closing a
             // picture is the same gesture, and it is the one people reach for
@@ -5832,7 +5882,7 @@ internal fun AlbumPagerViewer(
                     )
                 }
             }
-            if (current != null) {
+            if (current != null && !isGone(current)) {
                 ViewerChrome(chrome, Modifier.align(Alignment.TopEnd)) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -5845,11 +5895,11 @@ internal fun AlbumPagerViewer(
                         } else {
                             ViewerAction(Icons.Filled.Download, stringResource(R.string.media_save)) {
                                 actionBusy = true
-                                scope.launch { try { payloadOf(current)?.let { onSave(current, it) } } finally { actionBusy = false } }
+                                scope.launch { try { payloadOf(current)?.takeUnless { goneNow(current) }?.let { onSave(current, it) } } finally { actionBusy = false } }
                             }
                             ViewerAction(Icons.Filled.Share, stringResource(R.string.media_share)) {
                                 actionBusy = true
-                                scope.launch { try { payloadOf(current)?.let { onShare(current, it) } } finally { actionBusy = false } }
+                                scope.launch { try { payloadOf(current)?.takeUnless { goneNow(current) }?.let { onShare(current, it) } } finally { actionBusy = false } }
                             }
                             onShowInChat?.let { show ->
                                 ViewerAction(Icons.AutoMirrored.Filled.Message, stringResource(R.string.media_show_in_chat)) {
@@ -5862,20 +5912,20 @@ internal fun AlbumPagerViewer(
                                     // only route photos 5+ have, so without it
                                     // "delete the whole batch" would be missing
                                     // from the exact place it is reachable.
-                                    more(current, items)
+                                    more(current, pages)
                                 }
                             }
                         }
                     }
                 }
             }
-            if (items.size > 1) {
+            if (pages.size > 1) {
                 // The counter fades with the buttons rather than on its own
                 // clock: "3 / 10" burning on an otherwise bare picture is the
                 // drift the shared chrome exists to prevent.
                 ViewerChrome(chrome, Modifier.align(Alignment.BottomCenter)) {
                     Text(
-                        "${pager.currentPage + 1} / ${items.size}",
+                        "${pager.currentPage + 1} / ${pages.size}",
                         color = Color.White, fontSize = 13.sp,
                         // ⚠ BOTH, and neither alone. This window is laid out
                         // under the bar; whether it is also TOLD how tall the

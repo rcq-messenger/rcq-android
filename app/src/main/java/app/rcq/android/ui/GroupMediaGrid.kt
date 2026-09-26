@@ -73,6 +73,7 @@ internal fun GroupMediaGrid(
     val scope = rememberCoroutineScope()
     val all by session.groupMessages.collectAsState()
     val media = remember(all, groupId) { GroupMedia.of(all[groupId].orEmpty()) }
+    val gone = remember(all, groupId) { goneFrom(all[groupId].orEmpty()) }
     if (media.isEmpty()) return
 
     var expanded by remember(groupId) { mutableStateOf(false) }
@@ -142,6 +143,9 @@ internal fun GroupMediaGrid(
             },
             onPlayVideo = { _, src -> clip = src },
             onShowInChat = onShowInChat?.let { show -> { m -> paging = null; show(m) } },
+            // Against the live room, not the snapshot: a page deleted or
+            // expired since it was taken leaves the pager.
+            isGone = gone,
             onDismiss = { paging = null },
         )
     }
