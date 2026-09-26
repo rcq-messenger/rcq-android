@@ -328,6 +328,9 @@
     <string name="pin_biometric_prompt_title">Разблокировать RCQ</string>
     <string name="pin_biometric_prompt_subtitle">Подтвердите, что это вы, чтобы открыть переписку.</string>
     <string name="pin_biometric_cancel">Ввести PIN</string>
+    <string name="pin_biometric_unavailable">Вход по биометрии сейчас недоступен. Введите PIN.</string>
+    <string name="pin_biometric_error">Вход по биометрии не сработал: %1$s</string>
+    <string name="pin_biometric_reset">Отпечатки на телефоне изменились, и вход по биометрии выключился. Войдите по PIN и включите его снова в «Настройки → Приватность → PIN-коды».</string>
     <string name="pin_biometric_enroll_title">Включить вход по биометрии</string>
     <string name="pin_biometric_enroll_subtitle">Подтвердите отпечаток или лицо, чтобы включить.</string>
     <!-- Calls -->

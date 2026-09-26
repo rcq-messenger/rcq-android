@@ -329,6 +329,9 @@
     <string name="pin_biometric_prompt_title">Unlock RCQ</string>
     <string name="pin_biometric_prompt_subtitle">Confirm it\'s you to open your messages.</string>
     <string name="pin_biometric_cancel">Use PIN</string>
+    <string name="pin_biometric_unavailable">Biometric unlock isn\'t available right now. Enter your PIN.</string>
+    <string name="pin_biometric_error">Biometric unlock didn\'t work: %1$s</string>
+    <string name="pin_biometric_reset">The fingerprints on this phone changed, so biometric unlock was turned off. Enter your PIN and turn it on again under Settings, Privacy, PIN codes.</string>
     <string name="pin_biometric_enroll_title">Enable biometric unlock</string>
     <string name="pin_biometric_enroll_subtitle">Confirm your fingerprint or face to turn it on.</string>
     <!-- Calls -->

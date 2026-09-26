@@ -70,24 +70,41 @@ object BiometricVault {
 
     // ── unlock: BiometricPrompt authorises [decryptCipher], then [open] ──
 
-    /** A DECRYPT cipher initialised with the stored IV, or null if there is no
-     *  stored blob or the key was invalidated (biometrics changed) — in which
-     *  case the caller falls back to the PIN. */
-    fun decryptCipher(context: Context): Cipher? {
-        val ivB64 = prefs(context).getString(K_IV, null) ?: return null
-        val key = loadKey() ?: return null
+    /** What [decryptCipher] found. */
+    sealed interface Decrypt {
+        class Ready(val cipher: Cipher) : Decrypt
+        /** Nothing to unlock with any more: no stored blob or no key, or the
+         *  key was invalidated because the phone's biometrics changed. The
+         *  stale blob is gone too, so [isEnabled] now reads false. */
+        object Gone : Decrypt
+        /** The keystore refused for another reason. The blob is kept: this
+         *  may pass (a keystore that is not up yet after a boot). */
+        class Broken(val error: Exception) : Decrypt
+    }
+
+    /** A DECRYPT cipher initialised with the stored IV, or why there is none.
+     *
+     *  ⚠ Each outcome is told apart (#1049). All three used to be one `null`,
+     *  and the lock screen treated it as "nothing happened": the fingerprint
+     *  button stayed, a tap on it did nothing at all, not even a word, and
+     *  the sensor never lit. */
+    fun decryptCipher(context: Context): Decrypt {
+        val ivB64 = prefs(context).getString(K_IV, null) ?: return Decrypt.Gone
+        val key = loadKey() ?: run { disable(context); return Decrypt.Gone }
         val iv = Base64.decode(ivB64, Base64.NO_WRAP)
         return try {
-            Cipher.getInstance(TRANSFORM).apply {
-                init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
-            }
+            Decrypt.Ready(
+                Cipher.getInstance(TRANSFORM).apply {
+                    init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+                },
+            )
         } catch (e: KeyPermanentlyInvalidatedException) {
             // Re-enrollment wiped the key — drop the stale blob so isEnabled()
             // reads false and the lock screen offers the PIN only.
             disable(context)
-            null
+            Decrypt.Gone
         } catch (e: Exception) {
-            null
+            Decrypt.Broken(e)
         }
     }
 

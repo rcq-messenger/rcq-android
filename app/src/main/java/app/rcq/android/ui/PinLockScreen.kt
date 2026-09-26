@@ -35,6 +35,7 @@ import app.rcq.android.R
 import app.rcq.android.Session
 import app.rcq.android.security.BiometricGate
 import app.rcq.android.security.PanicPinService
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -71,46 +72,96 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
 
     // Biometric unlock (panic-PIN phase 4): offered only when a biometric blob
     // is enrolled and we can host the prompt (MainActivity is a FragmentActivity).
+    // State, not a constant: a key the phone invalidated takes the button away.
     val activity = remember(context) { context.findFragmentActivity() }
-    val bioEnabled = remember { activity != null && PanicPinService.biometricEnabled(context) }
-    var triedBio by remember { mutableStateOf(false) }
-    // Kept separate from [busy] (the PIN-submit gate): a biometric prompt that
-    // fails to call back must never disable the PIN field — that would lock the
-    // user out entirely.
+    var bioAvailable by remember { mutableStateOf(activity != null && PanicPinService.biometricEnabled(context)) }
+    // A prompt is out and has not answered. Guards only the AUTOMATIC prompt,
+    // never the button (#1049): a request the system dropped without a word
+    // left this true for good, and the button, disabled by it while its
+    // accent-coloured label still looked live, did nothing at all.
     var bioInFlight by remember { mutableStateOf(false) }
+    // The person closed the prompt ("Use PIN", back) or it failed on this
+    // visit: no automatic prompt again until the app has been left and come
+    // back to. The button still asks.
+    var bioDeclined by remember { mutableStateOf(false) }
 
-    fun tryBiometric() {
+    fun tryBiometric(auto: Boolean) {
         val act = activity ?: return
-        if (bioInFlight || remainingSec != null) return
+        if (!bioAvailable || remainingSec != null || busy) return
+        if (auto && (bioInFlight || bioDeclined)) return
         bioInFlight = true
-        error = null
+        if (!auto) error = null
         BiometricGate.unlock(
             act,
             context.getString(R.string.pin_biometric_prompt_title),
             context.getString(R.string.pin_biometric_prompt_subtitle),
             context.getString(R.string.pin_biometric_cancel),
-        ) { blob ->
-            if (blob != null) {
-                scope.launch {
+        ) { outcome ->
+            when (outcome) {
+                is BiometricGate.Outcome.Unlocked -> scope.launch {
                     // Biometric always unlocks the REAL session: ensure decoy is
                     // off first (it can't actually be on — biometric and decoy
                     // are mutually exclusive — but stay safe against a race).
                     app.rcq.android.data.AccountManager.exitDecoyMode()
-                    val ok = withContext(Dispatchers.Default) { PanicPinService.applyBiometricUnlock(context, blob) }
-                    if (!ok) bioInFlight = false
+                    val ok = withContext(Dispatchers.Default) { PanicPinService.applyBiometricUnlock(context, outcome.blob) }
+                    if (!ok) {
+                        bioInFlight = false; bioDeclined = true
+                        error = context.getString(R.string.pin_biometric_unavailable)
+                    }
                     // success → PanicPinService.locked flips false → host recomposes away
                 }
-            } else {
-                bioInFlight = false // cancelled / failed: fall back to PIN entry
+                is BiometricGate.Outcome.Dismissed -> {
+                    bioInFlight = false
+                    if (outcome.byPerson) bioDeclined = true
+                }
+                is BiometricGate.Outcome.Failed -> {
+                    bioInFlight = false; bioDeclined = true
+                    error = outcome.message?.let { context.getString(R.string.pin_biometric_error, it) }
+                        ?: context.getString(R.string.pin_biometric_unavailable)
+                }
+                BiometricGate.Outcome.KeyReset -> {
+                    bioInFlight = false; bioAvailable = false
+                    error = context.getString(R.string.pin_biometric_reset)
+                }
+                // Not in front: asked again on the next resume, below.
+                BiometricGate.Outcome.NotReady -> bioInFlight = false
             }
         }
     }
 
-    // Prompt once automatically when the lock screen appears (iOS parity). A
-    // short settle delay lets the activity window regain focus after a resume,
-    // otherwise the system can silently drop the prompt request.
-    LaunchedEffect(Unit) {
-        if (bioEnabled && !triedBio) { triedBio = true; delay(400); tryBiometric() }
+    // ⚠⚠ Prompt by itself every time the lock screen is actually in front: the
+    // activity RESUMED and its window FOCUSED (#1049, iQOO Z10 and Huawei Pura
+    // 80: the PIN screen with "Use biometrics" under it, and the under-display
+    // sensor never lit). It used to prompt once per appearance, 400 ms after
+    // the screen was composed, whatever the activity was doing: the lock
+    // screen is composed on the way back from the background and at launch
+    // under a permission dialog, a request made then is dropped (androidx
+    // returns without a callback once the state is saved; an OEM biometric
+    // service can ignore an app without focus), and nothing ever asked again.
+    // Now each return to the screen asks, once the window has focus, unless
+    // the person turned it down on this visit or one is already out.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            // A prompt does not outlive the app leaving the screen, and a new
+            // visit may prompt again.
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) { bioInFlight = false; bioDeclined = false }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    // This composition's tryBiometric, not the first one's: it reads the
+    // lockout countdown, which is a plain value of the composition it ran in.
+    val autoPrompt by androidx.compose.runtime.rememberUpdatedState { tryBiometric(auto = true) }
+    LaunchedEffect(bioAvailable, lifecycleOwner) {
+        if (!bioAvailable) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            view.awaitWindowFocus()
+            // A beat for the window transition to settle.
+            delay(250)
+            autoPrompt()
+        }
     }
 
     fun submit() {
@@ -203,10 +254,10 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
             enabled = canSubmit,
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         ) { submit() }
-        if (bioEnabled) {
+        if (bioAvailable) {
             TextButton(
-                onClick = { tryBiometric() },
-                enabled = remainingSec == null && !bioInFlight && !busy,
+                onClick = { tryBiometric(auto = false) },
+                enabled = remainingSec == null && !busy,
                 modifier = Modifier.padding(top = 8.dp),
             ) {
                 Icon(Icons.Filled.Fingerprint, null, tint = c.accent, modifier = Modifier.size(20.dp))
@@ -217,6 +268,30 @@ fun PinLockScreen(session: Session, onWiped: () -> Unit = {}, onAccountChanged: 
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
+        }
+    }
+}
+
+/** Suspends until this view's window has input focus. A biometric prompt asked
+ *  for while another window holds it (a permission dialog, the shade, the
+ *  transition back from the launcher) can be dropped by the system without a
+ *  callback. */
+private suspend fun android.view.View.awaitWindowFocus() {
+    if (hasWindowFocus()) return
+    kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
+        val listener = object : android.view.ViewTreeObserver.OnWindowFocusChangeListener {
+            override fun onWindowFocusChanged(hasFocus: Boolean) {
+                if (!hasFocus) return
+                runCatching { viewTreeObserver.removeOnWindowFocusChangeListener(this) }
+                if (cont.isActive) cont.resumeWith(Result.success(Unit))
+            }
+        }
+        viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        cont.invokeOnCancellation { runCatching { viewTreeObserver.removeOnWindowFocusChangeListener(listener) } }
+        // Focus may have arrived between the check and the listener.
+        if (hasWindowFocus()) {
+            runCatching { viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
+            if (cont.isActive) cont.resumeWith(Result.success(Unit))
         }
     }
 }

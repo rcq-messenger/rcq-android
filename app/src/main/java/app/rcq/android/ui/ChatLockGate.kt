@@ -238,15 +238,29 @@ internal fun gateBiometricAvailable(context: Context): Boolean =
 
 /** Ask for the fingerprint or face, and call [onOk] on a real success. The
  *  prompt decrypts the biometric-sealed vault blob; getting it back is the
- *  proof, the blob itself is not used. */
+ *  proof, the blob itself is not used.
+ *
+ *  A prompt that could not run, or failed, says so (#1049): these gates used
+ *  to drop every outcome but a match, so a key the phone had invalidated, or
+ *  a sensor locked out after too many tries, made the fingerprint button do
+ *  nothing at all. A gate is always asked from a tap on a screen in front, so
+ *  the lock screen's "not in front" case does not arise here. */
 internal fun askGateBiometric(context: Context, title: String, subtitle: String, onOk: () -> Unit) {
     val act = context.findFragmentActivity() ?: return
-    BiometricGate.unlock(act, title, subtitle, context.getString(R.string.pin_biometric_cancel)) { blob ->
-        if (blob != null) {
-            // The person proved it is them, as the lock screen's biometric
-            // unlock does, and it clears the count the same way.
-            app.rcq.android.crypto.PinVault.clearAttempts(context)
-            onOk()
+    BiometricGate.unlock(act, title, subtitle, context.getString(R.string.pin_biometric_cancel)) { outcome ->
+        val say = when (outcome) {
+            is BiometricGate.Outcome.Unlocked -> {
+                // The person proved it is them, as the lock screen's biometric
+                // unlock does, and it clears the count the same way.
+                app.rcq.android.crypto.PinVault.clearAttempts(context)
+                onOk()
+                null
+            }
+            is BiometricGate.Outcome.Failed -> outcome.message?.let { context.getString(R.string.pin_biometric_error, it) }
+                ?: context.getString(R.string.pin_biometric_unavailable)
+            BiometricGate.Outcome.KeyReset -> context.getString(R.string.pin_biometric_reset)
+            is BiometricGate.Outcome.Dismissed, BiometricGate.Outcome.NotReady -> null
         }
+        say?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() }
     }
 }

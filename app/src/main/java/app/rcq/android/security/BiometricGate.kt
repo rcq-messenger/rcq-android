@@ -1,5 +1,6 @@
 package app.rcq.android.security
 
+import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -49,32 +50,101 @@ object BiometricGate {
         prompt.authenticate(promptInfo(title, subtitle, negative), BiometricPrompt.CryptoObject(cipher))
     }
 
-    /** Show the prompt to UNLOCK with biometrics: a success authorises the
-     *  decrypt cipher and yields the stored blob, or null if there's nothing to
-     *  unlock with / the user cancelled. Runs on the main thread. */
+    /** How an unlock prompt ended, or why it never started. */
+    sealed interface Outcome {
+        /** A real match: the sealed real-slot blob, decrypted. */
+        class Unlocked(val blob: ByteArray) : Outcome
+        /** Closed without a match and without a fault: "Use PIN", back, or the
+         *  system took it down (the app left the screen). [byPerson] when the
+         *  person closed it themselves. */
+        class Dismissed(val byPerson: Boolean) : Outcome
+        /** The prompt could not run, or stopped on an error: no sensor free,
+         *  too many tries, nothing enrolled. [message] is the system's own
+         *  sentence when it gave one. */
+        class Failed(val message: String?) : Outcome
+        /** The phone's biometrics changed and the key went with them:
+         *  biometric unlock is off now and has to be turned on again. */
+        object KeyReset : Outcome
+        /** Not asked: the activity is not in front. See [unlock]. */
+        object NotReady : Outcome
+    }
+
+    /** Show the prompt to UNLOCK with biometrics; [onResult] is called exactly
+     *  once, on the main thread, with how it ended.
+     *
+     *  ⚠⚠ Never silently (#1049: "the sensor does not light up, there is
+     *  nowhere to put a finger"). Every way this used to end without a word
+     *  now comes back as an [Outcome] the caller can act on:
+     *  - androidx.biometric 1.1.0 drops a request made after the activity's
+     *    state was saved (it logs "Called after onSaveInstanceState()" and
+     *    returns, no callback at all), and the lock screen, waiting for that
+     *    callback, kept its fingerprint button disabled for good. Asked while
+     *    the activity is not resumed, this answers [Outcome.NotReady] instead
+     *    of asking; the caller asks again when it is.
+     *  - A key invalidated by a change of enrolled fingerprints, and any other
+     *    keystore refusal, were the same `null` as a cancel. Now
+     *    [Outcome.KeyReset] and [Outcome.Failed].
+     *  - Hardware that cannot serve a strong biometric right now (busy, locked
+     *    out, nothing enrolled) is asked first, and said. */
     fun unlock(
         activity: FragmentActivity,
         title: String,
         subtitle: String,
         negative: String,
-        onResult: (ByteArray?) -> Unit,
+        onResult: (Outcome) -> Unit,
     ) {
-        val cipher = BiometricVault.decryptCipher(activity)
-        if (cipher == null) { onResult(null); return }
+        var done = false
+        val once: (Outcome) -> Unit = { o -> if (!done) { done = true; onResult(o) } }
+        if (activity.supportFragmentManager.isStateSaved ||
+            !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+        ) {
+            once(Outcome.NotReady); return
+        }
+        val can = BiometricManager.from(activity).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        if (can != BiometricManager.BIOMETRIC_SUCCESS) {
+            android.util.Log.w("RCQbio", "strong biometric unavailable: $can")
+            once(Outcome.Failed(null)); return
+        }
+        val cipher = when (val d = BiometricVault.decryptCipher(activity)) {
+            is BiometricVault.Decrypt.Ready -> d.cipher
+            BiometricVault.Decrypt.Gone -> { once(Outcome.KeyReset); return }
+            is BiometricVault.Decrypt.Broken -> {
+                android.util.Log.w("RCQbio", "decrypt cipher refused", d.error)
+                once(Outcome.Failed(null)); return
+            }
+        }
         val prompt = BiometricPrompt(
             activity,
             ContextCompat.getMainExecutor(activity),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    val c = result.cryptoObject?.cipher
-                    onResult(c?.let { BiometricVault.open(activity, it) })
+                    val blob = result.cryptoObject?.cipher?.let { BiometricVault.open(activity, it) }
+                    once(if (blob != null) Outcome.Unlocked(blob) else Outcome.Failed(null))
                 }
 
-                override fun onAuthenticationError(code: Int, msg: CharSequence) = onResult(null)
+                override fun onAuthenticationError(code: Int, msg: CharSequence) {
+                    android.util.Log.i("RCQbio", "prompt ended: $code")
+                    once(outcomeOfError(code, msg))
+                }
+
+                // A single non-match isn't terminal; the prompt keeps retrying.
                 override fun onAuthenticationFailed() {}
             },
         )
         prompt.authenticate(promptInfo(title, subtitle, negative), BiometricPrompt.CryptoObject(cipher))
+    }
+
+    /** What an [BiometricPrompt.AuthenticationCallback.onAuthenticationError]
+     *  means for the person: closing it themselves ("Use PIN", back) is a
+     *  choice and says nothing; the system taking it down (the app left the
+     *  screen) says nothing either; anything else (locked out, no sensor
+     *  free, nothing enrolled, a vendor error) is a failure worth a sentence,
+     *  in the system's own words when there are any. */
+    internal fun outcomeOfError(code: Int, msg: CharSequence?): Outcome = when (code) {
+        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+        BiometricPrompt.ERROR_USER_CANCELED -> Outcome.Dismissed(byPerson = true)
+        BiometricPrompt.ERROR_CANCELED -> Outcome.Dismissed(byPerson = false)
+        else -> Outcome.Failed(msg?.toString()?.takeIf { it.isNotBlank() })
     }
 
     private fun promptInfo(title: String, subtitle: String, negative: String) =
@@ -82,7 +152,7 @@ object BiometricGate {
             .setTitle(title)
             .setSubtitle(subtitle)
             .setNegativeButtonText(negative)
-            .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG)
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .setConfirmationRequired(false)
             .build()
 }
