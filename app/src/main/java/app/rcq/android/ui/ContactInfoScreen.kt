@@ -119,7 +119,26 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     var profile by remember { mutableStateOf<RcqApi.MeProfile?>(null) }
     var requestSent by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
-    var removePin by remember { mutableStateOf(false) }
+    // ⚠ The PIN in front of the two actions that move this person past a lock
+    // or erase them: the star and Remove (#1045 review). The card opens from
+    // doors that ask for nothing (the Add sheet, a member or a mention in a
+    // room, a viewer), and for somebody in a locked Online, Offline or
+    // Cross-island section the star moved them into Favourites, out of the
+    // gate, and the chat then opened from home with no PIN; Remove, with the
+    // history ticked, erased a chat filed in a locked section. Asked when the
+    // chat itself is locked, or when the section the home screen draws them in
+    // is behind a PIN and not open on this visit. Recomputed when favourites
+    // change, since that is what moves them between sections.
+    var pinAsk by remember { mutableStateOf<CardPinAsk?>(null) }
+    val openSections = SectionUnlocks.collect(session.uin)
+    val pinSet = remember { app.rcq.android.security.PanicPinService.isConfigured(context) }
+    val lockingSection = remember(uin, favorites) { if (pinSet) lockingSectionNow(session, ChatTarget.Peer(uin)) else null }
+    fun guarded(label: String, action: () -> Unit) {
+        val section = lockingSection?.takeIf { it !in openSections }
+        val chat = chatLockHolds(context, thread)
+        if (section == null && !chat) action()
+        else pinAsk = CardPinAsk(label, realOnly = section != null, section = section, action = action)
+    }
     var showSafety by remember { mutableStateOf(false) }
     var safetyNumber by remember { mutableStateOf<String?>(null) }
     var safetyLoading by remember { mutableStateOf(false) }
@@ -507,7 +526,8 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
 
             // Actions. None on a guest copy's card (decision D5).
             if (!guestMember) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary)) {
-                InfoAction(if (isFav) Icons.Filled.Star else Icons.Filled.StarBorder, stringResource(if (isFav) R.string.ci_remove_fav else R.string.ci_add_fav)) { LocalStores.toggleFavorite(thread) }
+                val favLabel = stringResource(if (isFav) R.string.ci_remove_fav else R.string.ci_add_fav)
+                InfoAction(if (isFav) Icons.Filled.Star else Icons.Filled.StarBorder, favLabel) { guarded(favLabel) { LocalStores.toggleFavorite(thread) } }
                 InfoDivider()
                 InfoAction(Icons.Filled.NotificationsOff, stringResource(if (isMuted) R.string.ci_unmute else R.string.ci_mute)) { LocalStores.toggleMute(thread) }
                 InfoDivider()
@@ -538,12 +558,13 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
             // someone who is not your contact offered to delete them (#425).
             if (contact != null && !guestMember) {
                 Spacer(Modifier.height(16.dp))
+                val removeLabel = stringResource(R.string.home_remove)
                 Box(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.bgSecondary).clickable {
-                        // A locked chat's person, with the history if ticked,
-                        // is removed through the PIN (#1045 review).
-                        if (chatLockHolds(context, app.rcq.android.data.LocalStores.peerThread(uin))) removePin = true
-                        else confirmRemove = true
+                        // A locked chat's person, or one in a locked section,
+                        // with the history if ticked, is removed through the
+                        // PIN (#1045 review).
+                        guarded(removeLabel) { confirmRemove = true }
                     }.padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -586,13 +607,20 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         }
     }
 
-    if (removePin) {
+    pinAsk?.let { ask ->
         SectionPinSheet(
             title = nickname,
-            actionLabel = stringResource(R.string.home_remove),
-            realOnly = false,
-            onUnlocked = { confirmRemove = true },
-            onDismiss = { removePin = false },
+            actionLabel = ask.label,
+            // A section takes the real PIN only, as its own gate does; a chat
+            // lock takes this session's.
+            realOnly = ask.realOnly,
+            onUnlocked = {
+                // The same PIN opens the section for this visit, as it would
+                // at home or at the chat's gate.
+                ask.section?.let { SectionUnlocks.add(session.uin, it) }
+                ask.action()
+            },
+            onDismiss = { pinAsk = null },
         )
     }
     if (confirmRemove) {
@@ -660,6 +688,10 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
 /** A tap-row for a sheet that brings its own body: [RcqAskSheet] lays out its
  *  actions and appends a cancel by itself, [RcqSheet] leaves both to the caller.
  *  Same shape and weights as the rows inside [RcqAskSheet]. */
+/** One question for the PIN on the card: what the button says, which PIN
+ *  (the real one for a section), the section it opens, and what then runs. */
+private class CardPinAsk(val label: String, val realOnly: Boolean, val section: String?, val action: () -> Unit)
+
 @Composable
 private fun SheetActionRow(label: String, dimmed: Boolean = false, onClick: () -> Unit) {
     val c = RcqTheme.colors
