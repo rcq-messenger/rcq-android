@@ -304,6 +304,9 @@
     <string name="pin_biometric_prompt_title">Desbloquear RCQ</string>
     <string name="pin_biometric_prompt_subtitle">Confirma que eres tú para abrir tus mensajes.</string>
     <string name="pin_biometric_cancel">Usar el PIN</string>
+    <string name="pin_biometric_unavailable">El desbloqueo biométrico no está disponible ahora. Introduce tu PIN.</string>
+    <string name="pin_biometric_error">El desbloqueo biométrico no funcionó: %1$s</string>
+    <string name="pin_biometric_reset">Las huellas de este teléfono cambiaron, así que el desbloqueo biométrico se desactivó. Entra con tu PIN y vuelve a activarlo en Ajustes → Privacidad → Códigos PIN.</string>
     <string name="pin_biometric_enroll_title">Activar el desbloqueo biométrico</string>
     <string name="pin_biometric_enroll_subtitle">Confirma tu huella o tu cara para activarlo.</string>
     <!-- Calls -->

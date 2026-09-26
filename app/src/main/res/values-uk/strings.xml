@@ -311,6 +311,9 @@
     <string name="pin_biometric_prompt_title">Розблокувати RCQ</string>
     <string name="pin_biometric_prompt_subtitle">Підтверди, що це ти, щоб відкрити повідомлення.</string>
     <string name="pin_biometric_cancel">Ввести PIN</string>
+    <string name="pin_biometric_unavailable">Розблокування біометрією зараз недоступне. Введи PIN.</string>
+    <string name="pin_biometric_error">Розблокування біометрією не спрацювало: %1$s</string>
+    <string name="pin_biometric_reset">Відбитки пальців на телефоні змінилися, тож розблокування біометрією вимкнулося. Увійди за PIN і знову увімкни його в «Налаштування → Приватність → PIN-коди».</string>
     <string name="pin_biometric_enroll_title">Увімкнути розблокування біометрією</string>
     <string name="pin_biometric_enroll_subtitle">Підтверди відбиток або обличчя, щоб увімкнути.</string>
     <!-- Calls -->

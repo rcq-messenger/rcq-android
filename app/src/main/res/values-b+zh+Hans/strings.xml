@@ -311,6 +311,9 @@
     <string name="pin_biometric_prompt_title">解锁 RCQ</string>
     <string name="pin_biometric_prompt_subtitle">确认是你本人，才能打开消息。</string>
     <string name="pin_biometric_cancel">用 PIN</string>
+    <string name="pin_biometric_unavailable">生物识别解锁暂时不可用，请输入 PIN。</string>
+    <string name="pin_biometric_error">生物识别解锁没有成功：%1$s</string>
+    <string name="pin_biometric_reset">这部手机上的指纹有变化，生物识别解锁已关闭。请先用 PIN 进入，再到“设置 → 隐私 → PIN 码”重新开启。</string>
     <string name="pin_biometric_enroll_title">开启生物识别解锁</string>
     <string name="pin_biometric_enroll_subtitle">确认指纹或面容来开启。</string>
     <!-- Calls -->

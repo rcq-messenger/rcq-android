@@ -304,6 +304,9 @@
     <string name="pin_biometric_prompt_title">RCQ kilidini aç</string>
     <string name="pin_biometric_prompt_subtitle">Mesajlarını açmak için sen olduğunu doğrula.</string>
     <string name="pin_biometric_cancel">PIN kullan</string>
+    <string name="pin_biometric_unavailable">Biyometrik kilit açma şu an kullanılamıyor. PIN\'ini gir.</string>
+    <string name="pin_biometric_error">Biyometrik kilit açılamadı: %1$s</string>
+    <string name="pin_biometric_reset">Bu telefondaki parmak izleri değişti, bu yüzden biyometrik kilit açma kapandı. PIN\'inle gir ve Ayarlar → Gizlilik → PIN kodları bölümünden yeniden aç.</string>
     <string name="pin_biometric_enroll_title">Biyometrik kilit açmayı aç</string>
     <string name="pin_biometric_enroll_subtitle">Açmak için parmak izini ya da yüzünü doğrula.</string>
     <!-- Calls -->
