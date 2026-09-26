@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.SwapVert
@@ -201,9 +202,14 @@ internal fun SectionNameSheet(
  * cannot honour the flag another device set, so it says so in one line and
  * offers to open anyway rather than pretending to check something.
  *
- * Also the gate in front of turning a CHAT's lock off (#1045), which is why
- * the button's words and the check can be swapped: [actionLabel] says what the
- * PIN is for, and [verify] is the session-aware check there.
+ * Also the gate in front of what a locked chat guards (#1045): turning its lock
+ * off, clearing it, and linking a web session. [actionLabel] says what the PIN
+ * is for, and [realOnly] = false asks for the PIN of this session instead
+ * ([PanicPinService.verifySessionPin]).
+ *
+ * The check is the counted one every in-app gate makes, off the main thread
+ * ([rememberPinGate]), and a biometric prompt stands in for the PIN where the
+ * app accepts one ([allowBiometric], [gateBiometricAvailable]).
  */
 @Composable
 internal fun SectionPinSheet(
@@ -211,23 +217,21 @@ internal fun SectionPinSheet(
     onUnlocked: () -> Unit,
     onDismiss: () -> Unit,
     actionLabel: String? = null,
-    verify: (android.content.Context, String) -> Boolean = PanicPinService::verifyRealPin,
+    realOnly: Boolean = true,
+    allowBiometric: Boolean = true,
 ) {
     val c = RcqTheme.colors
     val context = LocalContext.current
     val configured = remember { PanicPinService.isConfigured(context) }
     var pin by remember { mutableStateOf("") }
-    var wrong by remember { mutableStateOf(false) }
+    val gate = rememberPinGate(realOnly)
+    val lockedSec = gate.remainingSec
 
-    fun submit() {
-        if (verify(context, pin)) {
-            onUnlocked()
-            onDismiss()
-        } else {
-            wrong = true
-            pin = ""
-        }
-    }
+    fun submit() = gate.submit(
+        pin,
+        onOk = { onUnlocked(); onDismiss() },
+        onWrong = { pin = "" },
+    )
 
     RcqSheet(onDismiss = onDismiss, title = title) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -244,18 +248,35 @@ internal fun SectionPinSheet(
         } else {
             RcqField(
                 value = pin,
-                onValueChange = { pin = it.filter(Char::isDigit).take(12); wrong = false },
+                onValueChange = { pin = it.filter(Char::isDigit).take(12); gate.wrong = false },
                 placeholder = stringResource(R.string.sections_locked_enter),
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                enabled = !gate.busy && lockedSec == null,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (wrong) {
+            if (lockedSec != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.pin_locked_out, lockedSec.toInt()), color = Color(0xFFE5484D), fontSize = 13.sp)
+            } else if (gate.wrong) {
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.sections_locked_wrong), color = Color(0xFFE5484D), fontSize = 13.sp)
             }
             Spacer(Modifier.height(16.dp))
-            SectionSheetRow(SheetAction(actionLabel ?: stringResource(R.string.sections_locked_open), icon = Icons.Filled.Check) { submit() })
+            SectionSheetRow(
+                SheetAction(
+                    if (gate.busy) stringResource(R.string.pin_busy) else actionLabel ?: stringResource(R.string.sections_locked_open),
+                    icon = Icons.Filled.Check,
+                    dimmed = gate.busy || lockedSec != null,
+                ) { submit() },
+            )
+            if (allowBiometric && lockedSec == null && gateBiometricAvailable(context)) {
+                SectionSheetRow(
+                    SheetAction(stringResource(R.string.pin_biometric_lock_use), icon = Icons.Filled.Fingerprint) {
+                        askGateBiometric(context, title, actionLabel ?: title) { onUnlocked(); onDismiss() }
+                    },
+                )
+            }
         }
         SectionSheetRow(SheetAction(stringResource(R.string.common_cancel), dimmed = true, onClick = onDismiss))
     }

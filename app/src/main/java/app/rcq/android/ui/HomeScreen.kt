@@ -1560,7 +1560,7 @@ internal fun HomeScreen(
         SectionPinSheet(
             title = name,
             actionLabel = stringResource(R.string.home_unlock_chat),
-            verify = PanicPinService::verifySessionPin,
+            realOnly = false,
             onUnlocked = { LocalStores.setLocked(thread, false) },
             onDismiss = { chatUnlockPrompt = null },
         )

@@ -190,6 +190,38 @@ object PanicPinService {
         else unlock.payload.mode == PinVault.MODE_REAL
     }
 
+    enum class GateCheck { OK, WRONG, LOCKED_OUT }
+
+    /** The check every in-app PIN gate makes: a chat's lock, turning it off,
+     *  clearing it, the PIN settings, linking a web session, a locked section,
+     *  the recovery phrase. [verifySessionPin], or [verifyRealPin] for
+     *  [realOnly], plus the lock screen's own failure counter.
+     *
+     *  ⚠⚠ COUNTED, and on the same counter as the lock screen (#1045 review).
+     *  The gates checked the vault directly, with no count and no cooldown, so
+     *  anyone holding the unlocked phone could sit on the PIN settings screen
+     *  and try every four-digit PIN in an afternoon, then take the PIN off and
+     *  every chat lock with it. A wrong answer here now costs what it costs at
+     *  the lock screen, and a lockout there holds here too. A right one clears
+     *  the count, as it does there.
+     *
+     *  ⚠ PBKDF2 over 400k rounds: call it off the main thread. */
+    fun checkGatePin(context: Context, pin: String, realOnly: Boolean = false): GateCheck {
+        if (lockedOutUntil(context) != null) return GateCheck.LOCKED_OUT
+        val ok = if (realOnly) verifyRealPin(context, pin) else verifySessionPin(context, pin)
+        if (ok) {
+            PinVault.clearAttempts(context)
+            return GateCheck.OK
+        }
+        val n = PinVault.loadAttempts(context).failedCount + 1
+        val lo = PinVault.lockoutMillis(n)
+        PinVault.saveAttempts(
+            context,
+            PinVault.AttemptState(n, if (lo > 0) System.currentTimeMillis() + lo else null),
+        )
+        return GateCheck.WRONG
+    }
+
     /** Create the real PIN (no PIN currently). Returns the new vault dataKey,
      *  or null if [pin] is too short. The caller rekeys the message DBs from
      *  the device key to this one. */

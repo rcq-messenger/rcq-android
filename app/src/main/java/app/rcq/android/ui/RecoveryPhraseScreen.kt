@@ -257,13 +257,19 @@ fun RecoveryPhraseScreen(session: Session, onBack: () -> Unit) {
 }
 
 /** PIN re-entry gate shown before the phrase when a PIN is configured. Verifies
- *  the REAL PIN only (decoy/wipe rejected), with no unlock side effects. */
+ *  the REAL PIN only (decoy/wipe rejected), with no unlock side effects.
+ *
+ *  Counted on the lock screen's counter and run off the main thread, like
+ *  every in-app gate (#1045 review, [rememberPinGate]). No biometric here: the
+ *  phrase is the account itself, and it asks for the one thing a person has to
+ *  know rather than the finger they carry. */
 @Composable
 private fun PinGate(onVerified: () -> Unit) {
     val c = RcqTheme.colors
-    val context = LocalContext.current
     var pin by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
+    val gate = rememberPinGate(realOnly = true)
+    val error = gate.wrong
+    val lockedSec = gate.remainingSec
     Column(
         Modifier.fillMaxSize().padding(28.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -273,19 +279,25 @@ private fun PinGate(onVerified: () -> Unit) {
         Text(stringResource(R.string.recovery_pin_prompt), color = c.textPrimary, fontSize = 15.sp)
         RcqField(
             value = pin,
-            onValueChange = { v -> pin = v.filter { it.isDigit() }; error = false },
+            onValueChange = { v -> pin = v.filter { it.isDigit() }; gate.wrong = false },
             singleLine = true,
+            enabled = !gate.busy && lockedSec == null,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             isError = error,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (error) {
+        if (lockedSec != null) {
+            Text(stringResource(R.string.pin_locked_out, lockedSec.toInt()), color = Color(0xFFE5484D), fontSize = 13.sp)
+        } else if (error) {
             Text(stringResource(R.string.recovery_pin_wrong), color = Color(0xFFE5484D), fontSize = 13.sp)
         }
-        CapsuleButton(stringResource(R.string.recovery_pin_unlock), modifier = Modifier.fillMaxWidth()) {
-            if (PanicPinService.verifyRealPin(context, pin)) onVerified()
-            else { error = true; pin = "" }
+        CapsuleButton(
+            if (gate.busy) stringResource(R.string.pin_busy) else stringResource(R.string.recovery_pin_unlock),
+            enabled = !gate.busy && lockedSec == null && pin.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            gate.submit(pin, onOk = onVerified, onWrong = { pin = "" })
         }
     }
 }
