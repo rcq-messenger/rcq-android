@@ -1126,7 +1126,7 @@
     <string name="bg_limits_fix">允许后台运行</string>
     <string name="bg_limits_open_vendor">打开手机设置</string>
     <string name="bg_limits_hint_huawei">华为和荣耀手机还需打开“应用启动管理”，找到 RCQ，改为手动管理，并打开全部三个开关。</string>
-    <string name="bg_limits_hint_vivo">vivo 和 iQOO 手机还需在电池设置中允许 RCQ 后台高耗电。</string>
+    <string name="bg_limits_hint_vivo">vivo 和 iQOO 手机还需打开“电池”→“后台耗电管理”，允许 RCQ 后台高耗电，并允许 RCQ 自启动。</string>
     <string name="bg_limits_hint_other">这台手机可能还需要在系统自带的设置里允许 RCQ 自启动和后台运行。</string>
     <string name="notif_push_broken_429">你的推送投递服务正在限制你所在网络的请求频率，部分唤醒被丢弃。换一个投递服务，或使用自己的 ntfy 服务器即可解决。</string>
     <string name="notif_push_broken_other">你的推送投递服务返回了错误（%1$s），唤醒无法送达。</string>

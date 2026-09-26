@@ -1107,7 +1107,7 @@
     <string name="bg_limits_fix">Permitir em segundo plano</string>
     <string name="bg_limits_open_vendor">Abrir ajustes do celular</string>
     <string name="bg_limits_hint_huawei">No Huawei e no Honor, abra também Inicialização de apps, escolha o RCQ, mude para manual e ligue as três opções.</string>
-    <string name="bg_limits_hint_vivo">No vivo e no iQOO, permita também ao RCQ alto consumo de energia em segundo plano nos ajustes de bateria.</string>
+    <string name="bg_limits_hint_vivo">No vivo e no iQOO, abra também Bateria → Consumo de energia em segundo plano, permita ao RCQ alto consumo em segundo plano e ative o início automático dele.</string>
     <string name="bg_limits_hint_other">Este celular também pode precisar que você permita ao RCQ iniciar sozinho e rodar em segundo plano nos ajustes dele.</string>
     <string name="notif_push_broken_429">Seu serviço de entrega de push está limitando a taxa da sua rede, então alguns avisos estão sendo descartados. Outro serviço de entrega, ou seu próprio servidor ntfy, resolve isto.</string>
     <string name="notif_push_broken_other">Seu serviço de entrega de push respondeu com um erro (%1$s), então os avisos não estão passando.</string>

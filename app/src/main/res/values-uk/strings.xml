@@ -1126,7 +1126,7 @@
     <string name="bg_limits_fix">Дозволити роботу у фоні</string>
     <string name="bg_limits_open_vendor">Відкрити налаштування телефону</string>
     <string name="bg_limits_hint_huawei">На Huawei і Honor ще відкрий «Запуск застосунків», вибери RCQ, перемкни на ручне керування й увімкни всі три пункти.</string>
-    <string name="bg_limits_hint_vivo">На vivo і iQOO ще дозволь RCQ високе енергоспоживання у фоні в налаштуваннях батареї.</string>
+    <string name="bg_limits_hint_vivo">На vivo і iQOO ще відкрий «Батарея» → «Енергоспоживання у фоні», дозволь RCQ високе енергоспоживання у фоні й увімкни для RCQ автозапуск.</string>
     <string name="bg_limits_hint_other">На цьому телефоні ще може знадобитися дозволити RCQ автозапуск і роботу у фоні в його власних налаштуваннях.</string>
     <string name="notif_push_broken_429">Твій сервіс доставки push обмежує швидкість для твоєї мережі, тож частина побудок губиться. Інший сервіс доставки або власний сервер ntfy це виправить.</string>
     <string name="notif_push_broken_other">Твій сервіс доставки push відповів помилкою (%1$s), тож побудки не проходять.</string>

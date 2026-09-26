@@ -101,7 +101,15 @@ object BackgroundLimits {
                 "com.huawei.systemmanager" to "com.huawei.systemmanager.optimize.process.ProtectActivity",
                 "com.hihonor.systemmanager" to "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
             )
+            // ⚠ The battery screen FIRST (#1044 review). What keeps a process
+            // unfrozen with the screen off on OriginOS/Funtouch is "high
+            // background power consumption" under Battery, and the first cut
+            // opened the auto-start list, which is a different switch, while
+            // the text beside the button named the battery one. Auto-start is
+            // the fallback, and the text names both.
             Vendor.VIVO -> listOf(
+                "com.vivo.abe" to "com.vivo.applicationbehaviorengine.ui.ExcessivePowerManagerActivity",
+                "com.iqoo.powersaving" to "com.iqoo.powersaving.PowerSavingManagerActivity",
                 "com.vivo.permissionmanager" to "com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
                 "com.iqoo.secure" to "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager",
                 "com.iqoo.secure" to "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity",

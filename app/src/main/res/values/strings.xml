@@ -1168,7 +1168,7 @@
     <string name="bg_limits_fix">Allow in background</string>
     <string name="bg_limits_open_vendor">Open phone settings</string>
     <string name="bg_limits_hint_huawei">On Huawei and Honor, also open App launch, pick RCQ, switch it to manual and turn on all three options.</string>
-    <string name="bg_limits_hint_vivo">On vivo and iQOO, also allow RCQ high background power consumption in the battery settings.</string>
+    <string name="bg_limits_hint_vivo">On vivo and iQOO, also open Battery → Background power consumption, allow RCQ high background power consumption, and let RCQ auto-start.</string>
     <string name="bg_limits_hint_other">This phone may also need RCQ allowed to auto-start and run in the background in its own settings.</string>
     <string name="notif_push_broken_429">Your push delivery service is rate-limiting your network, so some wakes are being dropped. A different delivery service, or your own ntfy server, fixes this.</string>
     <string name="notif_push_broken_other">Your push delivery service answered with an error (%1$s), so wakes are not getting through.</string>
