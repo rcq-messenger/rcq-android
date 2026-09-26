@@ -492,11 +492,14 @@ internal fun HomeScreen(
     /// Never persisted and never in the collapse set: it resets when the
     /// section is collapsed, when the app goes to the background, and on every
     /// cold start. A gate that survives those is not a gate.
-    var unlockedSections by remember { mutableStateOf(emptySet<String>()) }
+    /// Shared with the chat gate and the share picker ([SectionUnlocks]), so
+    /// a section opened here opens its chats wherever they are opened from,
+    /// and one that is not asks for the PIN at every door (#1045 review).
+    val unlockedSections = SectionUnlocks.collect(session.uin)
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) unlockedSections = emptySet()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) SectionUnlocks.clear()
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 bgLimited = app.rcq.android.push.BackgroundLimits.nudgeWanted(context)
             }
@@ -706,6 +709,12 @@ internal fun HomeScreen(
             // A built-in id from a newer client: keep the record, draw nothing.
             else -> false
         }
+    }
+    // Everyone a PIN-gated section hides right now, for every surface that
+    // lists people outside the sections themselves: search, the section
+    // picker, the new-group picker (#1045 review, [sectionHidden]).
+    val sectionHide = remember(sectionsTree, lists, gatingOn, inDecoy, unlockedSections) {
+        sectionHidden(sectionsTree, lists, gatingOn, inDecoy, unlockedSections)
     }
 
     /// The rendered order as one string, so a drag gesture can be keyed on it.
@@ -1079,7 +1088,7 @@ internal fun HomeScreen(
                             // Collapsing a section the user got past the PIN for
                             // puts the gate back. The unlocked set is view
                             // memory and nothing else.
-                            pinnedRec -> unlockedSections = unlockedSections - sid
+                            pinnedRec -> SectionUnlocks.remove(session.uin, sid)
                             isArchive -> LocalStores.setSectionFlag("sec:archive:open", collapsed)
                             else -> LocalStores.setSectionFlag(collapseKey, !collapsed)
                         }
@@ -1289,27 +1298,8 @@ internal fun HomeScreen(
             // built-in sections a person can put behind a PIN. The per-chat
             // lock needs nothing here: a hit on such a chat opens through its
             // gate, and this search reads names, never message text.
-            val hiddenBySection = remember(renderedSections, unlockedSections, lists, gatingOn, inDecoy) {
-                val out = HashSet<Int>()
-                for (rec in renderedSections) {
-                    if (!(gatingOn && !inDecoy && Sections.isPinnedRecord(rec))) continue
-                    val sid = Sections.idOf(rec)
-                    if (sid in unlockedSections) continue
-                    val members = when (sid) {
-                        Sections.SYS_FAV -> favContacts
-                        Sections.SYS_CI -> crossIslandContacts
-                        Sections.SYS_ONLINE -> onlineContacts
-                        Sections.SYS_OFFLINE -> offlineContacts
-                        Sections.SYS_ARCHIVE -> archivedContacts
-                        Sections.SYS_GROUPS, Sections.SYS_SAVED -> emptyList()
-                        else -> filedContacts[sid].orEmpty()
-                    }
-                    members.forEach { out.add(it.uin) }
-                }
-                out
-            }
             SearchOverlay(
-                contacts = contacts.filter { it.uin !in hiddenBySection },
+                contacts = contacts.filterNot { sectionHide.hides(it) },
                 onClose = { showSearch = false },
                 onSelect = { showSearch = false; onOpenChat(it.uin) },
             )
@@ -1415,7 +1405,9 @@ internal fun HomeScreen(
     }
     if (showCreateGroup) {
         CreateGroupDialog(
-            contacts = contacts,
+            // Nobody a locked section hides: the member list shows names and
+            // numbers (#1045 review).
+            contacts = contacts.filterNot { sectionHide.hides(it) },
             onCreate = { name, members ->
                 showCreateGroup = false
                 scope.launch {
@@ -1536,7 +1528,7 @@ internal fun HomeScreen(
                 // Turning the gate ON closes it here and now; leaving it on an
                 // open section until the next cold start is a gate the user
                 // watched not happen.
-                if (on) unlockedSections = unlockedSections - t.id
+                if (on) SectionUnlocks.remove(session.uin, t.id)
             },
             onNew = { creatingSection = true },
             onRename = { sectionRename = t },
@@ -1579,7 +1571,7 @@ internal fun HomeScreen(
                         // Its fold flag goes with it; nothing else refers to
                         // the id once the record is gone.
                         LocalStores.forgetSectionFlag(t.id)
-                        unlockedSections = unlockedSections - t.id
+                        SectionUnlocks.remove(session.uin, t.id)
                         sectionDelete = null
                     },
                 ),
@@ -1589,7 +1581,7 @@ internal fun HomeScreen(
     sectionPinPrompt?.let { t ->
         SectionPinSheet(
             title = t.title,
-            onUnlocked = { unlockedSections = unlockedSections + t.id },
+            onUnlocked = { SectionUnlocks.add(session.uin, t.id) },
             onDismiss = { sectionPinPrompt = null },
         )
     }
@@ -1625,11 +1617,18 @@ internal fun HomeScreen(
         // row the user never touched into a removal, with a tombstone newer
         // than the other device's add, and the merge keeps the undo.
         val initial = remember(id) { Sections.membersOf(sectionsTree, id) }
-        val candidates = remember(contacts, groups) {
+        // ⚠⚠ Nobody a locked section hides (#1045 review). The "+" of ANY open
+        // section listed every contact and group, the ones filed in a section
+        // behind a PIN included, by name, number and picture; and ticking one
+        // moved it OUT of the locked section (addMembers takes a key off its
+        // holder), synced to every device. The list leaves them out, and the
+        // save refuses to take a key off a locked holder whatever the sheet
+        // hands back.
+        val candidates = remember(contacts, groups, sectionHide) {
             val byKey = LinkedHashMap<String, SectionCandidate>()
             for (ct in contacts) {
                 val key = Sections.peerKey(ct.uin, ct.host)
-                if (byKey.containsKey(key)) continue
+                if (byKey.containsKey(key) || sectionHide.hides(ct)) continue
                 byKey[key] = SectionCandidate(
                     key = key,
                     title = session.contactName(ct.uin).ifBlank { "${ct.uin}" },
@@ -1642,7 +1641,7 @@ internal fun HomeScreen(
                 // ⚠⚠ Never the local id for a foreign group: it is a negative
                 // alias this device made up.
                 val key = app.rcq.android.data.SectionsVault.keyForGroup(g) ?: continue
-                if (byKey.containsKey(key)) continue
+                if (byKey.containsKey(key) || sectionHide.hides(g)) continue
                 byKey[key] = SectionCandidate(
                     key = key,
                     title = g.name,
@@ -1663,7 +1662,9 @@ internal fun HomeScreen(
                 // tree moves under an open sheet.
                 if (added.isNotEmpty() || removed.isNotEmpty()) {
                     editSections { tree ->
-                        var out = if (added.isNotEmpty()) Sections.addMembers(tree, id, added) else tree
+                        val index = Sections.memberIndex(tree)
+                        val movable = added.filter { k -> !sectionHide.hidesKey(k) && index[k]?.let { it in sectionHide.lockedIds } != true }
+                        var out = if (movable.isNotEmpty()) Sections.addMembers(tree, id, movable) else tree
                         for (k in removed) out = Sections.removeMemberFrom(out, id, k)
                         out
                     }

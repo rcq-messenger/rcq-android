@@ -19,8 +19,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,7 +82,10 @@ fun ShareTargetScreen(
     val ownUin = session.uin
     var query by remember { mutableStateOf("") }
     var overrides by remember { mutableStateOf(emptyMap<String, Boolean>()) }
-    var unlocked by rememberShareUnlocks()
+    // The app's one set of opened sections ([SectionUnlocks]): a section
+    // opened here opens the chat it leads to without a second PIN, and one
+    // opened at home is open here (#1045 review).
+    val unlocked = SectionUnlocks.collect(ownUin)
     var pinPrompt by remember { mutableStateOf<ShareSection?>(null) }
     val inDecoy = remember { PanicPinService.inDecoySession }
 
@@ -109,7 +110,7 @@ fun ShareTargetScreen(
             sec.locked -> pinPrompt = sec
             // Folding a section the user got past the PIN for puts the gate
             // back, as it does at home.
-            sec.gated -> unlocked = unlocked - sec.id
+            sec.gated -> SectionUnlocks.remove(ownUin, sec.id)
             // Everything is open while a search is typed; see [shareCollapsed].
             query.isNotBlank() -> Unit
             else -> overrides = overrides + (sec.id to !shareCollapsed(sec, query, sectionFlags, overrides))
@@ -178,7 +179,7 @@ fun ShareTargetScreen(
     pinPrompt?.let { sec ->
         SectionPinSheet(
             title = titles[sec.id] ?: sec.name.orEmpty(),
-            onUnlocked = { unlocked = unlocked + sec.id },
+            onUnlocked = { SectionUnlocks.add(ownUin, sec.id) },
             onDismiss = { pinPrompt = null },
         )
     }
@@ -276,25 +277,6 @@ private fun shareSectionTitles(): Map<String, String> = mapOf(
     Sections.SYS_OFFLINE to stringResource(R.string.home_sec_offline),
     Sections.SYS_ARCHIVE to stringResource(R.string.home_sec_archive),
 )
-
-/**
- * Sections whose PIN was answered in this picker. Never persisted, and cleared
- * when the app goes to the background, the same rule as the home screen's own
- * set: a gate that survives leaving the app is not a gate.
- */
-@Composable
-private fun rememberShareUnlocks(): MutableState<Set<String>> {
-    val state = remember { mutableStateOf(emptySet<String>()) }
-    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(owner) {
-        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) state.value = emptySet()
-        }
-        owner.lifecycle.addObserver(obs)
-        onDispose { owner.lifecycle.removeObserver(obs) }
-    }
-    return state
-}
 
 /** One line naming what is about to be sent, so the picker isn't a bare list
  *  of names with no clue what tapping one would do. */

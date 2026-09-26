@@ -561,11 +561,26 @@ private fun RcqApp(session: Session) {
     androidx.compose.runtime.SideEffect {
         if (unlockedChatThread != null && unlockedChatThread != openChatKey) unlockedChatThread = null
     }
-    LaunchedEffect(locked) { if (locked) unlockedChatThread = null }
+    LaunchedEffect(locked) {
+        if (locked) { unlockedChatThread = null; app.rcq.android.ui.SectionUnlocks.clear() }
+    }
+    // A section opened with its PIN stays open for this visit and not beyond:
+    // the app going to the background closes every one, wherever the user is
+    // (the home screen only heard this while it was on screen). A chat already
+    // open keeps its own pass in [unlockedChatThread].
+    val appLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(appLifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) app.rcq.android.ui.SectionUnlocks.clear()
+        }
+        appLifecycle.lifecycle.addObserver(obs)
+        onDispose { appLifecycle.lifecycle.removeObserver(obs) }
+    }
 
     // Clear every secondary screen so a switch/add lands on a clean Home.
     fun resetNav() {
         unlockedChatThread = null
+        app.rcq.android.ui.SectionUnlocks.clear()
         chatTarget = null; groupInfoId = null; peerInfoUin = null
         showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; sitesAddress = null; sitesPage = null; showRestore = false; showOutgoing = false
     }
@@ -1009,18 +1024,41 @@ private fun RcqApp(session: Session) {
                     is ChatTarget.Group -> app.rcq.android.data.LocalStores.groupThread(target.id)
                 }
                 val lockCtx = androidx.compose.ui.platform.LocalContext.current
-                if (app.rcq.android.data.LocalStores.isLocked(chatThread) &&
-                    app.rcq.android.security.PanicPinService.isConfigured(lockCtx) &&
-                    unlockedChatThread != chatUnlockKey(session.uin, target)
-                ) {
-                    ChatLockGate(
-                        // Backing out of the gate abandons a share picked
-                        // into this thread too; left set, the next chat opened
-                        // would be handed it (ChatScreen also checks `to`).
-                        onBack = { chatTarget = null; unlockedChatThread = null; ShareIntake.deliver.value = null },
-                        onUnlocked = { unlockedChatThread = chatUnlockKey(session.uin, target) },
-                    )
+                val openKey = chatUnlockKey(session.uin, target)
+                val pinSet = app.rcq.android.security.PanicPinService.isConfigured(lockCtx)
+                // ⚠⚠ THE SECTION'S PIN AT EVERY DOOR (#1045 review). A chat
+                // filed in a section behind a PIN was hidden in the home list
+                // and nowhere else: the Add sheet, a contact's card, a link, a
+                // notification all set the target and the chat simply opened.
+                // Asked HERE, where every one of those lands, for the section
+                // the home screen draws this chat in. Worked out once per
+                // opening, not per frame: presence moves a contact between
+                // Online and Offline, and a gate must not drop over a chat in
+                // use because somebody's flower changed colour.
+                val sectionLock = remember(openKey) { app.rcq.android.ui.lockingSectionNow(session, target) }
+                val openSections = app.rcq.android.ui.SectionUnlocks.collect(session.uin)
+                val chatLocked = pinSet && app.rcq.android.data.LocalStores.isLocked(chatThread)
+                val sectionLocked = pinSet && sectionLock != null && sectionLock !in openSections
+                if ((chatLocked || sectionLocked) && unlockedChatThread != openKey) {
+                    // Backing out of the gate abandons a share picked into this
+                    // thread too; left set, the next chat opened would be handed
+                    // it (ChatScreen also checks `to`).
+                    val back = { chatTarget = null; unlockedChatThread = null; ShareIntake.deliver.value = null }
+                    // One PIN answers both: it is the same PIN.
+                    val unlocked = {
+                        if (sectionLock != null) app.rcq.android.ui.SectionUnlocks.add(session.uin, sectionLock)
+                        unlockedChatThread = openKey
+                    }
+                    if (chatLocked) ChatLockGate(onBack = back, onUnlocked = unlocked)
+                    else app.rcq.android.ui.SectionLockGate(sectionLock!!, onBack = back, onUnlocked = unlocked)
                 } else {
+                    // Opened through an open section: the pass belongs to this
+                    // visit to the chat, so the section closing behind it (the
+                    // app going to the background for the photo picker) does not
+                    // drop a gate over a chat in use.
+                    if (sectionLock != null && !chatLocked && unlockedChatThread != openKey) {
+                        androidx.compose.runtime.SideEffect { unlockedChatThread = openKey }
+                    }
                     stateHolder.SaveableStateProvider("chat:$chatThread") {
                         ChatScreen(
                             session, target,
