@@ -876,7 +876,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // row is there with the quote on it (red, retryable), and handing the quote
     // back as well answered the message twice (#1048 review). [since] is when
     // the quote was taken, so an earlier answer to the same message does not
-    // count.
+    // count. Not for a send dropped because the account changed under it
+    // (Session.SendAbandoned, a cancellation): that one is over for everybody,
+    // quote included.
     fun giveReplyBack(quoted: ChatMessage?, since: Long) {
         quoted ?: return
         val thread = threadKey
@@ -988,7 +990,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime, reply)
                     else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime, reply)
                 } catch (e: Exception) {
-                    giveReplyBack(quoted, since)
+                    if (e !is kotlinx.coroutines.CancellationException) giveReplyBack(quoted, since)
                     throw e
                 }
             }
@@ -1264,7 +1266,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 if (isGroup) session.sendGroupVoice(groupId!!, res.first, res.second, reply)
                 else session.sendVoice(peer!!, res.first, res.second, reply)
             } catch (e: Exception) {
-                giveReplyBack(quoted, since)
+                if (e !is kotlinx.coroutines.CancellationException) giveReplyBack(quoted, since)
                 throw e
             }
         }
@@ -2866,7 +2868,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler, replyTo = reply)
                         }
                     } catch (e: Exception) {
-                        giveReplyBack(quoted, since)
+                        if (e !is kotlinx.coroutines.CancellationException) giveReplyBack(quoted, since)
                         throw e
                     }
                 }

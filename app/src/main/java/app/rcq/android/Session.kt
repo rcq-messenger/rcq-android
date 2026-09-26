@@ -363,6 +363,26 @@ class Session(context: Context) {
      *  dropped, not written down. */
     private fun stillOn(epoch: Int): Boolean = accountEpoch == epoch
 
+    /** The account epoch a [sendMediaDetached] send was started in, carried in
+     *  its coroutine context so the shared send functions can tell a detached
+     *  send from one a screen is waiting on. */
+    private class SendEpoch(val epoch: Int) : kotlin.coroutines.AbstractCoroutineContextElement(SendEpoch) {
+        companion object Key : kotlin.coroutines.CoroutineContext.Key<SendEpoch>
+    }
+
+    /** A detached send whose account is gone. A cancellation, so every catch
+     *  that lets cancellation through lets this through too, and nothing
+     *  counts it as a failure or hands its quote back. */
+    class SendAbandoned : kotlinx.coroutines.CancellationException("the account changed under a detached send")
+
+    /** Throws [SendAbandoned] when the detached send running here was started
+     *  for an account this session no longer serves. A no-op for a send that
+     *  is not detached. */
+    private suspend fun ensureSendStillOwned() {
+        val ep = kotlin.coroutines.coroutineContext[SendEpoch]?.epoch ?: return
+        if (!stillOn(ep)) throw SendAbandoned()
+    }
+
     /** 1:1 audio/video calls. Same-island signalling rides the WS (call_*
      *  events routed in [handleEvent]); signals to a CROSS-ISLAND peer are
      *  wrapped as an Envelope.CallSignal, v=1-sealed and deposited to the
@@ -5786,10 +5806,17 @@ class Session(context: Context) {
     // Same rule as the 1:1 upload below: a duress session puts no blob on any
     // island. Unreachable while a seeded decoy has no groups, and here for the
     // same reason its sibling in `fanOutGroup` is.
-    private suspend fun uploadBlobForGroup(groupId: Int, blob: ByteArray): RcqApi.UploadResponse =
-        if (app.rcq.android.security.DuressGate.isActive)
+    //
+    // Checked against the send's account before and after ([sendMediaDetached]):
+    // every media send goes up through here and writes its row right after.
+    private suspend fun uploadBlobForGroup(groupId: Int, blob: ByteArray): RcqApi.UploadResponse {
+        ensureSendStillOwned()
+        val up = if (app.rcq.android.security.DuressGate.isActive)
             RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), blob.size)
         else groupCtx(groupId).api.uploadBlob(blob, ::reportUpload)
+        ensureSendStillOwned()
+        return up
+    }
 
     fun group(id: Int): RcqGroup? = _groups.value.firstOrNull { it.id == id }
 
@@ -8264,8 +8291,17 @@ class Session(context: Context) {
      *  media from their OWN island, so the blob is DEPOSITED there under a
      *  client-chosen id (deposit-the-blob — islands never talk; the message
      *  survives our island dying), plus a best-effort copy on our island for
-     *  carbons + re-fetch. Mirrors web-chat media.ts uploadBlob. */
+     *  carbons + re-fetch. Mirrors web-chat media.ts uploadBlob.
+     *
+     *  Checked against the send's account before and after
+     *  ([sendMediaDetached]): the row is written right after this returns, with
+     *  no suspension in between. */
     private suspend fun uploadBlobFor(toUin: Int, blob: ByteArray): RcqApi.UploadResponse {
+        ensureSendStillOwned()
+        return uploadBlobTo(toUin, blob).also { ensureSendStillOwned() }
+    }
+
+    private suspend fun uploadBlobTo(toUin: Int, blob: ByteArray): RcqApi.UploadResponse {
         // ⚠⚠ A duress session uploads nothing, to any island. Both branches
         // below walk somewhere it must not go: the own-island one is an OkHttp
         // call, so the gate throws and the row lands FAILED — the red cross we
@@ -8394,8 +8430,23 @@ class Session(context: Context) {
      *  failure was wrapped in a bare `runCatching`, so a genuinely failed upload
      *  looked identical to a successful one: dialog closes, nothing appears,
      *  nothing said. This runs on the session's own scope and reports what
-     *  happened. */
+     *  happened.
+     *
+     *  ⚠⚠ But it belongs to the account it was started in (#1048 review). The
+     *  session's scope outlives an account switch and a lock, and the sends
+     *  read the LIVE store, database, keys and island once the upload is back:
+     *  a voice note recorded in account A, with the switch landing during its
+     *  upload, was written into B's database and sealed and sent AS B to the
+     *  same number, telling that person A and B are one; unlocked into the
+     *  decoy, the real recording landed in the decoy's database. So the epoch
+     *  is taken here, on the tap, and the upload helpers check it before and
+     *  after the upload ([ensureSendStillOwned]): a send whose account has gone
+     *  is dropped, written nowhere and reported nowhere (a failure toast in the
+     *  decoy would be a tell). Sending it as A regardless is not on offer: A's
+     *  database is closed by then, and a lock closes it too, so the old path
+     *  failed there anyway. */
     fun sendMediaDetached(what: String, count: Int = 1, block: suspend (oneDone: () -> Unit) -> Unit) {
+        val ep = epochNow()
         // An album is `count` files behind one call: the strip above the
         // composer counts them down as each one lands, instead of saying
         // "1 file" for a batch of ten. Before 0.142 a batch did not go through
@@ -8419,10 +8470,11 @@ class Session(context: Context) {
                 _mediaDone.update { it + 1 }
             }
         }
-        scope.launch {
+        scope.launch(SendEpoch(ep)) {
             try {
                 block(oneDone)
             } catch (e: kotlinx.coroutines.CancellationException) {
+                if (e is SendAbandoned) android.util.Log.i("RCQmedia", "$what dropped: the account changed under it")
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("RCQmedia", "$what failed to send", e)
