@@ -94,7 +94,8 @@ internal fun GroupMediaGrid(
     // review): a picture arriving, or one expiring, shifted every page under
     // the finger. A snapshot, the way the chat's own album viewer holds one.
     var paging by remember { mutableStateOf<Pair<List<ChatMessage>, Int>?>(null) }
-    var clip by remember { mutableStateOf<VideoSource?>(null) }
+    // With its message, so the player closes when that message goes.
+    var clip by remember { mutableStateOf<Pair<ChatMessage, VideoSource>?>(null) }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -141,7 +142,7 @@ internal fun GroupMediaGrid(
                     android.widget.Toast.makeText(context, said, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
-            onPlayVideo = { _, src -> clip = src },
+            onPlayVideo = { m, src -> clip = m to src },
             onShowInChat = onShowInChat?.let { show -> { m -> paging = null; show(m) } },
             // Against the live room, not the snapshot: a page deleted or
             // expired since it was taken leaves the pager.
@@ -149,7 +150,8 @@ internal fun GroupMediaGrid(
             onDismiss = { paging = null },
         )
     }
-    clip?.let { src ->
+    clip?.let { (m, src) ->
+        CloseWhenClipGone(m.id, m.expiresAt, all[groupId].orEmpty()) { clip = null }
         FullscreenVideoViewer(
             src,
             onShare = { s -> MediaSaver.share(context, s::writeTo, "RCQ_${System.currentTimeMillis()}.mp4", "video/mp4") },

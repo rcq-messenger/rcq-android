@@ -920,7 +920,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         ViewerMedia(bytes, viewerSenderUin(m), viewerSenderName(m))
 
     fun viewerVideoOf(m: ChatMessage, source: VideoSource): ViewerVideo =
-        ViewerVideo(source, viewerSenderUin(m), viewerSenderName(m), m.id)
+        ViewerVideo(source, viewerSenderUin(m), viewerSenderName(m), m.id, m.expiresAt)
 
     // Item 9(c): the name at the top of a viewer opens that person's card.
     //
@@ -2593,6 +2593,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         val walkTo: (ChatMessage?) -> (() -> Unit)? = { m ->
             if (m == null) null else ({ openVideo(m) { src -> fullscreenVideo = viewerVideoOf(m, src) } })
         }
+        CloseWhenClipGone(media.messageId, media.expiresAt, messages) { fullscreenVideo = null }
         FullscreenVideoViewer(
             media.source,
             senderName = media.senderName,
@@ -5605,6 +5606,25 @@ internal fun goneFrom(rows: List<ChatMessage>): (ChatMessage) -> Boolean {
     return { m -> m.id !in live || m.expiresAt?.let { it <= System.currentTimeMillis() } == true }
 }
 
+/** Closes the player of a clip whose message has left [rows] (deleted), or
+ *  when its disappearing timer runs out, whichever comes first (#1042
+ *  review). The pager drops such a page and offers nothing to save from it;
+ *  a clip already handed to the player kept playing with Save and Share,
+ *  which is the same promise broken one screen further. Its own composable
+ *  for the reason [ChatJumpEffect] is: ChatScreen is at the verifier's limit. */
+@Composable
+internal fun CloseWhenClipGone(messageId: String, expiresAt: Long?, rows: List<ChatMessage>, close: () -> Unit) {
+    val closeNow by rememberUpdatedState(close)
+    val present = rows.any { it.id == messageId }
+    LaunchedEffect(messageId, present, expiresAt) {
+        if (present) {
+            val at = expiresAt ?: return@LaunchedEffect
+            delay((at - System.currentTimeMillis()).coerceAtLeast(0))
+        }
+        closeNow()
+    }
+}
+
 /** The whole album, full screen, one item per page.
  *
  *  ⚠ The grid draws four tiles however many items the batch holds, and a tap
@@ -5658,8 +5678,11 @@ internal fun AlbumPagerViewer(
     // or mid-swipe.
     var restingOn by remember(items) { mutableStateOf(items[startIndex.coerceIn(0, items.size - 1)].id) }
     val pages = items.filter { it.id == restingOn || !isGone(it) }
+    // By id in [pages], not [startIndex] in [items]: a page already gone when
+    // the viewer opens is not in [pages], and the index would land one picture
+    // further along for every such page before it (#1042 review).
     val pager = androidx.compose.foundation.pager.rememberPagerState(
-        initialPage = startIndex.coerceIn(0, items.size - 1), pageCount = { pages.size },
+        initialPage = pages.indexOfFirst { it.id == restingOn }.coerceAtLeast(0), pageCount = { pages.size },
     )
     val pagesNow by rememberUpdatedState(pages)
     // For the save and share that finish after a fetch: the page is asked
@@ -5807,8 +5830,11 @@ internal fun AlbumPagerViewer(
                                         // has to survive the same length.
                                         val r = playableVideo(session, m)
                                         fetching = false
-                                        when (r) {
-                                            is PlayableVideo.Ready -> onPlayVideo(m, r.source)
+                                        when {
+                                            // Gone while it was fetched: no
+                                            // player, nothing to save from it.
+                                            goneNow(m) -> Unit
+                                            r is PlayableVideo.Ready -> onPlayVideo(m, r.source)
                                             else -> playFailed = true
                                         }
                                     }
@@ -6084,6 +6110,8 @@ private class ViewerVideo(
     /** The message this clip came from, so the viewer can find the next one in
      *  the conversation without the caller holding a second list (#1027). */
     val messageId: String,
+    /** That message's disappearing deadline, for [CloseWhenClipGone]. */
+    val expiresAt: Long? = null,
 )
 
 /** Something to save or share: what to call it, what it is, and how to write
