@@ -89,7 +89,10 @@ internal fun GroupMediaGrid(
     // play disc is tapped, so handing it the whole wall costs nothing up
     // front. All of it, not only the tiles drawn: "show all" folds the wall,
     // not what a swipe may reach. Same order as the wall, newest first.
-    var paging by remember { mutableStateOf<Int?>(null) }
+    // The wall as it was when the pager opened, not the live list (#1042
+    // review): a picture arriving, or one expiring, shifted every page under
+    // the finger. A snapshot, the way the chat's own album viewer holds one.
+    var paging by remember { mutableStateOf<Pair<List<ChatMessage>, Int>?>(null) }
     var clip by remember { mutableStateOf<VideoSource?>(null) }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -106,7 +109,7 @@ internal fun GroupMediaGrid(
                     MediaTile(
                         session, m, groupId, busy = false,
                         modifier = Modifier.weight(1f),
-                        onOpen = { paging = media.indexOfFirst { it.id == m.id }.coerceAtLeast(0) },
+                        onOpen = { paging = media to media.indexOfFirst { it.id == m.id }.coerceAtLeast(0) },
                     )
                 }
                 // The last row of an incomplete grid keeps its tiles square by
@@ -124,9 +127,9 @@ internal fun GroupMediaGrid(
         }
     }
 
-    paging?.let { start ->
+    paging?.let { (pages, start) ->
         AlbumPagerViewer(
-            session, media, start,
+            session, pages, start,
             onShare = { _, payload -> MediaSaver.share(context, payload.write, payload.name, payload.mime) },
             onSave = { m, payload ->
                 scope.launch {

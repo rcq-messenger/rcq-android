@@ -148,7 +148,7 @@ private suspend fun leaveCheckOf(session: Session, groupId: Int): LeaveCheckStat
     session.lastResidentWarning(groupId)?.let { LeaveCheckState.Warn(it) } ?: LeaveCheckState.Safe
 
 @Composable
-internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit, onLeft: () -> Unit, onOpenPeerInfo: (Int) -> Unit, onOpenGroup: (Int) -> Unit = {}) {
+internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit, onLeft: () -> Unit, onOpenPeerInfo: (Int) -> Unit, onOpenGroup: (Int) -> Unit = {}, onShowInChat: (groupId: Int, messageId: String) -> Unit = { _, _ -> onBack() }) {
     val c = RcqTheme.colors
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -518,14 +518,12 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
             GroupMediaGrid(
                 session, groupId,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                // #1042: "чтоб можно было эту картинку/видео найти в чате". The
-                // card is only ever opened from the room's own chat, so going
-                // back IS going to the chat, and the chat picks the request up
-                // as it reappears (ChatJump).
-                onShowInChat = { m ->
-                    ChatJump.request("g:$groupId", m.id)
-                    onBack()
-                },
+                // #1042: "чтоб можно было эту картинку/видео найти в чате".
+                // ⚠ Not "go back and hope": the chat under this card is not
+                // always this room's (a member's card, then Message, lands
+                // here again over somebody else's chat). The host opens THIS
+                // room and the chat picks the request up (ChatJump).
+                onShowInChat = { m -> onShowInChat(groupId, m.id) },
             )
         }
 

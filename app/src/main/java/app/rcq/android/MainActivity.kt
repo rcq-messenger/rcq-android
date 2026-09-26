@@ -979,7 +979,10 @@ private fun RcqApp(session: Session) {
                 session, peerInfo,
                 onBack = { peerInfoUin = null },
                 onRemoved = { peerInfoUin = null; chatTarget = null },
-                onOpenChat = { peerInfoUin = null; chatTarget = ChatTarget.Peer(it) },
+                // The group card this was opened from goes too: it outranks the
+                // chat in the screen order, so "Message" used to land back on
+                // the card with the new chat hidden underneath it.
+                onOpenChat = { peerInfoUin = null; groupInfoId = null; chatTarget = ChatTarget.Peer(it) },
                 groupHost = peerInfoHost,
                 guestMember = peerInfoGuest == (peerInfo to peerInfoHost),
             )
@@ -992,6 +995,13 @@ private fun RcqApp(session: Session) {
                 // Decision D5: see [openRoomMember].
                 onOpenPeerInfo = { openRoomMember(infoId, it) },
                 onOpenGroup = { groupInfoId = null; chatTarget = ChatTarget.Group(it) },
+                // #1042: to THIS room, explicitly, whatever chat happens to be
+                // under the card, and then to the message (ChatJump).
+                onShowInChat = { gid, mid ->
+                    app.rcq.android.ui.ChatJump.request("g:$gid", mid)
+                    groupInfoId = null; peerInfoUin = null
+                    chatTarget = ChatTarget.Group(gid)
+                },
             )
             s is UiState.Registered && target != null -> {
                 val chatThread = when (target) {

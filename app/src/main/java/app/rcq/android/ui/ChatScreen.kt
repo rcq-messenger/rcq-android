@@ -260,19 +260,32 @@ internal object ChatJump {
 
 /** Picks up a [ChatJump] for this thread. Its own composable, and not inline in
  *  [ChatScreen], because that method is at the verifier's limit (see
- *  MessageLongPressOverlay's kdoc). */
+ *  MessageLongPressOverlay's kdoc).
+ *
+ *  ⚠ Waits for the chat's own opening position to land ([ready]: the open
+ *  jumps have settled) and then for the row to exist, instead of a fixed
+ *  pause (#1042 review). The chat is rebuilt when the card closes, and its
+ *  open scroll (last read, or the bottom, pushed down for a few frames while
+ *  the layout settles) runs after it; a jump that went first was undone by it
+ *  on a slow phone. Bounded: a message that never shows up (deleted, expired
+ *  meanwhile) gives up quietly after a few seconds. [onJump] answers whether
+ *  the row was there. */
 @Composable
-private fun ChatJumpEffect(threadKey: String, onJump: (String) -> Unit) {
+private fun ChatJumpEffect(threadKey: String, ready: () -> Boolean, onJump: (String) -> Boolean) {
     val jump by rememberUpdatedState(onJump)
+    val isReady by rememberUpdatedState(ready)
     LaunchedEffect(threadKey) {
         ChatJump.pending.collect { r ->
             if (r == null || r.threadKey != threadKey) return@collect
             ChatJump.pending.value = null
-            if (android.os.SystemClock.elapsedRealtime() - r.at > 10_000) return@collect
-            // The chat's own opening position (last read, or the bottom) lands
-            // first; jumping before it would be undone by it.
-            delay(300)
-            jump(r.messageId)
+            val now = { android.os.SystemClock.elapsedRealtime() }
+            if (now() - r.at > 10_000) return@collect
+            val deadline = now() + 5_000
+            while (!isReady() && now() < deadline) delay(50)
+            while (now() < deadline) {
+                if (jump(r.messageId)) return@collect
+                delay(100)
+            }
         }
     }
 }
@@ -1483,16 +1496,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // Jump from something laid OVER the thread (the search, the media wall, a
     // viewer): the overlay closing re-pins the list to the newest message, so
     // pinning is held off for the length of the scroll and the flash.
-    fun jumpToMessage(id: String) {
+    fun jumpToMessage(id: String): Boolean {
         autoPinToBottom.value = false
-        onTapReply(id)
+        val found = onTapReply(id)
         scope.launch {
             kotlinx.coroutines.delay(700)
             autoPinToBottom.value = true
         }
+        return found
     }
     // "Show in chat" from the group card's media wall (#1042).
-    ChatJumpEffect(threadKey) { jumpToMessage(it) }
+    ChatJumpEffect(threadKey, ready = { positionSaveArmed }) { jumpToMessage(it) }
 
     // Mention-jump (Telegram-style @-FAB): ordered ids of messages in THIS open
     // thread that @mention me and aren't mine. Group-only by nature — a 1:1 body
@@ -2464,8 +2478,17 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 albumViewer = null
                 showAllMedia = false
                 actionMsg = m
+                // The same test the chat's own album row groups by: the id,
+                // the kind, and the same person. An album id is a string the
+                // sender's client chose, so two people's batches could share
+                // one, and "delete all" must never reach somebody else's.
                 actionAlbum = if (!wall) batch
-                              else m.albumId?.let { a -> messages.filter { it.albumId == a } }
+                              else m.albumId?.let { a ->
+                                  messages.filter {
+                                      it.albumId == a && (it.kind == "photo" || it.kind == "video") &&
+                                          it.fromMe == m.fromMe && it.senderUin == m.senderUin
+                                  }
+                              }
             },
             // Only when the pager came from the media wall; from an album
             // bubble the message is already behind the viewer.
@@ -5570,6 +5593,18 @@ internal fun AlbumPagerViewer(
     // here for the dialog's life after one play; the session's own cache
     // covers a second play.
     val loaded = remember(items) { mutableStateMapOf<String, ByteArray>() }
+    // ⚠ A WINDOW, not everything seen (#1042 review). The pages used to be one
+    // album of a few pictures; since the media walls open this pager with every
+    // picture in the chat, a long swipe kept every one it passed on the heap
+    // (several hundred KB each), even after the session's own bounded cache let
+    // them go. Pages more than two away drop their bytes; coming back to one
+    // fetches it again, from that cache when it still has it.
+    LaunchedEffect(pager, items) {
+        androidx.compose.runtime.snapshotFlow { pager.currentPage }.collect { cur ->
+            val keep = ((cur - 2)..(cur + 2)).mapNotNullTo(HashSet()) { items.getOrNull(it)?.id }
+            loaded.keys.filter { it !in keep }.forEach { loaded.remove(it) }
+        }
+    }
     suspend fun bytesOf(m: ChatMessage): ByteArray? {
         loaded[m.id]?.let { return it }
         val mid = m.mediaId ?: return null
