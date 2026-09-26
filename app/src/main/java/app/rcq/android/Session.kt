@@ -436,11 +436,13 @@ class Session(context: Context) {
      *  the island says anything about them (`presence`), and when they show up
      *  live: they answer our call, they call us, a message or typing arrives
      *  from them over the socket. */
-    private fun releaseCallHold(uin: Int) {
+    private fun releaseCallHold(uin: Int, quiet: Boolean = true) {
         if (callSaysOffline.remove(uin) == null) return
         // Our own grey going back to the island's green is not somebody
-        // coming online: the refresh below must not chime for it.
-        callHoldReleased.add(uin)
+        // coming online: the refresh below must not chime for it. [quiet] is
+        // false for a `presence` frame, which IS the island saying somebody
+        // came online, and that deserves the chime it always had.
+        if (quiet) callHoldReleased.add(uin)
         rosterEtag = null
         scope.launch { runCatching { refreshContacts() } }
     }
@@ -2327,6 +2329,10 @@ class Session(context: Context) {
         peerIdentityCache.clear()
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
         noV2Peers.clear(); previewCache.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
+        // A call's grey belongs to the account it was placed from: the same
+        // number in the next account is somebody else (#1047 review). The
+        // timers already running find nothing to release.
+        callSaysOffline.clear(); callHoldReleased.clear()
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
         // a socket and a peer number that mean somebody else entirely on the
@@ -12582,6 +12588,21 @@ class Session(context: Context) {
             // switch mid-fetch must not fold this account's foreign contacts
             // into the next account's screen.
             if (stillOn(ep)) syncCrossIslandContacts()
+            // A hold released while an earlier read was in the air can land
+            // here: that read took the new ETag with our grey still painted,
+            // and this one answers 304 (#1047 review). The island's own word
+            // for those rows is the list it last served, so they get it back,
+            // and the release is done with either way.
+            if (releasedNow.isNotEmpty() && stillOn(ep)) {
+                val served = rosterServed?.associateBy { it.uin }.orEmpty()
+                _contacts.update { list ->
+                    list.map { c ->
+                        val row = served[c.uin]
+                        if (c.uin in releasedNow && c.host == null && row != null && !callSaysOffline.containsKey(c.uin)) c.copy(status = row.status) else c
+                    }
+                }
+            }
+            callHoldReleased.removeAll(releasedNow)
             return@withLock
         }
         val fetched = answer.rows
@@ -13367,7 +13388,7 @@ class Session(context: Context) {
                 // ETag too, so the read below cannot come back 304 and keep the
                 // grey; with no hold it is the plain refresh it always was.
                 val who = obj.get("uin")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asInt }.getOrNull() }
-                if (who != null && callSaysOffline.containsKey(who)) releaseCallHold(who)
+                if (who != null && callSaysOffline.containsKey(who)) releaseCallHold(who, quiet = false)
                 else scope.launch { runCatching { refreshContacts() } }
             }
             // A contact changed their name. Nothing announced this before, so
