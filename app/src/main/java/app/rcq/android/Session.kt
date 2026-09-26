@@ -391,6 +391,7 @@ class Session(context: Context) {
         dbOpenFor = if (::db.isInitialized && db.isOpen) db.accountId else null,
         epoch = accountEpoch,
         ownerKnown = AccountManager.accounts.value.any { it.id == owner.accountId },
+        dbBroken = _dbLocked.value,
     )
 
     /** Background sends waiting for their account to come back ([sendGate]
@@ -415,6 +416,9 @@ class Session(context: Context) {
                 when (sendGate(ctx.owner, sendSceneNow(ctx.owner))) {
                     SendGate.GO -> return
                     SendGate.DROP -> throw SendAbandoned()
+                    // Not a cancellation: the send is counted as failed and the
+                    // person is told, as they were before sends could wait.
+                    SendGate.FAIL -> throw IllegalStateException("message database unavailable")
                     SendGate.WAIT -> {
                         if (parked == 0) {
                             parked = ctx.left().coerceAtLeast(1)

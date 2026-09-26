@@ -35,6 +35,12 @@ class SendOwnershipTest {
     @Test fun ownerAccountRemovedDrops() =
         assertEquals(SendGate.DROP, sendGate(a, home.copy(activeId = "B", dbOpenFor = "B", ownerKnown = false)))
 
+    @Test fun ownerInFrontWithADatabaseThatWouldNotOpenFails() =
+        assertEquals(SendGate.FAIL, sendGate(a, home.copy(dbOpenFor = null, dbBroken = true)))
+
+    @Test fun aBrokenDatabaseBehindALockStillWaits() =
+        assertEquals(SendGate.WAIT, sendGate(a, home.copy(locked = true, dbOpenFor = null, dbBroken = true)))
+
     @Test fun decoySendGoesOnlyInItsOwnSession() {
         val d = SendOwner(accountId = "A", decoy = true, epoch = 7)
         val decoyScene = home.copy(inDecoy = true, dbOpenFor = "decoy", epoch = 7)

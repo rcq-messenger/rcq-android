@@ -42,16 +42,27 @@ internal data class SendScene(
     val epoch: Int,
     /** The owner's account still exists on this device. */
     val ownerKnown: Boolean,
+    /** This session tried to open the account's message database and could
+     *  not (Session._dbLocked): it will not open by waiting. */
+    val dbBroken: Boolean = false,
 )
 
-internal enum class SendGate { GO, WAIT, DROP }
+/** FAIL: the owner's account is in front and unlocked, but its database could
+ *  not be opened this session and nothing will reopen it by waiting. Reported
+ *  as a failed send (the toast 0.206 showed), not parked for ever out of sight. */
+internal enum class SendGate { GO, WAIT, DROP, FAIL }
 
 internal fun sendGate(owner: SendOwner, scene: SendScene): SendGate {
     if (owner.decoy || owner.accountId == null) {
         return if (scene.epoch == owner.epoch && !scene.locked) SendGate.GO else SendGate.DROP
     }
     if (!scene.ownerKnown) return SendGate.DROP
-    val home = !scene.locked && !scene.inDecoy &&
-        scene.activeId == owner.accountId && scene.dbOpenFor == owner.accountId
-    return if (home) SendGate.GO else SendGate.WAIT
+    val inFront = !scene.locked && !scene.inDecoy && scene.activeId == owner.accountId
+    if (inFront && scene.dbOpenFor == owner.accountId) return SendGate.GO
+    // ⚠ Waiting only makes sense for something that ends: a lock, another
+    // account in front, a database still being bound. A database this session
+    // already failed to open does not end, and a send parked behind it vanished
+    // from the strip with no word (the review of 5f9afd3; 0.206 said "not sent").
+    if (inFront && scene.dbOpenFor == null && scene.dbBroken) return SendGate.FAIL
+    return SendGate.WAIT
 }
