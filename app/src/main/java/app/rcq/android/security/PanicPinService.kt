@@ -125,25 +125,20 @@ object PanicPinService {
      *  it was set on, the monotonic clock decides. After a reboot (monotonic
      *  time starts again) the wall-clock deadline is used, never longer than
      *  the escalation step it came from, and re-anchored on the new boot so
-     *  the clock cannot move it from then on either. */
+     *  the clock cannot move it from then on either. A reboot the boot
+     *  counter did not announce is caught too, and nothing ever leaves more
+     *  than the current step: see [LockoutClock], which decides. */
     fun lockedOutUntilElapsed(context: Context): Long? {
         val s = PinVault.loadAttempts(context)
         val ceiling = PinVault.lockoutMillis(s.failedCount)
-        if (ceiling <= 0) return null
-        val now = System.currentTimeMillis()
         val nowElapsed = android.os.SystemClock.elapsedRealtime()
         val boot = bootCount(context)
-        if (s.lockoutElapsed != null && boot != null && s.bootCount == boot) {
-            val left = (s.lockoutElapsed - nowElapsed).coerceAtMost(ceiling)
-            return if (left > 0) nowElapsed + left else null
-        }
-        val until = s.lockoutUntil ?: return null
-        val left = (until - now).coerceAtMost(ceiling)
-        if (left <= 0) return null
-        if (boot != null) {
-            PinVault.saveAttempts(context, s.copy(lockoutElapsed = nowElapsed + left, bootCount = boot))
-        }
-        return nowElapsed + left
+        val r = LockoutClock.read(
+            s.lockoutUntil, s.lockoutElapsed, s.bootCount, ceiling,
+            System.currentTimeMillis(), nowElapsed, boot,
+        ) ?: return null
+        if (r.reanchor) PinVault.saveAttempts(context, s.copy(lockoutElapsed = nowElapsed + r.leftMs, bootCount = boot))
+        return nowElapsed + r.leftMs
     }
 
     /** One more wrong PIN on the shared counter, with the lockout it earns. */
