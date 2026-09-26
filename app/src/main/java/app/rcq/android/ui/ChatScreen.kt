@@ -820,6 +820,24 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         return reply
     }
 
+    // The quote back on the composer, when the send it was taken for produced
+    // nothing (#1048 review). A picture, a clip, a file or a voice note goes up
+    // BEFORE its row is written, so a failed upload leaves no red bubble to
+    // retry from, and the quote would have gone with it without a word: the
+    // person sends the picture again and it answers nothing. Only when they
+    // have not picked another message to answer since. Posted to the main
+    // thread, because the sends fail on the session's IO scope, and written to
+    // the parked note too, because the chat may be gone by then (#473 made the
+    // sends outlive it) and the note is what brings the quote back.
+    fun giveReplyBack(quoted: ChatMessage?) {
+        quoted ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (replyTarget != null || ChatDrafts.replyByThread[threadKey] != null) return@post
+            ChatDrafts.replyByThread[threadKey] = quoted.id
+            replyTarget = quoted
+        }
+    }
+
     // Item 9(b/c): who a full-screen viewer names at the top, and whose card
     // that name opens.
     //
@@ -905,10 +923,16 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 return@launch
             }
             if (!fileFitsIsland(context, session, picked.bytes.size.toLong())) return@launch
+            val quoted = replyTarget
             val reply = takeReply()
             session.sendMediaDetached("file") {
-                if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime, reply)
-                else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime, reply)
+                try {
+                    if (isGroup) session.sendGroupFile(groupId!!, picked.bytes, picked.name, picked.mime, reply)
+                    else session.sendFile(peer!!, picked.bytes, picked.name, picked.mime, reply)
+                } catch (e: Exception) {
+                    giveReplyBack(quoted)
+                    throw e
+                }
             }
         }
     }
@@ -937,6 +961,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // same: `consumeReplyContext` hands it to one send and clears it), so
         // an album answers once rather than N times. Taken here, on the main
         // thread, because it is composer state.
+        val quoted = replyTarget
         var reply = if (uris.isNotEmpty()) takeReply() else null
         if (uris.isNotEmpty()) session.sendMediaDetached("album", uris.size) { oneDone ->
             val albumId = if (uris.size > 1) java.util.UUID.randomUUID().toString().uppercase() else null
@@ -972,6 +997,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     oneDone()
                 }
             }
+            // Nothing went, so nothing carried the quote: it goes back.
+            if (reply != null) giveReplyBack(quoted)
             // One failure toast for the batch, raised by the wrapper.
             if (failed > 0) throw IllegalStateException("$failed of ${uris.size} album items failed")
         }
@@ -1044,6 +1071,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // Detached from this screen for the same reasons as the paperclip
             // batch above: the strip, surviving the user leaving, and a word
             // when something fails (#691, #473).
+            //
+            // The quote rides the first item that goes, as in the album
+            // picker (#1048 review): a parked answer came back with the chat,
+            // and the batch left without it, the chip still promising one.
+            val quoted = replyTarget
+            var reply = takeReply()
             session.sendMediaDetached("share", uris.size) { oneDone ->
                 var failed = 0
                 for ((i, uri) in uris.withIndex()) {
@@ -1053,21 +1086,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             mime.startsWith("video/") -> {
                                 val v = withContext(Dispatchers.IO) { readPickedVideo(context, uri) }
                                 if (v == null) { failed += 1; continue }
-                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch)
+                                sendPickedVideo(context, session, isGroup, groupId, peer, v, null, albumId = albumId, batch = batch, replyTo = reply)
                             }
                             mime.startsWith("image/") -> {
                                 val data = withContext(Dispatchers.IO) { readImageForSend(context, uri) }
                                 if (data == null) { failed += 1; continue }
-                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch)
-                                else session.sendPhoto(peer!!, data, null, albumId = albumId)
+                                if (isGroup) session.sendGroupPhoto(groupId!!, data, null, albumId = albumId, batch = batch, replyTo = reply)
+                                else session.sendPhoto(peer!!, data, null, albumId = albumId, replyTo = reply)
                             }
                             else -> {
                                 val f = withContext(Dispatchers.IO) { readPickedFile(context, uri) }
                                 if (f == null) { failed += 1; continue }
-                                if (isGroup) session.sendGroupFile(groupId!!, f.bytes, f.name, f.mime)
-                                else session.sendFile(peer!!, f.bytes, f.name, f.mime)
+                                if (isGroup) session.sendGroupFile(groupId!!, f.bytes, f.name, f.mime, reply)
+                                else session.sendFile(peer!!, f.bytes, f.name, f.mime, reply)
                             }
                         }
+                        reply = null
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Throwable) {
@@ -1077,6 +1111,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         oneDone()
                     }
                 }
+                if (reply != null) giveReplyBack(quoted)
                 if (failed > 0) throw IllegalStateException("$failed of ${uris.size} shared items failed")
             }
         }
@@ -1160,12 +1195,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     fun stopAndSendVoice() {
         recording = false
         val res = recorder.stop() ?: return
+        val quoted = replyTarget
         val reply = takeReply()
         scope.launch {
             runCatching {
                 if (isGroup) session.sendGroupVoice(groupId!!, res.first, res.second, reply)
                 else session.sendVoice(peer!!, res.first, res.second, reply)
-            }
+            }.onFailure { giveReplyBack(quoted) }
         }
     }
     // ⚠⚠ ONE place that speaks a refusal, for all eight send paths. Both sends
@@ -2739,16 +2775,22 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 pendingSend = null
                 // The picture answers what the chip above the composer says it
                 // answers (#1048); Cancel above leaves the chip where it was.
+                val quoted = replyTarget
                 val reply = takeReply()
                 // NOT on this screen's scope: leaving the chat used to cancel the
                 // upload and lose the picture without a word (#473).
                 session.sendMediaDetached(if (ps is PendingSend.Video) "video" else "photo") {
-                    when (ps) {
-                        is PendingSend.Photo ->
-                            if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler, replyTo = reply)
-                            else session.sendPhoto(peer!!, ps.bytes, caption, spoiler, replyTo = reply)
-                        is PendingSend.Video ->
-                            sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler, replyTo = reply)
+                    try {
+                        when (ps) {
+                            is PendingSend.Photo ->
+                                if (isGroup) session.sendGroupPhoto(groupId!!, ps.bytes, caption, spoiler, replyTo = reply)
+                                else session.sendPhoto(peer!!, ps.bytes, caption, spoiler, replyTo = reply)
+                            is PendingSend.Video ->
+                                sendPickedVideo(context, session, isGroup, groupId, peer, ps.v, caption, spoiler, replyTo = reply)
+                        }
+                    } catch (e: Exception) {
+                        giveReplyBack(quoted)
+                        throw e
                     }
                 }
             },
@@ -2812,9 +2854,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 showGroupPicker = false
                                 val (shareId, shareHost) = session.groupShareRef(g.id)
                                 val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
+                                // A group link is a message like any other, so
+                                // it answers what the chip says (#1048 review).
+                                val reply = takeReply()
                                 scope.launch {
                                     runCatching {
-                                        if (isGroup) session.sendGroupText(groupId!!, url) else session.sendText(peer!!, url)
+                                        if (isGroup) session.sendGroupText(groupId!!, url, reply) else session.sendText(peer!!, url, reply)
                                     }
                                 }
                             }.padding(vertical = 8.dp),
