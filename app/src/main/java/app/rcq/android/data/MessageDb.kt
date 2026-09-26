@@ -39,7 +39,12 @@ private fun reactionsFromJson(s: String?): Map<Int, String> {
  * de-dups a message arriving over both the WebSocket and the queue drain.
  * Multi-account: the file is named per [Account.id] (`rcq-messages-<id>.db`).
  */
-class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
+class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
+
+    /** False once [close] has run: a background send asks this before it
+     *  writes (Session.ensureSendStillOwned). */
+    @Volatile var isOpen = true
+        private set
 
     private val db: SQLiteDatabase
 
@@ -57,7 +62,7 @@ class MessageDb(context: Context, accountId: String, dataKey: ByteArray) {
     fun rekey(newKey: ByteArray) = db.changePassword(passphrase(newKey))
 
     /** Close the underlying connection (called when the session rebinds/locks). */
-    fun close() { runCatching { db.close() } }
+    fun close() { isOpen = false; runCatching { db.close() } }
 
     private fun createSchema(db: SQLiteDatabase) {
         db.execSQL(

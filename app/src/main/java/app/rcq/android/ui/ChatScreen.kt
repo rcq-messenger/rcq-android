@@ -876,9 +876,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // row is there with the quote on it (red, retryable), and handing the quote
     // back as well answered the message twice (#1048 review). [since] is when
     // the quote was taken, so an earlier answer to the same message does not
-    // count. Not for a send dropped because the account changed under it
-    // (Session.SendAbandoned, a cancellation): that one is over for everybody,
-    // quote included.
+    // count. Not for a send dropped because its account is gone from the
+    // device (Session.SendAbandoned, a cancellation): that one is over for
+    // everybody, quote included. A lock or a switch does not drop a send; it
+    // waits for its account (SendOwnership.kt).
     fun giveReplyBack(quoted: ChatMessage?, since: Long) {
         quoted ?: return
         val thread = threadKey

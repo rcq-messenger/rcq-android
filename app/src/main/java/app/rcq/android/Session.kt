@@ -70,6 +70,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.takeWhile
@@ -363,24 +364,70 @@ class Session(context: Context) {
      *  dropped, not written down. */
     private fun stillOn(epoch: Int): Boolean = accountEpoch == epoch
 
-    /** The account epoch a [sendMediaDetached] send was started in, carried in
-     *  its coroutine context so the shared send functions can tell a detached
-     *  send from one a screen is waiting on. */
-    private class SendEpoch(val epoch: Int) : kotlin.coroutines.AbstractCoroutineContextElement(SendEpoch) {
-        companion object Key : kotlin.coroutines.CoroutineContext.Key<SendEpoch>
+    /** Whose a [sendMediaDetached] send is ([SendOwner]), carried in its
+     *  coroutine context so the shared send functions can tell a detached send
+     *  from one a screen is waiting on. */
+    private class SendOwnerCtx(
+        val owner: SendOwner,
+        /** How many files of this send are still to go: all of them leave
+         *  the strip while it waits, not only the one at the gate. */
+        val left: () -> Int,
+    ) : kotlin.coroutines.AbstractCoroutineContextElement(SendOwnerCtx) {
+        companion object Key : kotlin.coroutines.CoroutineContext.Key<SendOwnerCtx>
     }
 
-    /** A detached send whose account is gone. A cancellation, so every catch
-     *  that lets cancellation through lets this through too, and nothing
-     *  counts it as a failure or hands its quote back. */
-    class SendAbandoned : kotlinx.coroutines.CancellationException("the account changed under a detached send")
+    /** A detached send that can never be finished honestly ([sendGate] DROP):
+     *  its account is gone from the device, or it was a decoy session's send
+     *  and that session is over. A cancellation, so every catch that lets
+     *  cancellation through lets this through too, and nothing counts it as a
+     *  failure or hands its quote back. */
+    class SendAbandoned : kotlinx.coroutines.CancellationException("a detached send whose account is gone")
 
-    /** Throws [SendAbandoned] when the detached send running here was started
-     *  for an account this session no longer serves. A no-op for a send that
-     *  is not detached. */
+    /** The session as [sendGate] needs it, read now. */
+    private fun sendSceneNow(owner: SendOwner): SendScene = SendScene(
+        activeId = AccountManager.activeId.value,
+        locked = PanicPinService.locked.value,
+        inDecoy = PanicPinService.inDecoySession || AccountManager.isDecoyMode,
+        dbOpenFor = if (::db.isInitialized && db.isOpen) db.accountId else null,
+        epoch = accountEpoch,
+        ownerKnown = AccountManager.accounts.value.any { it.id == owner.accountId },
+    )
+
+    /** Background sends waiting for their account to come back ([sendGate]
+     *  WAIT). Left out of the "sending" strip and the shade's progress while
+     *  they wait: shown over another account's chats, or in the decoy, the
+     *  strip would say what the person in front of the phone must not see. */
+    private val _mediaParked = MutableStateFlow(0)
+
+    /** Before and after every upload of a detached send (#1048 review), and
+     *  so right before its row is written, with no suspension in between: go
+     *  on while the account it was started in is open and unlocked; wait,
+     *  however long, while the app is locked or another account or the decoy
+     *  is in front; throw [SendAbandoned] only when it can never be finished
+     *  honestly. A no-op for a send that is not detached. Polls once a second
+     *  while waiting: the conditions live in four places, and a waiting send
+     *  is rare and costs nothing else. */
     private suspend fun ensureSendStillOwned() {
-        val ep = kotlin.coroutines.coroutineContext[SendEpoch]?.epoch ?: return
-        if (!stillOn(ep)) throw SendAbandoned()
+        val ctx = kotlin.coroutines.coroutineContext[SendOwnerCtx] ?: return
+        var parked = 0
+        try {
+            while (true) {
+                when (sendGate(ctx.owner, sendSceneNow(ctx.owner))) {
+                    SendGate.GO -> return
+                    SendGate.DROP -> throw SendAbandoned()
+                    SendGate.WAIT -> {
+                        if (parked == 0) {
+                            parked = ctx.left().coerceAtLeast(1)
+                            _mediaParked.update { it + parked }
+                            android.util.Log.i("RCQmedia", "send waits for its account to be open again")
+                        }
+                        delay(1_000)
+                    }
+                }
+            }
+        } finally {
+            if (parked > 0) _mediaParked.update { (it - parked).coerceAtLeast(0) }
+        }
     }
 
     /** 1:1 audio/video calls. Same-island signalling rides the WS (call_*
@@ -6540,6 +6587,7 @@ class Session(context: Context) {
     }
 
     suspend fun sendGroupPhoto(groupId: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(jpeg, key)
@@ -8348,7 +8396,12 @@ class Session(context: Context) {
      *  не хватает индикатора" (#473), which is exactly right, and the same
      *  silence is what made the two failures underneath it unreadable. */
     private val _mediaSending = MutableStateFlow(0)
-    val mediaSending: StateFlow<Int> = _mediaSending.asStateFlow()
+    /** What the strip and the shade show: the sends in flight, less those
+     *  waiting for their account ([_mediaParked]). */
+    val mediaSending: StateFlow<Int> by lazy {
+        combine(_mediaSending, _mediaParked) { n, parked -> (n - parked).coerceAtLeast(0) }
+            .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, 0)
+    }
     /// How far the current upload has got, 0f..1f, or null while we do not
     /// know (cross-island deposits and the encrypt step report nothing).
     private val _mediaProgress = MutableStateFlow<Float?>(null)
@@ -8409,7 +8462,7 @@ class Session(context: Context) {
         // the same flows would post and cancel the same notification twice.
         if (uploadWatcher?.isActive == true) return
         uploadWatcher = scope.launch {
-            combine(_mediaSending, _mediaProgress) { left, p ->
+            combine(mediaSending, _mediaProgress) { left, p ->
                 // Map to what the shade should SHOW before deduping, so a
                 // foreground upload does not run cancel() once per 64 KB chunk:
                 // in the foreground every tick maps to the same null.
@@ -8447,15 +8500,19 @@ class Session(context: Context) {
      *  a voice note recorded in account A, with the switch landing during its
      *  upload, was written into B's database and sealed and sent AS B to the
      *  same number, telling that person A and B are one; unlocked into the
-     *  decoy, the real recording landed in the decoy's database. So the epoch
-     *  is taken here, on the tap, and the upload helpers check it before and
-     *  after the upload ([ensureSendStillOwned]): a send whose account has gone
-     *  is dropped, written nowhere and reported nowhere (a failure toast in the
-     *  decoy would be a tell). Sending it as A regardless is not on offer: A's
-     *  database is closed by then, and a lock closes it too, so the old path
-     *  failed there anyway. */
+     *  decoy, the real recording landed in the decoy's database. So the owner
+     *  is taken here, on the tap ([SendOwner]: the account, whether this is
+     *  the real session, the epoch), and every send checks it before its
+     *  upload and before its row is written ([ensureSendStillOwned]). A lock
+     *  or another account in front makes it WAIT for its account, not drop:
+     *  with a PIN and autolock "Immediately" every trip to the home screen
+     *  locks, and a picture must still arrive when the person comes back. */
     fun sendMediaDetached(what: String, count: Int = 1, block: suspend (oneDone: () -> Unit) -> Unit) {
-        val ep = epochNow()
+        val owner = SendOwner(
+            accountId = AccountManager.activeId.value,
+            decoy = PanicPinService.inDecoySession || AccountManager.isDecoyMode,
+            epoch = epochNow(),
+        )
         // An album is `count` files behind one call: the strip above the
         // composer counts them down as each one lands, instead of saying
         // "1 file" for a batch of ten. Before 0.142 a batch did not go through
@@ -8479,11 +8536,11 @@ class Session(context: Context) {
                 _mediaDone.update { it + 1 }
             }
         }
-        scope.launch(SendEpoch(ep)) {
+        scope.launch(SendOwnerCtx(owner) { left }) {
             try {
                 block(oneDone)
             } catch (e: kotlinx.coroutines.CancellationException) {
-                if (e is SendAbandoned) android.util.Log.i("RCQmedia", "$what dropped: the account changed under it")
+                if (e is SendAbandoned) android.util.Log.i("RCQmedia", "$what dropped: its account is gone")
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("RCQmedia", "$what failed to send", e)
@@ -8501,6 +8558,9 @@ class Session(context: Context) {
     }
 
     suspend fun sendPhoto(toUin: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, replyTo: Reply? = null) {
+        // Whose it is, before anything is read for it (the thread's timer
+        // included): a batch item can start after a lock or a switch.
+        ensureSendStillOwned()
         // ⚠ Read BEFORE the upload, which can take a while on a bad line. The
         // timer that counts is the one the thread had when the user pressed
         // send; turning it off while their picture is still going up must not
@@ -8520,6 +8580,7 @@ class Session(context: Context) {
     /** Encrypt+upload arbitrary file bytes, then send a file envelope (same
      *  blob path as photos; rcq-spec 9). [fileName]/[mime]/size describe it. */
     suspend fun sendFile(toUin: Int, bytes: ByteArray, fileName: String, mime: String, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -8535,6 +8596,7 @@ class Session(context: Context) {
 
     /** Group file: encrypt once, fan out per member (same as group photo). */
     suspend fun sendGroupFile(groupId: Int, bytes: ByteArray, fileName: String, mime: String, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -8548,6 +8610,7 @@ class Session(context: Context) {
 
     /** Encrypt+upload a recorded voice clip, then send a voice envelope. */
     suspend fun sendVoice(toUin: Int, bytes: ByteArray, durationSec: Int, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -8562,6 +8625,7 @@ class Session(context: Context) {
 
     /** Group voice note: encrypt once, fan out per member. */
     suspend fun sendGroupVoice(groupId: Int, bytes: ByteArray, durationSec: Int, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -8575,6 +8639,7 @@ class Session(context: Context) {
     /** Encrypt+upload a picked video, then send a video envelope carrying a
      *  base64 poster thumbnail so the bubble renders before download. */
     suspend fun sendVideo(toUin: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -8589,6 +8654,7 @@ class Session(context: Context) {
 
     /** Group video: encrypt once, fan out per member. */
     suspend fun sendGroupVideo(groupId: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null, replyTo: Reply? = null) {
+        ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val blob = MediaCrypto.seal(bytes, key)
@@ -10069,6 +10135,16 @@ class Session(context: Context) {
         plainLen: Long,
         key: ByteArray,
     ): RcqApi.UploadResponse {
+        ensureSendStillOwned()
+        return uploadStreamedTo(toUin, openSource, plainLen, key).also { ensureSendStillOwned() }
+    }
+
+    private suspend fun uploadStreamedTo(
+        toUin: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        key: ByteArray,
+    ): RcqApi.UploadResponse {
         preflightBlobSize(plainLen)
         // ⚠⚠ Same rule as every other upload: a duress session puts nothing on
         // any island, and returns an id so the decoy's own bubble still looks
@@ -10104,10 +10180,12 @@ class Session(context: Context) {
         key: ByteArray,
     ): RcqApi.UploadResponse {
         preflightBlobSize(plainLen)
-        if (app.rcq.android.security.DuressGate.isActive) {
-            return RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), 0)
-        }
-        return groupCtx(groupId).api.uploadBlobStreaming(openSource, plainLen, key, ::reportUpload)
+        ensureSendStillOwned()
+        val up = if (app.rcq.android.security.DuressGate.isActive)
+            RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), 0)
+        else groupCtx(groupId).api.uploadBlobStreaming(openSource, plainLen, key, ::reportUpload)
+        ensureSendStillOwned()
+        return up
     }
 
     /** Refuse an oversize blob here, where nothing has been sent yet, instead
@@ -10140,6 +10218,7 @@ class Session(context: Context) {
         albumId: String? = null,
         replyTo: Reply? = null,
     ) {
+        ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
@@ -10163,6 +10242,7 @@ class Session(context: Context) {
         batch: RcqApi.Batch? = null,
         replyTo: Reply? = null,
     ) {
+        ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
