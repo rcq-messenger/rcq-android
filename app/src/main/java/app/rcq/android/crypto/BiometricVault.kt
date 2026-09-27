@@ -90,7 +90,21 @@ object BiometricVault {
      *  the sensor never lit. */
     fun decryptCipher(context: Context): Decrypt {
         val ivB64 = prefs(context).getString(K_IV, null) ?: return Decrypt.Gone
-        val key = loadKey() ?: run { disable(context); return Decrypt.Gone }
+        // ⚠ Only a key that is really not there, or one the phone invalidated,
+        // is Gone. Any other keystore error (not up yet after a boot, a daemon
+        // restarting, an OEM keystore throwing now and then) is Broken and
+        // keeps everything: calling that Gone deleted the key and told the
+        // person their fingerprints had changed when nothing had (review of
+        // 9295bd6).
+        val key = try {
+            keyStore().getKey(KEY_ALIAS, null) as? SecretKey
+        } catch (e: Exception) {
+            if (generateSequence<Throwable>(e) { it.cause }.any { it is KeyPermanentlyInvalidatedException }) {
+                disable(context)
+                return Decrypt.Gone
+            }
+            return Decrypt.Broken(e)
+        } ?: run { disable(context); return Decrypt.Gone }
         val iv = Base64.decode(ivB64, Base64.NO_WRAP)
         return try {
             Decrypt.Ready(
@@ -153,9 +167,6 @@ object BiometricVault {
 
     private fun keyExists(): Boolean =
         runCatching { keyStore().containsAlias(KEY_ALIAS) }.getOrDefault(false)
-
-    private fun loadKey(): SecretKey? =
-        runCatching { keyStore().getKey(KEY_ALIAS, null) as? SecretKey }.getOrNull()
 
     private fun deleteKey() {
         runCatching { keyStore().deleteEntry(KEY_ALIAS) }

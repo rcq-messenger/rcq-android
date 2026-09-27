@@ -101,6 +101,14 @@ object BiometricGate {
             once(Outcome.NotReady); return
         }
         val can = BiometricManager.from(activity).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        // Every fingerprint removed: the key needed a strong biometric and is
+        // dead with them, so this is the "turn it back on" case, not a sensor
+        // that is merely busy (review of 9295bd6: it said "unavailable right
+        // now" for ever).
+        if (can == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
+            BiometricVault.disable(activity)
+            once(Outcome.KeyReset); return
+        }
         if (can != BiometricManager.BIOMETRIC_SUCCESS) {
             android.util.Log.w("RCQbio", "strong biometric unavailable: $can")
             once(Outcome.Failed(null)); return
