@@ -724,6 +724,25 @@ private fun RcqApp(session: Session) {
         sitesPage = req.page
         showSites = true
     }
+    // A `uin@island` address tapped in a message body (#1053): that person's
+    // card, pinned to the island the address names, exactly what the Add
+    // sheet opens for the same typed string (onOpenPeerInfoAt; our own host
+    // is onOpenPeerInfoHere, #433). The card has the Add / Message buttons.
+    val profilePending by app.rcq.android.ui.ProfileOpen.pending.collectAsState()
+    LaunchedEffect(profilePending, state, locked) {
+        val req = profilePending ?: return@LaunchedEffect
+        if (state !is UiState.Registered || locked) return@LaunchedEffect
+        app.rcq.android.ui.ProfileOpen.pending.value = null
+        if (session.isOwnAddress(req.uin, req.host)) {
+            // Our own address, or our own copy on a backup island: the same
+            // identity, nothing to open or add (the Add sheet says the same).
+            Toast.makeText(context, context.getString(R.string.add_ci_self), Toast.LENGTH_SHORT).show()
+            return@LaunchedEffect
+        }
+        peerInfoUin = req.uin
+        peerInfoHost = req.host
+        peerInfoGuest = null
+    }
     LaunchedEffect(state, locked, notifOpen) {
         val req = notifOpen ?: return@LaunchedEffect
         if (state !is UiState.Registered || locked) return@LaunchedEffect

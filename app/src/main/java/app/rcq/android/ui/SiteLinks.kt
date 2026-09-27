@@ -27,9 +27,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 object SiteLinks {
 
-    /** Mirrors the web `RCQ_RE`: a name, an optional island label, `.rcq`. */
+    /** Mirrors the web `RCQ_RE`: a name, an optional island label, `.rcq`.
+     *
+     *  ⚠ Plus one thing the web does not have yet: `.rcq` must END the name.
+     *  `\b` alone is satisfied by the dot in `is2.rcq.app`, so an island's
+     *  plain host written in a message came out as a link to a site called
+     *  `is2` on the reader's own island (#1053, where the host was the tail of
+     *  `833111503@is2.rcq.app`). A dot followed by more name is more host; a
+     *  dot followed by a space or the end is a sentence's full stop. */
     private val CANDIDATE = Regex(
-        "\\b[a-z0-9][a-z0-9-]{0,31}(?:\\.[a-z0-9][a-z0-9.:-]{0,63})?\\.rcq\\b",
+        "\\b[a-z0-9][a-z0-9-]{0,31}(?:\\.[a-z0-9][a-z0-9.:-]{0,63})?\\.rcq\\b(?!\\.[a-z0-9])",
         RegexOption.IGNORE_CASE,
     )
 

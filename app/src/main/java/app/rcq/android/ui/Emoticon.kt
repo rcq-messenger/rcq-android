@@ -483,8 +483,11 @@ internal fun EmoticonText(
     // Gated on the same links-off switch: a room with links turned off keeps
     // the address literal too, exactly as the web does.
     val hasSite = linksEnabled && SiteLinks.mayContain(body)
+    // A `uin@island` address opens that person's card (#1053). Same switch:
+    // in a links-off room it stays the literal text it was typed as.
+    val hasProfile = linksEnabled && ProfileLinks.mayContain(body)
     // Fast path: a pure-text body with no resolvable mentions and no links.
-    if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention && !hasUrl && !hasSite) {
+    if (tokens.size == 1 && tokens[0] is Emoticons.Token.Text && !hasMention && !hasUrl && !hasSite && !hasProfile) {
         Text(body, color = color, fontSize = fontSize, lineHeight = lineHeight, modifier = modifier, maxLines = maxLines, overflow = overflow, onTextLayout = layoutCb)
         return
     }
@@ -632,6 +635,8 @@ private fun AnnotatedString.Builder.appendWithMentions(
          *  typed (`https://e2ee.rcq/en.html`); this is the address and the
          *  page the reader is asked for. */
         val link: SiteLink? = null,
+        /** For a profile address (#1053): the island [uin] lives on. */
+        val profileHost: String? = null,
     )
     val hits = ArrayList<Hit>()
     if (mentionNick != null) {
@@ -672,6 +677,13 @@ private fun AnnotatedString.Builder.appendWithMentions(
             hits.add(Hit(m.range, site == null, 0, m.value, site = site != null, link = site))
             urls.add(m.range)
         }
+        // `uin@island` before the `.rcq` pass, and claimed from it: the
+        // `is2.rcq` inside `833111503@is2.rcq.app` was drawn as a link to a
+        // site called `is2`, when the whole string is a person (#1053).
+        for (p in ProfileLinks.find(text, urls)) {
+            hits.add(Hit(p.range, false, p.uin, text.substring(p.range), profileHost = p.host))
+            urls.add(p.range)
+        }
         // `.rcq` addresses in what the URLs left over — the web's two-pass
         // order, so the `blog.rcq` inside `https://blog.rcq.app/x` stays part
         // of somebody else's URL and is never taken for a site here.
@@ -686,7 +698,20 @@ private fun AnnotatedString.Builder.appendWithMentions(
     for (h in hits) {
         if (h.range.first < cursor) continue // skip overlaps
         if (h.range.first > cursor) append(text.substring(cursor, h.range.first))
-        if (h.site) {
+        if (h.profileHost != null) {
+            // Drawn as a link, not as a mention: what it shows is the address
+            // itself, and a tap opens the card the Add sheet opens for the
+            // same typed address (RcqApp picks up [ProfileOpen]).
+            val host = h.profileHost
+            withLink(
+                LinkAnnotation.Clickable(
+                    tag = "p${h.uin}@$host",
+                    linkInteractionListener = { ProfileOpen.request(h.uin, host) },
+                ),
+            ) {
+                withStyle(SpanStyle(color = accent, textDecoration = TextDecoration.Underline)) { append(h.display) }
+            }
+        } else if (h.site) {
             // Drawn like a link because it is one, but it never leaves the
             // app: the address is parked for RcqApp, which opens the `.rcq`
             // browser over whatever is on screen with it already loading.
