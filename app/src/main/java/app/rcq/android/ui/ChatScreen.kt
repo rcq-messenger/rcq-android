@@ -593,14 +593,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val mediaProgress by session.mediaProgress.collectAsState()
     val mediaFailed by session.mediaSendFailed.collectAsState()
     var showGroupPicker by remember { mutableStateOf(false) }
-    // Decrypted bytes of a photo opened for fullscreen viewing (tester #10),
-    // plus who sent it: item 9(b) puts the sender's name at the top of the
-    // viewer and one tap on it opens their card, and the bytes alone cannot
-    // say whose they are.
-    var fullscreenImage by remember { mutableStateOf<ViewerMedia?>(null) }
-    /** An album opened full screen: every picture of the batch and where to
-     *  start. The grid only ever draws four, and before this the other six of a
-     *  batch of ten could not be looked at from anywhere (#691/#675/#689). */
+    /** The full-screen media pager: its pages and where to start. From the
+     *  chat that is every picture and clip of the conversation (#1052, see
+     *  [ChatMediaPages]); from "All media", the wall. It used to be the ONE
+     *  album tapped (and a single photo opened a viewer of its own), so a batch
+     *  of four followed by a batch of five was two viewers with a trip back to
+     *  the chat between them. */
     var albumViewer by remember { mutableStateOf<Pair<List<ChatMessage>, Int>?>(null) }
     // ...and of a video. Same shape on purpose: the player reads the DECRYPTED
     // BYTES and never a URL, so a received clip is watched here rather than
@@ -917,8 +915,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     fun viewerSenderName(m: ChatMessage): String? =
         if (m.fromMe || isSelf) null else authorName(m)
 
-    fun viewerMediaOf(m: ChatMessage, bytes: ByteArray): ViewerMedia =
-        ViewerMedia(bytes, viewerSenderUin(m), viewerSenderName(m))
+    /** Open the pager on [m] with every picture and clip of this chat as its
+     *  pages (#1052). A snapshot, like the walls take: a picture arriving
+     *  while you look does not shift the pages under your finger. */
+    fun openMediaAt(m: ChatMessage) {
+        albumViewer = app.rcq.android.data.ChatMediaPages.around(messages, m)
+    }
 
     fun viewerVideoOf(m: ChatMessage, source: VideoSource): ViewerVideo =
         ViewerVideo(source, viewerSenderUin(m), viewerSenderName(m), m.id, m.expiresAt)
@@ -2036,8 +2038,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 onRetry = { scope.launch { runCatching { session.resend(m) } } },
                                 onLongPress = { actionMsg = m },
                                 onOpenGroup = onOpenGroup,
-                                onViewImage = { fullscreenImage = viewerMediaOf(m, it) },
-                                onViewVideo = { fullscreenVideo = viewerVideoOf(m, it) },
+                                // Both into the pager over the whole chat
+                                // (#1052). A clip the bubble has already
+                                // fetched starts playing at once, over its own
+                                // page: closing the player lands there, one
+                                // swipe from the pictures around it.
+                                onViewImage = { openMediaAt(m) },
+                                onViewVideo = { openMediaAt(m); fullscreenVideo = viewerVideoOf(m, it) },
                                 mentionNick = mentionNick,
                                 onMentionClick = onMentionClick,
                                 mentionMatch = mentionMatch,
@@ -2073,11 +2080,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         // extra item rather than a redefinition of the gesture.
                         onLongPress = { held -> actionMsg = held; actionAlbum = row.items },
                         onSenderClick = if (isGroup && !row.items.first().fromMe) ({ row.items.first().senderUin?.let { if (it != ownUin) onOpenPeerInfo(it) } }) else null,
-                        // An album is one sender's batch, so the first item
-                        // names the whole row.
-                        onViewImage = { fullscreenImage = viewerMediaOf(row.items.first(), it) },
-                        onViewVideo = { fullscreenVideo = viewerVideoOf(row.items.first(), it) },
-                        onOpenAlbum = { idx -> albumViewer = row.items to idx },
+                        // The tile opens the pager over the whole chat, not
+                        // over this batch only (#1052).
+                        onOpenAlbum = { idx -> row.items.getOrNull(idx)?.let { openMediaAt(it) } },
                         linksEnabled = rowLinksEnabled(linksOff, group, row.items.first()),
                         replyAuthorOverride = if (row.replyMine) youLabel else null,
                         deletedQuoted = deletedQuoted,
@@ -2520,16 +2525,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 }
             },
             onPlayVideo = { m, src -> fullscreenVideo = viewerVideoOf(m, src) },
+            // The player walks from clip to clip on its own (#1027); the pager
+            // under it follows, so closing the player lands on the clip that
+            // was playing, not on the one it was opened from.
+            follow = fullscreenVideo?.messageId,
             // The media wall goes too when the pager came from it: the message
             // menu is drawn over the thread, and left under the wall it was
             // invisible while still holding Back (found on the emulator).
             //
-            // ⚠⚠ And from the wall the pager's pages are NOT a batch. They are
-            // every picture in the chat, and handing them over as one offered
-            // "delete all N photos" for the whole wall. The batch is the
-            // message's own album, if it has one.
-            onMore = { m, batch ->
-                val wall = showAllMedia
+            // ⚠⚠ The pager's pages are NOT a batch. They are every picture in
+            // the chat (the wall's, and since #1052 the chat's own), and
+            // handing them over as one offered "delete all N photos" for the
+            // whole conversation. The batch is the message's own album, if it
+            // has one.
+            onMore = { m, _ ->
                 albumViewer = null
                 showAllMedia = false
                 actionMsg = m
@@ -2537,47 +2546,23 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                 // the kind, and the same person. An album id is a string the
                 // sender's client chose, so two people's batches could share
                 // one, and "delete all" must never reach somebody else's.
-                actionAlbum = if (!wall) batch
-                              else m.albumId?.let { a ->
-                                  messages.filter {
-                                      it.albumId == a && (it.kind == "photo" || it.kind == "video") &&
-                                          it.fromMe == m.fromMe && it.senderUin == m.senderUin
-                                  }
-                              }
+                actionAlbum = m.albumId?.let { a ->
+                    messages.filter {
+                        it.albumId == a && (it.kind == "photo" || it.kind == "video") &&
+                            it.fromMe == m.fromMe && it.senderUin == m.senderUin
+                    }
+                }
             },
-            // Only when the pager came from the media wall; from an album
-            // bubble the message is already behind the viewer.
-            onShowInChat = if (!showAllMedia) null else ({ m ->
+            // Always, since #1052: a swipe from the tapped picture reaches the
+            // whole chat, and the message behind the viewer is only the one it
+            // was opened on.
+            onShowInChat = { m ->
                 albumViewer = null
                 showAllMedia = false
                 jumpToMessage(m.id)
-            }),
-            isGone = goneFrom(messages),
+            },
+            isGone = remember(messages) { goneFrom(messages) },
             onDismiss = { albumViewer = null },
-        )
-    }
-
-    fullscreenImage?.let { media ->
-        val bytes = media.bytes
-        FullscreenImageViewer(
-            bytes,
-            senderName = media.senderName,
-            onSenderClick = viewerSenderClick(media.senderUin) { fullscreenImage = null },
-            onShare = {
-                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
-                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
-                MediaSaver.share(context, it, name, mime)
-            },
-            onSave = {
-                val (name, mime) = if (it.isGif()) "RCQ_${System.currentTimeMillis()}.gif" to "image/gif"
-                                   else "RCQ_${System.currentTimeMillis()}.jpg" to "image/jpeg"
-                runSave {
-                    val ok = MediaSaver.saveToGallery(context, it, name, mime)
-                    val msg = if (ok) context.getString(R.string.media_saved_to, "Pictures/RCQ") else saveFailToast
-                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                }
-            },
-            onDismiss = { fullscreenImage = null },
         )
     }
 
@@ -5626,7 +5611,8 @@ internal fun CloseWhenClipGone(messageId: String, expiresAt: Long?, rows: List<C
     }
 }
 
-/** The whole album, full screen, one item per page.
+/** Pictures and clips full screen, one per page: every one of the chat's
+ *  (#1052, [app.rcq.android.data.ChatMediaPages]) or of a media wall.
  *
  *  ⚠ The grid draws four tiles however many items the batch holds, and a tap
  *  used to open the ONE file under the finger. So a batch of ten had four you
@@ -5661,10 +5647,15 @@ internal fun AlbumPagerViewer(
     /// pager is the one place every page is reachable, so the menu opens from
     /// here. Null hides the disc, which keeps the clearance arithmetic honest.
     onMore: ((ChatMessage, List<ChatMessage>) -> Unit)? = null,
-    /// "Show in chat" for the page you are on (#1042). Given only where the
-    /// pager is opened AWAY from the message itself (a media wall), since from
-    /// an album bubble the message is already right behind the viewer.
+    /// "Show in chat" for the page you are on (#1042). From a media wall, and
+    /// since #1052 from the chat too: its pages are the whole conversation, so
+    /// the message behind the viewer is only the one it was opened on.
     onShowInChat: ((ChatMessage) -> Unit)? = null,
+    /// A message id to stand on while something drawn OVER the pager moves by
+    /// itself: the video player walking to the next clip (#1027). Without it
+    /// the pager stayed on the clip the player was opened from, and closing
+    /// the player jumped back there.
+    follow: String? = null,
     /// The page's message no longer exists (deleted, or its timer ran out)
     /// since [items] were taken. Such pages are dropped (#1042 review: the
     /// wall's snapshot kept them on screen and saveable), except the one you
@@ -5693,6 +5684,10 @@ internal fun AlbumPagerViewer(
         androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { p ->
             pagesNow.getOrNull(p)?.let { restingOn = it.id }
         }
+    }
+    LaunchedEffect(pager, follow) {
+        val at = follow?.let { id -> pagesNow.indexOfFirst { it.id == id } } ?: -1
+        if (at >= 0 && at != pager.currentPage) pager.scrollToPage(at)
     }
     // One copy of each page's bytes, shared between the page and the
     // save/share buttons. Two produceState()s on the same id used to race
@@ -6082,31 +6077,23 @@ internal fun FullscreenImageViewer(
     }
 }
 
-/** A picture or a clip on its way to a full-screen viewer, plus who sent it.
+/** A clip on its way to the video player, plus who sent it.
  *
- *  The viewers used to be handed a bare [ByteArray], which is why the sender's
- *  name could not be shown above them: decrypted bytes do not know whose they
- *  are, and the roster that could answer lives up in ChatScreen. This is the
- *  three fields the viewers need, built once at the point where the roster is
- *  still in scope (viewerMediaOf). */
-private class ViewerMedia(
-    val bytes: ByteArray,
+ *  The viewers used to be handed bare bytes, which is why the sender's name
+ *  could not be shown above them: decrypted bytes do not know whose they are,
+ *  and the roster that could answer lives up in ChatScreen (viewerVideoOf).
+ *  (Pictures have no such type any more: since #1052 every picture opens in
+ *  the pager, which asks for the name page by page.)
+ *
+ *  ⚠ A [VideoSource] and never a ByteArray, and the difference is the whole of
+ *  #691 item 3: a film is a thing you read a piece at a time, and holding one
+ *  the way a picture is held made a long one fail to open with no message of
+ *  any kind. */
+private class ViewerVideo(
+    val source: VideoSource,
     /** Whose card the name opens; null when there is nobody to open. */
     val senderUin: Int?,
     /** What to print; null means print nothing rather than print "unknown". */
-    val senderName: String?,
-)
-
-/** [ViewerMedia] for a clip.
- *
- *  ⚠ A separate type, and the difference is the whole of #691 item 3: a photo
- *  is bytes, a film is a thing you read a piece at a time. Holding a video the
- *  way [ViewerMedia] holds a picture is what made a long one fail to open with
- *  no message of any kind, so the video viewer is handed a [VideoSource] and
- *  never a ByteArray. */
-private class ViewerVideo(
-    val source: VideoSource,
-    val senderUin: Int?,
     val senderName: String?,
     /** The message this clip came from, so the viewer can find the next one in
      *  the conversation without the caller holding a second list (#1027). */
