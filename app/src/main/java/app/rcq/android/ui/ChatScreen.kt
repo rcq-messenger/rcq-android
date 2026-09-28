@@ -140,6 +140,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.State
@@ -5745,6 +5746,15 @@ internal fun AlbumPagerViewer(
     // here for the dialog's life after one play; the session's own cache
     // covers a second play.
     val loaded = remember(items) { mutableStateMapOf<String, ByteArray>() }
+    // ⚠ Spoilers stay covered here too (#1052 review). Since the chat opens this
+    // pager on every tap, a swipe from an ordinary photo used to land on the
+    // next one's spoiler at full size, the warning the sender set skipped on the
+    // commonest path. A page is shown only once it has been uncovered: the one
+    // that was tapped (its bubble asks for the reveal before it opens), or any
+    // page the viewer taps here.
+    val revealed = remember(items) {
+        mutableStateListOf(items[startIndex.coerceIn(0, items.size - 1)].id)
+    }
     // ⚠ A WINDOW, not everything seen (#1042 review). The pages used to be one
     // album of a few pictures; since the media walls open this pager with every
     // picture in the chat, a long swipe kept every one it passed on the heap
@@ -5845,7 +5855,30 @@ internal fun AlbumPagerViewer(
                     }
                     var fetching by remember(m.id) { mutableStateOf(false) }
                     var playFailed by remember(m.id) { mutableStateOf(false) }
-                    Box(
+                    val covered = m.spoiler && m.id !in revealed
+                    val coveredPoster = remember(m.id, covered) {
+                        if (!covered) null else m.thumbB64?.takeIf { it.isNotEmpty() }?.let {
+                            runCatching {
+                                val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP)
+                                BitmapFactory.decodeByteArray(b, 0, b.size)?.let { bmp -> blurForSpoiler(bmp).asImageBitmap() }
+                            }.getOrNull()
+                        }
+                    }
+                    if (covered) {
+                        Box(
+                            Modifier.fillMaxSize().clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { revealed.add(m.id) },
+                            ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            coveredPoster?.let {
+                                Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                            }
+                            SpoilerOverlay()
+                        }
+                    } else Box(
                         // Item 9(b): a tap TOGGLES the controls, it does not
                         // close the album. Closing is the X and the swipe down.
                         // A tap that threw the picture away was the reason Save
@@ -5900,7 +5933,29 @@ internal fun AlbumPagerViewer(
                         if (value == null) { tried = false; value = bytesOf(m); tried = true }
                     }
                     val zoom = rememberViewerZoom(m.id)
-                    Box(
+                    val covered = m.spoiler && m.id !in revealed
+                    val coveredCopy by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, bytes, covered) {
+                        val b = bytes
+                        value = if (b == null || !covered) null else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            runCatching { decodeSampled(b, 360)?.let { blurForSpoiler(it).asImageBitmap() } }.getOrNull()
+                        }
+                    }
+                    if (covered) {
+                        Box(
+                            Modifier.fillMaxSize().clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { revealed.add(m.id) },
+                            ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (bytes == null) CircularProgressIndicator(color = RcqTheme.colors.accent)
+                            coveredCopy?.let {
+                                Image(bitmap = it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                            }
+                            if (bytes != null) SpoilerOverlay()
+                        }
+                    } else Box(
                         // Toggles the controls; see the video page above. The
                         // picture itself carries its own tap (a double tap has
                         // to reach it), so this one only ever fires on a page
