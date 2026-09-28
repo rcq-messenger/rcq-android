@@ -178,7 +178,8 @@ class RcqApi(
         // so without this any duress-view screen that fetches would answer with
         // — or write to — the real account. See [DuressGate].
         app.rcq.android.security.DuressGate.check()
-        if (isPrimary || !autoEngage) return call(http())
+        if (isPrimary) return call(http()).also(::noteSessionRefusal)
+        if (!autoEngage) return call(http())
         // ⚠ Not through the memo either: the entry outlives the refusal, so a
         // host found blocked in the morning would keep forcing the tunnel on
         // for a certificate the person has yet to judge — and keep it on after
@@ -206,6 +207,28 @@ class RcqApi(
             blockedHosts.add(host)
             call(http()).also { SingBoxTransport.noteHostReachable(host) }
         }
+    }
+
+    /** Told when the island refuses the session token itself (a 401 whose
+     *  detail names the token, not the request). Set by Session on its own
+     *  island's client only.
+     *
+     *  ⚠ The socket was meant to be the one place this was noticed (close
+     *  4401, then the /auth/refresh probe), but the island refuses a dead
+     *  token BEFORE accepting the socket, so what arrives is a bare HTTP 403
+     *  with no code in it. A token killed by a key change on another device,
+     *  a move, or the conversion of a copy therefore sat on "connecting" for
+     *  ever, with every REST call answering 401 "stale token" and nothing
+     *  acting on it. */
+    @Volatile
+    var onSessionRefused: (() -> Unit)? = null
+
+    private fun noteSessionRefusal(resp: okhttp3.Response) {
+        if (resp.code != 401) return
+        val hook = onSessionRefused ?: return
+        if (resp.request.header("Authorization") == null) return
+        val detail = runCatching { resp.peekBody(512).string() }.getOrNull().orEmpty()
+        if (SESSION_REFUSALS.any { detail.contains(it) }) hook()
     }
 
     /** Whose island this instance is talking to, which decides whether an
@@ -2670,6 +2693,10 @@ private class SealingBody(
     }
 
     companion object {
+    /** The 401 details `authorize_session` gives for a token that is no
+     *  longer good. Anything else on a 401 is about the request. */
+    private val SESSION_REFUSALS = listOf("stale token", "invalid token", "device revoked")
+
     /** `/server/info` for an island we are NOT on, by host. Used before joining
      *  one: the name and rules belong on the confirm, which is the only moment
      *  anybody reads them. Unauthenticated by design — this is the island's

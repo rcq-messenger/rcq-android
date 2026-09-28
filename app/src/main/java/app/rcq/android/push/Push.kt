@@ -1436,6 +1436,7 @@ object Push {
             // the message text on an older backend.
             quiet -> ctx.getString(R.string.push_new_message)
             chatLocked -> ctx.getString(if (isGroup) R.string.push_new_group_message else R.string.push_new_message)
+            opened?.contactRequest == true -> opened.preview.orEmpty()
             opened?.preview == null || opened.quarantined -> str("body") ?: ctx.getString(
                 if (isGroup) R.string.push_new_group_message else R.string.push_new_message,
             )

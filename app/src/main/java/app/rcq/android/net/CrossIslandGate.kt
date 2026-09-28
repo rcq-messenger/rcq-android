@@ -207,5 +207,17 @@ object CrossIslandGate {
         else -> senderHost
     }
 
+    /**
+     * Whether the removed list drops a row (#1055). The list is bare numbers
+     * and speaks for our own island only, where a removal is mutual: a sender
+     * from another island is left to the gate above, which holds a stranger's
+     * row as a request. And it stops speaking the moment the sender is in the
+     * roster again, however they got back.
+     */
+    fun removedDrops(removed: Boolean, senderHost: String?, ownHosts: Collection<String>, inRoster: Boolean): Boolean {
+        if (!removed || inRoster) return false
+        return senderHost.isNullOrBlank() || ownHosts.any { it.equals(senderHost, ignoreCase = true) }
+    }
+
     private const val ED25519_PUB_LEN = 32
 }

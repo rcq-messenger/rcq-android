@@ -52,6 +52,10 @@ internal object PushEnvelope {
          *  stay anonymous and must not offer to open a chat that would send
          *  the reply to the wrong island. */
         val quarantined: Boolean,
+        /** A §5f request to connect. Its line is ours ("Wants to add you"),
+         *  so it may stand in the banner even for a quarantined sender, where
+         *  a stranger's own words may not. */
+        val contactRequest: Boolean = false,
     )
 
     /**
@@ -98,6 +102,7 @@ internal object PushEnvelope {
             preview = preview,
             mentionsMe = preview != null && mentionsMe(preview, me, store.nickname),
             quarantined = quarantined,
+            contactRequest = preview != null && dec.envelope is Envelope.ContactRequest,
         )
     }
 
@@ -205,6 +210,12 @@ internal object PushEnvelope {
         is Envelope.Poll -> "📊 " + (env.question.takeIf { it.isNotBlank() } ?: ctx.getString(R.string.kind_message))
         is Envelope.ScreenshotTaken -> "📸 " + ctx.getString(R.string.push_kind_screenshot)
         is Envelope.RelayShare -> "🛡️ " + ctx.getString(R.string.push_kind_relay_share)
+        // A request from another island used to wake nobody (#1055, "the
+        // person I added gets no notification at all"): it opened as control
+        // traffic. Only the ask itself; an accept or a decline is an answer to
+        // something we started and changes a row, not a reason to wake.
+        is Envelope.ContactRequest ->
+            if (env.act == Envelope.ACT_REQUEST) ctx.getString(R.string.ci_contact_request) else null
         // Control envelopes: receipts, reactions, edits, deletes, presence
         // pings, secure-screen sync, call signaling, federation records and
         // sender-key admin. None of them is a new message, and waking the user

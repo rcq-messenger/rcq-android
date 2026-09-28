@@ -78,6 +78,7 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
     private var onEvent: (type: String, obj: JsonObject) -> Unit = { _, _ -> }
     private var onState: (Boolean) -> Unit = {}
     private var onAuthRejected: () -> Unit = {}
+    private var onHandshakeRefused: () -> Unit = {}
 
     fun connect(
         uin: Int,
@@ -85,12 +86,18 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
         onEvent: (type: String, obj: JsonObject) -> Unit,
         onState: (connected: Boolean) -> Unit = {},
         onAuthRejected: () -> Unit = {},
+        /** The island answered the upgrade with 401/403. That is how a dead
+         *  token arrives (the island refuses it before accepting, so no 4401
+         *  close ever reaches us), but the connect ceiling says 403 the same
+         *  way, so the caller checks which it is rather than assuming. */
+        onHandshakeRefused: () -> Unit = {},
     ) {
         this.uin = uin
         this.token = token
         this.onEvent = onEvent
         this.onState = onState
         this.onAuthRejected = onAuthRejected
+        this.onHandshakeRefused = onHandshakeRefused
         shouldStayConnected = true
         open()
     }
@@ -192,6 +199,7 @@ class RcqSocket(private val baseWsUrl: String = DEFAULT_WS_URL) {
                     android.util.Log.w("RCQsocket", "trust refused for $islandHostPort — reconnects stop until the person decides")
                     return
                 }
+                if (response?.code == 401 || response?.code == 403) onHandshakeRefused()
                 scheduleReconnect()
             }
 

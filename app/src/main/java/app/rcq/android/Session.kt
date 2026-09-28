@@ -271,6 +271,7 @@ class Session(context: Context) {
     private fun newApi(): RcqApi =
         RcqApi("https://${apiHost()}", isPrimary = true, anonKeyLookup = { this@Session.anonKeyLookup }).apply {
             if (store.isRegistered) setToken(store.token)
+            onSessionRefused = { this@Session.onSessionTokenRefused() }
         }
     private fun newSocket(): RcqSocket = RcqSocket("wss://${apiHost()}")
     // Opened lazily by [bindDb] (in [start]) so the message DB is never opened
@@ -2368,6 +2369,7 @@ class Session(context: Context) {
         // FIRST, before a single field moves: everything already in flight is
         // now working for the previous account. See [accountEpoch].
         accountEpoch++
+        pendingRetractions.clear()
         // And the loops that WOULD keep working for it: the epoch stops them
         // writing, the cancel stops them running. See [accountJob].
         retireAccountJob()
@@ -3262,6 +3264,7 @@ class Session(context: Context) {
                 }
             },
             onAuthRejected = { if (owned.stillOwns(dialled)) onSocketAuthRejected() },
+            onHandshakeRefused = { if (owned.stillOwns(dialled)) onSocketHandshakeRefused() },
         )
         syncGraph()
     }
@@ -4777,8 +4780,12 @@ class Session(context: Context) {
      *  no roster row to DELETE) — drop it there, or refreshContacts would
      *  merge it right back (beta report #207). */
     suspend fun removeContact(uin: Int, alsoDeleteMessages: Boolean = false) {
-        LocalStores.addRemoved(uin)
         val ci = CrossIslandStore.findByUin(uin)
+        // Only for our own island (#1055): the list is bare numbers, and a
+        // foreign contact's number named whoever holds it here too. Once out
+        // of CrossIslandStore they are a stranger to the cross-island gate,
+        // which holds what they write as a request.
+        if (ci == null) LocalStores.addRemoved(uin)
         if (ci != null) {
             CrossIslandStore.remove(ci.uin, ci.host)
             // ⚠ The refreshContacts() at the end of this function cannot do it:
@@ -7645,6 +7652,44 @@ class Session(context: Context) {
      *  expired token, revoked device, burned account — and only a probe can
      *  tell them apart. Throttled: the socket keeps redialing on its backoff
      *  and every redial would land here. */
+    /** The island refused our token on a REST call (see
+     *  [RcqApi.onSessionRefused]). The same probe as a 4401, minus the wipe:
+     *  it takes a fresh token, follows a move, or says the keys changed on
+     *  another device, and on any other answer leaves everything as it is.
+     *
+     *  ⚠⚠ Why not the wipe. The 4401 that was meant to start the probe never
+     *  reaches the client (the island refuses the handshake before accepting
+     *  it), so `identity_not_found` → erase has never run in the field. A
+     *  401 is common and was never meant to carry that decision, so it does
+     *  not start acting on it here. */
+    private fun onSessionTokenRefused() {
+        if (duressViewUp || burningSelf) return
+        // The island already gave its final word for this number (keys changed
+        // elsewhere, a move it will not resolve, the row gone): asking again
+        // every minute changes nothing and costs two requests each time.
+        if (tokenProbeSettled != null && tokenProbeSettled == store.uin) return
+        val now = System.currentTimeMillis()
+        if (now - lastBurnProbeAt < BURN_PROBE_THROTTLE_MS) return
+        lastBurnProbeAt = now
+        scope.launch { runCatching { probeBurnedAccount(allowErase = false) } }
+    }
+
+    /** The socket handshake was refused with 401/403. A dead token and the
+     *  connect ceiling look the same there, so one authorised REST call is
+     *  asked instead: a dead token answers it with the 401 that
+     *  [onSessionTokenRefused] acts on, and a ceiling answers it normally. */
+    @Volatile private var lastHandshakeCheckAt = 0L
+    /** The number whose token refusal ended in an answer a retry will not
+     *  change. In memory only: a restart asks once more. */
+    @Volatile private var tokenProbeSettled: Int? = null
+    private fun onSocketHandshakeRefused() {
+        if (duressViewUp || burningSelf) return
+        val now = System.currentTimeMillis()
+        if (now - lastHandshakeCheckAt < BURN_PROBE_THROTTLE_MS) return
+        lastHandshakeCheckAt = now
+        scope.launch { runCatching { api.keysStatus() } }
+    }
+
     private fun onSocketAuthRejected() {
         // Never from a duress view: `store` is the real account's and a probe
         // outcome must not tear anything down while a coercer is watching.
@@ -7674,7 +7719,7 @@ class Session(context: Context) {
      *  arrives here looking exactly like a burn. [movedAwayFrom] is how the two
      *  are told apart, and it is set only when the island itself said the
      *  account moved. */
-    private suspend fun probeBurnedAccount() {
+    private suspend fun probeBurnedAccount(allowErase: Boolean = true) {
         val me = store.uin ?: return
         val fresh = try {
             refreshForSelf(me)
@@ -7703,14 +7748,21 @@ class Session(context: Context) {
             val outcome = app.rcq.android.net.AuthRefusal.probeOutcome(e.message, movedAwayFrom == me, store.hasPendingRotation)
             when (outcome) {
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.MOVE_REFUSED -> {
+                    tokenProbeSettled = me
                     android.util.Log.w("RCQmove", "#$me is vacant, shared or moved - refusing to guess, keeping local data")
                     announceMoveRefused(me, null)
                 }
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.ROTATED_ELSEWHERE -> {
+                    tokenProbeSettled = me
                     android.util.Log.w("RCQburn", "#$me keys were changed on another device - keeping local data")
                     announceRotatedElsewhere(me)
                 }
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.ERASE -> {
+                    if (!allowErase) {
+                        tokenProbeSettled = me
+                        android.util.Log.w("RCQburn", "island no longer knows #$me - a token refusal never wipes, keeping local data")
+                        return
+                    }
                     android.util.Log.w("RCQburn", "island no longer knows #$me - wiping the local copy (#655)")
                     val next = eraseActiveAccountLocally(AccountManager.activeId.value)
                     _accountLost.tryEmit(AccountLost(me, next))
@@ -8753,6 +8805,7 @@ class Session(context: Context) {
      *  envelope UUID is stable, so the recipient dedups anything that already
      *  half-landed. Sequential so a burst of stuck sends doesn't fan out at once. */
     private fun retryFailedSends() {
+        retryPendingRetractions()
         scope.launch {
             // Group rows too. This pass read only `_messages`, so a failed
             // GROUP send was the one thing a reconnect did not recover - it
@@ -8921,7 +8974,13 @@ class Session(context: Context) {
 
     /** Retry a previously-failed outgoing message (same UUID, so no dup). */
     suspend fun resend(msg: ChatMessage) {
-        if (!msg.fromMe || msg.state != DeliveryState.FAILED) return
+        // The LIVE row, not the copy handed in. The auto-retry pass walks a
+        // list captured when it started and takes seconds per row, so a row
+        // deleted meanwhile (or delivered by an earlier attempt) used to go out
+        // anyway: a message the sender had deleted, reaching the recipient and
+        // nobody else.
+        val live = liveRow(msg) ?: return
+        if (!live.fromMe || live.state != DeliveryState.FAILED) return
         val env = resendEnvelope(msg)
         if (msg.groupId != null) {
             updateGroupMsgState(msg.groupId, msg.id, DeliveryState.SENDING)
@@ -9404,6 +9463,30 @@ class Session(context: Context) {
         }
     }
 
+    /** [m] as it is now in the thread it lives in, or null once it is gone. */
+    private fun liveRow(m: ChatMessage): ChatMessage? {
+        val gid = m.groupId
+        val list = if (gid != null) _groupMessages.value[gid] else _messages.value[m.peerUin]
+        return list?.firstOrNull { it.id == m.id }
+    }
+
+    /** Retractions of rows deleted while still FAILED, still to be sent
+     *  (see [pushRetraction]). Tried again when the connection comes back.
+     *  In memory and tied to the account that made them. */
+    private data class PendingRetraction(val target: ChatMessage, val gid: Int?, val epoch: Int)
+    private val pendingRetractions = java.util.concurrent.ConcurrentHashMap<String, PendingRetraction>()
+
+    private fun retryPendingRetractions() {
+        if (pendingRetractions.isEmpty()) return
+        scope.launch {
+            val ep = epochNow()
+            for ((id, p) in pendingRetractions.entries.toList()) {
+                if (p.epoch != ep) { pendingRetractions.remove(id); continue }
+                if (sendRetraction(p.target, Envelope.delete(p.target.id), p.gid)) pendingRetractions.remove(id)
+            }
+        }
+    }
+
     /** Retract [target] for everyone (iOS delete-for-everyone). Allowed for the
      *  author, OR (in a group) a moderator: the owner, an admin, or a member
      *  the owner granted the `delete` cap (founder batch 21.08, item 3; web
@@ -9433,6 +9516,7 @@ class Session(context: Context) {
             if (!canModerate) return
         }
         val env = Envelope.delete(target.id)
+        val wasFailed = liveRow(target)?.let { it.fromMe && it.state == DeliveryState.FAILED } ?: false
         // Locally FIRST, and the fan-out on OUR scope, not the caller's (#521,
         // "в группе rcq beta пытаюсь удалить своё сообщение у всех — не
         // удаляет"). Both halves of that report come from the same ordering:
@@ -9447,7 +9531,21 @@ class Session(context: Context) {
         //    was ever sent AND the message came back. Nothing in the retraction
         //    belongs to a screen that is already gone.
         deleteLocal(target)
-        scope.launch { pushRetraction(target, env, gid) }
+        scope.launch { pushRetraction(target, env, gid, wasFailed) }
+    }
+
+    /** Fan the retraction out and mirror it to my own devices. True when it
+     *  left this device. */
+    private suspend fun sendRetraction(target: ChatMessage, env: Envelope, gid: Int?): Boolean {
+        val sent = runCatching {
+            if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
+        }.getOrDefault(false)
+        // Mirror the retraction to our OWN other devices (the fan-out
+        // skips self); foreign groups excluded, same guard as sendEdit.
+        if (sent && (gid == null || gid >= 0)) {
+            sendMessageCarbon(env, toPeer = if (gid == null) target.peerUin else null, toGroup = gid)
+        }
+        return sent
     }
 
     /** The wire half of a retraction: fan out, mirror to my own devices, and
@@ -9457,23 +9555,21 @@ class Session(context: Context) {
      *  times 1184 seals and ~13 MB racing each other up one socket; sequential
      *  is slower to finish and the only version that does not melt the link.
      *  Callers own the scope and the local delete, exactly as before. */
-    private suspend fun pushRetraction(target: ChatMessage, env: Envelope, gid: Int?) {
+    private suspend fun pushRetraction(target: ChatMessage, env: Envelope, gid: Int?, wasFailed: Boolean) {
         run {
-            val sent = runCatching {
-                if (gid != null) fanOutControl(gid, env) else sendControl(target.peerUin, env)
-            }.getOrDefault(false)
-            // Mirror the retraction to our OWN other devices (the fan-out
-            // skips self); foreign groups excluded, same guard as sendEdit.
-            if (sent && (gid == null || gid >= 0)) {
-                sendMessageCarbon(env, toPeer = if (gid == null) target.peerUin else null, toGroup = gid)
+            val sent = sendRetraction(target, env, gid)
+            // A row still marked FAILED when it was deleted is not put back.
+            // Restoring it made a red "tap to retry" bubble impossible to
+            // delete while offline: it vanished, the retraction failed for the
+            // same reason the send did, and it came straight back. But FAILED
+            // does not prove nobody got it (one of the recipient's devices may
+            // have, or the island took it and the answer was lost), so the
+            // retraction is kept and sent again when the connection is back.
+            if (!sent && wasFailed) {
+                pendingRetractions[target.id] = PendingRetraction(target, gid, epochNow())
+                return
             }
-            // A row still marked FAILED never reached anyone, so there is no
-            // other screen to be out of step with. Restoring it made a red
-            // "tap to retry" bubble impossible to delete while offline: it
-            // vanished, the retraction failed for the same reason the send
-            // did, and it came straight back. The retraction above is still
-            // worth trying in case an earlier attempt half-landed.
-            if (!sent && !(target.fromMe && target.state == DeliveryState.FAILED)) {
+            if (!sent) {
                 // Nothing left the device after the retries, so the message is
                 // still on everyone else's screen and only gone from mine. Put
                 // it back rather than leave the two out of step: seeing it
@@ -9510,8 +9606,9 @@ class Session(context: Context) {
             }
             // Local first, all of it: the point of the item is that the batch
             // goes in one action.
+            val wasFailed = items.associate { m -> m.id to (liveRow(m)?.let { it.fromMe && it.state == DeliveryState.FAILED } ?: false) }
             items.forEach { deleteLocal(it) }
-            items.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId) }
+            items.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId, wasFailed[m.id] == true) }
         }
     }
 
@@ -10345,7 +10442,7 @@ class Session(context: Context) {
             // the code that CLEARS the removed flag skips our own uin, so one
             // stray entry would silently kill every self-carbon forever.
             if (dec.senderUin != store.uin &&
-                (LocalStores.isRemoved(dec.senderUin) || LocalStores.isBlocked(dec.senderUin))
+                (LocalStores.isBlocked(dec.senderUin) || droppedAsRemoved(dec))
             ) return@runCatching
             // §5d cross-island call signaling rides sealed envelopes (kind
             // "call") — route to the call state machine, never the message
@@ -11251,6 +11348,8 @@ class Session(context: Context) {
 
     suspend fun addContact(uin: Int) {
         api.requestContact(uin)
+        // Asking for them again is the end of having removed them (#1055).
+        LocalStores.clearRemoved(uin)
         runCatching { refreshContacts() }
         runCatching { refreshPending() }
         runCatching { refreshOutgoing() }
@@ -11762,6 +11861,34 @@ class Session(context: Context) {
     private fun isVerifiedCrossIslandContact(uin: Int, host: String, spub: ByteArray): Boolean {
         val c = CrossIslandStore.get(uin, host) ?: return false
         return CrossIslandGate.signingKeyMatches(c.signingKey, spub)
+    }
+
+    /** A row from somebody this account removed, and who is not a contact
+     *  again since (#1055).
+     *
+     *  ⚠⚠ The removed list is bare numbers and nothing ever took a number off
+     *  it: the one call that does sits further down [ingest], behind this very
+     *  drop. So a person removed once was dropped for good, silently and
+     *  AFTER the ack, whatever happened next: added back from either side, a
+     *  new request, a request accepted. Their contact request never showed,
+     *  their messages woke the phone ("New message") and were never filed.
+     *  vss hit it across islands with 134@api, a number one of his accounts
+     *  had removed at some point.
+     *
+     *  Now the list only speaks for OUR island, where a removal is mutual and
+     *  the list is what keeps it that way, and only while the sender is not in
+     *  the roster again. Another island's sender goes through the cross-island
+     *  gate like any stranger: held as a request, which is where a removed
+     *  person asking again belongs (a block is what drops them). */
+    private fun droppedAsRemoved(dec: SealedSender.Decrypted): Boolean {
+        val uin = dec.senderUin
+        if (!LocalStores.isRemoved(uin)) return false
+        return CrossIslandGate.removedDrops(
+            removed = true,
+            senderHost = dec.senderHost,
+            ownHosts = setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() },
+            inRoster = _contacts.value.any { it.uin == uin && it.host == null },
+        )
     }
 
     private fun ciContactMatch(uin: Int, host: String, spub: ByteArray): CrossIslandGate.ContactMatch {
@@ -12808,6 +12935,9 @@ class Session(context: Context) {
         // account B's screen and account B's prefs slot, where they survive a
         // restart. Stop before any of it.
         if (!stillOn(ep)) return@withLock
+        // Back in the roster, so whatever removed them is over, however they
+        // got back: our request, theirs accepted, from another device (#1055).
+        fetched.forEach { LocalStores.clearRemoved(it.uin) }
         _contacts.value = fetched.map {
             Contact(
                 uin = it.uin,

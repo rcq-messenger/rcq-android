@@ -152,4 +152,16 @@ class CrossIslandGateTest {
         assertNull(CrossIslandGate.attributedHost(null, null, own))
         assertEquals("home.example", CrossIslandGate.attributedHost("home.example", null, own))
     }
+
+    @Test fun the_removed_list_speaks_for_our_island_and_only_until_they_are_back() {
+        val own = listOf("home.example", "cdn.rcq.app")
+        // Removed here and not back: dropped, whether the row names our island or nothing.
+        assertTrue(CrossIslandGate.removedDrops(true, null, own, inRoster = false))
+        assertTrue(CrossIslandGate.removedDrops(true, "HOME.example", own, inRoster = false))
+        // #1055: back in the roster, the list no longer speaks.
+        assertFalse(CrossIslandGate.removedDrops(true, null, own, inRoster = true))
+        // #1055: another island's sender under the same bare number goes to the gate.
+        assertFalse(CrossIslandGate.removedDrops(true, "api.rcq.app", own, inRoster = false))
+        assertFalse(CrossIslandGate.removedDrops(false, null, own, inRoster = false))
+    }
 }
