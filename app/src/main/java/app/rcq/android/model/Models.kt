@@ -40,6 +40,9 @@ data class OutgoingRequest(
     val toUin: Int,
     val toNickname: String,
     val state: String,   // "pending" | "declined"
+    /** `uin@host` when [toUin] is somebody's backup copy: the request will
+     *  never be read, and the person lives there (#1054). */
+    val home: String? = null,
 )
 
 /** Delivery state of an outgoing message. Incoming messages are always

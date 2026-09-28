@@ -75,6 +75,7 @@
     <string name="share_to_unreadable">Não foi possível ler o que foi compartilhado. Tente enviar de novo pelo outro app.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d arquivo</item><item quantity="other">%1$d arquivos</item></plurals>
     <string name="outgoing_state_pending">Aguardando</string>
+    <string name="outgoing_state_backup">Cópia de reserva, não vai chegar. Endereço real: %1$s</string>
     <string name="outgoing_state_declined">Recusada</string>
     <string name="outgoing_cancel">Retirar</string>
     <string name="outgoing_dismiss">Descartar</string>
@@ -839,6 +840,9 @@
     <string name="ci_number_too_short">Este número não pode existir: os números têm de 3 a 9 dígitos.</string>
     <string name="ci_no_such_number">Ninguém tem este número ainda.</string>
     <string name="ci_request_failed">Não foi possível enviar a solicitação.</string>
+    <string name="ci_backup_copy_of">Cópia de reserva da conta %1$s</string>
+    <string name="ci_backup_add_home">Adicionar %1$s</string>
+    <string name="ci_backup_key_mismatch">Não adicionado: a conta nesse endereço tem uma chave diferente desta cópia de reserva, então a cópia pode não ser dela.</string>
     <string name="ci_contact_request">Quer adicionar você</string>
     <string name="ci_key_changed">A chave de assinatura não corresponde ao contato salvo. Pode ser outra pessoa.</string>
     <string name="ci_request_not_delivered">Adicionado, mas a solicitação não chegou.</string>

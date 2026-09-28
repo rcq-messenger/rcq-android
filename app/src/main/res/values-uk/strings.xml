@@ -75,6 +75,7 @@
     <string name="share_to_unreadable">Не вдалося прочитати те, чим поділилися. Спробуй надіслати це з іншого застосунку ще раз.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d файл</item><item quantity="few">%1$d файли</item><item quantity="many">%1$d файлів</item><item quantity="other">%1$d файла</item></plurals>
     <string name="outgoing_state_pending">Очікує</string>
+    <string name="outgoing_state_backup">Резервна копія, запит не дійде. Їхня адреса: %1$s</string>
     <string name="outgoing_state_declined">Відхилено</string>
     <string name="outgoing_cancel">Скасувати</string>
     <string name="outgoing_dismiss">Прибрати</string>
@@ -853,6 +854,9 @@
     <string name="ci_number_too_short">Такого номера не буває: номери від 3 до 9 цифр.</string>
     <string name="ci_no_such_number">Цього номера ще ніхто не тримає.</string>
     <string name="ci_request_failed">Не вдалося надіслати запит.</string>
+    <string name="ci_backup_copy_of">Резервна копія акаунта %1$s</string>
+    <string name="ci_backup_add_home">Додати %1$s</string>
+    <string name="ci_backup_key_mismatch">Не додано: акаунт за цією адресою має інший ключ, ніж резервна копія, тож копія може бути не його.</string>
     <string name="ci_contact_request">Хоче додати вас</string>
     <string name="ci_key_changed">Ключ підпису не збігається зі збереженим контактом. Можливо, це інша людина.</string>
     <string name="ci_request_not_delivered">Додано, але запит до нього не дійшов.</string>

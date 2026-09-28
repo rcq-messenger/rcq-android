@@ -75,6 +75,7 @@
     <string name="share_to_unreadable">无法读取分享过来的内容。请在那个应用里重新发送一次。</string>
     <plurals name="share_to_files"><item quantity="other">%1$d 个文件</item></plurals>
     <string name="outgoing_state_pending">等待中</string>
+    <string name="outgoing_state_backup">备份副本，请求不会送达。对方的地址：%1$s</string>
     <string name="outgoing_state_declined">已拒绝</string>
     <string name="outgoing_cancel">取消</string>
     <string name="outgoing_dismiss">移除</string>
@@ -853,6 +854,9 @@
     <string name="ci_number_too_short">不存在这样的号码：号码为 3 到 9 位。</string>
     <string name="ci_no_such_number">还没有人使用这个号码。</string>
     <string name="ci_request_failed">请求发送失败。</string>
+    <string name="ci_backup_copy_of">账号 %1$s 的备份副本</string>
+    <string name="ci_backup_add_home">添加 %1$s</string>
+    <string name="ci_backup_key_mismatch">未添加：那个地址上的账号与这个备份副本的密钥不同，这个副本可能不属于对方。</string>
     <string name="ci_contact_request">想添加你为联系人</string>
     <string name="ci_key_changed">签名密钥与已保存的联系人不一致，可能是其他人。</string>
     <string name="ci_request_not_delivered">已添加，但请求未送达对方。</string>

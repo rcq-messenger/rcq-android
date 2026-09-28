@@ -75,6 +75,7 @@
     <string name="share_to_unreadable">No se pudo leer lo que compartiste. Vuelve a enviarlo desde la otra app.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d archivo</item><item quantity="other">%1$d archivos</item></plurals>
     <string name="outgoing_state_pending">Pendiente</string>
+    <string name="outgoing_state_backup">Copia de respaldo, no llegará. Su dirección: %1$s</string>
     <string name="outgoing_state_declined">Rechazada</string>
     <string name="outgoing_cancel">Cancelar</string>
     <string name="outgoing_dismiss">Descartar</string>
@@ -839,6 +840,9 @@
     <string name="ci_number_too_short">Este número no puede existir: los números tienen de 3 a 9 dígitos.</string>
     <string name="ci_no_such_number">Todavía nadie tiene este número.</string>
     <string name="ci_request_failed">No se pudo enviar la solicitud.</string>
+    <string name="ci_backup_copy_of">Copia de respaldo de la cuenta %1$s</string>
+    <string name="ci_backup_add_home">Añadir %1$s</string>
+    <string name="ci_backup_key_mismatch">No añadido: la cuenta en esa dirección tiene una clave distinta a la de esta copia de respaldo, así que la copia puede no ser suya.</string>
     <string name="ci_contact_request">Quiere añadirte</string>
     <string name="ci_key_changed">La clave de firma no coincide con el contacto guardado. Puede ser otra persona.</string>
     <string name="ci_request_not_delivered">Añadido, pero la solicitud no llegó.</string>

@@ -86,6 +86,7 @@
     <string name="share_to_unreadable">Couldn\'t read what was shared. Try sending it from the other app again.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d file</item><item quantity="other">%1$d files</item></plurals>
     <string name="outgoing_state_pending">Pending</string>
+    <string name="outgoing_state_backup">Backup copy, this will not arrive. Their address: %1$s</string>
     <string name="outgoing_state_declined">Declined</string>
     <string name="outgoing_cancel">Cancel</string>
     <string name="outgoing_dismiss">Dismiss</string>
@@ -885,6 +886,9 @@
     <string name="ci_number_too_short">This number is too short to exist: numbers are 3 to 9 digits.</string>
     <string name="ci_no_such_number">Nobody holds this number yet.</string>
     <string name="ci_request_failed">Could not send the request.</string>
+    <string name="ci_backup_copy_of">Backup copy of account %1$s</string>
+    <string name="ci_backup_add_home">Add %1$s</string>
+    <string name="ci_backup_key_mismatch">Not added: the account at that address has a different key than this backup copy, so the copy may not be theirs.</string>
     <string name="ci_contact_request">Wants to add you</string>
     <string name="ci_key_changed">The signing key does not match the saved contact. It may be someone else.</string>
     <string name="ci_request_not_delivered">Added, but the request did not reach them.</string>

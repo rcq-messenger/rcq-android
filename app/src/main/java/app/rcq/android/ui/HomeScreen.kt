@@ -3204,7 +3204,12 @@ private fun AddContactDialog(
                                 u.uin in sentTo -> stringResource(R.string.add_request_sent)
                                 else -> ""
                             }
-                            val sub = listOf(name, realName, state)
+                            // Somebody's backup mailbox (#1054): say whose, so
+                            // the profile it opens is not read as a person here.
+                            val backupOf = u.home?.address()
+                                ?.let { (hu, hh) -> stringResource(R.string.ci_backup_copy_of, "$hu@$hh") }
+                                .orEmpty()
+                            val sub = listOf(name, realName, state, backupOf)
                                 .filter { it.isNotEmpty() }
                                 .distinct()
                                 .joinToString(" · ")

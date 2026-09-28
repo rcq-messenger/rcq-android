@@ -118,6 +118,10 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
 
     var profile by remember { mutableStateOf<RcqApi.MeProfile?>(null) }
     var requestSent by remember { mutableStateOf(false) }
+    // #1054: the island refused a request because this number is somebody's
+    // backup copy (a card from an island older than `home`, or a record
+    // published a moment ago). Read together with the card's own `home`.
+    var refusedHome by remember(uin) { mutableStateOf<RcqApi.HomeRef?>(null) }
     var confirmRemove by remember { mutableStateOf(false) }
     // ⚠ The PIN in front of the two actions that move this person past a lock
     // or erase them: the star and Remove (#1045 review). The card opens from
@@ -350,6 +354,54 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )
                 Spacer(Modifier.height(12.dp))
+            } else if (contact == null && crossIslandHost == null &&
+                (profile?.home ?: refusedHome)?.address() != null
+            ) {
+                // A backup copy is a mailbox, not a person (#1054): a request
+                // to this number is never read. Say whose it is, and add the
+                // person at that address instead, the way any `uin@host` is
+                // added (their island's card, keys pinned, §5f request).
+                val home = (profile?.home ?: refusedHome)!!
+                val homeAddr = home.address()!!.let { (u, h) -> "$u@$h" }
+                Text(
+                    stringResource(R.string.ci_backup_copy_of, homeAddr),
+                    color = c.textSecondary, fontSize = 13.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        .background(if (requestSent) c.bgSecondary else c.accent)
+                        .clickable(enabled = !requestSent) {
+                            scope.launch {
+                                when (runCatching { session.addBackupCopyHome(home, profile?.signing_key) }
+                                    .getOrDefault(Session.CiAdd.FAILED)) {
+                                    Session.CiAdd.SENT -> requestSent = true
+                                    Session.CiAdd.ADDED_ONLY -> {
+                                        requestSent = true
+                                        Toast.makeText(context, context.getString(R.string.ci_request_not_delivered), Toast.LENGTH_LONG).show()
+                                    }
+                                    Session.CiAdd.CLOSED_ISLAND ->
+                                        Toast.makeText(context, context.getString(R.string.ci_closed_island), Toast.LENGTH_LONG).show()
+                                    Session.CiAdd.FAILED ->
+                                        Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                                    // The home does not hold the copy's key.
+                                    null ->
+                                        Toast.makeText(context, context.getString(R.string.ci_backup_key_mismatch), Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            AddSheet.close()
+                        }.padding(14.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (requestSent) stringResource(R.string.add_request_sent)
+                        else stringResource(R.string.ci_backup_add_home, homeAddr),
+                        color = if (requestSent) c.textSecondary else Color.White,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
             } else if (contact == null && crossIslandHost == null) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
@@ -371,9 +423,15 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                             // исходящих"). Report what happened, not what was
                             // attempted.
                             scope.launch {
-                                val ok = runCatching { session.addContact(uin) }.isSuccess
-                                if (ok) requestSent = true
-                                else Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                                val r = runCatching { session.addContact(uin) }
+                                val refused = r.exceptionOrNull() as? RcqApi.BackupCopyRefused
+                                when {
+                                    r.isSuccess -> requestSent = true
+                                    // A backup copy (#1054): the branch above
+                                    // takes over and offers the real address.
+                                    refused != null -> refusedHome = refused.home
+                                    else -> Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                                }
                             }
                             // The request is on its way, so the search that led
                             // here has done its job — don't reopen it behind us

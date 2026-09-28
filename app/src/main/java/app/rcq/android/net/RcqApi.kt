@@ -624,7 +624,25 @@ class RcqApi(
         // like the same person in the Add sheet.
         val first_name: String? = null,
         val last_name: String? = null,
+        /** Set when this number is somebody's BACKUP mailbox (#1054). */
+        val home: HomeRef? = null,
     )
+
+    /** Where the person behind a backup copy lives (federation §5a, #1054).
+     *  The island marks a copy with it on search, /users/{uin}/info and
+     *  /contacts/outgoing; absent on an island older than the field. */
+    data class HomeRef(val host: String? = null, val uin: Int = 0) {
+        /** Null unless it is an address this app can dial. */
+        fun address(): Pair<Int, String>? {
+            val h = host?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+            return if (uin > 0) uin to h else null
+        }
+    }
+
+    /** The island refused a contact request because [uin] is a backup copy:
+     *  the request would never be read there, and the person lives at [home]
+     *  (403 `backup_copy`, #1054). */
+    class BackupCopyRefused(val home: HomeRef) : IOException("HTTP 403: backup_copy")
 
     /** [card] is a guest card, presented on a CLOSED island. Without it that
      *  island answers "no such user" for somebody who has not shared one, and
@@ -1275,6 +1293,9 @@ class RcqApi(
         val to_uin: Int = 0,
         val nickname: String? = null,
         val state: String? = null,
+        /** The number is a backup copy, so this request will never be read;
+         *  the person lives here (#1054). */
+        val home: HomeRef? = null,
     )
 
     /** Requests WE sent that are still pending or were declined. */
@@ -1290,8 +1311,23 @@ class RcqApi(
     data class ContactRequestBody(val to_uin: Int)
     data class ContactRequestResponse(val id: Int = 0, val state: String? = null, val auto: Boolean = false)
 
+    /** Throws [BackupCopyRefused] when [toUin] is a backup copy (#1054).
+     *  Read here from the whole body rather than from the exception text the
+     *  generic path builds, which keeps only 200 characters: a long home host
+     *  would cut the JSON and the code with it. */
     suspend fun requestContact(toUin: Int): ContactRequestResponse = withContext(Dispatchers.IO) {
-        post("/contacts/request", gson.toJson(ContactRequestBody(toUin)), authed = true, ContactRequestResponse::class.java)
+        val builder = Request.Builder()
+            .url("$baseUrl/contacts/request")
+            .post(gson.toJson(ContactRequestBody(toUin)).toRequestBody(JSON))
+        token?.let { builder.header("Authorization", "Bearer $it") }
+        viaBestRoute { it.newCall(builder.build()).execute() }.use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) {
+                if (resp.code == 403) backupCopyHome(text)?.let { throw BackupCopyRefused(it) }
+                throw IOException("HTTP ${resp.code}: ${text.take(200)}")
+            }
+            gson.fromJson(text, ContactRequestResponse::class.java) ?: throw IOException("empty/unparseable response")
+        }
     }
 
     data class RespondBody(val request_id: Int, val accept: Boolean)
@@ -2189,6 +2225,11 @@ class RcqApi(
         val presence_ttl_minutes: Int? = null,
         val hof_opt_in: Boolean? = null,
         val hof_avatar: String? = null,
+        /** A peer's Ed25519 key, as the island holds it. Read only to check a
+         *  backup copy's home against it (#1054). */
+        val signing_key: String? = null,
+        /** Set when this number is somebody's BACKUP mailbox (#1054). */
+        val home: HomeRef? = null,
     )
 
     suspend fun getMe(uin: Int): MeProfile = withContext(Dispatchers.IO) {
@@ -2707,6 +2748,15 @@ private class SealingBody(
         /** The exact `detail.code` of whatever RcqApi threw, or null (spec
          *  2026-09-15, 12.2). Codes, never substrings, for every new refusal. */
         fun detailCode(e: Throwable?): String? = refusalOf(e?.message).code
+
+        /** The home named by a 403 `backup_copy` body (#1054), or null. By the
+         *  code, never by the English sentence the body also carries. */
+        fun backupCopyHome(body: String): HomeRef? = runCatching {
+            val d = com.google.gson.JsonParser.parseString(body).asJsonObject
+                .get("detail")?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+            if (d.get("code")?.asString != "backup_copy") return null
+            HomeRef(d.get("home_host")?.asString, d.get("home_uin")?.asInt ?: 0).takeIf { it.address() != null }
+        }.getOrNull()
 
         /** The longest report `reason` the island stores, in CODE POINTS.
          *  ⚠ Pydantic's max_length counts Python characters, so an emoji is ONE

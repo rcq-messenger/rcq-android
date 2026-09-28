@@ -11357,6 +11357,32 @@ class Session(context: Context) {
         if (depositContactRequest(host, uin, contact.identityKey, act)) CiAdd.SENT else CiAdd.ADDED_ONLY
     }
 
+    /** Add the person behind a backup copy at their real address (#1054).
+     *
+     *  A copy names its home in a record signed by the copy's OWN key, and
+     *  nothing stops anybody from signing "my home is 134@api" about a person
+     *  who is not them. So the home's card must carry the copy's signing key
+     *  before anything is pinned or sent. Null means it does not: nothing was
+     *  added. [copySigningKey] null (a closed island strips keys from search)
+     *  skips the check rather than blocking the add. */
+    suspend fun addBackupCopyHome(home: RcqApi.HomeRef, copySigningKey: String?): CiAdd? =
+        withContext(Dispatchers.IO) {
+            val (uin, host) = home.address() ?: return@withContext CiAdd.FAILED
+            val card = runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull()
+                ?: return@withContext if (islandIsClosed(host)) CiAdd.CLOSED_ISLAND else CiAdd.FAILED
+            if (!copySigningKey.isNullOrBlank() && !sameKey(card.signingKey, copySigningKey)) return@withContext null
+            addCrossIslandContactDetailed(uin, host, prefetched = card)
+        }
+
+    /** Two base64 spellings of one key compare equal (a client that padded
+     *  and one that did not wrote the same 32 bytes). */
+    private fun sameKey(a: String, b: String): Boolean {
+        fun raw(s: String) = runCatching { android.util.Base64.decode(s.trim(), android.util.Base64.DEFAULT) }.getOrNull()
+        val x = raw(a) ?: return false
+        val y = raw(b) ?: return false
+        return x.isNotEmpty() && x.contentEquals(y)
+    }
+
     /** Seal a §5f `contactreq` to [identityKeyB64] (the key from the peer's open
      *  card) and deposit it to their PRIMARY island — the §5d path, no server
      *  changes. Returns true only when the island actually took it. */
@@ -13159,7 +13185,10 @@ class Session(context: Context) {
 
     private suspend fun refreshOutgoing() {
         _outgoing.value = api.outgoing().map {
-            OutgoingRequest(it.to_uin, it.nickname ?: "${it.to_uin}", it.state ?: "pending")
+            OutgoingRequest(
+                it.to_uin, it.nickname ?: "${it.to_uin}", it.state ?: "pending",
+                home = it.home?.address()?.let { (u, h) -> "$u@$h" },
+            )
         }
     }
 
