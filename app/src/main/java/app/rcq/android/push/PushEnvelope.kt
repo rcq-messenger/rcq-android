@@ -95,7 +95,11 @@ internal object PushEnvelope {
         // failure to open — returning null here would send the caller down the
         // generic-wake fallback and buzz the phone about the message the user
         // just sent from their other device.
-        val preview = if (dec.senderUin == me) null else preview(ctx, dec.envelope)
+        val preview = when {
+            dec.senderUin == me -> null
+            dec.envelope is Envelope.ContactRequest -> requestLine(ctx, accountId, me, dec, host)
+            else -> preview(ctx, dec.envelope)
+        }
         return Opened(
             senderUin = dec.senderUin,
             senderName = nameFor(ctx, accountId, dec.senderUin, host) ?: "${dec.senderUin}",
@@ -189,6 +193,39 @@ internal object PushEnvelope {
         )
     }
 
+    /**
+     * The banner line for a §5f request, or null when ingest will not file it
+     * as one (#1055: a request from another island used to wake nobody at all).
+     *
+     * The same questions ingest asks, so the banner never announces what the
+     * app then drops: only the ask itself (an accept or a decline answers
+     * something we started), only from ANOTHER island (ingest ignores a
+     * request that did not cross one), not from somebody already a contact
+     * there, and not from a blocked sender, by either list. Deliberately not
+     * in [preview]: [announces] feeds the #1047 clean-up, and whether a request
+     * is worth a banner depends on the sender, not on the envelope alone.
+     */
+    private fun requestLine(ctx: Context, accountId: String, me: Int, dec: SealedSender.Decrypted, host: String?): String? {
+        val cr = dec.envelope as? Envelope.ContactRequest ?: return null
+        if (cr.act != Envelope.ACT_REQUEST || host.isNullOrBlank()) return null
+        val store = SecureStore(ctx, accountId)
+        val own = listOfNotNull(
+            store.serverHost ?: app.rcq.android.net.RcqApi.DEFAULT_HOST,
+            app.rcq.android.net.RelayConfigStore.frontHost.takeIf { it.isNotBlank() },
+        )
+        if (own.any { it.equals(host, ignoreCase = true) }) return null
+        if (CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host) != null) return null
+        if (LocalStores.isBlockedFor(accountId, dec.senderUin)) return null
+        val blockedThere = runCatching {
+            // A cold wake can start the process without a Session, which is
+            // what normally opens this store. Idempotent.
+            app.rcq.android.net.CrossIslandRequestsStore.init(ctx)
+            app.rcq.android.net.CrossIslandRequestsStore.isBlocked(me, dec.senderUin, host)
+        }.getOrDefault(true)
+        if (blockedThere) return null
+        return ctx.getString(R.string.ci_contact_request)
+    }
+
     /** Whether a wake for [env] would have been worth a banner had it opened:
      *  the same test [open] applies, for the drain to use once it HAS opened
      *  one the wake could not ([Push.noteSilentEnvelope], #1047). */
@@ -210,12 +247,6 @@ internal object PushEnvelope {
         is Envelope.Poll -> "📊 " + (env.question.takeIf { it.isNotBlank() } ?: ctx.getString(R.string.kind_message))
         is Envelope.ScreenshotTaken -> "📸 " + ctx.getString(R.string.push_kind_screenshot)
         is Envelope.RelayShare -> "🛡️ " + ctx.getString(R.string.push_kind_relay_share)
-        // A request from another island used to wake nobody (#1055, "the
-        // person I added gets no notification at all"): it opened as control
-        // traffic. Only the ask itself; an accept or a decline is an answer to
-        // something we started and changes a row, not a reason to wake.
-        is Envelope.ContactRequest ->
-            if (env.act == Envelope.ACT_REQUEST) ctx.getString(R.string.ci_contact_request) else null
         // Control envelopes: receipts, reactions, edits, deletes, presence
         // pings, secure-screen sync, call signaling, federation records and
         // sender-key admin. None of them is a new message, and waking the user

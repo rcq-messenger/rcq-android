@@ -328,6 +328,9 @@ class Session(context: Context) {
      *  island that was no longer ours. Two sockets, two islands, one dot. */
     private fun replaceClients() {
         socket.disconnect()
+        // The outgoing client can still answer a late 401; it must not start
+        // a probe for whichever account holds the session by then.
+        api.onSessionRefused = null
         api = newApi()
         socket = newSocket()
     }
@@ -2370,6 +2373,9 @@ class Session(context: Context) {
         // now working for the previous account. See [accountEpoch].
         accountEpoch++
         pendingRetractions.clear()
+        tokenProbeSettled = null
+        tokenProbeBackoffMs = BURN_PROBE_THROTTLE_MS
+        rosterAnsweredEpoch = -1
         // And the loops that WOULD keep working for it: the epoch stops them
         // writing, the cancel stops them running. See [accountJob].
         retireAccountJob()
@@ -4785,7 +4791,13 @@ class Session(context: Context) {
         // foreign contact's number named whoever holds it here too. Once out
         // of CrossIslandStore they are a stranger to the cross-island gate,
         // which holds what they write as a request.
-        if (ci == null) LocalStores.addRemoved(uin)
+        if (ci == null) {
+            LocalStores.addRemoved(uin)
+            // Out of the roster NOW, not at the next refresh: the removed list
+            // stops speaking for anybody in it, so a refresh that fails after
+            // this would have let their next row straight into the chat.
+            _contacts.update { list -> list.filterNot { it.uin == uin && it.host == null } }
+        }
         if (ci != null) {
             CrossIslandStore.remove(ci.uin, ci.host)
             // ⚠ The refreshContacts() at the end of this function cannot do it:
@@ -7667,9 +7679,9 @@ class Session(context: Context) {
         // The island already gave its final word for this number (keys changed
         // elsewhere, a move it will not resolve, the row gone): asking again
         // every minute changes nothing and costs two requests each time.
-        if (tokenProbeSettled != null && tokenProbeSettled == store.uin) return
+        if (tokenProbeIsSettled()) return
         val now = System.currentTimeMillis()
-        if (now - lastBurnProbeAt < BURN_PROBE_THROTTLE_MS) return
+        if (now - lastBurnProbeAt < tokenProbeBackoffMs) return
         lastBurnProbeAt = now
         scope.launch { runCatching { probeBurnedAccount(allowErase = false) } }
     }
@@ -7679,13 +7691,19 @@ class Session(context: Context) {
      *  asked instead: a dead token answers it with the 401 that
      *  [onSessionTokenRefused] acts on, and a ceiling answers it normally. */
     @Volatile private var lastHandshakeCheckAt = 0L
-    /** The number whose token refusal ended in an answer a retry will not
-     *  change. In memory only: a restart asks once more. */
-    @Volatile private var tokenProbeSettled: Int? = null
+    /** The account whose token refusal ended in an answer a retry will not
+     *  change. In memory only and cleared on a switch: a restart or coming
+     *  back to the account asks once more. */
+    @Volatile private var tokenProbeSettled: String? = null
+    /** Pause between token probes that changed nothing, doubling each time. */
+    @Volatile private var tokenProbeBackoffMs = BURN_PROBE_THROTTLE_MS
+    private fun settleTokenProbe() { tokenProbeSettled = AccountManager.activeId.value }
+    private fun tokenProbeIsSettled(): Boolean =
+        tokenProbeSettled != null && tokenProbeSettled == AccountManager.activeId.value
     private fun onSocketHandshakeRefused() {
-        if (duressViewUp || burningSelf) return
+        if (duressViewUp || burningSelf || tokenProbeIsSettled()) return
         val now = System.currentTimeMillis()
-        if (now - lastHandshakeCheckAt < BURN_PROBE_THROTTLE_MS) return
+        if (now - lastHandshakeCheckAt < tokenProbeBackoffMs) return
         lastHandshakeCheckAt = now
         scope.launch { runCatching { api.keysStatus() } }
     }
@@ -7721,9 +7739,18 @@ class Session(context: Context) {
      *  account moved. */
     private suspend fun probeBurnedAccount(allowErase: Boolean = true) {
         val me = store.uin ?: return
+        // ⚠⚠ Whose probe this is, the way [followAccountMove] pins it. Every
+        // write below (a token, a followed move, a redial) belongs to the
+        // account that asked; after a switch or a PIN lock in the middle of
+        // /auth/refresh it would land in the next account's store. And never
+        // alongside a move this device is making or following already.
+        val ep = epochNow()
+        if (isSelfMigrating() || followingMove) return
+        fun stillMine() = stillOn(ep) && store.uin == me && !isSelfMigrating() && !followingMove
         val fresh = try {
             refreshForSelf(me)
         } catch (e: Exception) {
+            if (!stillMine()) return
             // ⚠⚠ THE ONE PLACE THAT DELETES A LIVE ACCOUNT IF IT IS WRONG, so the
             // decision is one pure function, [app.rcq.android.net.AuthRefusal.probeOutcome],
             // made from the EXACT detail code of a 404 and nothing else. It used
@@ -7748,18 +7775,18 @@ class Session(context: Context) {
             val outcome = app.rcq.android.net.AuthRefusal.probeOutcome(e.message, movedAwayFrom == me, store.hasPendingRotation)
             when (outcome) {
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.MOVE_REFUSED -> {
-                    tokenProbeSettled = me
+                    settleTokenProbe()
                     android.util.Log.w("RCQmove", "#$me is vacant, shared or moved - refusing to guess, keeping local data")
                     announceMoveRefused(me, null)
                 }
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.ROTATED_ELSEWHERE -> {
-                    tokenProbeSettled = me
+                    settleTokenProbe()
                     android.util.Log.w("RCQburn", "#$me keys were changed on another device - keeping local data")
                     announceRotatedElsewhere(me)
                 }
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.ERASE -> {
                     if (!allowErase) {
-                        tokenProbeSettled = me
+                        settleTokenProbe()
                         android.util.Log.w("RCQburn", "island no longer knows #$me - a token refusal never wipes, keeping local data")
                         return
                     }
@@ -7767,10 +7794,19 @@ class Session(context: Context) {
                     val next = eraseActiveAccountLocally(AccountManager.activeId.value)
                     _accountLost.tryEmit(AccountLost(me, next))
                 }
-                app.rcq.android.net.AuthRefusal.ProbeOutcome.KEEP -> Unit
+                app.rcq.android.net.AuthRefusal.ProbeOutcome.KEEP -> if (!allowErase) {
+                    // A revoked install stays revoked: nothing a retry can change.
+                    // Anything else (offline, 429, a rotation still pending) is
+                    // asked again, but less and less often.
+                    val msg = e.message.orEmpty()
+                    if (msg.contains("device_revoked") || msg.contains("device revoked")) settleTokenProbe()
+                    else tokenProbeBackoffMs = (tokenProbeBackoffMs * 2).coerceAtMost(TOKEN_PROBE_MAX_BACKOFF_MS)
+                }
             }
             return
         }
+        if (!stillMine()) return
+        tokenProbeBackoffMs = BURN_PROBE_THROTTLE_MS
         // ⚠⚠ Alive AND somewhere else: the account moved off #me while this
         // install was not the one in hand. Adopting only the token would leave
         // this phone acting as the new number while every local store still
@@ -9479,9 +9515,11 @@ class Session(context: Context) {
     private fun retryPendingRetractions() {
         if (pendingRetractions.isEmpty()) return
         scope.launch {
-            val ep = epochNow()
             for ((id, p) in pendingRetractions.entries.toList()) {
-                if (p.epoch != ep) { pendingRetractions.remove(id); continue }
+                // Checked per entry, right before it goes: a switch in the
+                // middle of the loop would otherwise send the rest through the
+                // next account's client, a delete that ties the two together.
+                if (!stillOn(p.epoch)) { pendingRetractions.remove(id); continue }
                 if (sendRetraction(p.target, Envelope.delete(p.target.id), p.gid)) pendingRetractions.remove(id)
             }
         }
@@ -10441,9 +10479,16 @@ class Session(context: Context) {
             // ⚠ Never ourselves: a carbon always arrives from our own uin, and
             // the code that CLEARS the removed flag skips our own uin, so one
             // stray entry would silently kill every self-carbon forever.
-            if (dec.senderUin != store.uin &&
-                (LocalStores.isBlocked(dec.senderUin) || droppedAsRemoved(dec))
-            ) return@runCatching
+            if (dec.senderUin != store.uin && LocalStores.isBlocked(dec.senderUin)) return@runCatching
+            if (dec.senderUin != store.uin && droppedAsRemoved(dec)) {
+                // Not decided before the island has answered for the roster in
+                // this session: a cold start drains BEFORE the roster refresh,
+                // and somebody added back from another device still reads as
+                // removed until then. Left on the island, the row is decided
+                // on the next drain instead of being dropped after the ack.
+                if (!rosterAnsweredThisSession()) why = "roster_pending"
+                return@runCatching
+            }
             // §5d cross-island call signaling rides sealed envelopes (kind
             // "call") — route to the call state machine, never the message
             // store, and never the request quarantine (signals are ephemeral).
@@ -10685,8 +10730,10 @@ class Session(context: Context) {
                 refreshCiRequests()
                 return@runCatching
             }
-            // A thread the user deleted comes back when its peer writes again.
-            if (dec.senderUin != meUin) LocalStores.clearRemoved(dec.senderUin)
+            // ⚠ No clearRemoved here any more (#1055 review). Nothing hides a
+            // thread by that list now, and clearing it for every row that got
+            // this far let an accepted contact on ANOTHER island undo the
+            // removal of the same number here. The roster clears it.
             val now = System.currentTimeMillis()
             // Random-chat peer: keep the conversation ephemeral (in-memory,
             // never persisted, never on Home). Text only for v=1.
@@ -11347,9 +11394,10 @@ class Session(context: Context) {
     // ── contacts ─────────────────────────────────────────────────────
 
     suspend fun addContact(uin: Int) {
+        val ep = epochNow()
         api.requestContact(uin)
         // Asking for them again is the end of having removed them (#1055).
-        LocalStores.clearRemoved(uin)
+        if (stillOn(ep)) LocalStores.clearRemoved(uin)
         runCatching { refreshContacts() }
         runCatching { refreshPending() }
         runCatching { refreshOutgoing() }
@@ -11880,6 +11928,11 @@ class Session(context: Context) {
      *  the roster again. Another island's sender goes through the cross-island
      *  gate like any stranger: held as a request, which is where a removed
      *  person asking again belongs (a block is what drops them). */
+    /** The epoch whose roster the island has answered for (a full body or a
+     *  304 on the rows we hold), or -1 before the first answer. */
+    @Volatile private var rosterAnsweredEpoch = -1
+    private fun rosterAnsweredThisSession(): Boolean = rosterAnsweredEpoch == epochNow()
+
     private fun droppedAsRemoved(dec: SealedSender.Decrypted): Boolean {
         val uin = dec.senderUin
         if (!LocalStores.isRemoved(uin)) return false
@@ -12906,7 +12959,10 @@ class Session(context: Context) {
             // Behind the same epoch guard as the full body below: an account
             // switch mid-fetch must not fold this account's foreign contacts
             // into the next account's screen.
-            if (stillOn(ep)) syncCrossIslandContacts()
+            if (stillOn(ep)) {
+                syncCrossIslandContacts()
+                if (rosterEtag != null) rosterAnsweredEpoch = ep
+            }
             // A hold released while an earlier read was in the air can land
             // here: that read took the new ETag with our grey still painted,
             // and this one answers 304 (#1047 review). The island's own word
@@ -12938,6 +12994,7 @@ class Session(context: Context) {
         // Back in the roster, so whatever removed them is over, however they
         // got back: our request, theirs accepted, from another device (#1055).
         fetched.forEach { LocalStores.clearRemoved(it.uin) }
+        rosterAnsweredEpoch = ep
         _contacts.value = fetched.map {
             Contact(
                 uin = it.uin,
@@ -14653,6 +14710,7 @@ class Session(context: Context) {
         /** Floor between two burned-account probes (#655): the socket redials
          *  on its backoff and every 4401 close would otherwise probe again. */
         const val BURN_PROBE_THROTTLE_MS = 60_000L
+        const val TOKEN_PROBE_MAX_BACKOFF_MS = 30 * 60_000L
         /** How long a migration started on THIS device keeps us deaf to
          *  `account_moved` about our own number. Wide enough to cover a slow
          *  purchase round trip, since the island broadcasts before it answers

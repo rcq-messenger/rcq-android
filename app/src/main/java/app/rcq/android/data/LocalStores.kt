@@ -821,6 +821,12 @@ object LocalStores {
     }
 
     fun isBlocked(uin: Int) = uin in _blocked.value
+
+    /** Headless [isBlocked] for [accountId] (companion to [isMutedFor]), for
+     *  the push service. Blocked when prefs are not up yet: a banner too few
+     *  for a request is better than a blocked sender waking the phone. */
+    fun isBlockedFor(accountId: String, uin: Int): Boolean =
+        !::prefs.isInitialized || prefs.getStringSet("$accountId.$K_BLOCKED", emptySet())!!.contains(uin.toString())
     fun setBlocked(uin: Int, on: Boolean) {
         if (acct == null || on == (uin in _blocked.value)) return
         _blocked.value = if (on) _blocked.value + uin else _blocked.value - uin
