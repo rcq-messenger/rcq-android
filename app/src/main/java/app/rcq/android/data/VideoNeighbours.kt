@@ -28,7 +28,12 @@ object VideoNeighbours {
      *  list at all, which happens when it was opened from somewhere this
      *  thread does not hold (a forward preview, a deleted row). */
     fun around(messages: List<ChatMessage>, currentId: String): Pair<ChatMessage?, ChatMessage?> {
-        val list = clips(messages)
+        // ⚠ A spoiler clip is never stepped INTO (#1052 review): "next" in the
+        // player used to start it at once, sound and all, the cover its sender
+        // set skipped. It stays reachable from its own bubble or pager page,
+        // where it is uncovered on purpose; the one on screen stays in the
+        // list, so walking OUT of it still works.
+        val list = clips(messages).filter { !it.spoiler || it.id == currentId }
         val at = list.indexOfFirst { it.id == currentId }
         if (at < 0) return null to null
         return list.getOrNull(at - 1) to list.getOrNull(at + 1)

@@ -201,24 +201,30 @@ private fun MediaTile(
     val still = rememberSampledBitmap(bytes?.takeIf { it.isJpegOrPng() }, maxPx = 320)
     val gif = rememberGifFirstFrame(bytes?.takeIf { it.isGif() })
     val image = still ?: gif
+    // Covered like the bubble covers it (#1052 review); the pager page it
+    // opens is covered too, and a tap there uncovers it.
+    val shownPoster = remember(poster, m.spoiler) { coveredIfSpoiler(poster?.asImageBitmap(), m.spoiler) }
+    val shownImage = remember(image, m.spoiler) { coveredIfSpoiler(image, m.spoiler) }
 
     Box(
         modifier.aspectRatio(1f).clip(RoundedCornerShape(6.dp))
             .background(c.bgSecondary).clickable(onClick = onOpen),
         contentAlignment = Alignment.Center,
     ) {
-        if (poster != null) {
+        if (shownPoster != null) {
             Image(
-                bitmap = poster.asImageBitmap(), contentDescription = null,
+                bitmap = shownPoster, contentDescription = null,
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
             )
-        } else if (image != null) {
+        } else if (shownImage != null) {
             Image(
-                bitmap = image, contentDescription = null,
+                bitmap = shownImage, contentDescription = null,
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
             )
         }
-        if (isVideo) {
+        if (m.spoiler) {
+            SpoilerTileMark()
+        } else if (isVideo) {
             Icon(
                 Icons.Filled.PlayArrow, null, tint = Color.White,
                 modifier = Modifier.size(22.dp),

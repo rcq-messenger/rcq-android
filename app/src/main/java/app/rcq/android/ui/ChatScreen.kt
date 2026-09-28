@@ -601,6 +601,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
      *  of four followed by a batch of five was two viewers with a trip back to
      *  the chat between them. */
     var albumViewer by remember { mutableStateOf<Pair<List<ChatMessage>, Int>?>(null) }
+    /// Whether the page [albumViewer] opens on was uncovered where it was
+    /// tapped (a bubble), or may still be a covered spoiler (a tile, a wall).
+    var albumOpenedRevealed by remember { mutableStateOf(false) }
     // ...and of a video. Same shape on purpose: the player reads the DECRYPTED
     // BYTES and never a URL, so a received clip is watched here rather than
     // being written out as plaintext for whatever player happens to be
@@ -919,7 +922,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     /** Open the pager on [m] with every picture and clip of this chat as its
      *  pages (#1052). A snapshot, like the walls take: a picture arriving
      *  while you look does not shift the pages under your finger. */
-    fun openMediaAt(m: ChatMessage) {
+    fun openMediaAt(m: ChatMessage, revealed: Boolean = false) {
+        albumOpenedRevealed = revealed
         albumViewer = app.rcq.android.data.ChatMediaPages.around(messages, m)
     }
 
@@ -2044,8 +2048,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 // fetched starts playing at once, over its own
                                 // page: closing the player lands there, one
                                 // swipe from the pictures around it.
-                                onViewImage = { openMediaAt(m) },
-                                onViewVideo = { openMediaAt(m); fullscreenVideo = viewerVideoOf(m, it) },
+                                onViewImage = { openMediaAt(m, revealed = true) },
+                                onViewVideo = { openMediaAt(m, revealed = true); fullscreenVideo = viewerVideoOf(m, it) },
                                 mentionNick = mentionNick,
                                 onMentionClick = onMentionClick,
                                 mentionMatch = mentionMatch,
@@ -2514,6 +2518,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // a page of an album can be a film and a film does not fit in an array.
         AlbumPagerViewer(
             session, items, idx,
+            openedRevealed = albumOpenedRevealed,
             senderNameOf = { m -> viewerSenderName(m) },
             onSenderClick = { m -> viewerSenderClick(viewerSenderUin(m)) { albumViewer = null } },
             onShare = { _, payload -> MediaSaver.share(context, payload.write, payload.name, payload.mime) },
@@ -2982,7 +2987,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onClose = { showAllMedia = false },
             // The whole wall as pages, not the one tile (#1042): the album
             // pager already turns through pictures and clips alike.
-            onOpen = { list, idx -> albumViewer = list to idx },
+            onOpen = { list, idx -> albumOpenedRevealed = false; albumViewer = list to idx },
         )
     }
     if (confirmLocation) {
@@ -4945,9 +4950,17 @@ private fun AlbumTile(
             photo?.let { runCatching { (if (it.isGif()) gifFirstFrame(it) else BitmapFactory.decodeByteArray(it, 0, it.size))?.asImageBitmap() }.getOrNull() }
         }
     }
+    // A spoiler in an album is covered like one in its own bubble (#1052
+    // review). Opening the album from here lands on its page covered, and a
+    // tap there uncovers it. Without an album around it, the first tap here
+    // uncovers it, as a bubble's does.
+    var revealed by remember(m.id) { mutableStateOf(false) }
+    val covered = m.spoiler && !revealed
+    val shown = remember(bmp, covered) { coveredIfSpoiler(bmp, covered) }
     Box(
         Modifier.size(w, h).background(c.bgSecondary).combinedClickable(
             onClick = {
+                if (covered && onOpenAlbum == null) { revealed = true; return@combinedClickable }
                 // In an album, a tap opens the ALBUM at this picture. Opening
                 // the single tapped file was why only what the grid happened to
                 // show could be looked at: a batch of ten had four reachable
@@ -4975,9 +4988,10 @@ private fun AlbumTile(
         ),
         contentAlignment = Alignment.Center,
     ) {
-        if (bmp != null) Image(bitmap = bmp, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (shown != null) Image(bitmap = shown, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else CircularProgressIndicator(color = c.accent, modifier = Modifier.size(16.dp))
-        if (isVideo) Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
+        if (covered) SpoilerTileMark()
+        else if (isVideo) Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
     }
 }
 
@@ -5619,7 +5633,7 @@ private fun SpoilerOverlay() {
 /** Heavy pixelate-blur for a spoiler: downscale to a few px then back up. Used
  *  instead of Modifier.blur, which is a no-op below API 31 and would otherwise
  *  leak the original image on older devices (minSdk is 26). */
-private fun blurForSpoiler(src: Bitmap): Bitmap {
+internal fun blurForSpoiler(src: Bitmap): Bitmap {
     val w = src.width.coerceAtLeast(1)
     val h = src.height.coerceAtLeast(1)
     val scale = 18f / maxOf(w, h).toFloat()
@@ -5686,6 +5700,10 @@ internal fun AlbumPagerViewer(
     session: Session,
     items: List<ChatMessage>,
     startIndex: Int,
+    /// The page it opens on was already uncovered where it was tapped (a
+    /// single bubble asks for the reveal before it opens). False from a tile
+    /// or a wall, which open a spoiler covered (#1052 review).
+    openedRevealed: Boolean = false,
     senderNameOf: (ChatMessage) -> String? = { null },
     onSenderClick: (ChatMessage) -> (() -> Unit)? = { null },
     onShare: (ChatMessage, MediaPayload) -> Unit = { _, _ -> },
@@ -5753,7 +5771,8 @@ internal fun AlbumPagerViewer(
     // that was tapped (its bubble asks for the reveal before it opens), or any
     // page the viewer taps here.
     val revealed = remember(items) {
-        mutableStateListOf(items[startIndex.coerceIn(0, items.size - 1)].id)
+        if (openedRevealed) mutableStateListOf(items[startIndex.coerceIn(0, items.size - 1)].id)
+        else mutableStateListOf()
     }
     // ⚠ A WINDOW, not everything seen (#1042 review). The pages used to be one
     // album of a few pictures; since the media walls open this pager with every
@@ -7033,14 +7052,19 @@ private fun MediaTile(session: Session, m: ChatMessage, onClick: () -> Unit) {
             }
         }
     }
+    // Covered like the bubble covers it (#1052 review); the pager page it
+    // opens is covered too, and a tap there uncovers it.
+    val shown = remember(bmp, m.spoiler) { coveredIfSpoiler(bmp, m.spoiler) }
     Box(
         Modifier.aspectRatio(1f).background(c.bgSecondary).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (bmp != null) {
-            Image(bitmap = bmp, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (shown != null) {
+            Image(bitmap = shown, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        if (isVideo) {
+        if (m.spoiler) {
+            SpoilerTileMark()
+        } else if (isVideo) {
             Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(34.dp))
         }
     }

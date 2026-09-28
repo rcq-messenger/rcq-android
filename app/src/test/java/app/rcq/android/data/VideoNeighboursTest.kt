@@ -76,4 +76,15 @@ class VideoNeighboursTest {
         assertEquals(emptyList<String>(), VideoNeighbours.clips(talk).map { it.id })
         assertEquals(null to null, VideoNeighbours.around(talk, "1"))
     }
+
+    @Test
+    fun `the walk never steps into a spoiler clip, but can step out of one`() {
+        val withSpoiler = listOf(msg("1"), msg("2").copy(spoiler = true), msg("3"))
+        val (prev, next) = VideoNeighbours.around(withSpoiler, "1")
+        assertNull(prev)
+        assertEquals("3", next?.id)
+        val (back, fwd) = VideoNeighbours.around(withSpoiler, "2")
+        assertEquals("1", back?.id)
+        assertEquals("3", fwd?.id)
+    }
 }
