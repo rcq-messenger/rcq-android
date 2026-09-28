@@ -2408,7 +2408,7 @@ class Session(context: Context) {
         _receivingViaBackup.value = false
         peerIdentityCache.clear()
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
-        noV2Peers.clear(); previewCache.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
+        noV2Peers.clear(); invitePreviews.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
         // A call's grey belongs to the account it was placed from: the same
         // number in the next account is somebody else (#1047 review). The
         // timers already running find nothing to release.
@@ -5856,9 +5856,13 @@ class Session(context: Context) {
      *  So a received cross-island invite shows the real group, not a blank card. */
     suspend fun previewForeignGroup(host: String, remoteId: Int): RcqApi.GroupPreviewOut? {
         val v = VisitedIslandsStore.get(host)
-        return runCatching {
+        // Through the same memo, gate and cool-down as our own island's cards
+        // (#1051): a pin in a room on another island names its sibling rooms
+        // by bare links, which resolve THERE, and it was twenty uncached
+        // requests per open of the sheet.
+        return invitePreviews.get(host.lowercase(), remoteId) {
             RcqApi("https://$host").apply { v?.let { setToken(it.jwt) } }.previewGroup(remoteId)
-        }.getOrNull()
+        }
     }
 
     /** §5c: media in a group lives on the GROUP's island — upload there (the
@@ -6151,11 +6155,22 @@ class Session(context: Context) {
      *  "Группа" rows with the generic glyph, which is report #918. Successes
      *  only: a failure must stay retryable, or one bad minute would poison the
      *  card for the life of the process.
+     *
+     *  ⚠⚠ #1051: the memo was not enough. The same sheet on a cold start
+     *  still fired every chip at once, and a failure still drew the
+     *  placeholder for good. The memo, a cap on parallel requests and a
+     *  cool-down after a 429 live in [app.rcq.android.net.InvitePreviews]; the
+     *  card asks again after a failure (rememberInvitePreview, ChatScreen.kt).
      */
-    private val previewCache = java.util.concurrent.ConcurrentHashMap<Int, RcqApi.GroupPreviewOut>()
+    private val invitePreviews = app.rcq.android.net.InvitePreviews()
 
     suspend fun previewGroup(id: Int): RcqApi.GroupPreviewOut? =
-        previewCache[id] ?: runCatching { api.previewGroup(id) }.getOrNull()?.also { previewCache[id] = it }
+        invitePreviews.get("", id) { api.previewGroup(id) }
+
+    /** A card already fetched in this process, without asking anybody: what
+     *  an invite card draws on its first frame instead of the placeholder. */
+    fun cachedGroupPreview(id: Int, foreignHost: String?): RcqApi.GroupPreviewOut? =
+        invitePreviews.cached(foreignHost?.lowercase() ?: "", id)
 
     /** Join a group from a shared invite. Already-member is a no-op that just
      *  returns the existing group (the caller jumps into the chat). Returns

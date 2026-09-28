@@ -4121,6 +4121,37 @@ internal object GroupLinkParser {
     }
 }
 
+/** The invite card for a group link, fetched the same way wherever the link
+ *  is drawn: the chat's join card and every chip of a pinned message (#1051).
+ *
+ *  Starts from what this process already fetched, so a card seen once never
+ *  flashes the placeholder again. A failure is NOT the end of it any more:
+ *  the placeholder used to stay for as long as the card was on screen, which
+ *  on the pin sheet was every link at once after one refused burst. The card
+ *  asks again after [INVITE_PREVIEW_RETRY_MS], and the session holds the
+ *  requests back while the island's rate limit says to wait
+ *  ([app.rcq.android.net.InvitePreviews]). */
+@Composable
+private fun rememberInvitePreview(session: Session, groupId: Int, foreignHost: String?): app.rcq.android.net.RcqApi.GroupPreviewOut? {
+    val preview by produceState(session.cachedGroupPreview(groupId, foreignHost), groupId, foreignHost) {
+        if (value != null) return@produceState
+        var attempt = 0
+        while (true) {
+            value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId)
+                    else session.previewGroup(groupId)
+            if (value != null) return@produceState
+            val pause = INVITE_PREVIEW_RETRY_MS.getOrNull(attempt++) ?: return@produceState
+            delay(pause)
+        }
+    }
+    return preview
+}
+
+/** Pauses between the attempts of one card: soon enough to fill in while the
+ *  sheet is still being read, and few enough that a card for a group that is
+ *  really gone stops asking within two minutes. */
+private val INVITE_PREVIEW_RETRY_MS = longArrayOf(3_000L, 10_000L, 30_000L, 60_000L)
+
 /** A shared group-invite link rendered as a join card (iOS GroupLinkBubble
  *  parity): avatar + name + member count + closed badge; tap opens a join
  *  dialog, and joining jumps into the group chat. */
@@ -4136,11 +4167,7 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
     // never visited is NOT touched for the preview (minimal card; the guest
     // registration happens only on the explicit Join tap).
     val foreignHost = ref.host?.takeIf { it != session.currentServer }
-    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, ref) {
-        value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId)
-        else session.previewGroup(groupId)
-    }
-    val p = preview
+    val p = rememberInvitePreview(session, groupId, foreignHost)
     // Already a member? Resolve the LOCAL group id via a pure reverse lookup
     // (refByAlias never allocates an alias) so tapping a group you're already
     // in OPENS it instead of re-asking you to join (founder report).
@@ -4274,7 +4301,9 @@ internal fun PinnedAnnouncement(
     // Inject the viewing group's host into BARE group links (`/g/<id>` with no
     // @host) so a pinned link to a sibling group on the SAME foreign island
     // resolves cross-island instead of blank-fetching from our own island.
-    val pinGroupIds = remember(pin, groupHost) { GroupLinkParser.parseAll(pin).map { it.copy(host = it.host ?: groupHost) } }
+    // Distinct AFTER the host goes in: `/g/57` and `/g/57@<this room's island>`
+    // are one room, and two rows with one key crash the lazy list below.
+    val pinGroupIds = remember(pin, groupHost) { GroupLinkParser.parseAll(pin).map { it.copy(host = it.host ?: groupHost) }.distinct() }
     val hasPinText = annotated.text.isNotBlank()
     val uriHandler = LocalUriHandler.current
     var showPinSheet by remember(pin) { mutableStateOf(false) }
@@ -4324,8 +4353,14 @@ internal fun PinnedAnnouncement(
     }
     if (showPinSheet) {
         RcqSheet(onDismiss = { showPinSheet = false }, title = stringResource(R.string.gi_pinned)) {
-            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                if (hasPinText) {
+            // ⚠ LAZY, like the chat the same links would sit in (#1051). A
+            // plain scrolling Column composed a chip for every link the moment
+            // the sheet opened, and every chip fetched its card: twenty
+            // requests at once for a pin of twenty links, against a limit of
+            // thirty a minute, over a relay. A chip now asks when it scrolls
+            // into view, as a join card in the chat always did.
+            LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                if (hasPinText) item(key = "pin-text") {
                     ClickableText(
                         text = annotated,
                         style = TextStyle(color = c.textPrimary, fontSize = 14.sp),
@@ -4339,7 +4374,7 @@ internal fun PinnedAnnouncement(
                         },
                     )
                 }
-                pinGroupIds.forEach { gref ->
+                items(pinGroupIds, key = { "${it.id}@${it.host}" }) { gref ->
                     Spacer(Modifier.height(6.dp))
                     PinnedGroupChip(session, gref, onOpenGroup = { showPinSheet = false; onOpenGroup(it) })
                 }
@@ -4360,11 +4395,7 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
     var joining by remember { mutableStateOf(false) }
     val groupId = ref.id
     val foreignHost = ref.host?.takeIf { it != session.currentServer }
-    val preview by produceState<app.rcq.android.net.RcqApi.GroupPreviewOut?>(initialValue = null, ref) {
-        value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId)
-        else session.previewGroup(groupId)
-    }
-    val p = preview
+    val p = rememberInvitePreview(session, groupId, foreignHost)
     // Same membership check as GroupLinkBubble: open instead of re-join.
     val groups by session.groups.collectAsState()
     val joinedLocalId = remember(groups, foreignHost, groupId) {
@@ -4374,20 +4405,24 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
         }?.id
         else groups.firstOrNull { it.id == groupId }?.id
     }
-    val avatarGroup = remember(p, groups) {
+    // A room I am in is already on this device, name and picture: the chip
+    // says what it is before, or without, any card from the island (#1051:
+    // twenty rows of "Группа" in a pin that links the reader's own rooms).
+    val local = remember(groups, joinedLocalId) { joinedLocalId?.let { id -> groups.firstOrNull { it.id == id } } }
+    val name = p?.name?.takeIf { it.isNotBlank() } ?: local?.name?.takeIf { it.isNotBlank() }
+    val avatarGroup = remember(p, local) {
         p?.let {
             // Stage 6: the island serves the avatar pair to MEMBERS only, so
             // the preview carries it only for rooms we are in - and for those
             // the local roster has it anyway. A stranger's link renders the
             // generic glyph, which is the point.
-            val local = groups.firstOrNull { g -> g.id == it.id }
             app.rcq.android.model.RcqGroup(
                 id = it.id, name = it.name ?: "", ownerUin = it.owner_uin,
                 isClosed = it.is_closed,
                 avatarMediaId = it.avatar_media_id ?: local?.avatarMediaId,
                 avatarMediaKey = it.avatar_media_key ?: local?.avatarMediaKey,
             )
-        }
+        } ?: local
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -4412,15 +4447,29 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
         }
         Column(Modifier.weight(1f)) {
             Text(
-                p?.name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_loading),
+                name ?: stringResource(if (foreignHost != null) R.string.group_invite_island else R.string.group_invite_loading),
                 color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (foreignHost != null) Text(foreignHost, color = c.textMono, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (p != null) Text(
-                memberCountLabel(p.member_count),
-                color = c.textSecondary, fontSize = 11.sp,
-            )
+            // The same two facts the chat's join card gives: how many, and
+            // what a tap does (open a room I am in, join, or that it is closed).
+            if (p != null || joinedLocalId != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                if (p != null) Text(
+                    "${memberCountLabel(p.member_count)} · ",
+                    color = c.textSecondary, fontSize = 11.sp, maxLines = 1,
+                )
+                val closed = p?.is_closed == true && joinedLocalId == null
+                Text(
+                    stringResource(
+                        if (joinedLocalId != null) R.string.group_invite_tap_open
+                        else if (closed) R.string.group_invite_closed
+                        else R.string.group_invite_tap_join,
+                    ),
+                    color = if (closed) Color(0xFFE5484D) else c.accent, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
     if (showJoin && (p != null || foreignHost != null)) {
