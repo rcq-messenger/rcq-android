@@ -7740,7 +7740,11 @@ class Session(context: Context) {
         val now = System.currentTimeMillis()
         if (now - lastBurnProbeAt < BURN_PROBE_THROTTLE_MS) return
         lastBurnProbeAt = now
-        scope.launch { runCatching { probeBurnedAccount() } }
+        if (tokenProbeInFlight) return
+        tokenProbeInFlight = true
+        scope.launch {
+            try { runCatching { probeBurnedAccount() } } finally { tokenProbeInFlight = false }
+        }
     }
 
     /** #655 — the burned account that kept talking. Burning bumps the uin
@@ -10515,7 +10519,12 @@ class Session(context: Context) {
             // ⚠ Never ourselves: a carbon always arrives from our own uin, and
             // the code that CLEARS the removed flag skips our own uin, so one
             // stray entry would silently kill every self-carbon forever.
-            if (dec.senderUin != store.uin && LocalStores.isBlocked(dec.senderUin)) return@runCatching
+            if (dec.senderUin != store.uin && LocalStores.isBlocked(dec.senderUin)) {
+                // A blocked sender's request is not worth the banner its wake
+                // may have put up while it could not be opened.
+                if (dec.envelope is Envelope.ContactRequest) app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+                return@runCatching
+            }
             if (dec.senderUin != store.uin && droppedAsRemoved(dec)) {
                 // Not decided before the island has answered for the roster in
                 // this session: a cold start drains BEFORE the roster refresh,
@@ -10703,14 +10712,21 @@ class Session(context: Context) {
             (dec.envelope as? Envelope.ContactRequest)?.let { cr ->
                 val host = dec.senderHost
                 val crossed = host != null && host !in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
-                val filed = crossed && handleContactRequest(dec.senderUin, host!!, cr, dec.senderSigningPub)
+                val outcome = if (crossed) handleContactRequest(dec.senderUin, host!!, cr, dec.senderSigningPub) else CiRequestOutcome.NONE
                 // A request that opened a row is the banner's to keep, and a
-                // running app in the background raises it itself: the island
-                // does not wake a phone whose socket took the envelope. Anything
-                // else (an answer, a repeat, a blocked sender, a request that did
-                // not cross an island) takes back a banner the wake put up.
-                if (!filed) app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
-                else if (!app.rcq.android.RcqApp.foreground) notifyContactRequestInBackground()
+                // running app in the background raises it itself when the row
+                // came over the LIVE socket: the island does not wake a phone
+                // whose socket took the envelope, and a drained row already had
+                // its wake (posting again would ring twice). A repeat of a
+                // request we hold keeps its banner too. Anything else (an
+                // answer, a blocked sender, a request that did not cross an
+                // island) takes back a banner the wake put up.
+                when (outcome) {
+                    CiRequestOutcome.FILED ->
+                        if (drainDepth.get() == 0 && !app.rcq.android.RcqApp.foreground) notifyContactRequestInBackground()
+                    CiRequestOutcome.HELD -> Unit
+                    CiRequestOutcome.NONE -> app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+                }
                 return@runCatching
             }
             // §5e cross-island profile refresh. Routed here, BEFORE the
@@ -11615,12 +11631,17 @@ class Session(context: Context) {
      * other — the mutual state §5d checks. `decline` drops our pending row for
      * them, silently. A blocked sender is dropped silently, same as same-island.
      */
-    /** @return true when a REQUEST opened or refreshed a pending row, the one
-     *  outcome worth a notification. */
-    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest, spub: ByteArray): Boolean {
-        val me = store.uin ?: return false
-        if (uin == me) return false
-        if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return false
+    /** What a §5f envelope did: [FILED] a request opened or refreshed a
+     *  pending row, [HELD] it repeats one we already hold, [NONE] nothing to
+     *  announce. Decides what becomes of the banner its wake put up. */
+    private enum class CiRequestOutcome { FILED, HELD, NONE }
+
+    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest, spub: ByteArray): CiRequestOutcome {
+        val me = store.uin ?: return CiRequestOutcome.NONE
+        if (uin == me) return CiRequestOutcome.NONE
+        if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return CiRequestOutcome.NONE
+        fun held() = if (CrossIslandRequestsStore.list(me).any { it.uin == uin && it.host.equals(host, ignoreCase = true) })
+            CiRequestOutcome.HELD else CiRequestOutcome.NONE
         // Who this is, by KEY: an envelope that names an accepted contact's
         // address but is signed by another key is a stranger's request, filed
         // as one and marked, never merged into that contact.
@@ -11634,19 +11655,19 @@ class Session(context: Context) {
                 val key = "$uin@${host.lowercase()}"
                 val now = System.currentTimeMillis()
                 val last = ciReqSeenAt[key]
-                if (last != null && now - last < CI_REQ_MIN_INTERVAL_MS) return false
+                if (last != null && now - last < CI_REQ_MIN_INTERVAL_MS) return held()
                 ciReqSeenAt[key] = now
                 // Already ours: nothing to consent to, and no second row.
-                if (match == CrossIslandGate.ContactMatch.VERIFIED) return false
+                if (match == CrossIslandGate.ContactMatch.VERIFIED) return CiRequestOutcome.NONE
                 if (CrossIslandRequestsStore.holdContactRequest(
                         me, uin, host, cr.nickname, cr.note,
                         keyChanged = match == CrossIslandGate.ContactMatch.KEY_MISMATCH,
                     )
                 ) {
                     refreshCiRequests()
-                    return true
+                    return CiRequestOutcome.FILED
                 }
-                return false
+                return held()
             }
             Envelope.ACT_ACCEPT -> {
                 // They took the request we sent. We already hold their row (the
@@ -11662,7 +11683,7 @@ class Session(context: Context) {
                     // start on our CURRENT name and picture instead of whatever
                     // the open card said when they fetched it.
                     depositProfileToNewContact(uin, host)
-                    return false
+                    return CiRequestOutcome.NONE
                 }
                 // An `accept` from someone we never asked is NOT a licence to
                 // add them: adding here let any stranger self-add with one
@@ -11687,7 +11708,7 @@ class Session(context: Context) {
                 // have always checked; this branch did not read `match` at all.
                 if (CrossIslandStore.get(uin, host) != null &&
                     match != CrossIslandGate.ContactMatch.VERIFIED
-                ) return false
+                ) return CiRequestOutcome.NONE
                 // Drop the pending row we hold for them, silently.
                 CrossIslandRequestsStore.clear(me, uin, host)
                 // ⚠⚠ AND THE CONTACT ROW. It used to be left alone, reasoned as
@@ -11709,7 +11730,7 @@ class Session(context: Context) {
             }
             else -> Unit // unknown act from a newer client
         }
-        return false
+        return CiRequestOutcome.NONE
     }
 
     // ── §5e cross-island profile refresh (name + picture) ──────────────
