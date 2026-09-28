@@ -9467,7 +9467,13 @@ class Session(context: Context) {
             if (sent && (gid == null || gid >= 0)) {
                 sendMessageCarbon(env, toPeer = if (gid == null) target.peerUin else null, toGroup = gid)
             }
-            if (!sent) {
+            // A row still marked FAILED never reached anyone, so there is no
+            // other screen to be out of step with. Restoring it made a red
+            // "tap to retry" bubble impossible to delete while offline: it
+            // vanished, the retraction failed for the same reason the send
+            // did, and it came straight back. The retraction above is still
+            // worth trying in case an earlier attempt half-landed.
+            if (!sent && !(target.fromMe && target.state == DeliveryState.FAILED)) {
                 // Nothing left the device after the retries, so the message is
                 // still on everyone else's screen and only gone from mine. Put
                 // it back rather than leave the two out of step: seeing it
