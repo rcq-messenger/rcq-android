@@ -1175,7 +1175,28 @@ class Session(context: Context) {
     val nickname: String get() = decoySessionNickname ?: store.nickname ?: "—"
 
     // uin -> recipient X25519 identity public (raw), from contacts or lookup.
-    private val peerIdentityCache = HashMap<Int, ByteArray>()
+    // ⚠ Concurrent: `encryptFor` runs on the IO pool (`scope`) and on
+    // Dispatchers.Default (the composer's send), and a plain HashMap written
+    // from both at once can lose entries or corrupt itself.
+    private val peerIdentityCache = java.util.concurrent.ConcurrentHashMap<Int, ByteArray>()
+
+    // One island lookup per peer at a time, for the two reads every seal to a
+    // peer may make: their card (identity key, [recipientKey]) and their device
+    // list ([peerDevices]). A second send, receipt or ask for the same number
+    // while the first read is on the wire waits for that answer instead of
+    // sending its own. Keyed by (account epoch, uin, generation): a read
+    // started for one account is never handed to the account switched to
+    // meanwhile, and a read started before its cache entry was declared stale
+    // is never handed to a caller who came after that (see
+    // [peerDeviceGens]). Nothing is kept once it returns, the caches above and
+    // below do that.
+    private val identityLookups = app.rcq.android.net.SingleFlight<Triple<Int, Int, Long>, String?>()
+    private val deviceLookups = app.rcq.android.net.SingleFlight<Triple<Int, Int, Long>, RcqApi.PeerDevices>()
+
+    // ⚠ Every drop of [peerIdentityCache] goes through this, so a card read
+    // that was on the wire across the drop (a burn, a wipe, a new identity)
+    // neither answers a later caller nor writes itself back.
+    private val peerIdentityGens = app.rcq.android.net.CacheGenerations<Int>()
 
     // Peers known to have no v=2 bundle this session — send them v=1 without
     // re-probing /keys/{uin}/bundle on every message. Cleared on account
@@ -1192,6 +1213,15 @@ class Session(context: Context) {
     // and an inbound v=2 message naming a device the list does not have.
     private val peerDeviceCache =
         java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<Int>>>()
+
+    // ⚠⚠ Every drop of [peerDeviceCache], one number or all of them, goes
+    // through this and never straight to the map. The drop that matters is the
+    // new-device signal: a message from an install the list does not have.
+    // Without the count, the reply typed right after it joined a list read
+    // that had started BEFORE the drop, sealed to the old installs only, and
+    // cached that list for the full TTL: the new install heard nothing from us
+    // until it wrote again. See [app.rcq.android.net.CacheGenerations].
+    private val peerDeviceGens = app.rcq.android.net.CacheGenerations<Int>()
 
     // ── Silence probe: notice a peer whose install was replaced under us ──
     // A replaced install (re-claimed slot, reinstall, phrase restore onto a
@@ -2242,8 +2272,8 @@ class Session(context: Context) {
         // number that warns contacts.
         SignalBootstrap.rebootstrap(signalStores, api, resp.uin, identityPub())
         // Old sessions/cache referenced the previous identity — drop them.
-        peerIdentityCache.clear()
-        peerDeviceCache.clear()
+        peerIdentityGens.invalidateAll(peerIdentityCache)
+        peerDeviceGens.invalidateAll(peerDeviceCache)
         // ⚠⚠ EVERY GROUP THIS ACCOUNT SENDS TO IS NOW SIGNING WITH A KEY ITS
         // MEMBERS DO NOT EXPECT. A member's inbound chain pins the signing key
         // that arrived with the SKDM and verifies every message against it, so
@@ -2416,9 +2446,9 @@ class Session(context: Context) {
         offlineSince = 0L
         lastLadderAt = 0L
         _receivingViaBackup.value = false
-        peerIdentityCache.clear()
+        peerIdentityGens.invalidateAll(peerIdentityCache)
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
-        noV2Peers.clear(); invitePreviews.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
+        noV2Peers.clear(); invitePreviews.clear(); peerDeviceGens.invalidateAll(peerDeviceCache); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
         // A call's grey belongs to the account it was placed from: the same
         // number in the next account is somebody else (#1047 review). The
         // timers already running find nothing to release.
@@ -4287,7 +4317,7 @@ class Session(context: Context) {
             app.rcq.android.push.embedded.EmbeddedDistributor.clear(appCtx)
         }
         PanicPinService.removePin(appCtx)   // destroys the vault, clears the lock + dataKey
-        peerIdentityCache.clear(); noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; ackedReads.clear()
+        peerIdentityGens.invalidateAll(peerIdentityCache); noV2Peers.clear(); peerDeviceGens.invalidateAll(peerDeviceCache); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
         // a socket and a peer number that mean somebody else entirely on the
         // next one. Flushing them after a switch would hand a stranger's
@@ -5236,9 +5266,18 @@ class Session(context: Context) {
                 // different numbering space, so its members' numbers must not
                 // be looked up in a store keyed by ours, and must not be asked
                 // either (maybeAskProfileKey refuses a non-null host anyway).
+                // ⚠⚠ AND ONLY A CONTACT IS ASKED. This used to ask every member
+                // with a picture, and nobody but an accepted contact ever
+                // answers (the answerer's rule, on all three clients). Each of
+                // those futile asks was a card read and a device list read for
+                // a stranger, all launched at once: 22 to 29 per cold start in
+                // the beta room, and those bursts are what stalled the island's
+                // database pool from 21.09 on. See data/ProfileKeyAsk.
                 avatarMediaKey = (it.avatar_media_key ?: if (onHost == null) LocalStores.profileKey(it.uin) else null)
                     ?: run {
-                        if (!it.avatar_media_id.isNullOrEmpty()) {
+                        if (!it.avatar_media_id.isNullOrEmpty() &&
+                            app.rcq.android.data.ProfileKeyAsk.worthAsking(it.uin, onHost, sameIslandContactUins())
+                        ) {
                             maybeAskProfileKey(it.uin, it.identity_key ?: "", onHost)
                         }
                         null
@@ -5252,6 +5291,20 @@ class Session(context: Context) {
         // Older islands do not send it; the roster's own size is right there.
         memberCount = if (g.member_count > 0) g.member_count else g.members.size,
     )
+
+    /** The numbers of our accepted contacts on THIS island, for
+     *  [app.rcq.android.data.ProfileKeyAsk]. Kept per roster list rather than
+     *  rebuilt per call: the member mapper asks once for each of a room's
+     *  members that has a picture we cannot open, and the beta room has 2271.
+     *  The flow publishes a new list on every change, so identity is enough. */
+    @Volatile private var sameIslandContactsMemo: Pair<List<Contact>, Set<Int>>? = null
+
+    private fun sameIslandContactUins(): Set<Int> {
+        val list = _contacts.value
+        sameIslandContactsMemo?.let { (from, uins) -> if (from === list) return uins }
+        return list.filter { it.host == null }.mapTo(HashSet()) { it.uin }
+            .also { sameIslandContactsMemo = list to it }
+    }
 
     /** One `pkeyask` per contact per six hours, when they HAVE a picture and we
      *  hold no key for it.
@@ -7521,9 +7574,9 @@ class Session(context: Context) {
             db.wipe()
             app.rcq.android.data.VisitStore.wipe()
         }
-        peerIdentityCache.clear()
+        peerIdentityGens.invalidateAll(peerIdentityCache)
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceGens.invalidateAll(peerDeviceCache); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
         // a socket and a peer number that mean somebody else entirely on the
@@ -8335,9 +8388,9 @@ class Session(context: Context) {
         // backup-home store, which has to be under the new number by then.
         rekeyMovedAccount(oldUin, newUin)
         api.setToken(token)
-        peerIdentityCache.clear()
+        peerIdentityGens.invalidateAll(peerIdentityCache)
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
-        noV2Peers.clear(); peerDeviceCache.clear(); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
+        noV2Peers.clear(); peerDeviceGens.invalidateAll(peerDeviceCache); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false
         ackedReads.clear()
         // ⚠ Held call signals belong to the account that made them: an island,
         // a socket and a peer number that mean somebody else entirely on the
@@ -9156,7 +9209,7 @@ class Session(context: Context) {
                     val usable = SignalSession.ensureSession(signalStores, api, toUin, dev) {
                         // The island has no such install: the list this id
                         // came from is stale, so the next send re-reads it.
-                        peerDeviceCache.remove(toUin)
+                        peerDeviceGens.invalidate(peerDeviceCache, toUin)
                     }
                     if (!usable) return@mapNotNull null
                     runCatching {
@@ -9247,7 +9300,7 @@ class Session(context: Context) {
                 // list so the next send addresses only the ones still there —
                 // and do not chase a copy for an install that no longer exists.
                 if (c.deviceId != null && e.message?.startsWith("HTTP 404") == true) {
-                    peerDeviceCache.remove(toUin)
+                    peerDeviceGens.invalidate(peerDeviceCache, toUin)
                 } else {
                     missed.add(c)
                 }
@@ -9292,7 +9345,7 @@ class Session(context: Context) {
                         // is nobody left to miss this copy, so it is dropped
                         // instead of counted as lost.
                         if (c.deviceId != null && e.message?.startsWith("HTTP 404") == true) {
-                            peerDeviceCache.remove(toUin)
+                            peerDeviceGens.invalidate(peerDeviceCache, toUin)
                         } else {
                             still.add(c)
                         }
@@ -9328,8 +9381,9 @@ class Session(context: Context) {
         val now = System.currentTimeMillis()
         peerDeviceCache[uin]?.let { (goodUntil, devices) -> if (now < goodUntil) return devices }
         val self = if (uin == store.uin) myDeviceId() else null
+        val gen = peerDeviceGens.of(uin)
         val answered = try {
-            val rows = api.fetchPeerDevices(uin).devices
+            val rows = deviceLookups.run(Triple(epochNow(), uin, gen)) { api.fetchPeerDevices(uin) }.devices
             for (r in rows) r.signal_identity_key?.let { ik -> peerDeviceIdentity["$uin:${r.device_id}"] = ik }
             rows.map { it.device_id }
         } catch (e: Exception) {
@@ -9349,7 +9403,9 @@ class Session(context: Context) {
         val jitter = (Math.random() * 2 - 1) * PEER_DEVICES_JITTER_MS
         val ttl = if (self != null && now < ownListShortUntil) OWN_DEVICES_SHORT_TTL_MS
                   else PEER_DEVICES_TTL_MS + jitter.toLong()
-        peerDeviceCache[uin] = (now + ttl) to devices
+        // Not remembered if the list was declared stale while this read was
+        // on the wire: this caller still gets it, the next one reads afresh.
+        peerDeviceGens.store(peerDeviceCache, uin, gen, (now + ttl) to devices)
         return devices
     }
 
@@ -9366,7 +9422,7 @@ class Session(context: Context) {
      *  everything typed here meanwhile would never reach the new device
      *  unless it sent first. */
     private fun ownDeviceListChanged(linked: Boolean) {
-        store.uin?.let { peerDeviceCache.remove(it) }
+        store.uin?.let { peerDeviceGens.invalidate(peerDeviceCache, it) }
         if (linked) ownListShortUntil = System.currentTimeMillis() + OWN_DEVICES_SHORT_WINDOW_MS
     }
 
@@ -10454,6 +10510,7 @@ class Session(context: Context) {
 
     private suspend fun recipientKey(uin: Int): ByteArray {
         peerIdentityCache[uin]?.let { return it }
+        val gen = peerIdentityGens.of(uin)
         // ⚠⚠ THE FUNNEL. Every 1:1 seal on this client comes through here, and
         // the fallback below is the one the closed-island call-site map flagged
         // first: a peer who is NOT in the roster is sealed to with a key
@@ -10462,9 +10519,11 @@ class Session(context: Context) {
         // stranger who wrote first — the exact case the card exists for — dies
         // silently without this argument.
         val keyB64 = _contacts.value.firstOrNull { it.uin == uin }?.identityKey
-            ?: api.userInfo(uin, app.rcq.android.net.GuestCardStore.theirCard(uin)).identity_key
+            ?: identityLookups.run(Triple(epochNow(), uin, gen)) {
+                api.userInfo(uin, app.rcq.android.net.GuestCardStore.theirCard(uin)).identity_key
+            }
             ?: throw IllegalStateException("peer has no identity key")
-        return Base64.decode(keyB64, Base64.NO_WRAP).also { peerIdentityCache[uin] = it }
+        return Base64.decode(keyB64, Base64.NO_WRAP).also { peerIdentityGens.store(peerIdentityCache, uin, gen, it) }
     }
 
     /** [depositAtMs]: see [ingestGroup]. */
@@ -14707,9 +14766,17 @@ class Session(context: Context) {
             // and dropping it would re-ask on every inbound message.
             if (dev != null) {
                 val from = d.senderUin
-                peerDeviceCache[from]?.let { (_, known) ->
-                    val ours = from == store.uin && dev == myDeviceIdOrNull()
-                    if (known.isNotEmpty() && dev !in known && !ours) peerDeviceCache.remove(from)
+                val ours = from == store.uin && dev == myDeviceIdOrNull()
+                val cached = peerDeviceCache[from]
+                if (cached == null) {
+                    // No list yet, but one may be in flight, read before this
+                    // install existed. Bumping the generation keeps that read
+                    // from being shared with later sends or cached for the TTL
+                    // (the remove itself finds nothing). One counter, no read.
+                    if (!ours) peerDeviceGens.invalidate(peerDeviceCache, from)
+                } else {
+                    val known = cached.second
+                    if (known.isNotEmpty() && dev !in known && !ours) peerDeviceGens.invalidate(peerDeviceCache, from)
                 }
             }
         }

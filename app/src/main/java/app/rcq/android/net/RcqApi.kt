@@ -427,8 +427,8 @@ class RcqApi(
         postNoContent("/keys/devices/$deviceId/prekeys", gson.toJson(body), authed = true)
     }
     /** Fetch a peer's bundle to establish a v=2 session. */
-    suspend fun fetchPeerBundle(uin: Int): PeerBundle = withContext(Dispatchers.IO) {
-        fetchBundle("/keys/$uin/bundle")
+    suspend fun fetchPeerBundle(uin: Int): PeerBundle = PeerLookupGate.shared.run(host) {
+        withContext(Dispatchers.IO) { fetchBundle("/keys/$uin/bundle") }
     }
     /** Every device of [uin] a sender has to reach, the primary included.
      *  Nothing is consumed by reading it, so the anonymous form needs no
@@ -437,12 +437,14 @@ class RcqApi(
      *  owner's own key-slot screen passes [own] and keeps the session token
      *  on that one call about its own account (there is no pair to leak in
      *  naming oneself), which is what the island serves the labels against. */
-    suspend fun fetchPeerDevices(uin: Int, own: Boolean = false): PeerDevices = withContext(Dispatchers.IO) {
-        get("/keys/$uin/devices", authed = own || !anonKeyLookup(), PeerDevices::class.java)
+    suspend fun fetchPeerDevices(uin: Int, own: Boolean = false): PeerDevices = PeerLookupGate.shared.run(host) {
+        withContext(Dispatchers.IO) {
+            get("/keys/$uin/devices", authed = own || !anonKeyLookup(), PeerDevices::class.java)
+        }
     }
     /** One device's bundle, for the session that belongs to that device. */
-    suspend fun fetchPeerDeviceBundle(uin: Int, deviceId: Int): PeerBundle = withContext(Dispatchers.IO) {
-        fetchBundle("/keys/$uin/devices/$deviceId/bundle")
+    suspend fun fetchPeerDeviceBundle(uin: Int, deviceId: Int): PeerBundle = PeerLookupGate.shared.run(host) {
+        withContext(Dispatchers.IO) { fetchBundle("/keys/$uin/devices/$deviceId/bundle") }
     }
 
     /** Fill the deposit-token reserve for this host in the background, so the
@@ -670,9 +672,14 @@ class RcqApi(
     /** [card] is a guest card, presented on a CLOSED island. Without it that
      *  island answers "no such user" for somebody who has not shared one, and
      *  the refusal is deliberately indistinguishable from a number that does
-     *  not exist. See net/GuestCardStore.kt. */
-    suspend fun userInfo(uin: Int, card: String? = null): UserInfo = withContext(Dispatchers.IO) {
-        get("/users/$uin/info", authed = true, UserInfo::class.java, card)
+     *  not exist. See net/GuestCardStore.kt.
+     *
+     *  ⚠ Through [PeerLookupGate], like the three key lookups: this is the
+     *  route a burst of seals to strangers hammered until the island's pool
+     *  ran dry (28.09), and nothing about a single card read is urgent enough
+     *  to go around the queue. */
+    suspend fun userInfo(uin: Int, card: String? = null): UserInfo = PeerLookupGate.shared.run(host) {
+        withContext(Dispatchers.IO) { get("/users/$uin/info", authed = true, UserInfo::class.java, card) }
     }
 
     // Guest cards (closed islands). The island is only ever told a DIGEST.
