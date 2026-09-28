@@ -40,6 +40,21 @@ object ProfileLinks {
         RegexOption.IGNORE_CASE,
     )
 
+    /** Mail providers people write numeric addresses at. Not a guess about
+     *  islands, which can live on any name: only the hosts that are certainly
+     *  mailboxes and never an island. */
+    private val MAIL_HOSTS = setOf(
+        "gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com",
+        "icloud.com", "me.com", "proton.me", "protonmail.com", "aol.com", "gmx.com", "gmx.de",
+        "mail.ru", "bk.ru", "list.ru", "inbox.ru", "internet.ru", "yandex.ru", "ya.ru", "yandex.com",
+        "rambler.ru", "ukr.net", "qq.com", "163.com", "126.com", "naver.com",
+    )
+
+    internal fun isMailHost(host: String): Boolean {
+        val h = host.substringBefore(':').lowercase().trimEnd('.')
+        return h in MAIL_HOSTS
+    }
+
     /** Cheap gate so the overwhelmingly common message never sees the regex. */
     fun mayContain(text: String): Boolean {
         var at = text.indexOf('@')
@@ -63,6 +78,10 @@ object ProfileLinks {
             // message never offers an address that the card then refuses.
             val a = runCatching { RcqFederation.parseAddress(m.value) }.getOrNull() ?: continue
             if (a.uin <= 0) continue
+            // A mailbox that happens to be all digits (`12345@gmail.com`) is
+            // still an email, and a tap would have asked the mail provider for
+            // an island card, telling it the reader's address (#1053 review).
+            if (isMailHost(a.host)) continue
             out.add(Hit(r, a.uin, a.host))
         }
         return out

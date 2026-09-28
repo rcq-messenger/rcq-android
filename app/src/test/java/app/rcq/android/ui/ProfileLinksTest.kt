@@ -94,4 +94,9 @@ class ProfileLinksTest {
         assertEquals(listOf(4..11), SiteLinks.find("see blog.rcq, ok"))
         assertEquals(listOf(1..8), SiteLinks.find("(e2ee.rcq)"))
     }
+
+    @Test fun aNumericMailboxAtAMailProviderStaysText() {
+        assertTrue(ProfileLinks.find("write to 12345@gmail.com or 777@mail.ru").isEmpty())
+        assertEquals(1, ProfileLinks.find("my number is 833111503@is2.rcq.app").size)
+    }
 }

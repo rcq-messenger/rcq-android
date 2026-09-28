@@ -739,6 +739,15 @@ private fun RcqApp(session: Session) {
             Toast.makeText(context, context.getString(R.string.add_ci_self), Toast.LENGTH_SHORT).show()
             return@LaunchedEffect
         }
+        // The same number already names somebody in the other place (a contact
+        // here, the tapped address on another island, or the other way round):
+        // the card looks a person up by number and would show the one we know,
+        // and Message would open their chat (#1053 review). The Add sheet
+        // refuses the same way.
+        if (session.clashesWithKnownNumber(req.uin, req.host)) {
+            Toast.makeText(context, context.getString(R.string.add_ci_number_clash, req.uin), Toast.LENGTH_LONG).show()
+            return@LaunchedEffect
+        }
         peerInfoUin = req.uin
         peerInfoHost = req.host
         peerInfoGuest = null
