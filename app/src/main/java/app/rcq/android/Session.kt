@@ -2375,7 +2375,9 @@ class Session(context: Context) {
         pendingRetractions.clear()
         tokenProbeSettled = null
         tokenProbeBackoffMs = BURN_PROBE_THROTTLE_MS
+        handshakeCheckBackoffMs = BURN_PROBE_THROTTLE_MS
         rosterAnsweredEpoch = -1
+        rosterPendingRows = false
         // And the loops that WOULD keep working for it: the epoch stops them
         // writing, the cancel stops them running. See [accountJob].
         retireAccountJob()
@@ -4792,13 +4794,20 @@ class Session(context: Context) {
         // of CrossIslandStore they are a stranger to the cross-island gate,
         // which holds what they write as a request.
         if (ci == null) {
-            LocalStores.addRemoved(uin)
-            // Out of the roster NOW, not at the next refresh: the removed list
-            // stops speaking for anybody in it, so a refresh that fails after
-            // this would have let their next row straight into the chat.
-            _contacts.update { list -> list.filterNot { it.uin == uin && it.host == null } }
-        }
-        if (ci != null) {
+            val ep = epochNow()
+            // Under the roster lock: a refresh whose GET was answered before
+            // this DELETE landed would otherwise write them back and take the
+            // number off the list again.
+            contactsRefreshLock.withLock {
+                if (!stillOn(ep)) return
+                LocalStores.addRemoved(uin)
+                runCatching { api.removeContact(uin) }
+                // Out of the roster NOW, not at the next refresh: the removed
+                // list stops speaking for anybody in it, so a refresh that
+                // fails after this would have let their next row into the chat.
+                _contacts.update { list -> list.filterNot { it.uin == uin && it.host == null } }
+            }
+        } else {
             CrossIslandStore.remove(ci.uin, ci.host)
             // ⚠ The refreshContacts() at the end of this function cannot do it:
             // dropping a foreign row moves nothing on our island, so that call
@@ -4806,7 +4815,7 @@ class Session(context: Context) {
             // switched away and back (#1024). Remove has to publish its own
             // result.
             syncCrossIslandContacts()
-        } else runCatching { api.removeContact(uin) }
+        }
         // Take them out of whatever section they were filed in. ⚠ This is the
         // ONLY pruning there is: nothing prunes because a chat failed to
         // resolve while rendering. ⚠⚠ And it runs whether or not they WERE
@@ -7683,8 +7692,13 @@ class Session(context: Context) {
         val now = System.currentTimeMillis()
         if (now - lastBurnProbeAt < tokenProbeBackoffMs) return
         lastBurnProbeAt = now
-        scope.launch { runCatching { probeBurnedAccount(allowErase = false) } }
+        if (tokenProbeInFlight) return
+        tokenProbeInFlight = true
+        scope.launch {
+            try { runCatching { probeBurnedAccount(allowErase = false) } } finally { tokenProbeInFlight = false }
+        }
     }
+    @Volatile private var tokenProbeInFlight = false
 
     /** The socket handshake was refused with 401/403. A dead token and the
      *  connect ceiling look the same there, so one authorised REST call is
@@ -7703,10 +7717,18 @@ class Session(context: Context) {
     private fun onSocketHandshakeRefused() {
         if (duressViewUp || burningSelf || tokenProbeIsSettled()) return
         val now = System.currentTimeMillis()
-        if (now - lastHandshakeCheckAt < tokenProbeBackoffMs) return
+        if (now - lastHandshakeCheckAt < handshakeCheckBackoffMs) return
         lastHandshakeCheckAt = now
-        scope.launch { runCatching { api.keysStatus() } }
+        scope.launch {
+            // Answered normally: the token is fine and the refusal was
+            // something else (the connect ceiling says 403 too), so ask less
+            // often. A dead token answers 401 and the hook takes it from there.
+            if (runCatching { api.keysStatus() }.isSuccess) {
+                handshakeCheckBackoffMs = (handshakeCheckBackoffMs * 2).coerceAtMost(TOKEN_PROBE_MAX_BACKOFF_MS)
+            }
+        }
     }
+    @Volatile private var handshakeCheckBackoffMs = BURN_PROBE_THROTTLE_MS
 
     private fun onSocketAuthRejected() {
         // Never from a duress view: `store` is the real account's and a probe
@@ -7835,10 +7857,17 @@ class Session(context: Context) {
      *  `moved_from`. Throws on any refusal, and every caller must decide for
      *  itself what a refusal means; ⚠⚠ only ONE of them may ever wipe. */
     private suspend fun refreshForSelf(me: Int): RcqApi.RegisterResponse {
-        val spubB64 = Base64.encodeToString(signingPub(), Base64.NO_WRAP)
-        val challenge = api.recoverChallenge(spubB64).challenge
-        val signature = app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv(), challenge)
-        return api.refreshSession(RcqApi.RefreshRequest(me, spubB64, challenge, signature, DeviceId.get(appCtx)))
+        // Client and keys taken ONCE, before the first request: read live, a
+        // switch between the two requests would send one account's number
+        // and key to the other's island, signed by the other, which ties the
+        // two accounts together even though nothing is written after.
+        val client = api
+        val spub = signingPub()
+        val spriv = signingPriv()
+        val spubB64 = Base64.encodeToString(spub, Base64.NO_WRAP)
+        val challenge = client.recoverChallenge(spubB64).challenge
+        val signature = app.rcq.android.crypto.RecoveryPhrase.signChallenge(spriv, challenge)
+        return client.refreshSession(RcqApi.RefreshRequest(me, spubB64, challenge, signature, DeviceId.get(appCtx)))
     }
 
     /** `account_moved` — the island telling the OLD number that the account
@@ -9509,17 +9538,21 @@ class Session(context: Context) {
     /** Retractions of rows deleted while still FAILED, still to be sent
      *  (see [pushRetraction]). Tried again when the connection comes back.
      *  In memory and tied to the account that made them. */
-    private data class PendingRetraction(val target: ChatMessage, val gid: Int?, val epoch: Int)
+    private data class PendingRetraction(val target: ChatMessage, val gid: Int?, val accountId: String?)
     private val pendingRetractions = java.util.concurrent.ConcurrentHashMap<String, PendingRetraction>()
 
     private fun retryPendingRetractions() {
         if (pendingRetractions.isEmpty()) return
         scope.launch {
+            // Keyed by ACCOUNT, not epoch: a PIN lock moves the epoch too, and
+            // every queued retraction used to be dropped by the next lock. A
+            // switch clears the map ([rebindTo]); the epoch taken here only
+            // stops the loop, before the next entry goes out through a client
+            // that may belong to somebody else by then.
+            val ep = epochNow()
             for ((id, p) in pendingRetractions.entries.toList()) {
-                // Checked per entry, right before it goes: a switch in the
-                // middle of the loop would otherwise send the rest through the
-                // next account's client, a delete that ties the two together.
-                if (!stillOn(p.epoch)) { pendingRetractions.remove(id); continue }
+                if (!stillOn(ep)) break
+                if (p.accountId != AccountManager.activeId.value) { pendingRetractions.remove(id); continue }
                 if (sendRetraction(p.target, Envelope.delete(p.target.id), p.gid)) pendingRetractions.remove(id)
             }
         }
@@ -9604,7 +9637,7 @@ class Session(context: Context) {
             // have, or the island took it and the answer was lost), so the
             // retraction is kept and sent again when the connection is back.
             if (!sent && wasFailed) {
-                pendingRetractions[target.id] = PendingRetraction(target, gid, epochNow())
+                pendingRetractions[target.id] = PendingRetraction(target, gid, AccountManager.activeId.value)
                 return
             }
             if (!sent) {
@@ -10466,8 +10499,11 @@ class Session(context: Context) {
             // `call_end` was the "New message" that led nowhere (#1047). Same
             // rule the wake path applies when it CAN open: our own copies and
             // control kinds announce nothing.
+            // A contact request is decided in its own branch below: whether it
+            // was worth the banner depends on what becomes of it (#1055).
             if (dec.senderUin == store.uin ||
-                !app.rcq.android.push.PushEnvelope.announces(appCtx, dec.envelope)
+                (dec.envelope !is Envelope.ContactRequest &&
+                    !app.rcq.android.push.PushEnvelope.announces(appCtx, dec.envelope))
             ) {
                 app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
             }
@@ -10486,7 +10522,7 @@ class Session(context: Context) {
                 // and somebody added back from another device still reads as
                 // removed until then. Left on the island, the row is decided
                 // on the next drain instead of being dropped after the ack.
-                if (!rosterAnsweredThisSession()) why = "roster_pending"
+                if (!rosterAnsweredThisSession()) { why = "roster_pending"; rosterPendingRows = true }
                 return@runCatching
             }
             // §5d cross-island call signaling rides sealed envelopes (kind
@@ -10665,9 +10701,16 @@ class Session(context: Context) {
             // adds still go through POST /contacts/request, so an envelope that
             // did not cross an island boundary is ignored.
             (dec.envelope as? Envelope.ContactRequest)?.let { cr ->
-                val host = dec.senderHost ?: return@runCatching
-                if (host in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }) return@runCatching
-                handleContactRequest(dec.senderUin, host, cr, dec.senderSigningPub)
+                val host = dec.senderHost
+                val crossed = host != null && host !in setOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
+                val filed = crossed && handleContactRequest(dec.senderUin, host!!, cr, dec.senderSigningPub)
+                // A request that opened a row is the banner's to keep, and a
+                // running app in the background raises it itself: the island
+                // does not wake a phone whose socket took the envelope. Anything
+                // else (an answer, a repeat, a blocked sender, a request that did
+                // not cross an island) takes back a banner the wake put up.
+                if (!filed) app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+                else if (!app.rcq.android.RcqApp.foreground) notifyContactRequestInBackground()
                 return@runCatching
             }
             // §5e cross-island profile refresh. Routed here, BEFORE the
@@ -11572,10 +11615,12 @@ class Session(context: Context) {
      * other — the mutual state §5d checks. `decline` drops our pending row for
      * them, silently. A blocked sender is dropped silently, same as same-island.
      */
-    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest, spub: ByteArray) {
-        val me = store.uin ?: return
-        if (uin == me) return
-        if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return
+    /** @return true when a REQUEST opened or refreshed a pending row, the one
+     *  outcome worth a notification. */
+    private fun handleContactRequest(uin: Int, host: String, cr: Envelope.ContactRequest, spub: ByteArray): Boolean {
+        val me = store.uin ?: return false
+        if (uin == me) return false
+        if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return false
         // Who this is, by KEY: an envelope that names an accepted contact's
         // address but is signed by another key is a stranger's request, filed
         // as one and marked, never merged into that contact.
@@ -11589,17 +11634,19 @@ class Session(context: Context) {
                 val key = "$uin@${host.lowercase()}"
                 val now = System.currentTimeMillis()
                 val last = ciReqSeenAt[key]
-                if (last != null && now - last < CI_REQ_MIN_INTERVAL_MS) return
+                if (last != null && now - last < CI_REQ_MIN_INTERVAL_MS) return false
                 ciReqSeenAt[key] = now
                 // Already ours: nothing to consent to, and no second row.
-                if (match == CrossIslandGate.ContactMatch.VERIFIED) return
+                if (match == CrossIslandGate.ContactMatch.VERIFIED) return false
                 if (CrossIslandRequestsStore.holdContactRequest(
                         me, uin, host, cr.nickname, cr.note,
                         keyChanged = match == CrossIslandGate.ContactMatch.KEY_MISMATCH,
                     )
                 ) {
                     refreshCiRequests()
+                    return true
                 }
+                return false
             }
             Envelope.ACT_ACCEPT -> {
                 // They took the request we sent. We already hold their row (the
@@ -11615,7 +11662,7 @@ class Session(context: Context) {
                     // start on our CURRENT name and picture instead of whatever
                     // the open card said when they fetched it.
                     depositProfileToNewContact(uin, host)
-                    return
+                    return false
                 }
                 // An `accept` from someone we never asked is NOT a licence to
                 // add them: adding here let any stranger self-add with one
@@ -11640,7 +11687,7 @@ class Session(context: Context) {
                 // have always checked; this branch did not read `match` at all.
                 if (CrossIslandStore.get(uin, host) != null &&
                     match != CrossIslandGate.ContactMatch.VERIFIED
-                ) return
+                ) return false
                 // Drop the pending row we hold for them, silently.
                 CrossIslandRequestsStore.clear(me, uin, host)
                 // ⚠⚠ AND THE CONTACT ROW. It used to be left alone, reasoned as
@@ -11662,6 +11709,7 @@ class Session(context: Context) {
             }
             else -> Unit // unknown act from a newer client
         }
+        return false
     }
 
     // ── §5e cross-island profile refresh (name + picture) ──────────────
@@ -11931,6 +11979,16 @@ class Session(context: Context) {
     /** The epoch whose roster the island has answered for (a full body or a
      *  304 on the rows we hold), or -1 before the first answer. */
     @Volatile private var rosterAnsweredEpoch = -1
+    /** A row was left on the island for the roster's answer: drain again
+     *  once it is in, rather than waiting for the next reconnect or push. */
+    @Volatile private var rosterPendingRows = false
+    private fun rosterAnswered(ep: Int) {
+        rosterAnsweredEpoch = ep
+        if (rosterPendingRows) {
+            rosterPendingRows = false
+            scope.launch { runCatching { drainQueue() } }
+        }
+    }
     private fun rosterAnsweredThisSession(): Boolean = rosterAnsweredEpoch == epochNow()
 
     private fun droppedAsRemoved(dec: SealedSender.Decrypted): Boolean {
@@ -12961,7 +13019,7 @@ class Session(context: Context) {
             // into the next account's screen.
             if (stillOn(ep)) {
                 syncCrossIslandContacts()
-                if (rosterEtag != null) rosterAnsweredEpoch = ep
+                if (rosterEtag != null) rosterAnswered(ep)
             }
             // A hold released while an earlier read was in the air can land
             // here: that read took the new ETag with our grey still painted,
@@ -12994,7 +13052,7 @@ class Session(context: Context) {
         // Back in the roster, so whatever removed them is over, however they
         // got back: our request, theirs accepted, from another device (#1055).
         fetched.forEach { LocalStores.clearRemoved(it.uin) }
-        rosterAnsweredEpoch = ep
+        rosterAnswered(ep)
         _contacts.value = fetched.map {
             Contact(
                 uin = it.uin,
@@ -14242,6 +14300,24 @@ class Session(context: Context) {
     /** Raise the system notification for a message that arrived over the live
      *  socket while the app was in the background. False when the OS has our
      *  notifications switched off and nothing was shown. */
+    /** A cross-island contact request that opened a row while the app runs
+     *  in the background (#1055). Anonymous like the wake for it: the sender
+     *  is a stranger until accepted, so no name and nothing to open but Home. */
+    private fun notifyContactRequestInBackground() {
+        val quiet = app.rcq.android.security.PanicPinService.isLocked ||
+            app.rcq.android.security.DuressGate.isActive
+        app.rcq.android.push.Push.showLocalMessage(
+            ctx = appCtx,
+            title = appCtx.getString(app.rcq.android.R.string.app_name),
+            body = appCtx.getString(
+                if (quiet) app.rcq.android.R.string.push_new_message else app.rcq.android.R.string.ci_contact_request,
+            ),
+            groupId = null,
+            peerUin = null,
+            toUin = store.uin,
+        )
+    }
+
     private fun notifyInBackground(msg: ChatMessage): Boolean {
         val gid = msg.groupId
         // While the app is locked its own history is unreadable, so a preview in
