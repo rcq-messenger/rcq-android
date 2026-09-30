@@ -10772,7 +10772,13 @@ class Session(context: Context) {
                 // Only an accepted cross-island contact may ring us, and only a
                 // row signed by the key pinned for them is that contact: the
                 // address in the envelope is not signed.
-                if (!isVerifiedCrossIslandContact(dec.senderUin, host, dec.senderSigningPub)) return@runCatching
+                //
+                // ⚠ The exact address only, not the same key from another of
+                // their islands (third review): the answer, ICE and hang-up go
+                // back to the address the contact is filed under, so such a
+                // call rang and then hung on "connecting".
+                val filed = CrossIslandStore.get(dec.senderUin, host)
+                if (filed == null || !CrossIslandGate.signingKeyMatches(filed.signingKey, dec.senderSigningPub)) return@runCatching
                 // An offer this phone already turned down (from the ring its
                 // wake raised) neither rings again when the queue hands it
                 // over nor becomes a missed call later (#1047 review).
@@ -10903,9 +10909,12 @@ class Session(context: Context) {
             if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin &&
                 dec.senderUin != activeRandomPeer && shouldQuarantineStranger(dec.senderUin, dec.envelope)
             ) {
+                // "" for the key, as iOS and the web keep it: on our own island
+                // the ratchet (v=2) or the island vouches for the sender, and a
+                // message sealed v=1 and deleted over v=2 must still match.
                 CrossIslandRequestsStore.hold(
                     meUin, dec.senderUin, "", payloadB64, ciPreview(dec.envelope),
-                    id = CrossIslandGate.contentId(dec.envelope), spub = spubB64(dec),
+                    id = CrossIslandGate.contentId(dec.envelope), spub = "",
                 )
                 refreshCiRequests()
                 return@runCatching
@@ -10914,7 +10923,7 @@ class Session(context: Context) {
             // take it out of the request, or accepting would replay it.
             if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin) {
                 val e = dec.envelope
-                if (e is Envelope.Delete && CrossIslandRequestsStore.retract(meUin, dec.senderUin, "", e.targetId, spubB64(dec))) {
+                if (e is Envelope.Delete && CrossIslandRequestsStore.retract(meUin, dec.senderUin, "", e.targetId, "")) {
                     refreshCiRequests()
                     return@runCatching
                 }
