@@ -21,7 +21,10 @@ import com.google.gson.reflect.TypeToken
  */
 object CrossIslandRequestsStore {
 
-    data class Held(val payload: String, val preview: String)
+    /** [id] and [spub] (the sealing key, base64; empty for a v=2 row, whose
+     *  ratchet vouches for the sender) let the sender take a held message back
+     *  with a delete for everyone, see [retract]. Null on rows held before. */
+    data class Held(val payload: String, val preview: String, val id: String? = null, val spub: String? = null)
 
     data class Request(
         val ownUin: Int,
@@ -127,14 +130,17 @@ object CrossIslandRequestsStore {
     fun isBlocked(ownUin: Int, uin: Int, host: String): Boolean = blockedSet().contains(reqKey(ownUin, uin, host))
 
     /** Quarantine one sealed payload. Returns false (caller drops it) when blocked. */
-    fun hold(ownUin: Int, uin: Int, host: String, payload: String, preview: String, keyChanged: Boolean = false): Boolean {
+    fun hold(
+        ownUin: Int, uin: Int, host: String, payload: String, preview: String, keyChanged: Boolean = false,
+        id: String? = null, spub: String? = null,
+    ): Boolean {
         if (isBlocked(ownUin, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
         val base = map[k] ?: Request(ownUin, uin, host, System.currentTimeMillis(), mutableListOf())
         // Sticky: one mismatched row is enough to warn about the whole request.
         val r = if (keyChanged && !base.keyChanged) base.copy(keyChanged = true) else base
-        r.msgs.add(Held(payload, preview))
+        r.msgs.add(Held(payload, preview, id, spub))
         while (r.msgs.size > MAX_HELD) r.msgs.removeAt(0)
         map[k] = r
         writeAll(map)
@@ -325,6 +331,27 @@ object CrossIslandRequestsStore {
     fun count(ownUin: Int): Int = all().values.count { it.ownUin == ownUin }
 
     /** Drop a request and return it (after Accept replays its messages). */
+    /**
+     * The sender deleted a held message for everyone before we answered. It
+     * used to stay in the request, because a control from somebody not yet
+     * accepted is dropped at the gate, and accepting then replayed a message
+     * its author had taken back. Only the key that sealed the held message
+     * can retract it. A row left with nothing in it goes too, unless it is an
+     * explicit contact request or stands for one on an island's pending list.
+     * Returns true when something was removed.
+     */
+    fun retract(ownUin: Int, uin: Int, host: String, targetId: String, spub: String): Boolean {
+        val map = all()
+        val k = reqKey(ownUin, uin, host)
+        val r = map[k] ?: return false
+        val before = r.msgs.size
+        r.msgs.removeAll { it.id == targetId && it.spub == spub }
+        if (r.msgs.size == before) return false
+        if (r.msgs.isEmpty() && !r.contactReq && r.srvReqId == null) map.remove(k) else map[k] = r
+        writeAll(map)
+        return true
+    }
+
     fun clear(ownUin: Int, uin: Int, host: String): Request? {
         val map = all()
         val k = reqKey(ownUin, uin, host)

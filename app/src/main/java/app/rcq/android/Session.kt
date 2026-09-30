@@ -10896,9 +10896,21 @@ class Session(context: Context) {
             if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin &&
                 dec.senderUin != activeRandomPeer && shouldQuarantineStranger(dec.senderUin, dec.envelope)
             ) {
-                CrossIslandRequestsStore.hold(meUin, dec.senderUin, "", payloadB64, ciPreview(dec.envelope))
+                CrossIslandRequestsStore.hold(
+                    meUin, dec.senderUin, "", payloadB64, ciPreview(dec.envelope),
+                    id = CrossIslandGate.contentId(dec.envelope), spub = spubB64(dec),
+                )
                 refreshCiRequests()
                 return@runCatching
+            }
+            // A stranger deleting for everyone a message we are still holding:
+            // take it out of the request, or accepting would replay it.
+            if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin) {
+                val e = dec.envelope
+                if (e is Envelope.Delete && CrossIslandRequestsStore.retract(meUin, dec.senderUin, "", e.targetId, spubB64(dec))) {
+                    refreshCiRequests()
+                    return@runCatching
+                }
             }
             // ⚠ No clearRemoved here any more (#1055 review). Nothing hides a
             // thread by that list now, and clearing it for every row that got
@@ -12201,6 +12213,10 @@ class Session(context: Context) {
     /** A request row that claims an accepted contact's address under another
      *  key. Accept and Block both act on the ADDRESS, so on such a row they
      *  would re-pin or silence the real contact; only dismissing is offered. */
+    /** The key a row was sealed under, as the request store keeps it. */
+    private fun spubB64(dec: SealedSender.Decrypted): String =
+        android.util.Base64.encodeToString(dec.senderSigningPub, android.util.Base64.NO_WRAP)
+
     private fun isKeyChangedRequest(me: Int, uin: Int, host: String): Boolean =
         CrossIslandRequestsStore.list(me).any { it.uin == uin && it.host.equals(host, ignoreCase = true) && it.keyChanged }
 
@@ -12209,13 +12225,25 @@ class Session(context: Context) {
         val verifiedSelf = ownNumberRow(dec, meUin) == CrossIslandGate.OwnNumber.OURS_SIGNED
         return when (CrossIslandGate.verdict(true, verifiedSelf, match == CrossIslandGate.ContactMatch.VERIFIED, dec.envelope)) {
             CrossIslandGate.Verdict.PASS -> false
-            CrossIslandGate.Verdict.DROP -> true
+            CrossIslandGate.Verdict.DROP -> {
+                // Dropped, except for what it says about a message we hold
+                // from them: a delete for everyone takes that back, or the
+                // accept would replay it.
+                val e = dec.envelope
+                if (e is Envelope.Delete && CrossIslandRequestsStore.retract(meUin, dec.senderUin, host, e.targetId, spubB64(dec))) {
+                    refreshCiRequests()
+                }
+                true
+            }
             CrossIslandGate.Verdict.HOLD -> {
                 val mismatch = match == CrossIslandGate.ContactMatch.KEY_MISMATCH
                 if (mismatch) {
                     android.util.Log.w("RCQci", "row from ${dec.senderUin}@$host is not signed by the pinned key, held as a stranger")
                 }
-                CrossIslandRequestsStore.hold(meUin, dec.senderUin, host, payloadB64, ciPreview(dec.envelope), keyChanged = mismatch)
+                CrossIslandRequestsStore.hold(
+                    meUin, dec.senderUin, host, payloadB64, ciPreview(dec.envelope), keyChanged = mismatch,
+                    id = CrossIslandGate.contentId(dec.envelope), spub = spubB64(dec),
+                )
                 refreshCiRequests()
                 true
             }

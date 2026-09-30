@@ -31,6 +31,17 @@ object CrossIslandGate {
      *  traffic that co-members of a room on another island send to our guest
      *  mailbox (visit pings, receipts, key asks) opened phantom requests with an
      *  empty preview when every kind was held (#985(1)). */
+    /** The message id of a content envelope (what a delete names), else null. */
+    fun contentId(env: Envelope): String? = when (env) {
+        is Envelope.Text -> env.id
+        is Envelope.Photo -> env.id
+        is Envelope.Video -> env.id
+        is Envelope.File -> env.id
+        is Envelope.Voice -> env.id
+        is Envelope.Location -> env.id
+        else -> null
+    }
+
     fun isContentKind(env: Envelope): Boolean =
         env is Envelope.Text || env is Envelope.Photo || env is Envelope.Video ||
             env is Envelope.File || env is Envelope.Voice || env is Envelope.Location
