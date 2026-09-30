@@ -11586,8 +11586,16 @@ class Session(context: Context) {
      *  at once would merge two people's histories into one thread, so the
      *  second one is refused rather than quietly welded to the first. */
     fun clashesWithKnownNumber(uin: Int, host: String?): Boolean {
-        val here = host == null || host.equals(serverHost(), true)
-        return _contacts.value.any { it.uin == uin && (it.host == null) != here }
+        // Where the number is being asked about, in one spelling (null = our
+        // island). Any contact holding that number SOMEWHERE ELSE clashes: our
+        // island against another, and (#1061) one island against another. This
+        // used to catch only the first, so `N@a` and `N@b` both went in and
+        // shared the one thread the bare number keys.
+        val own = app.rcq.android.crypto.GuestProof.canonicalHost(serverHost())
+        val want = host?.let { app.rcq.android.crypto.GuestProof.canonicalHost(it) }?.takeUnless { it == own }
+        return _contacts.value.any { c ->
+            c.uin == uin && c.host?.let { app.rcq.android.crypto.GuestProof.canonicalHost(it) }?.takeUnless { it == own } != want
+        }
     }
 
     /** Outcome of a §5f cross-island add. [SENT] = the local row is written AND

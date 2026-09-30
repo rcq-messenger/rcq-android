@@ -101,6 +101,41 @@ object CrossIslandStore {
     fun bindAccount(accountId: String?) {
         acct = accountId
         rev.incrementAndGet()
+        if (::prefs.isInitialized) dedupeSamePerson()
+    }
+
+    /**
+     * The same person twice under one number (#1061): a contact and their
+     * backup copy on a third island, which gets the same number where it can,
+     * both added before the add path refused a number already held elsewhere.
+     * Every conversation is keyed by the bare number, so the two rows fed one
+     * thread, and every lookup by number ([findByUin]) took whichever came
+     * first: the profile, the sends and even "remove" could land on the other
+     * row. Same number AND the same pinned signing key is one person: keep
+     * the row added first and bury the rest, so a vault sync does not bring
+     * them back. Their other islands are still reached through their signed
+     * home record. Same number with different keys is two people and is left
+     * alone. Returns the rows it removed.
+     */
+    /** Pure half of [dedupeSamePerson]: every row but the first added of each
+     *  (number, signing key) pair. */
+    internal fun samePersonDuplicates(rows: Collection<Contact>): List<Contact> =
+        rows.groupBy { it.uin to it.signingKey }.values
+            .filter { it.size > 1 }
+            .flatMap { same -> same.sortedBy { it.addedAt }.drop(1) }
+
+    fun dedupeSamePerson(): List<Contact> {
+        if (acct == null) return emptyList()
+        val m = loadAll()
+        val dropped = samePersonDuplicates(m.values)
+        if (dropped.isEmpty()) return emptyList()
+        for (c in dropped) {
+            m.remove(ciKey(c.uin, c.host))
+            bury(c.uin, c.host)
+        }
+        saveAll(m)
+        for (c in dropped) notify(c.uin to c.host)
+        return dropped
     }
 
     private fun storageKey(accountId: String) = "$accountId.$KEY"
