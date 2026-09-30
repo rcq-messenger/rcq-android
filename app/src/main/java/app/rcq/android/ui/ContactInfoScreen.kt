@@ -385,6 +385,8 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                                         Toast.makeText(context, context.getString(R.string.ci_closed_island), Toast.LENGTH_LONG).show()
                                     Session.CiAdd.FAILED ->
                                         Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                                    Session.CiAdd.CLASH ->
+                                        Toast.makeText(context, context.getString(R.string.add_ci_number_clash, uin), Toast.LENGTH_LONG).show()
                                     // The home does not hold the copy's key.
                                     null ->
                                         Toast.makeText(context, context.getString(R.string.ci_backup_key_mismatch), Toast.LENGTH_LONG).show()
@@ -470,6 +472,8 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                                         Toast.makeText(context, context.getString(R.string.ci_closed_island), Toast.LENGTH_LONG).show()
                                     Session.CiAdd.FAILED ->
                                         Toast.makeText(context, context.getString(R.string.ci_request_failed), Toast.LENGTH_LONG).show()
+                                    Session.CiAdd.CLASH ->
+                                        Toast.makeText(context, context.getString(R.string.add_ci_number_clash, uin), Toast.LENGTH_LONG).show()
                                 }
                             }
                         }.padding(14.dp),

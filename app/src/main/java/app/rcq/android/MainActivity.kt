@@ -1497,6 +1497,8 @@ private fun RcqApp(session: Session) {
                                             Toast.makeText(context, context.getString(R.string.ci_closed_island), Toast.LENGTH_LONG).show()
                                         Session.CiAdd.FAILED ->
                                             Toast.makeText(context, context.getString(R.string.addlink_failed), Toast.LENGTH_LONG).show()
+                                        Session.CiAdd.CLASH ->
+                                            Toast.makeText(context, context.getString(R.string.add_ci_number_clash, req.uin), Toast.LENGTH_LONG).show()
                                     }
                                 } else {
                                     val ok = runCatching { session.addContact(req.uin) }.isSuccess

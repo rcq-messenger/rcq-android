@@ -464,6 +464,9 @@ internal fun HomeScreen(
                 scope.launch {
                     val out = runCatching { session.acceptCrossIslandRequestDetailed(req.uin, req.host, confirmKeyChange = keyWarn) }.getOrNull()
                     if (out == app.rcq.android.Session.CiAccept.KEY_DIFFERS) ciServerAsk = req to true
+                    if (out == app.rcq.android.Session.CiAccept.CLASH) {
+                        android.widget.Toast.makeText(context, context.getString(R.string.add_ci_number_clash, req.uin), android.widget.Toast.LENGTH_LONG).show()
+                    }
                 }
             },
         )
@@ -996,8 +999,13 @@ internal fun HomeScreen(
                                         if (r.fromServer) { ciServerAsk = r to r.viaKeyChanged } else scope.launch {
                                             // Accepting a same-island stranger releases their
                                             // held messages into a normal thread; open it.
-                                            runCatching { session.acceptCrossIslandRequest(r.uin, r.host) }
-                                                .onSuccess { ok -> if (ok && r.host.isEmpty()) onOpenChat(r.uin) }
+                                            val out = runCatching { session.acceptCrossIslandRequestDetailed(r.uin, r.host) }.getOrNull()
+                                            if (out == app.rcq.android.Session.CiAccept.OK && r.host.isEmpty()) onOpenChat(r.uin)
+                                            // The number is already a contact elsewhere (#1061):
+                                            // say so, rather than a button that does nothing.
+                                            if (out == app.rcq.android.Session.CiAccept.CLASH) {
+                                                android.widget.Toast.makeText(context, context.getString(R.string.add_ci_number_clash, r.uin), android.widget.Toast.LENGTH_LONG).show()
+                                            }
                                         }
                                     }
                                 },

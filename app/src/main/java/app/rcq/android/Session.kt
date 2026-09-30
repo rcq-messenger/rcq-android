@@ -125,6 +125,8 @@ private const val TYPED_CONTROL_SENDS = true
  *  envelope, and how many ids one envelope carries. */
 private const val DELIVERED_BATCH_MS = 1_200L
 private const val DELIVERED_BATCH_MAX = 64
+/** How long a batch caught by a lock or a switch waits for its account. */
+private const val DELIVERED_WAIT_MAX_MS = 30 * 60_000L
 
 /** How long a contact a call found offline stays grey against a roster that
  *  still says otherwise (see Session.callSaysOffline, #1047). Long enough to
@@ -8573,7 +8575,7 @@ class Session(context: Context) {
         if (app.rcq.android.security.DuressGate.isActive) {
             return RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), blob.size)
         }
-        val ci = CrossIslandStore.findByUin(toUin) ?: return api.uploadBlob(blob, ::reportUpload)
+        val ci = ciRouteFor(toUin) ?: return api.uploadBlob(blob, ::reportUpload)
         return withContext(Dispatchers.IO) {
             val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
             // The peer-island copy is REQUIRED — that's the one they read,
@@ -9460,7 +9462,7 @@ class Session(context: Context) {
         // ⚠ Never for our own number: that thread is Saved Messages, and a
         // cross-island contact who happens to hold the same number on their
         // island would have been handed every note in it.
-        val ci = if (toUin != store.uin) CrossIslandStore.findByUin(toUin) else null
+        val ci = ciRouteFor(toUin)
         if (ci != null) {
             val me = store.uin
             val ok = me != null && runCatching {
@@ -9968,17 +9970,22 @@ class Session(context: Context) {
         // a neighbour here and somebody else over there, and their receipts
         // must not cross (the add paths refuse that pairing now, #1061, but a
         // roster from before can still hold it).
-        val ci = if (toUin != store.uin && _contacts.value.none { it.uin == toUin && it.host == null }) {
-            CrossIslandStore.findByUin(toUin)
-        } else {
-            null
-        }
+        val ci = ciRouteFor(toUin)
         if (ci != null) {
             val me = store.uin ?: return false
             // Three tries, like the same-island path's own retries: a delete
-            // for everyone that fails here is put back on the screen.
+            // for everyone that fails here is put back on the screen. Each try
+            // is for the account that asked: the key, the island and the
+            // number are read again after every pause, so a switch or a lock
+            // in between ends the tries instead of sealing as somebody else.
+            val owner = SendOwner(
+                accountId = AccountManager.activeId.value,
+                decoy = PanicPinService.inDecoySession || AccountManager.isDecoyMode,
+                epoch = epochNow(),
+            )
             for (attempt in 0 until 3) {
                 if (attempt > 0) delay(if (attempt == 1) 1_000L else 3_000L)
+                if (sendGate(owner, sendSceneNow(owner)) != SendGate.GO || store.uin != me) return false
                 val ok = runCatching {
                     val sp = signingPriv(); val pp = signingPub()
                     withContext(Dispatchers.IO) {
@@ -10462,7 +10469,7 @@ class Session(context: Context) {
             // too, so it tells an observer nothing they could act on.
             return RcqApi.UploadResponse(java.util.UUID.randomUUID().toString().replace("-", ""), 0)
         }
-        val ci = CrossIslandStore.findByUin(toUin)
+        val ci = ciRouteFor(toUin)
             ?: return api.uploadBlobStreaming(openSource, plainLen, key, ::reportUpload)
         return withContext(Dispatchers.IO) {
             val mediaId = java.util.UUID.randomUUID().toString().replace("-", "")
@@ -11650,7 +11657,7 @@ class Session(context: Context) {
      *  is the only thing that can. Without this the person sees the generic
      *  failure and reads it as "the app is broken" or "you gave me a wrong
      *  number". */
-    enum class CiAdd { FAILED, CLOSED_ISLAND, ADDED_ONLY, SENT }
+    enum class CiAdd { FAILED, CLOSED_ISLAND, ADDED_ONLY, SENT, CLASH }
 
     /** Ask an island whether it is closed, to turn a deliberate "no such
      *  number" into a sentence a person can act on. Best effort: an island
@@ -11685,7 +11692,9 @@ class Session(context: Context) {
          *  as is instead of fetching again. */
         prefetched: CrossIslandSender.Card? = null,
     ): CiAdd = withContext(Dispatchers.IO) {
-        if (clashesWithKnownNumber(uin, host)) return@withContext CiAdd.FAILED
+        // Said as itself (review): as FAILED it read "request failed", and an
+        // accept did nothing at all.
+        if (clashesWithKnownNumber(uin, host)) return@withContext CiAdd.CLASH
         val card = prefetched ?: runCatching { CrossIslandSender.fetchCard(host, uin) }.getOrNull()
             ?: return@withContext if (islandIsClosed(host)) CiAdd.CLOSED_ISLAND else CiAdd.FAILED
         val contact = CrossIslandStore.Contact(
@@ -12110,9 +12119,33 @@ class Session(context: Context) {
     /** An accepted cross-island contact at (uin, host) AND a row signed by the
      *  key pinned for them. The address in a v=1 envelope is not signed, so the
      *  address alone never makes a sender that contact. */
-    private fun isVerifiedCrossIslandContact(uin: Int, host: String, spub: ByteArray): Boolean {
-        val c = CrossIslandStore.get(uin, host) ?: return false
-        return CrossIslandGate.signingKeyMatches(c.signingKey, spub)
+    private fun isVerifiedCrossIslandContact(uin: Int, host: String, spub: ByteArray): Boolean =
+        verifiedCiRow(uin, host, spub) != null
+
+    /** The contact a v=1 sender is: the row at their exact address when there
+     *  is one (its key decides), else a row for the same number under the SAME
+     *  pinned key on another of their islands. The key is who they are, the
+     *  address only where the row came from: a backup made primary writes
+     *  from its new home, and the row kept for them may be another home
+     *  (#1061 review). Without this their mail went to requests, and the
+     *  accept was then refused as a number already held. */
+    private fun verifiedCiRow(uin: Int, host: String, spub: ByteArray): CrossIslandStore.Contact? {
+        CrossIslandStore.get(uin, host)?.let { c ->
+            return c.takeIf { CrossIslandGate.signingKeyMatches(it.signingKey, spub) }
+        }
+        return CrossIslandStore.list().firstOrNull { it.uin == uin && CrossIslandGate.signingKeyMatches(it.signingKey, spub) }
+    }
+
+    /** Where a 1:1 send to [uin] goes: the cross-island contact to deposit to,
+     *  or null for our own island. One rule for messages, media, controls and
+     *  receipts (review): our own number is Saved Messages and never leaves;
+     *  a contact on our island holding the number wins over one elsewhere
+     *  (the add paths refuse that pairing now, #1061, but a roster from before
+     *  can hold it), so an edit never reaches somebody the message did not. */
+    private fun ciRouteFor(uin: Int): CrossIslandStore.Contact? {
+        if (uin == store.uin) return null
+        if (_contacts.value.any { it.uin == uin && it.host == null }) return null
+        return CrossIslandStore.findByUin(uin)
     }
 
     /** A row from somebody this account removed, and who is not a contact
@@ -12160,7 +12193,10 @@ class Session(context: Context) {
 
     private fun ciContactMatch(uin: Int, host: String, spub: ByteArray): CrossIslandGate.ContactMatch {
         val c = CrossIslandStore.get(uin, host)
-        return CrossIslandGate.contactMatch(c?.signingKey, c != null, spub)
+        if (c != null) return CrossIslandGate.contactMatch(c.signingKey, true, spub)
+        // The same person writing from another of their islands, see [verifiedCiRow].
+        return if (verifiedCiRow(uin, host, spub) != null) CrossIslandGate.ContactMatch.VERIFIED
+        else CrossIslandGate.ContactMatch.NONE
     }
 
     /**
@@ -12594,7 +12630,7 @@ class Session(context: Context) {
      *  island serves differs from a key this device already saw for that
      *  number in a room there, so the person confirms before anything is
      *  pinned. */
-    enum class CiAccept { OK, FAILED, KEY_DIFFERS }
+    enum class CiAccept { OK, FAILED, KEY_DIFFERS, CLASH }
 
     suspend fun acceptCrossIslandRequestDetailed(uin: Int, host: String, confirmKeyChange: Boolean = false): CiAccept {
         val me = store.uin ?: return CiAccept.FAILED
@@ -12631,6 +12667,7 @@ class Session(context: Context) {
             }
         }
         val added = addCrossIslandContactDetailed(uin, host, Envelope.ACT_ACCEPT, prefetched = card)
+        if (added == CiAdd.CLASH) return CiAccept.CLASH
         if (added == CiAdd.FAILED || added == CiAdd.CLOSED_ISLAND) return CiAccept.FAILED
         if (srvId != null) {
             val deposit = if (added == CiAdd.SENT) GuestPendingRequests.Deposit.SENT else GuestPendingRequests.Deposit.ADDED_ONLY
@@ -14293,13 +14330,19 @@ class Session(context: Context) {
      *  a home lookup, a deposit token and a POST per home. One envelope per
      *  peer per [DELIVERED_BATCH_MS] carries all of them (every client reads
      *  the id list). Guarded by itself. */
-    private val deliveredPending = HashMap<Pair<Int, Int>, LinkedHashSet<String>>()
+    private val deliveredPending = HashMap<Pair<SendOwner, Int>, LinkedHashSet<String>>()
 
     private fun queueDeliveredReceipt(peer: Int, id: String) {
-        // Keyed by the account epoch too: a switch inside the window must not
-        // send the last account's receipts sealed as the next one.
-        val ep = epochNow()
-        val key = ep to peer
+        // Whose receipts these are ([SendOwner]: the account, real or decoy),
+        // not the session epoch, which every PIN lock moves: a batch caught by
+        // a lock waits for its account instead of being thrown away, and one
+        // caught by a switch is never sealed as the next account.
+        val owner = SendOwner(
+            accountId = AccountManager.activeId.value,
+            decoy = PanicPinService.inDecoySession || AccountManager.isDecoyMode,
+            epoch = epochNow(),
+        )
+        val key = owner to peer
         val first = synchronized(deliveredPending) {
             val set = deliveredPending.getOrPut(key) { LinkedHashSet() }
             set.add(id)
@@ -14308,8 +14351,22 @@ class Session(context: Context) {
         if (!first) return
         scope.launch {
             delay(DELIVERED_BATCH_MS)
+            // Wait (bounded) while locked or another account is in front.
+            var waited = 0L
+            while (true) {
+                when (sendGate(owner, sendSceneNow(owner))) {
+                    SendGate.GO -> break
+                    SendGate.WAIT -> if (waited < DELIVERED_WAIT_MAX_MS) { delay(2_000L); waited += 2_000L } else {
+                        synchronized(deliveredPending) { deliveredPending.remove(key) }
+                        return@launch
+                    }
+                    else -> {
+                        synchronized(deliveredPending) { deliveredPending.remove(key) }
+                        return@launch
+                    }
+                }
+            }
             val ids = synchronized(deliveredPending) { deliveredPending.remove(key)?.toList().orEmpty() }
-            if (!stillOn(ep)) return@launch
             for (chunk in ids.chunked(DELIVERED_BATCH_MAX)) {
                 runCatching { sendControl(peer, Envelope.deliveredReceipt(chunk)) }
             }

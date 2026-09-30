@@ -122,7 +122,9 @@ object CrossIslandStore {
     internal fun samePersonDuplicates(rows: Collection<Contact>): List<Contact> =
         rows.groupBy { it.uin to it.signingKey }.values
             .filter { it.size > 1 }
-            .flatMap { same -> same.sortedBy { it.addedAt }.drop(1) }
+            // Ties broken by address, the same way on every client, so two
+            // devices never keep different rows and bury both between them.
+            .flatMap { same -> same.sortedWith(compareBy({ it.addedAt }, { "${it.uin}@${it.host.lowercase()}" })).drop(1) }
 
     fun dedupeSamePerson(): List<Contact> {
         if (acct == null) return emptyList()
