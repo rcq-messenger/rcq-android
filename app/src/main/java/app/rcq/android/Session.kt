@@ -121,6 +121,11 @@ sealed interface RandomState {
  *  (fan-out live test 2026-08-20). */
 private const val TYPED_CONTROL_SENDS = true
 
+/** How long delivered receipts to one peer gather before they go as one
+ *  envelope, and how many ids one envelope carries. */
+private const val DELIVERED_BATCH_MS = 1_200L
+private const val DELIVERED_BATCH_MAX = 64
+
 /** How long a contact a call found offline stays grey against a roster that
  *  still says otherwise (see Session.callSaysOffline, #1047). Long enough to
  *  cover the island's presence window and a ghost connection's sweep, short
@@ -9451,7 +9456,11 @@ class Session(context: Context) {
         // island and deposit there instead of the flagship. Gated strictly —
         // for every flagship peer (no cross-island entry) the path below is
         // byte-identical to before.
-        val ci = CrossIslandStore.findByUin(toUin)
+        //
+        // ⚠ Never for our own number: that thread is Saved Messages, and a
+        // cross-island contact who happens to hold the same number on their
+        // island would have been handed every note in it.
+        val ci = if (toUin != store.uin) CrossIslandStore.findByUin(toUin) else null
         if (ci != null) {
             val me = store.uin
             val ok = me != null && runCatching {
@@ -9954,15 +9963,31 @@ class Session(context: Context) {
         // reactions and edits to a cross-island contact went nowhere (no
         // second tick) or, if our island has somebody with the same number,
         // to them. Same routing and the same pinned keys as a message.
-        val ci = if (toUin != store.uin) CrossIslandStore.findByUin(toUin) else null
+        //
+        // A contact on OUR island with the number wins: the same number can be
+        // a neighbour here and somebody else over there, and their receipts
+        // must not cross (the add paths refuse that pairing now, #1061, but a
+        // roster from before can still hold it).
+        val ci = if (toUin != store.uin && _contacts.value.none { it.uin == toUin && it.host == null }) {
+            CrossIslandStore.findByUin(toUin)
+        } else {
+            null
+        }
         if (ci != null) {
             val me = store.uin ?: return false
-            return runCatching {
-                val sp = signingPriv(); val pp = signingPub()
-                withContext(Dispatchers.IO) {
-                    CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost(), envelopeType = envelopeTypeFor(env))
-                }
-            }.getOrDefault(false)
+            // Three tries, like the same-island path's own retries: a delete
+            // for everyone that fails here is put back on the screen.
+            for (attempt in 0 until 3) {
+                if (attempt > 0) delay(if (attempt == 1) 1_000L else 3_000L)
+                val ok = runCatching {
+                    val sp = signingPriv(); val pp = signingPub()
+                    withContext(Dispatchers.IO) {
+                        CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost(), envelopeType = envelopeTypeFor(env))
+                    }
+                }.getOrDefault(false)
+                if (ok) return true
+            }
+            return false
         }
         return runCatching {
             sendSealedCopies(toUin, encryptFor(toUin, env), envelopeType = envelopeTypeFor(env))
@@ -11593,6 +11618,10 @@ class Session(context: Context) {
         // shared the one thread the bare number keys.
         val own = app.rcq.android.crypto.GuestProof.canonicalHost(serverHost())
         val want = host?.let { app.rcq.android.crypto.GuestProof.canonicalHost(it) }?.takeUnless { it == own }
+        // Our own number on another island is somebody else under the number
+        // that files Saved Messages, and every row they send reads as forged
+        // (our number, not our key) and is dropped. Nothing to add.
+        if (want != null && uin == store.uin) return true
         return _contacts.value.any { c ->
             c.uin == uin && c.host?.let { app.rcq.android.crypto.GuestProof.canonicalHost(it) }?.takeUnless { it == own } != want
         }
@@ -14230,6 +14259,35 @@ class Session(context: Context) {
         return senderUin == me
     }
 
+    /** Delivered receipts waiting to go, per peer. A reconnect drain files
+     *  dozens of rows from one person in a burst, and one envelope per row
+     *  meant as many sealed deposits; to a contact on another island each is
+     *  a home lookup, a deposit token and a POST per home. One envelope per
+     *  peer per [DELIVERED_BATCH_MS] carries all of them (every client reads
+     *  the id list). Guarded by itself. */
+    private val deliveredPending = HashMap<Pair<Int, Int>, LinkedHashSet<String>>()
+
+    private fun queueDeliveredReceipt(peer: Int, id: String) {
+        // Keyed by the account epoch too: a switch inside the window must not
+        // send the last account's receipts sealed as the next one.
+        val ep = epochNow()
+        val key = ep to peer
+        val first = synchronized(deliveredPending) {
+            val set = deliveredPending.getOrPut(key) { LinkedHashSet() }
+            set.add(id)
+            set.size == 1
+        }
+        if (!first) return
+        scope.launch {
+            delay(DELIVERED_BATCH_MS)
+            val ids = synchronized(deliveredPending) { deliveredPending.remove(key)?.toList().orEmpty() }
+            if (!stillOn(ep)) return@launch
+            for (chunk in ids.chunked(DELIVERED_BATCH_MAX)) {
+                runCatching { sendControl(peer, Envelope.deliveredReceipt(chunk)) }
+            }
+        }
+    }
+
     /** File one received (or locally-minted) row. Answers true when the row was
      *  NEW, false when the UUID was already on this device or is tombstoned,
      *  which is what lets a caller tell a first delivery from a repeat. */
@@ -14315,9 +14373,7 @@ class Session(context: Context) {
         // oracle anyone with the number can poll for free.
         if (!row.fromMe && row.groupId == null && row.peerUin != store.uin &&
             row.kind != "call" && row.kind != "system") {
-            scope.launch {
-                runCatching { sendControl(row.peerUin, Envelope.deliveredReceipt(listOf(row.id))) }
-            }
+            queueDeliveredReceipt(row.peerUin, row.id)
         }
         return true
     }
