@@ -1552,4 +1552,11 @@
     <string name="gi_link_reset_done">Посилання оновлено. Старе більше не відкриє кімнату.</string>
     <string name="gi_link_reset_failed">Не вдалося скинути посилання.</string>
     <string name="group_link_invalid">Посилання на цю кімнату неповне або застаріле. Попроси нове в того, хто його дав.</string>
+    <string name="backup_island_remove_title">Прибрати резервний острів?</string>
+    <string name="backup_island_remove_body">Копія на %1$s залишиться, і якщо додати острів знову, повернеться вона ж із тим самим номером. Можна видалити її зовсім, тоді номер там звільниться.</string>
+    <string name="backup_island_remove_keep">Прибрати</string>
+    <string name="backup_island_remove_delete">Прибрати й видалити копію</string>
+    <string name="backup_island_copy_deleted">Копію на %1$s видалено.</string>
+    <string name="backup_island_copy_has_rooms">Копію на %1$s видалити не можна: через неї ти в кімнатах цього острова. Спершу вийди з них.</string>
+    <string name="backup_island_copy_delete_failed">Не вдалося видалити копію на %1$s. Нічого не змінилося, спробуй пізніше.</string>
 </resources>

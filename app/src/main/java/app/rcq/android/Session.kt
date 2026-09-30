@@ -3617,6 +3617,36 @@ class Session(context: Context) {
         scope.launch { drainBackupQueuesOnce() }
     }
 
+    enum class CopyDelete { DELETED, HAS_ROOMS, FAILED }
+
+    /**
+     * Forget a backup home AND delete the copy on it (report 1062): the island
+     * frees the number, so a backup made there again can get the home number.
+     * The copy is proven ours by a fresh recover (the signing key), then
+     * deleted with that token; only then is the home forgotten, so a failure
+     * leaves everything as it was. A copy that is how we sit in rooms on that
+     * island (the guest path reuses it, recover-first) is not deleted: that
+     * would take us out of those rooms. No account there counts as deleted.
+     */
+    suspend fun removeBackupIslandAndCopy(host: String): CopyDelete {
+        if (duressViewUp) return CopyDelete.FAILED
+        val onIsland = groups.value.any { it.host.equals(host, true) } ||
+            app.rcq.android.net.VisitedIslandsStore.get(host) != null
+        if (onIsland) return CopyDelete.HAS_ROOMS
+        val sp = runCatching { signingPriv() }.getOrNull() ?: return CopyDelete.FAILED
+        val pp = runCatching { signingPub() }.getOrNull() ?: return CopyDelete.FAILED
+        val gone = withContext(Dispatchers.IO) {
+            runCatching {
+                val cred = Multihome.recoverOn(host, sp, pp) ?: return@runCatching true
+                val status = app.rcq.android.net.BurnCascade.ApiTransport.deleteAccount(host, cred.token)
+                status in 200..299 || status == 404
+            }.getOrDefault(false)
+        }
+        if (!gone) return CopyDelete.FAILED
+        removeBackupIsland(host)
+        return CopyDelete.DELETED
+    }
+
     /** Forget a backup home (the orphan mailbox account stays on that island;
      *  re-adding recovers the same per-island uin) and republish the record. */
     fun removeBackupIsland(host: String) {

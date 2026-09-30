@@ -1603,4 +1603,11 @@
     <string name="gi_link_reset_done">Ссылка обновлена. Старая больше не откроет комнату.</string>
     <string name="gi_link_reset_failed">Не удалось сбросить ссылку.</string>
     <string name="group_link_invalid">Ссылка на эту комнату неполная или устарела. Попросите новую у того, кто её дал.</string>
+    <string name="backup_island_remove_title">Убрать запасной остров?</string>
+    <string name="backup_island_remove_body">Копия на %1$s останется, и если добавить остров снова, вернётся она же с тем же номером. Можно удалить её совсем, тогда номер там освободится.</string>
+    <string name="backup_island_remove_keep">Убрать</string>
+    <string name="backup_island_remove_delete">Убрать и удалить копию</string>
+    <string name="backup_island_copy_deleted">Копия на %1$s удалена.</string>
+    <string name="backup_island_copy_has_rooms">Копию на %1$s удалить нельзя: через неё вы состоите в комнатах этого острова. Сначала выйдите из них.</string>
+    <string name="backup_island_copy_delete_failed">Не удалось удалить копию на %1$s. Ничего не изменилось, попробуйте позже.</string>
 </resources>

@@ -1526,4 +1526,11 @@
     <string name="gi_link_reset_done">Enlace restablecido. El anterior ya no abrirá la sala.</string>
     <string name="gi_link_reset_failed">No se pudo restablecer el enlace.</string>
     <string name="group_link_invalid">Este enlace de sala está incompleto o caducado. Pide uno nuevo a quien te lo dio.</string>
+    <string name="backup_island_remove_title">¿Quitar la isla de respaldo?</string>
+    <string name="backup_island_remove_body">Tu copia en %1$s se queda, y si vuelves a añadir la isla vuelve la misma copia con el mismo número. También puedes borrarla del todo, y el número allí queda libre.</string>
+    <string name="backup_island_remove_keep">Quitar</string>
+    <string name="backup_island_remove_delete">Quitar y borrar la copia</string>
+    <string name="backup_island_copy_deleted">La copia en %1$s se ha borrado.</string>
+    <string name="backup_island_copy_has_rooms">La copia en %1$s no se puede borrar: estás en salas de esa isla a través de ella. Sal de ellas primero.</string>
+    <string name="backup_island_copy_delete_failed">No se pudo borrar la copia en %1$s. No ha cambiado nada, inténtalo más tarde.</string>
 </resources>

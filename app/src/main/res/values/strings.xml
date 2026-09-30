@@ -1613,4 +1613,11 @@
     <string name="gi_link_reset_done">Link reset. The old one will no longer open the room.</string>
     <string name="gi_link_reset_failed">Couldn\'t reset the link.</string>
     <string name="group_link_invalid">This room link is incomplete or out of date. Ask whoever gave it to you for a new one.</string>
+    <string name="backup_island_remove_title">Remove the backup island?</string>
+    <string name="backup_island_remove_body">Your copy on %1$s stays, and adding the island again brings back the same copy with the same number. You can delete it for good instead, and the number there becomes free.</string>
+    <string name="backup_island_remove_keep">Remove</string>
+    <string name="backup_island_remove_delete">Remove and delete the copy</string>
+    <string name="backup_island_copy_deleted">The copy on %1$s is deleted.</string>
+    <string name="backup_island_copy_has_rooms">The copy on %1$s can\'t be deleted: you are in rooms on that island through it. Leave them first.</string>
+    <string name="backup_island_copy_delete_failed">Couldn\'t delete the copy on %1$s. Nothing was changed, try again later.</string>
 </resources>

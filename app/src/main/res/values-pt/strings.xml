@@ -1526,4 +1526,11 @@
     <string name="gi_link_reset_done">Link redefinido. O antigo não abrirá mais a sala.</string>
     <string name="gi_link_reset_failed">Não foi possível redefinir o link.</string>
     <string name="group_link_invalid">Este link de sala está incompleto ou desatualizado. Peça um novo a quem o enviou.</string>
+    <string name="backup_island_remove_title">Remover a ilha de backup?</string>
+    <string name="backup_island_remove_body">Sua cópia em %1$s continua lá, e ao adicionar a ilha de novo volta a mesma cópia com o mesmo número. Você pode apagá-la de vez, e o número lá fica livre.</string>
+    <string name="backup_island_remove_keep">Remover</string>
+    <string name="backup_island_remove_delete">Remover e apagar a cópia</string>
+    <string name="backup_island_copy_deleted">A cópia em %1$s foi apagada.</string>
+    <string name="backup_island_copy_has_rooms">A cópia em %1$s não pode ser apagada: você está em salas dessa ilha por meio dela. Saia delas primeiro.</string>
+    <string name="backup_island_copy_delete_failed">Não foi possível apagar a cópia em %1$s. Nada mudou, tente mais tarde.</string>
 </resources>

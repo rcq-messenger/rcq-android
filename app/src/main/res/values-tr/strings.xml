@@ -1526,4 +1526,11 @@
     <string name="gi_link_reset_done">Bağlantı sıfırlandı. Eskisi artık odayı açmayacak.</string>
     <string name="gi_link_reset_failed">Bağlantı sıfırlanamadı.</string>
     <string name="group_link_invalid">Bu oda bağlantısı eksik ya da eski. Sana verenden yenisini iste.</string>
+    <string name="backup_island_remove_title">Yedek ada kaldırılsın mı?</string>
+    <string name="backup_island_remove_body">%1$s üzerindeki kopyan kalır ve adayı yeniden eklersen aynı kopya aynı numarayla geri gelir. İstersen onu tamamen silebilirsin, o zaman oradaki numara boşa çıkar.</string>
+    <string name="backup_island_remove_keep">Kaldır</string>
+    <string name="backup_island_remove_delete">Kaldır ve kopyayı sil</string>
+    <string name="backup_island_copy_deleted">%1$s üzerindeki kopya silindi.</string>
+    <string name="backup_island_copy_has_rooms">%1$s üzerindeki kopya silinemez: o adadaki odalarda bu kopya üzerinden bulunuyorsun. Önce onlardan çık.</string>
+    <string name="backup_island_copy_delete_failed">%1$s üzerindeki kopya silinemedi. Hiçbir şey değişmedi, daha sonra dene.</string>
 </resources>

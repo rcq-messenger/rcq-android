@@ -4126,6 +4126,41 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
         )
     }
 
+    // Remove (or switch off) a backup: keep the copy on that island, where
+    // adding it again brings the same copy and number back, or delete it so
+    // the number there is free (report 1062).
+    var removeAsk by remember { mutableStateOf<List<String>?>(null) }
+    removeAsk?.let { hosts ->
+        RcqAskSheet(
+            onDismiss = { if (!busy) removeAsk = null },
+            title = stringResource(R.string.backup_island_remove_title),
+            body = stringResource(R.string.backup_island_remove_body, hosts.joinToString(", ")),
+            actions = listOf(
+                SheetAction(stringResource(R.string.backup_island_remove_keep)) {
+                    removeAsk = null
+                    hosts.forEach { session.removeBackupIsland(it) }
+                },
+                SheetAction(stringResource(R.string.backup_island_remove_delete), destructive = true) {
+                    if (!busy) {
+                        busy = true; error = null
+                        scope.launch {
+                            for (h in hosts) {
+                                val msg = when (session.removeBackupIslandAndCopy(h)) {
+                                    Session.CopyDelete.DELETED -> context.getString(R.string.backup_island_copy_deleted, h)
+                                    Session.CopyDelete.HAS_ROOMS -> context.getString(R.string.backup_island_copy_has_rooms, h)
+                                    Session.CopyDelete.FAILED -> context.getString(R.string.backup_island_copy_delete_failed, h)
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            }
+                            busy = false
+                            removeAsk = null
+                        }
+                    }
+                },
+            ),
+        )
+    }
+
     // §5a.5 promote: confirm-first — the number and the connected island change.
     var promoteTarget by remember { mutableStateOf<MultihomeStore.Home?>(null) }
     promoteTarget?.let { target ->
@@ -4189,6 +4224,12 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                 checked = autoHomes.isNotEmpty(),
             ) { on ->
                 if (autoBusy) return@SettingToggleRow
+                // Off asks first: keep the copy there, or delete it so the
+                // number frees up (report 1062).
+                if (!on) {
+                    removeAsk = autoHomes.map { it.host }
+                    return@SettingToggleRow
+                }
                 autoBusy = true; error = null
                 scope.launch {
                     runCatching {
@@ -4279,7 +4320,7 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                                         stringResource(R.string.backup_island_remove),
                                         color = c.accent,
                                         fontSize = 14.sp,
-                                        modifier = Modifier.clickable(enabled = !busy) { session.removeBackupIsland(h.host) },
+                                        modifier = Modifier.clickable(enabled = !busy) { removeAsk = listOf(h.host) },
                                     )
                                     Text(
                                         stringResource(R.string.backup_island_promote),

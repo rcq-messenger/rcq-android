@@ -1545,4 +1545,11 @@
     <string name="gi_link_reset_done">链接已重置。旧链接将无法再打开这个房间。</string>
     <string name="gi_link_reset_failed">无法重置链接。</string>
     <string name="group_link_invalid">这个房间链接不完整或已过期。请向给你链接的人要一个新的。</string>
+    <string name="backup_island_remove_title">移除备用岛？</string>
+    <string name="backup_island_remove_body">你在 %1$s 上的副本会保留，再次添加该岛时会回到同一个副本和同一个号码。你也可以彻底删除它，那里的号码就会空出来。</string>
+    <string name="backup_island_remove_keep">移除</string>
+    <string name="backup_island_remove_delete">移除并删除副本</string>
+    <string name="backup_island_copy_deleted">%1$s 上的副本已删除。</string>
+    <string name="backup_island_copy_has_rooms">%1$s 上的副本无法删除：你通过它加入了该岛的房间。请先退出这些房间。</string>
+    <string name="backup_island_copy_delete_failed">无法删除 %1$s 上的副本。没有任何更改，请稍后再试。</string>
 </resources>
