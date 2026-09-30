@@ -3552,8 +3552,11 @@ class Session(context: Context) {
                 runCatching {
                     val ci = CrossIslandStore.findByUin(c.uin)
                     if (ci != null) {
-                        // Cross-island contact: deliver to their home(s) (v=1, gossip-aware).
-                        CrossIslandSender.deliver(ci, env, uin, signingPriv, skPub, ownHost)
+                        // Cross-island contact: deliver to their home(s) (v=1, gossip-aware),
+                        // under the same non-pushable type as the same-island branch:
+                        // as a "message" it woke their phone with a "New message" for
+                        // a record nobody reads.
+                        CrossIslandSender.deliver(ci, env, uin, signingPriv, skPub, ownHost, envelopeType = "homerec")
                     } else {
                         // Flagship contact: v=1-seal (NOT v=2 — the receiver binds the
                         // record to the v=1 `spub`) and deposit. Non-pushable type so
@@ -9457,6 +9460,12 @@ class Session(context: Context) {
             }.getOrDefault(false)
             updateMessageState(id, toUin, if (ok) DeliveryState.SENT else DeliveryState.FAILED)
             if (!ok) notePeerLivenessAfterFailure(toUin)
+            // ⚠ Mirror it to our other devices, like the same-island path below
+            // does (#1056). This branch returned before the carbon, so a message
+            // sent from the phone to somebody on another island never existed
+            // on the desktop or the web of the same account, while one sent
+            // from there showed up here.
+            if (ok) sendMessageCarbon(env, toPeer = toUin, toGroup = null)
             return
         }
         try {
@@ -9937,10 +9946,28 @@ class Session(context: Context) {
     /** @return true when the island took it. Callers that only fire and forget
      *  can ignore it; a retraction cannot — it has already removed the message
      *  from this device and needs to know whether anyone else heard. */
-    private suspend fun sendControl(toUin: Int, env: Envelope): Boolean =
-        runCatching {
+    private suspend fun sendControl(toUin: Int, env: Envelope): Boolean {
+        // ⚠⚠ A contact on ANOTHER island is reached on THEIR island (#1056,
+        // #1062). This used to seal to the number on OUR island like any
+        // same-island peer, which sendEnvelope never did: so a delete for
+        // everyone "did not reach the island" and came back, and receipts,
+        // reactions and edits to a cross-island contact went nowhere (no
+        // second tick) or, if our island has somebody with the same number,
+        // to them. Same routing and the same pinned keys as a message.
+        val ci = if (toUin != store.uin) CrossIslandStore.findByUin(toUin) else null
+        if (ci != null) {
+            val me = store.uin ?: return false
+            return runCatching {
+                val sp = signingPriv(); val pp = signingPub()
+                withContext(Dispatchers.IO) {
+                    CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost(), envelopeType = envelopeTypeFor(env))
+                }
+            }.getOrDefault(false)
+        }
+        return runCatching {
             sendSealedCopies(toUin, encryptFor(toUin, env), envelopeType = envelopeTypeFor(env))
         }.isSuccess
+    }
 
     /** Message kinds we mirror to the user's other devices via a carbon.
      *  Reactions sync through their own self-echo; poll/receipts don't sync.

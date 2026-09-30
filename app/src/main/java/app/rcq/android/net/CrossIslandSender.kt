@@ -525,6 +525,11 @@ object CrossIslandSender {
         signingPriv: ByteArray,
         signingPub: ByteArray,
         ownHost: String,
+        /** The OUTER type the island files and pushes by. "message" for
+         *  content; a receipt, an edit, a delete or a reaction must carry its
+         *  own ("read", "edit", ...), or the peer's island pushes a "New
+         *  message" for each of them (#1047's phantom wake, across islands). */
+        envelopeType: String = "message",
     ): Boolean {
         val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
         val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
@@ -543,9 +548,9 @@ object CrossIslandSender {
                 viaBestRoute(h.host) { client ->
                     val body = JsonObject().apply {
                         addProperty("to_uin", h.uin)
-                        addProperty("envelope_type", "message")
+                        addProperty("envelope_type", envelopeType)
                         // Stage 2: retention / push class beside the legacy type.
-                        addProperty("cls", SealedSender.messageClass("message"))
+                        addProperty("cls", SealedSender.messageClass(envelopeType))
                         addProperty("payload", payload)
                         // F3 deposit-auth: attach an anonymous blinded token when the
                         // recipient island offers it, so our cross-island deposit isn't

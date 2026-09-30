@@ -158,7 +158,7 @@
     <string name="settings_row_backup_island">Isla de reserva</string>
     <string name="backup_island_body">Copia automática, no un segundo inicio de sesión: nunca cambias de cuenta ni entras allí. Mientras tu isla principal funciona, cada mensaje entrante deja también una copia en la de reserva. Si tu isla principal está bloqueada o se cae, la app sigue recibiendo desde la de reserva por su cuenta. Tu número en una isla de reserva puede ser otro (cada isla numera por su cuenta); tu número principal no cambia nunca.</string>
     <string name="backup_island_row_uin">buzón en esta isla: %1$d</string>
-    <string name="home_via_backup">Tu isla no responde. Los mensajes llegan por tu isla de reserva; para enviar desde ella, hazla la principal en Ajustes.</string>
+    <string name="home_via_backup">Tu isla no responde. Los mensajes llegan por tu isla de reserva. Toca para hacerla la principal y enviar también desde ella.</string>
     <string name="backup_island_row_uin_diff">buzón en esta isla: %1$d (cada isla numera por su cuenta y tu %2$d ya estaba ocupado aquí)</string>
     <string name="backup_island_auto_title">Guardar una copia en otra isla</string>
     <string name="backup_island_auto_sub">La isla se elige sola del catálogo público</string>

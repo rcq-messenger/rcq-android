@@ -158,7 +158,7 @@
     <string name="settings_row_backup_island">Yedek ada</string>
     <string name="backup_island_body">Otomatik yedek, ikinci bir giriş değil: orada hesap değiştirmez, oturum açmazsın. Ana adan çalışırken gelen her mesajın bir kopyası yedeğe de bırakılır. Ana adan engellenir ya da çökerse uygulama kendiliğinden yedekten almayı sürdürür. Yedek adadaki numaran farklı olabilir (adalar numaraları birbirinden bağımsız verir); ana numaran hiç değişmez.</string>
     <string name="backup_island_row_uin">bu adadaki posta kutusu: %1$d</string>
-    <string name="home_via_backup">Adan cevap vermiyor. Mesajlar yedek adandan geliyor; oradan göndermek için Ayarlar\'dan onu ana ada yap.</string>
+    <string name="home_via_backup">Adan cevap vermiyor. Mesajlar yedek adandan geliyor. Onu ana ada yapıp oradan da göndermek için dokun.</string>
     <string name="backup_island_row_uin_diff">bu adadaki posta kutusu: %1$d (adalar numaraları bağımsız verir ve %2$d burada alınmıştı)</string>
     <string name="backup_island_auto_title">Başka bir adada yedek tut</string>
     <string name="backup_island_auto_sub">Ada, herkese açık katalogdan kendiliğinden seçilir</string>

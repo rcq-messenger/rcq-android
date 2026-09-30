@@ -110,6 +110,7 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -2659,22 +2660,33 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                     ),
                     color = c.textPrimary, fontSize = 13.sp,
                 )
-                Text(a.compact, color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CapsuleButton(stringResource(R.string.common_copy)) {
+                // Copy and share as icons beside the line they act on (#1059):
+                // as two text capsules in an unweighted row, "Поделиться" got
+                // ~65dp and wrapped onto three lines, and its label said
+                // "Share link" in six languages for something that is not one.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        a.compact, color = c.textMono, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(ClipData.newPlainText("RCQ network audit", a.compact))
                         Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Filled.ContentCopy, stringResource(R.string.common_copy), tint = c.accent)
                     }
-                    CapsuleButton(stringResource(R.string.qr_share)) {
+                    IconButton(onClick = {
                         context.startActivity(
                             Intent.createChooser(
                                 Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"; putExtra(Intent.EXTRA_TEXT, a.compact)
                                 },
-                                context.getString(R.string.qr_share),
+                                null,
                             ),
                         )
+                    }) {
+                        Icon(Icons.Filled.Share, stringResource(R.string.media_share), tint = c.accent)
                     }
                 }
             }
@@ -4130,6 +4142,11 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                         scope.launch {
                             runCatching { session.promoteBackupToPrimary(target.host) }
                                 .onSuccess {
+                                    // The old primary comes back as a MANUAL backup, and
+                                    // the block that lists those starts closed for anyone
+                                    // who never added one by hand: open it, or the island
+                                    // they just left is nowhere on screen.
+                                    advanced = true
                                     Toast.makeText(
                                         context,
                                         context.getString(R.string.backup_island_promoted, target.host),
@@ -4195,11 +4212,29 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                 SettingsGroup {
                     autoHomes.forEachIndexed { index, h ->
                         if (index > 0) Divider()
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
-                            Text(h.host, color = c.textPrimary)
+                        // ⚠ Promotable like a manual row (#1060). The banner on
+                        // Home sends everybody here to "make it primary", and
+                        // most people only ever have this automatic one: it had
+                        // no button at all. Promoting is the same for either
+                        // kind (recover first, nothing changes on a failure, the
+                        // old primary stays as a backup). No "remove": the toggle
+                        // above is how an automatic backup goes away.
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(h.host, color = c.textPrimary)
+                                Text(
+                                    stringResource(R.string.backup_island_row_uin, h.uin),
+                                    color = c.textSecondary, fontSize = 12.sp,
+                                )
+                            }
                             Text(
-                                stringResource(R.string.backup_island_row_uin, h.uin),
-                                color = c.textSecondary, fontSize = 12.sp,
+                                stringResource(R.string.backup_island_promote),
+                                color = c.textSecondary,
+                                fontSize = 14.sp,
+                                modifier = Modifier.clickable(enabled = !busy) { promoteTarget = h },
                             )
                         }
                     }

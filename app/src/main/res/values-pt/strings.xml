@@ -158,7 +158,7 @@
     <string name="settings_row_backup_island">Ilha de backup</string>
     <string name="backup_island_body">Backup automático, não um segundo login: você nunca troca nem entra por lá. Enquanto sua ilha principal funciona, uma cópia de cada mensagem que chega também cai na de backup. Se a principal for bloqueada ou sair do ar, o app continua recebendo pela de backup sozinho. Seu número numa ilha de backup pode ser outro (cada ilha numera por conta própria); seu número principal nunca muda.</string>
     <string name="backup_island_row_uin">caixa nesta ilha: %1$d</string>
-    <string name="home_via_backup">Sua ilha não está respondendo. As mensagens estão chegando pela ilha de backup; para enviar de lá, torne ela a principal nas Configurações.</string>
+    <string name="home_via_backup">Sua ilha não está respondendo. As mensagens estão chegando pela ilha de backup. Toque para torná-la a principal e enviar por ela também.</string>
     <string name="backup_island_row_uin_diff">caixa nesta ilha: %1$d (cada ilha numera por conta própria e seu %2$d já estava ocupado aqui)</string>
     <string name="backup_island_auto_title">Manter um backup em outra ilha</string>
     <string name="backup_island_auto_sub">A ilha é escolhida automaticamente no catálogo público</string>
