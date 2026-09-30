@@ -130,6 +130,14 @@ android {
             // a little install footprint / first-load time for a much smaller
             // download. System.loadLibrary still works (libs extract on install).
             useLegacyPackaging = true
+            // Never strip native libs. AGP strips them only when it finds the
+            // NDK it wants (android.ndkVersion's default), so the same source
+            // would give a different APK on a machine that happens to have that
+            // NDK installed. Releases have always shipped them unstripped; this
+            // makes that independent of the machine, and keeps libgojni.so in
+            // the APK byte-identical to the one in app/libs/rcqbox.aar, whose
+            // hashes docs/REPRODUCIBLE-BUILDS.md publishes.
+            keepDebugSymbols += "**/*.so"
         }
     }
 }
@@ -189,9 +197,10 @@ dependencies {
 
     // rcqbox: the embedded sing-box core (VLESS+Reality / Hysteria2) for the
     // censorship-circumvention transport — a gomobile-bound Go wrapper, same
-    // Start/Stop API the iOS client uses. Built from ~/sing-box-src/rcqbox via
-    // `gomobile bind -target=android/arm64,android/arm,android/amd64
-    // -androidapi 26 -tags "with_utls,with_quic"`. Ships libgojni.so per ABI.
+    // Start/Stop API the iOS client uses. Source: upstream sing-box at a pinned
+    // commit + the wrapper in tools/rcqbox/. tools/build-rcqbox.sh rebuilds it
+    // byte for byte; the hashes are in docs/REPRODUCIBLE-BUILDS.md. Ships
+    // libgojni.so per ABI.
     implementation(files("libs/rcqbox.aar"))
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 

@@ -28,7 +28,8 @@ cross-platform with the iOS and web clients.
 | `app/src/main/java/app/rcq/android/ui` | Compose screens |
 | `app/src/main/java/app/rcq/android/nearby` | Nearby, plus Radio Chat: the offline mesh over BLE + Wi-Fi Direct |
 | `app/src/main/java/app/rcq/android/backup` | The `.rcqbak` archive: the same file the iOS and web clients read |
-| `docs/` | `REPRODUCIBLE-BUILDS.md` — how to check a published APK against this source |
+| `app/libs/rcqbox.aar`, `tools/rcqbox/` | The sing-box library behind `SingBoxTransport`, and the wrapper it is built from; `tools/build-rcqbox.sh` rebuilds it byte for byte |
+| `docs/` | `REPRODUCIBLE-BUILDS.md` — how to check a published APK, and `rcqbox.aar`, against this source |
 
 ## Building
 

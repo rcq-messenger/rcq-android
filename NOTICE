@@ -9,9 +9,12 @@ Copyleft, and the reason this file matters:
   - libsignal-android 0.86.5 — Signal Messenger, LLC — AGPL-3.0
       The Double Ratchet / PQXDH implementation. Source:
       https://github.com/signalapp/libsignal
-  - rcqbox (app/libs/rcqbox.aar) — a gomobile binding of sing-box, vendored as
-    a prebuilt archive rather than resolved from a repository — sing-box is
-    GPL-3.0-or-later. Source: https://github.com/SagerNet/sing-box
+  - rcqbox (app/libs/rcqbox.aar) — a gomobile binding of sing-box, committed
+    as a prebuilt archive rather than resolved from a repository — sing-box is
+    GPL-3.0-or-later. Source: https://github.com/SagerNet/sing-box at commit
+    82e84f950cab3b215f4cfb4021a3f6ad0ec78fd1, unmodified, plus our wrapper in
+    tools/rcqbox/ (GPL-3.0-or-later). tools/build-rcqbox.sh rebuilds the
+    archive byte for byte; see docs/REPRODUCIBLE-BUILDS.md.
   - desugar_jdk_libs 2.1.5 — Google — GPL-2.0 with the Classpath Exception
 
 Permissive:
