@@ -77,6 +77,9 @@ data class RcqGroup(
     val minAccountAgeHours: Int = 0,
     val avatarMediaId: String? = null,
     val avatarMediaKey: String? = null,
+    /** The room link's key (#990 step 2): what a shared link carries so a
+     *  room outside the catalogue opens for whoever it was given to. */
+    val shareToken: String? = null,
     val members: List<GroupMember> = emptyList(),
     /// How many people are in the group, independent of whether [members] was
     /// fetched. The chat list needs the number and nothing else, and the roster

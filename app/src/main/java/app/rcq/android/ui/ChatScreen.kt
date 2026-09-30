@@ -2924,8 +2924,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         Row(
                             Modifier.fillMaxWidth().clickable {
                                 showGroupPicker = false
-                                val (shareId, shareHost) = session.groupShareRef(g.id)
-                                val url = GroupLinkParser.canonicalUrl(shareId, shareHost)
+                                val url = session.groupShareUrl(g.id)
                                 // A group link is a message like any other, so
                                 // it answers what the chip says (#1048 review).
                                 val reply = takeReply()
@@ -4091,40 +4090,66 @@ private fun SystemNoticeRow(m: ChatMessage) {
  *  `https://rcq.app/g/<id>` (the shareable / paste form). */
 internal object GroupLinkParser {
     /** A parsed invite: server-side group id + the island it lives on
-     *  (§5c — null host = "my own island", the legacy bare-id form). */
-    data class GroupRef(val id: Int, val host: String?)
+     *  (§5c — null host = "my own island", the legacy bare-id form), and the
+     *  room link's key when the link carries one (#990 step 2). */
+    data class GroupRef(val id: Int, val host: String?, val k: String? = null)
 
-    private fun refOf(seg: String): GroupRef? {
+    /** The key's shape: what `secrets.token_urlsafe` makes, at most 64. */
+    private val KEY = Regex("^[A-Za-z0-9_-]{8,64}$")
+
+    private fun refOf(seg: String, k: String? = null): GroupRef? {
         val at = seg.indexOf('@')
         val id = (if (at >= 0) seg.substring(0, at) else seg).toIntOrNull()?.takeIf { it > 0 } ?: return null
         val host = if (at >= 0) seg.substring(at + 1).lowercase().takeIf { it.isNotEmpty() } else null
-        return GroupRef(id, host)
+        val key = k?.takeIf { KEY.matches(it) }
+        // Remembered where the preview, the join and the guest entry find it,
+        // so every surface that parses a link hands its key on without being
+        // told about keys at all.
+        key?.let { RoomLinkKeys.remember(host, id, it) }
+        return GroupRef(id, host, key)
     }
 
     fun parse(body: String): GroupRef? {
         val t = body.trim()
         if (t.isEmpty() || t.contains(' ') || t.contains('\n')) return null
         val uri = runCatching { android.net.Uri.parse(t) }.getOrNull() ?: return null
+        val k = runCatching { uri.getQueryParameter("k") }.getOrNull()
         if (uri.scheme == "rcq" && uri.host == "group") {
-            return uri.lastPathSegment?.let(::refOf)
+            return uri.lastPathSegment?.let { refOf(it, k) }
         }
         if ((uri.scheme == "https" || uri.scheme == "http") && uri.host == "rcq.app") {
             val segs = uri.pathSegments
-            if (segs.size >= 2 && segs[0] == "g") return refOf(segs[1])
+            if (segs.size >= 2 && segs[0] == "g") return refOf(segs[1], k)
         }
         return null
     }
 
-    /** New shares always carry the host so the link works from ANY island. */
-    fun canonicalUrl(id: Int, host: String): String = "https://rcq.app/g/$id@$host"
+    /** New shares always carry the host so the link works from ANY island, and
+     *  the room's key when we hold it (#990 step 2): a room outside the
+     *  catalogue opens only with it once its island asks for it. */
+    fun canonicalUrl(id: Int, host: String, k: String? = null): String =
+        "https://rcq.app/g/$id@$host" + (k?.takeIf { KEY.matches(it) }?.let { "?k=$it" } ?: "")
 
     /** Every group-invite link in [text], in document order (iOS
      *  GroupLinkParser.parseAll parity) — used to render pin cards. Matches
      *  both the shareable https form and the rcq:// deep-link form. */
     fun parseAll(text: String): List<GroupRef> {
-        val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+(?:@[a-z0-9.-]+)?)", RegexOption.IGNORE_CASE)
-        return re.findAll(text).mapNotNull { refOf(it.groupValues[1]) }.distinct().toList()
+        val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+(?:@[a-z0-9.-]+)?)(?:\\?k=([A-Za-z0-9_-]{8,64}))?", RegexOption.IGNORE_CASE)
+        return re.findAll(text).mapNotNull { refOf(it.groupValues[1], it.groupValues[2].takeIf { k -> k.isNotEmpty() }) }.distinct().toList()
     }
+}
+
+/** Room link keys seen in links this process parsed, by (island, room). The
+ *  preview, the join and the guest entry look here, so a key rides from the
+ *  link to the island without every screen in between carrying it. Memory
+ *  only: a link parsed again (the bubble, the pin, the paste) puts it back. */
+internal object RoomLinkKeys {
+    private val keys = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private fun slot(host: String?, id: Int) = "${host?.lowercase().orEmpty()}#$id"
+    fun remember(host: String?, id: Int, k: String) { keys[slot(host, id)] = k }
+    /** [hosts]: every name the room's island goes by here (for our own island,
+     *  "" and its hosts, since a link names it explicitly or not at all). */
+    fun find(id: Int, hosts: Collection<String?>): String? = hosts.firstNotNullOfOrNull { keys[slot(it, id)] }
 }
 
 /** The invite card for a group link, fetched the same way wherever the link

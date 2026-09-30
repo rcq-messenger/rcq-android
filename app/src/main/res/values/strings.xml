@@ -1609,4 +1609,8 @@
          them from the start, this client used to show the generic line. -->
     <string name="group_join_blocked">The owner has blocked you from this group.</string>
     <string name="group_join_gone">This group no longer exists.</string>
+    <string name="gi_link_reset">Reset link</string>
+    <string name="gi_link_reset_done">Link reset. The old one will no longer open the room.</string>
+    <string name="gi_link_reset_failed">Couldn\'t reset the link.</string>
+    <string name="group_link_invalid">This room link is incomplete or out of date. Ask whoever gave it to you for a new one.</string>
 </resources>

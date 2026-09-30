@@ -597,6 +597,8 @@ class RcqApi(
         val challenge: String,
         val signature: String,
         val device_id: String? = null,
+        /** The room link's key (#990 step 2), outside the proof on purpose. */
+        val k: String? = null,
     )
 
     /** [guest] false: the key opened a NATIVE account there (a backup home, or a
@@ -1423,6 +1425,8 @@ class RcqApi(
     data class GroupOut(
         val id: Int,
         val name: String?,
+        /** The room link's key, served to members (#990 step 2). */
+        val share_token: String? = null,
         val badge: String? = null,
         val description: String? = null,
         val owner_uin: Int = 0,
@@ -1482,9 +1486,20 @@ class RcqApi(
         get("/groups/$id", authed = true, GroupOut::class.java)
     }
 
-    suspend fun joinGroup(id: Int): GroupOut = withContext(Dispatchers.IO) {
-        post("/groups/$id/join", "{}", authed = true, GroupOut::class.java)
+    /** [k]: the room link's key, needed for a room outside the catalogue once
+     *  its island asks for it (#990 step 2). Old islands ignore it. */
+    suspend fun joinGroup(id: Int, k: String? = null): GroupOut = withContext(Dispatchers.IO) {
+        post("/groups/$id/join" + keyQuery(k), "{}", authed = true, GroupOut::class.java)
     }
+
+    /** A new share link for the room: owner or a member with the `members`
+     *  permission. The old key stops opening the room. */
+    suspend fun resetShareToken(id: Int): GroupOut = withContext(Dispatchers.IO) {
+        post("/groups/$id/share-token", "{}", authed = true, GroupOut::class.java)
+    }
+
+    private fun keyQuery(k: String?): String =
+        k?.takeIf { it.isNotEmpty() }?.let { "?k=" + java.net.URLEncoder.encode(it, "UTF-8") }.orEmpty()
 
     /** Public-ish group snapshot for the invite card (no membership needed),
      *  mirrors backend GroupPreviewOut. */
@@ -1501,8 +1516,8 @@ class RcqApi(
         val avatar_media_key: String? = null,
     )
 
-    suspend fun previewGroup(id: Int): GroupPreviewOut = withContext(Dispatchers.IO) {
-        get("/groups/$id/preview", authed = true, GroupPreviewOut::class.java)
+    suspend fun previewGroup(id: Int, k: String? = null): GroupPreviewOut = withContext(Dispatchers.IO) {
+        get("/groups/$id/preview" + keyQuery(k), authed = true, GroupPreviewOut::class.java)
     }
 
     /** Open rooms the caller is not in, biggest first: the carousel a new

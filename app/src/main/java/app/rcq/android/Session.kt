@@ -5253,6 +5253,7 @@ class Session(context: Context) {
         minAccountAgeHours = g.min_account_age_hours,
         avatarMediaId = g.avatar_media_id,
         avatarMediaKey = g.avatar_media_key,
+        shareToken = g.share_token,
         members = g.members.map {
             GroupMember(
                 uin = it.uin,
@@ -5537,6 +5538,34 @@ class Session(context: Context) {
         return if (ref != null) ref.remoteId to ref.host else groupId to serverHost()
     }
 
+    /** The link to share for a room: its island and, when we hold it, its key
+     *  (#990 step 2). */
+    fun groupShareUrl(groupId: Int): String {
+        val (rid, host) = groupShareRef(groupId)
+        return app.rcq.android.ui.GroupLinkParser.canonicalUrl(rid, host, group(groupId)?.shareToken)
+    }
+
+    /** A new link for a room: the old key stops opening it. Owner, or a member
+     *  with the `members` permission; the island says no to anyone else. */
+    suspend fun resetGroupLink(groupId: Int): Boolean = runCatching {
+        val ctx = groupCtx(groupId)
+        val g = ctx.api.resetShareToken(ctx.gid)
+        withContext(Dispatchers.Main) { upsertGroup(mapGroupCtx(ctx, g)) }
+        true
+    }.getOrDefault(false)
+
+    /** The key a parsed link left for this room ([app.rcq.android.ui.RoomLinkKeys]):
+     *  [host] null means our own island, which a link names by any of its hosts
+     *  or not at all. */
+    private fun linkKeyFor(host: String?, id: Int): String? {
+        val names: List<String?> = if (host == null || host.equals(serverHost(), true)) {
+            listOf(null, serverHost(), FRONT_HOST)
+        } else {
+            listOf(host)
+        }
+        return app.rcq.android.ui.RoomLinkKeys.find(id, names)
+    }
+
     fun groupHost(groupId: Int): String? =
         if (groupId < 0) VisitedIslandsStore.refByAlias(groupId)?.host else null
 
@@ -5746,6 +5775,7 @@ class Session(context: Context) {
                         signing_key = skB64,
                         challenge = challenge,
                         signature = app.rcq.android.crypto.GuestProof.sign(me.sp, signed),
+                        k = linkKeyFor(h, groupId),
                     ),
                 )
                 return GuestCreds(r.uin, r.token, r.guest)
@@ -5824,7 +5854,7 @@ class Session(context: Context) {
         val epoch = epochNow()
         val v = ensureGuestOn(host, remoteId)
         val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
-        val g = guest.joinGroup(remoteId)
+        val g = guest.joinGroup(remoteId, linkKeyFor(v.host, remoteId))
         // The room belongs in the list of the account that joined it.
         if (!stillOn(epoch)) throw IllegalStateException("switched")
         val alias = VisitedIslandsStore.aliasFor(v.host, remoteId)
@@ -5835,6 +5865,11 @@ class Session(context: Context) {
     /** The sentence for a failed join (spec 2026-09-15, 12.5). [host] is null
      *  for a room on our own island, which keeps its one generic sentence. */
     fun joinFailureSentence(e: Throwable?, host: String?): String? {
+        // The link lacked the room's key, or the room's link was reset (#990
+        // step 2): the one refusal a person can act on, by asking for a new one.
+        if (RcqApi.detailCode(e) == "room_link_invalid" || (host == null && lastJoinRefusal == "room_link_invalid")) {
+            return appCtx.getString(R.string.group_link_invalid)
+        }
         if (host == null) return appCtx.getString(R.string.group_invite_join_failed)
         val s = app.rcq.android.net.GuestPath.joinSentence(e?.message)
         // A retired key already raised the rotated-elsewhere notice, which says
@@ -5952,7 +5987,7 @@ class Session(context: Context) {
         // by bare links, which resolve THERE, and it was twenty uncached
         // requests per open of the sheet.
         return invitePreviews.get(host.lowercase(), remoteId) {
-            RcqApi("https://$host").apply { v?.let { setToken(it.jwt) } }.previewGroup(remoteId)
+            RcqApi("https://$host").apply { v?.let { setToken(it.jwt) } }.previewGroup(remoteId, linkKeyFor(host, remoteId))
         }
     }
 
@@ -6165,7 +6200,7 @@ class Session(context: Context) {
             withContext(Dispatchers.Main) { upsertGroup(mapGroupCtx(ctx, added)) }
             // Tell the contact via a cross-island 1:1: the group invite link
             // (carries the host) renders as a join card on their side.
-            val link = "https://rcq.app/g/${ctx.gid}@$groupHost"
+            val link = app.rcq.android.ui.GroupLinkParser.canonicalUrl(ctx.gid, groupHost, group(groupId)?.shareToken)
             withContext(Dispatchers.Main) { runCatching { sendText(contact.uin, link) } }
             null
         }
@@ -6256,7 +6291,7 @@ class Session(context: Context) {
     private val invitePreviews = app.rcq.android.net.InvitePreviews()
 
     suspend fun previewGroup(id: Int): RcqApi.GroupPreviewOut? =
-        invitePreviews.get("", id) { api.previewGroup(id) }
+        invitePreviews.get("", id) { api.previewGroup(id, linkKeyFor(null, id)) }
 
     /** A card already fetched in this process, without asking anybody: what
      *  an invite card draws on its first frame instead of the placeholder. */
@@ -6271,9 +6306,17 @@ class Session(context: Context) {
     suspend fun discoverGroups(limit: Int = 12): List<RcqApi.GroupPreviewOut> =
         runCatching { api.discoverGroups(limit) }.getOrDefault(emptyList())
 
+    /** The island's code for the last failed [joinGroup] (e.g. `room_link_invalid`),
+     *  for the sentence the screen shows. */
+    @Volatile var lastJoinRefusal: String? = null
+        private set
+
     suspend fun joinGroup(id: Int): RcqGroup? {
         group(id)?.let { return it }
-        return runCatching { mapGroup(api.joinGroup(id)).also { upsertGroup(it); roomJoined() } }.getOrNull()
+        lastJoinRefusal = null
+        return runCatching { mapGroup(api.joinGroup(id, linkKeyFor(null, id))).also { upsertGroup(it); roomJoined() } }
+            .onFailure { e -> lastJoinRefusal = RcqApi.detailCode(e) }
+            .getOrNull()
     }
 
     suspend fun leaveGroup(id: Int) {

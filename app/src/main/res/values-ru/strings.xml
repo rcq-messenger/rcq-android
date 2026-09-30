@@ -1599,4 +1599,8 @@
     <!-- Decision D3: a refused join says the same thing on every client. -->
     <string name="group_join_blocked">Владелец закрыл вам доступ в эту группу.</string>
     <string name="group_join_gone">Этой группы больше не существует.</string>
+    <string name="gi_link_reset">Сбросить ссылку</string>
+    <string name="gi_link_reset_done">Ссылка обновлена. Старая больше не откроет комнату.</string>
+    <string name="gi_link_reset_failed">Не удалось сбросить ссылку.</string>
+    <string name="group_link_invalid">Ссылка на эту комнату неполная или устарела. Попросите новую у того, кто её дал.</string>
 </resources>

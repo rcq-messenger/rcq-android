@@ -1522,4 +1522,8 @@
     <!-- Decision D3: a refused join says the same thing on every client. -->
     <string name="group_join_blocked">O dono do grupo bloqueou você aqui.</string>
     <string name="group_join_gone">Este grupo não existe mais.</string>
+    <string name="gi_link_reset">Redefinir link</string>
+    <string name="gi_link_reset_done">Link redefinido. O antigo não abrirá mais a sala.</string>
+    <string name="gi_link_reset_failed">Não foi possível redefinir o link.</string>
+    <string name="group_link_invalid">Este link de sala está incompleto ou desatualizado. Peça um novo a quem o enviou.</string>
 </resources>

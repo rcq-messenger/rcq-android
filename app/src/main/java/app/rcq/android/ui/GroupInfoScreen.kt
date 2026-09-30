@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
@@ -714,8 +715,8 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(10.dp)).background(c.bgSecondary)
                     .clickable {
-                        val (rid, host) = session.groupShareRef(groupId)
-                        val link = GroupLinkParser.canonicalUrl(rid, host)
+                        // With the room's key when we hold it (#990 step 2).
+                        val link = session.groupShareUrl(groupId)
                         (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                             .setPrimaryClip(android.content.ClipData.newPlainText("group link", link))
                         linkCopied = true
@@ -728,6 +729,34 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
                     stringResource(if (linkCopied) R.string.gi_link_copied else R.string.gi_copy_link),
                     color = if (linkCopied) c.accent else c.textPrimary, fontSize = 15.sp,
                 )
+            }
+        }
+
+        // A new link (#990 step 2): the old one stops opening the room once its
+        // island asks for the key. Whoever may manage members may do it.
+        if (canManageMembers) {
+            item {
+                var resetting by remember { mutableStateOf(false) }
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp)).background(c.bgSecondary)
+                        .clickable(enabled = !resetting) {
+                            resetting = true
+                            scope.launch {
+                                val ok = session.resetGroupLink(groupId)
+                                resetting = false
+                                android.widget.Toast.makeText(
+                                    context,
+                                    context.getString(if (ok) R.string.gi_link_reset_done else R.string.gi_link_reset_failed),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.Filled.Refresh, null, tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.gi_link_reset), color = c.textPrimary, fontSize = 15.sp)
+                }
             }
         }
 
