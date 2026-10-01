@@ -733,8 +733,11 @@ internal fun GroupInfoScreen(session: Session, groupId: Int, onBack: () -> Unit,
         }
 
         // A new link (#990 step 2): the old one stops opening the room once its
-        // island asks for the key. Whoever may manage members may do it.
-        if (canManageMembers) {
+        // island asks for the key. Whoever may manage members may do it, but
+        // never from a guest copy (the island refuses every guest this route),
+        // and only where the island serves a key at all: one too old to have
+        // the route sends none, and the row would only ever fail there.
+        if (canManageMembers && !guestHere && group.shareToken != null) {
             item {
                 var resetting by remember { mutableStateOf(false) }
                 Row(

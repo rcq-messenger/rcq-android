@@ -3019,8 +3019,9 @@ private fun AddContactDialog(
                         if (groupRef != null) {
                             val foreignHost = groupRef.host?.takeIf { it != session.currentServer }
                             val gp by produceState<RcqApi.GroupPreviewOut?>(initialValue = null, groupRef) {
-                                value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupRef.id)
-                                        else session.previewGroup(groupRef.id)
+                                // The pasted link's own key (#990 step 2).
+                                value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupRef.id, groupRef.k)
+                                        else session.previewGroup(groupRef.id, groupRef.k)
                             }
                             val pv = gp
                             val closed = pv?.is_closed == true
@@ -3039,8 +3040,8 @@ private fun AddContactDialog(
                                     android.widget.Toast.makeText(context, context.getString(R.string.group_invite_closed_hint), android.widget.Toast.LENGTH_LONG).show()
                                 } else scope.launch {
                                     // A foreign join says why it failed (spec 2026-09-15, 12.5).
-                                    val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, groupRef.id)
-                                                 else session.joinGroup(groupRef.id)?.let { Result.success(groupRef.id) } ?: Result.failure<Int>(IllegalStateException("join"))
+                                    val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, groupRef.id, groupRef.k)
+                                                 else session.joinGroup(groupRef.id, groupRef.k)?.let { Result.success(groupRef.id) } ?: Result.failure<Int>(IllegalStateException("join"))
                                     opened.onSuccess { onOpenGroup(it) }
                                         .onFailure { e -> session.joinFailureSentence(e, foreignHost)?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() } }
                                 }

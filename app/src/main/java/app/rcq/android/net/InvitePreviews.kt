@@ -30,6 +30,12 @@ import kotlin.coroutines.cancellation.CancellationException
  * answer that asking again cannot change is a 404 (the room is gone, or it is
  * closed to us): that link is not asked about again for [GONE_MS], so a pin
  * with dead links does not spend the budget its live ones need.
+ *
+ * ⚠ "That link" includes its room key (#990 step 2). An island that asks for
+ * keys answers 404 to a preview without the right one, so a card and a 404
+ * kept per room only let an old keyless or revoked link in the chat mark the
+ * room gone, and the new link with the right key then drew a dead card for
+ * ten minutes without a single request.
  */
 class InvitePreviews(
     private val parallel: Int = 3,
@@ -43,9 +49,10 @@ class InvitePreviews(
     /** Per link: a 404, not worth another request until then. */
     private val goneUntil = ConcurrentHashMap<String, Long>()
 
-    private fun key(island: String, id: Int) = "$island/$id"
+    /** [k]: the room key the fetch sends, null for none. */
+    private fun key(island: String, id: Int, k: String?) = "$island/$id/${k.orEmpty()}"
 
-    fun cached(island: String, id: Int): RcqApi.GroupPreviewOut? = cache[key(island, id)]
+    fun cached(island: String, id: Int, k: String? = null): RcqApi.GroupPreviewOut? = cache[key(island, id, k)]
 
     /** Account switch: a card can differ per viewer (the avatar pair goes to
      *  members only), and a cool-down belongs to the identity that earned it. */
@@ -55,10 +62,12 @@ class InvitePreviews(
         goneUntil.clear()
     }
 
-    suspend fun get(island: String, id: Int, fetch: suspend () -> RcqApi.GroupPreviewOut): RcqApi.GroupPreviewOut? {
-        val k = key(island, id)
-        cache[k]?.let { return it }
-        if ((goneUntil[k] ?: 0L) > now()) return null
+    /** [k] must be the key [fetch] sends: the memo and the 404 are kept per
+     *  key, the cool-down per island. */
+    suspend fun get(island: String, id: Int, k: String? = null, fetch: suspend () -> RcqApi.GroupPreviewOut): RcqApi.GroupPreviewOut? {
+        val ck = key(island, id, k)
+        cache[ck]?.let { return it }
+        if ((goneUntil[ck] ?: 0L) > now()) return null
         // Waited OUTSIDE the gate: one island refusing us must not hold the
         // permits the other islands' cards are queued for.
         val wait = (coolUntil[island] ?: 0L) - now()
@@ -66,13 +75,13 @@ class InvitePreviews(
         return gate.withPermit {
             // A twin card (the bubble and the chip of the same link) may have
             // fetched it while this one queued.
-            cache[k] ?: try {
-                fetch().also { cache[k] = it }
+            cache[ck] ?: try {
+                fetch().also { cache[ck] = it }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 retryAfterMs(e)?.let { coolUntil[island] = now() + it }
-                if (e.message?.startsWith("HTTP 404") == true) goneUntil[k] = now() + GONE_MS
+                if (e.message?.startsWith("HTTP 404") == true) goneUntil[ck] = now() + GONE_MS
                 null
             }
         }

@@ -91,4 +91,20 @@ class InvitePreviewsTest {
         assertNull(InvitePreviews.retryAfterMs(IOException("HTTP 404: no such group")))
         assertNull(InvitePreviews.retryAfterMs(IOException("timeout")))
     }
+
+    // #990 step 2 review: an island that asks for room keys answers 404 to a
+    // preview without the right one. That must not stand in for the link that
+    // carries it, or the new link draws a dead card for ten minutes.
+    @Test
+    fun `a 404 for one key does not stand in for another`() = runBlocking {
+        val p = InvitePreviews()
+        var calls = 0
+        assertNull(p.get("", 61, null) { calls++; throw IOException("HTTP 404: {\"detail\":\"not found\"}") })
+        assertEquals("room 61", p.get("", 61, "NewKeyNewKey") { calls++; card(61) }?.name)
+        // The keyless link keeps its own 404.
+        assertNull(p.get("", 61, null) { calls++; card(61) })
+        assertEquals(2, calls)
+        assertEquals("room 61", p.cached("", 61, "NewKeyNewKey")?.name)
+        assertNull(p.cached("", 61))
+    }
 }

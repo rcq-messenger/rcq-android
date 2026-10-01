@@ -2390,6 +2390,11 @@ class Session(context: Context) {
         CrossIslandStore.bindAccount(accountId)
         GuestCardStore.bindAccount(accountId)
         VisitedIslandsStore.bindAccount(accountId)
+        // Not a store, but per account all the same: a bare link's key sits in
+        // the slot that means "our own island", which is another island (and
+        // another operator) for the account bound next, and the duress view
+        // must not hand on keys the real account saw.
+        app.rcq.android.ui.RoomLinkKeys.clear()
     }
 
     /** Drop everything the decoy namespace could have written outside its own
@@ -5584,12 +5589,17 @@ class Session(context: Context) {
         true
     }.getOrDefault(false)
 
-    /** The key a parsed link left for this room ([app.rcq.android.ui.RoomLinkKeys]):
-     *  [host] null means our own island, which a link names by any of its hosts
-     *  or not at all. */
+    /** The key a parsed link left for this room ([app.rcq.android.ui.RoomLinkKeys]),
+     *  the fallback for a link tapped without its own key: [host] null means
+     *  our own island, which a link names by any of its hosts or not at all.
+     *
+     *  ⚠ The front is a road to the FLAGSHIP only. Counted as "our own" for an
+     *  account on another island, a key from `/g/42@cdn.rcq.app` (a flagship
+     *  room) went out with the preview and the join of that island's room 42. */
     private fun linkKeyFor(host: String?, id: Int): String? {
-        val names: List<String?> = if (host == null || host.equals(serverHost(), true)) {
-            listOf(null, serverHost(), FRONT_HOST)
+        val own = serverHost()
+        val names: List<String?> = if (host == null || host.equals(own, true)) {
+            if (RcqFederation.isFlagship(own)) listOf(null, own, FRONT_HOST) else listOf(null, own)
         } else {
             listOf(host)
         }
@@ -5690,7 +5700,7 @@ class Session(context: Context) {
      *  key for that room (`POST /auth/guest`), the one door a paid or invite
      *  island leaves open to people from other islands. Everywhere else the old
      *  recover-first then register path runs exactly as before. */
-    suspend fun ensureGuestOn(host: String, groupId: Int? = null): VisitedIslandsStore.Visited {
+    suspend fun ensureGuestOn(host: String, groupId: Int? = null, k: String? = null): VisitedIslandsStore.Visited {
         // ⚠ Before the first suspension, see [accountEpoch]: an account switch
         // mid-join re-points [store] and VisitedIslandsStore, and without this
         // one account's token lands in the other's Visited store, and the guest
@@ -5725,7 +5735,7 @@ class Session(context: Context) {
         // touches the island (the §5c privacy rule).
         val creds = when (app.rcq.android.net.GuestPath.decide(RcqApi.serverInfoOf(h))) {
             app.rcq.android.net.GuestPath.Path.GUEST ->
-                if (groupId != null) guestCopyOn(h, groupId, me)
+                if (groupId != null) guestCopyOn(h, groupId, me, k)
                 // No room, no mint: only a copy this key already has there.
                 else recoverForGuest(h, me)
                     ?.let { GuestCreds(it.uin, it.token, it.guest) }
@@ -5785,7 +5795,7 @@ class Session(context: Context) {
      *
      *  ⚠ Nothing about our home island goes in the request, and the nickname
      *  never falls back to our home number. */
-    private suspend fun guestCopyOn(h: String, groupId: Int, me: GuestSelf): GuestCreds {
+    private suspend fun guestCopyOn(h: String, groupId: Int, me: GuestSelf, k: String? = null): GuestCreds {
         val api = RcqApi("https://$h")
         val skB64 = app.rcq.android.crypto.GuestProof.canonicalKey(me.spub)
         for (attempt in 0..1) {
@@ -5805,7 +5815,9 @@ class Session(context: Context) {
                         signing_key = skB64,
                         challenge = challenge,
                         signature = app.rcq.android.crypto.GuestProof.sign(me.sp, signed),
-                        k = linkKeyFor(h, groupId),
+                        // The tapped link's key; a remembered one only for a
+                        // link that came without (#990 step 2 review).
+                        k = k ?: linkKeyFor(h, groupId),
                     ),
                 )
                 return GuestCreds(r.uin, r.token, r.guest)
@@ -5880,11 +5892,14 @@ class Session(context: Context) {
      *  link never touches the island), join the group there, merge it into the
      *  list under its local alias. The alias id, or the failure, which
      *  [joinFailureSentence] turns into what the join card says. */
-    suspend fun joinForeignGroup(host: String, remoteId: Int): Result<Int> = runCatching {
+    suspend fun joinForeignGroup(host: String, remoteId: Int, k: String? = null): Result<Int> = runCatching {
         val epoch = epochNow()
-        val v = ensureGuestOn(host, remoteId)
+        // [k] is the tapped link's own key, passed through rather than looked
+        // up: the guest entry suspends, and the map behind [linkKeyFor] is
+        // rewritten by whatever the screen draws meanwhile.
+        val v = ensureGuestOn(host, remoteId, k)
         val guest = RcqApi("https://${v.host}").apply { setToken(v.jwt) }
-        val g = guest.joinGroup(remoteId, linkKeyFor(v.host, remoteId))
+        val g = guest.joinGroup(remoteId, k ?: linkKeyFor(v.host, remoteId))
         // The room belongs in the list of the account that joined it.
         if (!stillOn(epoch)) throw IllegalStateException("switched")
         val alias = VisitedIslandsStore.aliasFor(v.host, remoteId)
@@ -6010,14 +6025,17 @@ class Session(context: Context) {
      *  /groups/{id}/preview is optional-auth. Sends the guest token if we have
      *  one (visited), otherwise unauthenticated; rides the proxy when onion is on.
      *  So a received cross-island invite shows the real group, not a blank card. */
-    suspend fun previewForeignGroup(host: String, remoteId: Int): RcqApi.GroupPreviewOut? {
+    suspend fun previewForeignGroup(host: String, remoteId: Int, k: String? = null): RcqApi.GroupPreviewOut? {
         val v = VisitedIslandsStore.get(host)
+        // The drawn link's own key first (#990 step 2), worked out once so
+        // the memo below is keyed by exactly what the request sends.
+        val key = k ?: linkKeyFor(host, remoteId)
         // Through the same memo, gate and cool-down as our own island's cards
         // (#1051): a pin in a room on another island names its sibling rooms
         // by bare links, which resolve THERE, and it was twenty uncached
         // requests per open of the sheet.
-        return invitePreviews.get(host.lowercase(), remoteId) {
-            RcqApi("https://$host").apply { v?.let { setToken(it.jwt) } }.previewGroup(remoteId, linkKeyFor(host, remoteId))
+        return invitePreviews.get(host.lowercase(), remoteId, key) {
+            RcqApi("https://$host").apply { v?.let { setToken(it.jwt) } }.previewGroup(remoteId, key)
         }
     }
 
@@ -6077,6 +6095,11 @@ class Session(context: Context) {
         // draw the roles it just fetched under the owner it already had.
         val merged = cached.copy(
             members = full.members, memberCount = full.memberCount, ownerUin = full.ownerUin,
+            // #990 step 2: a reset by another admin of a room over
+            // SNAPSHOT_BROADCAST_LIMIT reaches us only as the compact frame,
+            // which carries no key; this fetch does. An island too old to send
+            // one leaves the key we hold.
+            shareToken = full.shareToken ?: cached.shareToken,
         )
         _groups.value = _groups.value.map { if (it.id == id) merged else it }
         rememberMemberNames(merged)
@@ -6320,13 +6343,18 @@ class Session(context: Context) {
      */
     private val invitePreviews = app.rcq.android.net.InvitePreviews()
 
-    suspend fun previewGroup(id: Int): RcqApi.GroupPreviewOut? =
-        invitePreviews.get("", id) { api.previewGroup(id, linkKeyFor(null, id)) }
+    /** [k]: the drawn link's own key (#990 step 2); the remembered one only
+     *  for a link without its own. The memo is keyed by the key sent, so a
+     *  refusal for a keyless or revoked link never stands in for the new one. */
+    suspend fun previewGroup(id: Int, k: String? = null): RcqApi.GroupPreviewOut? {
+        val key = k ?: linkKeyFor(null, id)
+        return invitePreviews.get("", id, key) { api.previewGroup(id, key) }
+    }
 
     /** A card already fetched in this process, without asking anybody: what
      *  an invite card draws on its first frame instead of the placeholder. */
-    fun cachedGroupPreview(id: Int, foreignHost: String?): RcqApi.GroupPreviewOut? =
-        invitePreviews.cached(foreignHost?.lowercase() ?: "", id)
+    fun cachedGroupPreview(id: Int, foreignHost: String?, k: String? = null): RcqApi.GroupPreviewOut? =
+        invitePreviews.cached(foreignHost?.lowercase() ?: "", id, k ?: linkKeyFor(foreignHost, id))
 
     /** Join a group from a shared invite. Already-member is a no-op that just
      *  returns the existing group (the caller jumps into the chat). Returns
@@ -6341,10 +6369,12 @@ class Session(context: Context) {
     @Volatile var lastJoinRefusal: String? = null
         private set
 
-    suspend fun joinGroup(id: Int): RcqGroup? {
+    /** [k]: the tapped link's own key (#990 step 2), the remembered one only
+     *  for a link that came without. */
+    suspend fun joinGroup(id: Int, k: String? = null): RcqGroup? {
         group(id)?.let { return it }
         lastJoinRefusal = null
-        return runCatching { mapGroup(api.joinGroup(id, linkKeyFor(null, id))).also { upsertGroup(it); roomJoined() } }
+        return runCatching { mapGroup(api.joinGroup(id, k ?: linkKeyFor(null, id))).also { upsertGroup(it); roomJoined() } }
             .onFailure { e -> lastJoinRefusal = RcqApi.detailCode(e) }
             .getOrNull()
     }

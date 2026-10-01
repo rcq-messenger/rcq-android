@@ -4097,14 +4097,20 @@ internal object GroupLinkParser {
     /** The key's shape: what `secrets.token_urlsafe` makes, at most 64. */
     private val KEY = Regex("^[A-Za-z0-9_-]{8,64}$")
 
-    private fun refOf(seg: String, k: String? = null): GroupRef? {
+    /** [defaultHost]: the island a link without `@host` belongs to where the
+     *  caller knows better than "our own" (a pin in a room on another island),
+     *  resolved HERE so the key is remembered under the room's real island. */
+    private fun refOf(seg: String, k: String? = null, defaultHost: String? = null): GroupRef? {
         val at = seg.indexOf('@')
         val id = (if (at >= 0) seg.substring(0, at) else seg).toIntOrNull()?.takeIf { it > 0 } ?: return null
-        val host = if (at >= 0) seg.substring(at + 1).lowercase().takeIf { it.isNotEmpty() } else null
+        val host = (if (at >= 0) seg.substring(at + 1).lowercase().takeIf { it.isNotEmpty() } else null)
+            ?: defaultHost?.lowercase()
         val key = k?.takeIf { KEY.matches(it) }
-        // Remembered where the preview, the join and the guest entry find it,
-        // so every surface that parses a link hands its key on without being
-        // told about keys at all.
+        // A FALLBACK only, for a tap on a copy of the link that lost its key.
+        // The card that is tapped hands its own [GroupRef.k] to the preview,
+        // the join and the guest entry: this map is filled during composition,
+        // where the last link drawn wins, and an old link scrolled into view
+        // would otherwise send its revoked key with the new one's join.
         key?.let { RoomLinkKeys.remember(host, id, it) }
         return GroupRef(id, host, key)
     }
@@ -4132,17 +4138,28 @@ internal object GroupLinkParser {
 
     /** Every group-invite link in [text], in document order (iOS
      *  GroupLinkParser.parseAll parity) — used to render pin cards. Matches
-     *  both the shareable https form and the rcq:// deep-link form. */
-    fun parseAll(text: String): List<GroupRef> {
+     *  both the shareable https form and the rcq:// deep-link form.
+     *  [defaultHost] is the island of a bare `/g/<id>` (see [refOf]).
+     *
+     *  ⚠ One entry per ROOM, the first link to it in the text. Since the key
+     *  is part of [GroupRef], `.distinct()` kept the old and the new link of a
+     *  reset room as two rows with one lazy-list key, which crashes the pin
+     *  sheet ("Key was already used"). */
+    fun parseAll(text: String, defaultHost: String? = null): List<GroupRef> {
         val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+(?:@[a-z0-9.-]+)?)(?:\\?k=([A-Za-z0-9_-]{8,64}))?", RegexOption.IGNORE_CASE)
-        return re.findAll(text).mapNotNull { refOf(it.groupValues[1], it.groupValues[2].takeIf { k -> k.isNotEmpty() }) }.distinct().toList()
+        return re.findAll(text)
+            .mapNotNull { refOf(it.groupValues[1], it.groupValues[2].takeIf { k -> k.isNotEmpty() }, defaultHost) }
+            .distinctBy { it.id to it.host }
+            .toList()
     }
 }
 
-/** Room link keys seen in links this process parsed, by (island, room). The
- *  preview, the join and the guest entry look here, so a key rides from the
- *  link to the island without every screen in between carrying it. Memory
- *  only: a link parsed again (the bubble, the pin, the paste) puts it back. */
+/** Room link keys seen in links this process parsed, by (island, room): the
+ *  FALLBACK for a link tapped without a key of its own (a card hands its own
+ *  key on, see [GroupLinkParser.refOf]). Memory only: a link parsed again (the
+ *  bubble, the pin, the paste) puts it back. Emptied whenever the session
+ *  changes account or enters the duress view ([clear]), since a bare link's
+ *  slot means "our own island", which is another island for another account. */
 internal object RoomLinkKeys {
     private val keys = java.util.concurrent.ConcurrentHashMap<String, String>()
     private fun slot(host: String?, id: Int) = "${host?.lowercase().orEmpty()}#$id"
@@ -4150,6 +4167,7 @@ internal object RoomLinkKeys {
     /** [hosts]: every name the room's island goes by here (for our own island,
      *  "" and its hosts, since a link names it explicitly or not at all). */
     fun find(id: Int, hosts: Collection<String?>): String? = hosts.firstNotNullOfOrNull { keys[slot(it, id)] }
+    fun clear() = keys.clear()
 }
 
 /** The invite card for a group link, fetched the same way wherever the link
@@ -4163,13 +4181,15 @@ internal object RoomLinkKeys {
  *  requests back while the island's rate limit says to wait
  *  ([app.rcq.android.net.InvitePreviews]). */
 @Composable
-private fun rememberInvitePreview(session: Session, groupId: Int, foreignHost: String?): app.rcq.android.net.RcqApi.GroupPreviewOut? {
-    val preview by produceState(session.cachedGroupPreview(groupId, foreignHost), groupId, foreignHost) {
+private fun rememberInvitePreview(session: Session, groupId: Int, foreignHost: String?, k: String?): app.rcq.android.net.RcqApi.GroupPreviewOut? {
+    // [k]: the drawn link's own key (#990 step 2). A room outside the
+    // catalogue shows its card only with it once its island asks.
+    val preview by produceState(session.cachedGroupPreview(groupId, foreignHost, k), groupId, foreignHost, k) {
         if (value != null) return@produceState
         var attempt = 0
         while (true) {
-            value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId)
-                    else session.previewGroup(groupId)
+            value = if (foreignHost != null) session.previewForeignGroup(foreignHost, groupId, k)
+                    else session.previewGroup(groupId, k)
             if (value != null) return@produceState
             val pause = INVITE_PREVIEW_RETRY_MS.getOrNull(attempt++) ?: return@produceState
             delay(pause)
@@ -4198,7 +4218,7 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
     // never visited is NOT touched for the preview (minimal card; the guest
     // registration happens only on the explicit Join tap).
     val foreignHost = ref.host?.takeIf { it != session.currentServer }
-    val p = rememberInvitePreview(session, groupId, foreignHost)
+    val p = rememberInvitePreview(session, groupId, foreignHost, ref.k)
     // Already a member? Resolve the LOCAL group id via a pure reverse lookup
     // (refByAlias never allocates an alias) so tapping a group you're already
     // in OPENS it instead of re-asking you to join (founder report).
@@ -4288,16 +4308,20 @@ private fun GroupLinkBubble(session: Session, ref: GroupLinkParser.GroupRef, onO
                     if (!joining) {
                         joining = true
                         scope.launch {
+                            // The key of THIS link, never whichever link was
+                            // drawn last (#990 step 2 review).
                             if (foreignHost != null) {
-                                val joined = session.joinForeignGroup(foreignHost, groupId)
+                                val joined = session.joinForeignGroup(foreignHost, groupId, ref.k)
                                 joining = false
                                 showJoin = false
                                 joined.onSuccess(onOpenGroup).onFailure { session.toastJoinFailure(it, foreignHost) }
                             } else {
-                                val g = session.joinGroup(groupId)
+                                val g = session.joinGroup(groupId, ref.k)
                                 joining = false
                                 showJoin = false
-                                if (g != null) onOpenGroup(groupId)
+                                // A refusal says why (a reset link names itself),
+                                // not a sheet closing on nothing.
+                                if (g != null) onOpenGroup(groupId) else session.toastJoinFailure(null, null)
                             }
                         }
                     }
@@ -4334,7 +4358,10 @@ internal fun PinnedAnnouncement(
     // resolves cross-island instead of blank-fetching from our own island.
     // Distinct AFTER the host goes in: `/g/57` and `/g/57@<this room's island>`
     // are one room, and two rows with one key crash the lazy list below.
-    val pinGroupIds = remember(pin, groupHost) { GroupLinkParser.parseAll(pin).map { it.copy(host = it.host ?: groupHost) }.distinct() }
+    // parseAll puts the host in itself, so a bare link's key is remembered
+    // under this room's island and not under our own; and it keeps one row
+    // per room even when two links to it carry different keys.
+    val pinGroupIds = remember(pin, groupHost) { GroupLinkParser.parseAll(pin, groupHost) }
     val hasPinText = annotated.text.isNotBlank()
     val uriHandler = LocalUriHandler.current
     var showPinSheet by remember(pin) { mutableStateOf(false) }
@@ -4426,7 +4453,7 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
     var joining by remember { mutableStateOf(false) }
     val groupId = ref.id
     val foreignHost = ref.host?.takeIf { it != session.currentServer }
-    val p = rememberInvitePreview(session, groupId, foreignHost)
+    val p = rememberInvitePreview(session, groupId, foreignHost, ref.k)
     // Same membership check as GroupLinkBubble: open instead of re-join.
     val groups by session.groups.collectAsState()
     val joinedLocalId = remember(groups, foreignHost, groupId) {
@@ -4515,14 +4542,16 @@ internal fun PinnedGroupChip(session: Session, ref: GroupLinkParser.GroupRef, on
                     if (!joining) {
                         joining = true
                         scope.launch {
+                            // Same as GroupLinkBubble: this link's own key, and
+                            // a refusal that says why.
                             if (foreignHost != null) {
-                                val joined = session.joinForeignGroup(foreignHost, groupId)
+                                val joined = session.joinForeignGroup(foreignHost, groupId, ref.k)
                                 joining = false; showJoin = false
                                 joined.onSuccess(onOpenGroup).onFailure { session.toastJoinFailure(it, foreignHost) }
                             } else {
-                                val g = session.joinGroup(groupId)
+                                val g = session.joinGroup(groupId, ref.k)
                                 joining = false; showJoin = false
-                                if (g != null) onOpenGroup(groupId)
+                                if (g != null) onOpenGroup(groupId) else session.toastJoinFailure(null, null)
                             }
                         }
                     }

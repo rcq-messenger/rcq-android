@@ -161,12 +161,14 @@ object WebLinkRequest {
  *  same island → joinGroup; then opens the group chat. The privacy-safe path —
  *  the user holds the link (no discovery). */
 object GroupJoinLink {
-    data class Req(val id: Int, val host: String?)
+    /** [k]: the opened link's room key (#990 step 2), handed to the join as
+     *  is rather than looked up among the links this process parsed. */
+    data class Req(val id: Int, val host: String?, val k: String? = null)
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
 
     fun fromUri(uri: android.net.Uri?): Req? {
         val ref = app.rcq.android.ui.GroupLinkParser.parse(uri?.toString() ?: return null) ?: return null
-        return Req(ref.id, ref.host)
+        return Req(ref.id, ref.host, ref.k)
     }
 }
 
@@ -1529,8 +1531,8 @@ private fun RcqApp(session: Session) {
                         scope.launch {
                             // A foreign join says why it failed (spec 2026-09-15,
                             // 12.5); a same-island join keeps its one sentence.
-                            val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, req.id)
-                                         else session.joinGroup(req.id)?.let { Result.success(req.id) } ?: Result.failure<Int>(IllegalStateException("join"))
+                            val opened = if (foreignHost != null) session.joinForeignGroup(foreignHost, req.id, req.k)
+                                         else session.joinGroup(req.id, req.k)?.let { Result.success(req.id) } ?: Result.failure<Int>(IllegalStateException("join"))
                             opened.onSuccess { chatTarget = ChatTarget.Group(it) }
                                 .onFailure { e -> session.joinFailureSentence(e, foreignHost)?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
                         }
