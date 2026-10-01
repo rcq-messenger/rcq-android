@@ -36,9 +36,17 @@ object MultihomeStore {
      *  as the anti-rollback floor for a self-pushed record (gossip B1). */
     data class PeerHomes(val homes: List<RcqFederation.Home>, val ts: Long, val recTs: Int = 0)
 
+    /** A backup home removed on THIS install, until a record without it is
+     *  confirmed on the primary island (see [dropped]). Looked up by [sk], the
+     *  account's signing key, which is what the record belongs to and which
+     *  survives a promote or a number move; [ownUin] is kept only so the burn
+     *  sweep ([wipeOwn]) finds the rows of the number it erases. */
+    data class Dropped(val ownUin: Int, val sk: String, val host: String, val at: Long)
+
     private const val PREFS = "rcq_multihome"
     private const val KEY_HOMES = "homes"
     private const val KEY_PEER_CACHE = "peer_homes"
+    private const val KEY_DROPPED = "dropped_homes"
     private val gson = Gson()
     private lateinit var prefs: SharedPreferences
 
@@ -66,12 +74,13 @@ object MultihomeStore {
      *  leaves no account behind to be selective about. */
     fun wipeAll() {
         if (!::prefs.isInitialized) return
-        prefs.edit().remove(KEY_HOMES).remove(KEY_PEER_CACHE).apply()
+        prefs.edit().remove(KEY_HOMES).remove(KEY_PEER_CACHE).remove(KEY_DROPPED).apply()
     }
 
     fun wipeOwn(ownUin: Int) {
         if (!::prefs.isInitialized) return
         write(all().filterNot { it.ownUin == ownUin })
+        writeDropped(allDropped().filterNot { it.ownUin == ownUin })
     }
 
     /** Replace the token (and per-island uin) after a /auth/recover refresh. */
@@ -118,6 +127,49 @@ object MultihomeStore {
                 else -> it.copy(ownUin = newOwnUin)
             }
         }
+    }
+
+    // ── hosts removed here, kept out of the published record ──
+    //
+    // ⚠⚠ The signed home record CARRIES OVER every published home this install
+    // does not know (Session.publishHomeIslandRecord): a backup switched on in
+    // the web or on a second phone must not be unpublished by this one. The
+    // same rule made a backup removed HERE come straight back from the old
+    // record on the next publish, under a fresh ts, so a removed or deleted
+    // copy stayed advertised to senders for good (report 1064). A host removed
+    // on this install is therefore left out of the carry-over until the
+    // primary island has confirmed a record without it; from then on the
+    // published record itself no longer names it, and the entry goes, so a
+    // later add on another device is carried over again as before.
+
+    /** Remember that [host] was removed from the account signed by [sk]. */
+    fun markDropped(ownUin: Int, sk: String, host: String) {
+        if (!::prefs.isInitialized) return
+        val h = host.lowercase()
+        writeDropped(allDropped().filterNot { it.sk == sk && it.host == h } + Dropped(ownUin, sk, h, System.currentTimeMillis()))
+    }
+
+    /** The hosts removed on this install from the account signed by [sk] and
+     *  not yet confirmed gone from its published record. */
+    fun dropped(sk: String): Set<String> =
+        allDropped().filter { it.sk == sk }.map { it.host }.toSet()
+
+    /** [hosts] are confirmed out of the published record, or were added back. */
+    fun clearDropped(sk: String, hosts: Collection<String>) {
+        if (!::prefs.isInitialized || hosts.isEmpty()) return
+        val gone = hosts.map { it.lowercase() }.toSet()
+        val before = allDropped()
+        val after = before.filterNot { it.sk == sk && it.host in gone }
+        if (after.size != before.size) writeDropped(after)
+    }
+
+    private fun allDropped(): List<Dropped> = runCatching {
+        val raw = prefs.getString(KEY_DROPPED, null) ?: return emptyList()
+        gson.fromJson<List<Dropped>>(raw, object : TypeToken<List<Dropped>>() {}.type) ?: emptyList()
+    }.getOrDefault(emptyList())
+
+    private fun writeDropped(list: List<Dropped>) {
+        prefs.edit().putString(KEY_DROPPED, gson.toJson(list)).apply()
     }
 
     private fun all(): List<Home> = runCatching {

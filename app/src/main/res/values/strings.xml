@@ -173,7 +173,7 @@
     <string name="backup_island_body">Automatic backup, not a second login: you never switch or sign in there. While your main island works, a copy of each incoming message is also dropped on the backup. If your main island is blocked or goes down, the app keeps receiving from the backup on its own. Your number on a backup island may be a different one (islands number independently); your main number never changes.</string>
     <string name="backup_island_row_uin">mailbox on this island: %1$d</string>
     <string name="home_via_backup">Your island is not answering. Messages are arriving through your backup island. Tap to make it your primary island and send from it too.</string>
-    <string name="backup_island_row_uin_diff">mailbox on this island: %1$d (islands number independently and your %2$d was taken here)</string>
+    <string name="backup_island_row_uin_diff">mailbox on this island: %1$d (islands number independently, so it differs from your %2$d)</string>
     <string name="backup_island_auto_title">Keep a backup on another island</string>
     <string name="backup_island_auto_sub">The island is picked automatically from the public catalogue</string>
     <string name="backup_island_auto_busy">Picking an island…</string>
@@ -1615,6 +1615,7 @@
     <string name="group_link_invalid">This room link is incomplete or out of date. Ask whoever gave it to you for a new one.</string>
     <string name="backup_island_remove_title">Remove the backup island?</string>
     <string name="backup_island_remove_body">Your copy on %1$s stays, and adding the island again brings back the same copy with the same number. You can delete it for good instead, and the number there becomes free.</string>
+    <string name="backup_island_remove_shut_door">%1$s only lets people in by invite or with an entry code: once the copy is deleted, the island can\'t be added again without one.</string>
     <string name="backup_island_remove_keep">Remove</string>
     <string name="backup_island_remove_delete">Remove and delete the copy</string>
     <string name="backup_island_copy_deleted">The copy on %1$s is deleted.</string>

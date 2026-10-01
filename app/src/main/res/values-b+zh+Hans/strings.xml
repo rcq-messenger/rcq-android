@@ -159,7 +159,7 @@
     <string name="backup_island_body">这是自动备份，不是第二个登录：你不会切换过去，也不会在那里登录。只要主岛正常工作，每一条收到的消息也会往备用岛上放一份。如果主岛被封锁或者宕机，应用会自己继续从备用岛接收。你在备用岛上的号码可能是另一个（各个岛独立编号），你的主号码不会变。</string>
     <string name="backup_island_row_uin">这个岛上的信箱：%1$d</string>
     <string name="home_via_backup">你的岛没有响应。消息正在通过备用岛送达。点按即可把它设为主岛，并从那里发送。</string>
-    <string name="backup_island_row_uin_diff">这个岛上的信箱：%1$d（各个岛独立编号，你的 %2$d 在这里已被占用）</string>
+    <string name="backup_island_row_uin_diff">这个岛上的信箱：%1$d（各个岛独立编号，所以和你的 %2$d 不一样）</string>
     <string name="backup_island_auto_title">在另一个岛上保留备份</string>
     <string name="backup_island_auto_sub">从公共目录里自动挑选岛</string>
     <string name="backup_island_auto_busy">正在挑选岛…</string>
@@ -1547,6 +1547,7 @@
     <string name="group_link_invalid">这个房间链接不完整或已过期。请向给你链接的人要一个新的。</string>
     <string name="backup_island_remove_title">移除备用岛？</string>
     <string name="backup_island_remove_body">你在 %1$s 上的副本会保留，再次添加该岛时会回到同一个副本和同一个号码。你也可以彻底删除它，那里的号码就会空出来。</string>
+    <string name="backup_island_remove_shut_door">%1$s 只接受受邀或持有入场代码的人进入：删除副本后，没有邀请或入场代码就无法再添加这个岛。</string>
     <string name="backup_island_remove_keep">移除</string>
     <string name="backup_island_remove_delete">移除并删除副本</string>
     <string name="backup_island_copy_deleted">%1$s 上的副本已删除。</string>

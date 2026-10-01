@@ -172,7 +172,7 @@
     <string name="backup_island_body">Это автоматический резерв, а не второй вход: вы никуда не переключаетесь и не входите. Пока основной остров работает, копия каждого входящего сообщения кладётся и на резервный. Если основной заблокируют или он упадёт, приложение само продолжит получать с резервного. Номер на резервном острове может оказаться другим (острова нумеруют независимо), а ваш основной номер не меняется.</string>
     <string name="backup_island_row_uin">почтовый ящик на этом острове: %1$d</string>
     <string name="home_via_backup">Ваш остров не отвечает. Сообщения приходят через запасной остров. Нажмите, чтобы сделать его основным и отправлять с него.</string>
-    <string name="backup_island_row_uin_diff">почтовый ящик на этом острове: %1$d (острова нумеруют независимо, ваш %2$d здесь занят)</string>
+    <string name="backup_island_row_uin_diff">почтовый ящик на этом острове: %1$d (острова нумеруют независимо, поэтому номер не совпадает с вашим %2$d)</string>
     <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
     <string name="backup_island_auto_sub">Остров подбирается автоматически из публичного каталога</string>
     <string name="backup_island_auto_busy">Подбираем остров…</string>
@@ -1605,6 +1605,7 @@
     <string name="group_link_invalid">Ссылка на эту комнату неполная или устарела. Попросите новую у того, кто её дал.</string>
     <string name="backup_island_remove_title">Убрать запасной остров?</string>
     <string name="backup_island_remove_body">Копия на %1$s останется, и если добавить остров снова, вернётся она же с тем же номером. Можно удалить её совсем, тогда номер там освободится.</string>
+    <string name="backup_island_remove_shut_door">%1$s впускает только по приглашению или коду входа: если удалить копию, без них этот остров снова не добавить.</string>
     <string name="backup_island_remove_keep">Убрать</string>
     <string name="backup_island_remove_delete">Убрать и удалить копию</string>
     <string name="backup_island_copy_deleted">Копия на %1$s удалена.</string>

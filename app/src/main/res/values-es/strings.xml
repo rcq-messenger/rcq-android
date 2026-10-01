@@ -159,7 +159,7 @@
     <string name="backup_island_body">Copia automática, no un segundo inicio de sesión: nunca cambias de cuenta ni entras allí. Mientras tu isla principal funciona, cada mensaje entrante deja también una copia en la de reserva. Si tu isla principal está bloqueada o se cae, la app sigue recibiendo desde la de reserva por su cuenta. Tu número en una isla de reserva puede ser otro (cada isla numera por su cuenta); tu número principal no cambia nunca.</string>
     <string name="backup_island_row_uin">buzón en esta isla: %1$d</string>
     <string name="home_via_backup">Tu isla no responde. Los mensajes llegan por tu isla de reserva. Toca para hacerla la principal y enviar también desde ella.</string>
-    <string name="backup_island_row_uin_diff">buzón en esta isla: %1$d (cada isla numera por su cuenta y tu %2$d ya estaba ocupado aquí)</string>
+    <string name="backup_island_row_uin_diff">buzón en esta isla: %1$d (cada isla numera por su cuenta, así que no coincide con tu %2$d)</string>
     <string name="backup_island_auto_title">Guardar una copia en otra isla</string>
     <string name="backup_island_auto_sub">La isla se elige sola del catálogo público</string>
     <string name="backup_island_auto_busy">Eligiendo una isla…</string>
@@ -1528,6 +1528,7 @@
     <string name="group_link_invalid">Este enlace de sala está incompleto o caducado. Pide uno nuevo a quien te lo dio.</string>
     <string name="backup_island_remove_title">¿Quitar la isla de respaldo?</string>
     <string name="backup_island_remove_body">Tu copia en %1$s se queda, y si vuelves a añadir la isla vuelve la misma copia con el mismo número. También puedes borrarla del todo, y el número allí queda libre.</string>
+    <string name="backup_island_remove_shut_door">%1$s solo deja entrar por invitación o con un código de entrada: si borras la copia, no podrás volver a añadir la isla sin uno de ellos.</string>
     <string name="backup_island_remove_keep">Quitar</string>
     <string name="backup_island_remove_delete">Quitar y borrar la copia</string>
     <string name="backup_island_copy_deleted">La copia en %1$s se ha borrado.</string>

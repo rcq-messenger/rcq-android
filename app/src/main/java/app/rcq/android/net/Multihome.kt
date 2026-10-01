@@ -76,6 +76,10 @@ object Multihome {
         /** True inside the guest flow: a 404 `identity_rotated` throws instead of
          *  reading as "no account here" ([GuestPath.recoverAbsent], decision D2). */
         rotatedIsError: Boolean = false,
+        /** True where "the copy is gone" leads somewhere: a 404 that says
+         *  `identity_not_found` in so many words throws ([copyGone]) instead of
+         *  reading as null with every other kind of absence. */
+        goneIsError: Boolean = false,
     ): RcqApi.RegisterResponse? {
         val api = RcqApi("https://$host")
         val skB64 = Base64.encodeToString(signingPub, Base64.NO_WRAP)
@@ -87,15 +91,23 @@ object Multihome {
         val challenge = try {
             api.recoverChallenge(skB64).challenge
         } catch (e: IOException) {
-            if (GuestPath.recoverAbsent(e.message, rotatedIsError)) return null else throw e
+            if (GuestPath.recoverAbsent(e.message, rotatedIsError) && !(goneIsError && copyGone(e.message))) return null else throw e
         }
         val signature = RecoveryPhrase.signChallenge(signingPriv, challenge)
         return try {
             api.recover(RcqApi.RecoverRequest(skB64, challenge, signature))
         } catch (e: IOException) {
-            if (GuestPath.recoverAbsent(e.message, rotatedIsError)) null else throw e
+            if (GuestPath.recoverAbsent(e.message, rotatedIsError) && !(goneIsError && copyGone(e.message))) null else throw e
         }
     }
+
+    /** The island said no row carries our key any more: a 404 with the code
+     *  `identity_not_found`, never a bare 404 (an island without the route),
+     *  `identity_ambiguous` or `identity_rotated` (the account is alive). The
+     *  one answer that lets a device forget a backup copy that was deleted,
+     *  most likely from another device of the same account. */
+    fun copyGone(message: String?): Boolean =
+        AuthRefusal.code404(message) == AuthRefusal.IDENTITY_NOT_FOUND
 
     /** Register (or recover) this identity on [hostInput] as a backup home and
      *  persist it. Throws with a short reason on failure; the caller should
@@ -109,6 +121,11 @@ object Multihome {
         signingPub: ByteArray,
         nickname: String,
         auto: Boolean = false,
+        /** Our signed home record naming ONLY the primary home (report 1069),
+         *  offered with a registration so the island can give the copy our
+         *  number when it is a reserved one and free there; see
+         *  [RcqApi.RegisterRequest.home_record]. Null registers without it. */
+        homeRecord: JsonObject? = null,
     ): MultihomeStore.Home {
         val host = backupHost(ownUin, ownHost, hostInput)
         val recovered = recoverOn(host, signingPriv, signingPub)
@@ -129,17 +146,21 @@ object Multihome {
                     nickname = nickname,
                     identity_key = Base64.encodeToString(identityPub, Base64.NO_WRAP),
                     signing_key = skB64,
-                    // Ask to keep our primary number on this backup island
-                    // (best-effort; the server mints a fresh uin if it's taken).
+                    // Ask to keep our primary number on this backup island.
+                    // Best effort: the island mints a fresh uin if it is taken
+                    // there, and for a reserved (short or patterned) number it
+                    // wants proof the number is already ours elsewhere, which
+                    // is what the record below is.
                     desired_uin = ownUin,
                     challenge = challenge,
                     signature = challenge?.let {
                         app.rcq.android.crypto.RecoveryPhrase.signChallenge(signingPriv, it)
                     },
+                    home_record = homeRecord,
                 ),
             )
         }
-        return saveHome(ownUin, host, creds, auto)
+        return saveHome(ownUin, host, creds, auto, signingPub)
     }
 
     /** Adopt the copy of this identity that [hostInput] ALREADY holds as a
@@ -160,7 +181,7 @@ object Multihome {
         val creds = recoverOn(host, signingPriv, signingPub) ?: return null
         // A guest copy is not a copy of this account to adopt ([addBackupIsland]).
         if (creds.guest) return null
-        return saveHome(ownUin, host, creds, auto)
+        return saveHome(ownUin, host, creds, auto, signingPub)
     }
 
     /** The normalized host a backup may be kept on, or the short reason it
@@ -175,9 +196,11 @@ object Multihome {
         return host
     }
 
-    private fun saveHome(ownUin: Int, host: String, creds: RcqApi.RegisterResponse, auto: Boolean): MultihomeStore.Home {
+    private fun saveHome(ownUin: Int, host: String, creds: RcqApi.RegisterResponse, auto: Boolean, signingPub: ByteArray): MultihomeStore.Home {
         val home = MultihomeStore.Home(ownUin, host, creds.uin, creds.token, System.currentTimeMillis(), auto)
         MultihomeStore.save(home)
+        // Added back: no longer one this install removed ([MultihomeStore.markDropped]).
+        MultihomeStore.clearDropped(Base64.encodeToString(signingPub, Base64.NO_WRAP), listOf(host))
         return home
     }
 
@@ -429,7 +452,14 @@ object Multihome {
     /** PUT the signed record to every backup home. Best-effort per island; a
      *  401 refreshes the token via recover once. 409 (stale ts) is fine — an
      *  equal-or-newer record is already there. */
-    suspend fun publishToBackups(ownUin: Int, signingPriv: ByteArray, signingPub: ByteArray, docJson: String) {
+    suspend fun publishToBackups(
+        ownUin: Int,
+        signingPriv: ByteArray,
+        signingPub: ByteArray,
+        docJson: String,
+        /** The copy on this home is gone ([copyGone]): see [drainBackupQueues]. */
+        onGone: (host: String) -> Unit = {},
+    ) {
         for (home in MultihomeStore.list(ownUin)) {
             // A phantom front row PUTs to our own island, which the session's
             // authed api already covered (and the island rejects any record
@@ -442,7 +472,12 @@ object Multihome {
                     api.publishIslandRecord(docJson)
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
-                        val fresh = recoverOn(home.host, signingPriv, signingPub) ?: return@runCatching
+                        val fresh = try {
+                            recoverOn(home.host, signingPriv, signingPub, goneIsError = true)
+                        } catch (gone: IOException) {
+                            if (copyGone(gone.message)) { onGone(home.host); return@runCatching }
+                            throw gone
+                        } ?: return@runCatching
                         MultihomeStore.updateCreds(ownUin, home.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)
                         api.publishIslandRecord(docJson)
@@ -636,6 +671,14 @@ object Multihome {
          *  destroys the only copy. */
         stillOurs: () -> Boolean = { true },
         onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?) -> String?)? = null,
+        /** The island no longer has an account for our key ([copyGone]): the
+         *  copy was deleted, as a rule by another device of this account that
+         *  removed the backup with "delete the copy". Before this, a 401 then
+         *  a null recover returned in silence, so this device kept the home,
+         *  drained a mailbox that no longer existed and went on putting
+         *  `uin@host` in the signed record, a number the island may already
+         *  have given to somebody else. Asked only while [stillOurs]. */
+        onGone: (host: String) -> Unit = {},
         /** The session's ingest for one row, with the row's `envelope_type`.
          *  Its answer decides the ack: null = done with, a tag = may pass on a
          *  later drain (see [fileQueueRows]). */
@@ -657,7 +700,15 @@ object Multihome {
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
                         if (!stillOurs()) return@runCatching
-                        val fresh = recoverOn(home.host, signingPriv, signingPub) ?: return@runCatching
+                        val fresh = try {
+                            recoverOn(home.host, signingPriv, signingPub, goneIsError = true)
+                        } catch (gone: IOException) {
+                            if (copyGone(gone.message)) {
+                                if (stillOurs()) onGone(home.host)
+                                return@runCatching
+                            }
+                            throw gone
+                        } ?: return@runCatching
                         if (!stillOurs()) return@runCatching
                         MultihomeStore.updateCreds(ownUin, home.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)
@@ -853,6 +904,23 @@ object Multihome {
             val h = it.asJsonObject
             RcqFederation.Home(h.get("host").asString, h.get("uin").asInt)
         }
+
+    /** The published homes [Session] carries over into its own record: every
+     *  one this install does not know ([mine]), except our own island, a front
+     *  (the phantom old builds left behind) and a host removed on this install
+     *  that the primary island has not yet confirmed gone ([dropped], report
+     *  1064). Pure, for the test. */
+    internal fun carriedOverHomes(
+        published: List<RcqFederation.Home>,
+        mine: List<RcqFederation.Home>,
+        dropped: Set<String>,
+        ownHost: String,
+        isFront: (String) -> Boolean,
+    ): List<RcqFederation.Home> = published.filter { p ->
+        mine.none { it.host.equals(p.host, true) } &&
+            dropped.none { it.equals(p.host, true) } &&
+            !p.host.equals(ownHost, true) && !isFront(p.host)
+    }
 
     /** The homes OUR OWN published record already lists, verified against our
      *  own signing key. Blocking — call from IO. Empty when there is no record

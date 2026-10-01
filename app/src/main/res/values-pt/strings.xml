@@ -159,7 +159,7 @@
     <string name="backup_island_body">Backup automático, não um segundo login: você nunca troca nem entra por lá. Enquanto sua ilha principal funciona, uma cópia de cada mensagem que chega também cai na de backup. Se a principal for bloqueada ou sair do ar, o app continua recebendo pela de backup sozinho. Seu número numa ilha de backup pode ser outro (cada ilha numera por conta própria); seu número principal nunca muda.</string>
     <string name="backup_island_row_uin">caixa nesta ilha: %1$d</string>
     <string name="home_via_backup">Sua ilha não está respondendo. As mensagens estão chegando pela ilha de backup. Toque para torná-la a principal e enviar por ela também.</string>
-    <string name="backup_island_row_uin_diff">caixa nesta ilha: %1$d (cada ilha numera por conta própria e seu %2$d já estava ocupado aqui)</string>
+    <string name="backup_island_row_uin_diff">caixa nesta ilha: %1$d (cada ilha numera por conta própria, então não coincide com o seu %2$d)</string>
     <string name="backup_island_auto_title">Manter um backup em outra ilha</string>
     <string name="backup_island_auto_sub">A ilha é escolhida automaticamente no catálogo público</string>
     <string name="backup_island_auto_busy">Escolhendo uma ilha…</string>
@@ -1528,6 +1528,7 @@
     <string name="group_link_invalid">Este link de sala está incompleto ou desatualizado. Peça um novo a quem o enviou.</string>
     <string name="backup_island_remove_title">Remover a ilha de backup?</string>
     <string name="backup_island_remove_body">Sua cópia em %1$s continua lá, e ao adicionar a ilha de novo volta a mesma cópia com o mesmo número. Você pode apagá-la de vez, e o número lá fica livre.</string>
+    <string name="backup_island_remove_shut_door">%1$s só deixa entrar por convite ou com um código de entrada: se você apagar a cópia, não vai dar para adicionar a ilha de novo sem um deles.</string>
     <string name="backup_island_remove_keep">Remover</string>
     <string name="backup_island_remove_delete">Remover e apagar a cópia</string>
     <string name="backup_island_copy_deleted">A cópia em %1$s foi apagada.</string>

@@ -95,6 +95,17 @@ object VisitedIslandsStore {
         get(host)?.let { save(it.copy(uin = uin, jwt = jwt)) }
     }
 
+    /** Forget our copy on [host]: it was deleted there (a backup removed with
+     *  "delete the copy" is the same row, same key). The room aliases stay:
+     *  they are ids, and a join made later files under the same ones. */
+    fun remove(host: String) {
+        val k = key(K_VISITED) ?: return
+        val h = host.lowercase()
+        val before = list()
+        if (before.none { it.host == h }) return
+        prefs.edit().putString(k, gson.toJson(before.filterNot { it.host == h })).apply()
+    }
+
     // ── foreign-group alias ids ──────────────────────────────────────
 
     private fun aliases(): List<AliasRef> {

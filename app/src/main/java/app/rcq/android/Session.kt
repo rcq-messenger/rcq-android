@@ -3503,41 +3503,88 @@ class Session(context: Context) {
      *  without the F1 endpoint, a missing identity, a network hiccup) is
      *  swallowed so it can never disrupt the session or login. */
     private suspend fun publishHomeIslandRecord() {
+        // Read before the first suspension: a home found gone during the
+        // backup PUTs below is forgotten only for the account this ran for.
+        val epoch = epochNow()
         try {
-            val uin = store.uin ?: return
-            val signingPriv = store.signingPrivate ?: return
-            if (!signalStores.hasLocalIdentity()) return
-            val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
-            val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
-            val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
-            val mine = ownRecordHomes(uin)
-            // ⚠⚠ Read before publishing. The homes list belongs to the ACCOUNT,
-            // not to this install: a backup island switched on in the web, or on
-            // a second phone, is not in `MultihomeStore` here. Publishing `mine`
-            // alone put a record without it under a fresh `ts`, and since the
-            // island rejects only an OLDER ts, this device silently unpublished
-            // the other one's backup — senders stop being told the mailbox
-            // exists. Anything already in the published record and not known
-            // here is carried over untouched (we hold no credentials for it, and
-            // the record is an address list, not an authorisation).
-            //
-            // Untouched with one exception: a front in the published record is
-            // the phantom old builds left behind (they stamped the road,
-            // cdn.rcq.app, instead of the island). Carrying it forward would
-            // re-publish the very row the scrub in [start] removes, forever.
-            val published = withContext(Dispatchers.IO) { Multihome.ownPublishedHomes(serverHost(), uin, sk) }
-            val homes = mine + published.filter { p ->
-                mine.none { it.host.equals(p.host, true) } &&
-                    !p.host.equals(serverHost(), true) && !RelayConfigStore.isFrontHost(p.host)
+            // One publish at a time. Each one reads the published record, then
+            // writes its own under a fresh ts, and the island takes an EQUAL ts
+            // as well: a boot publish still holding the old list could land
+            // after the one that left a removed backup out, in the same second,
+            // and put it straight back.
+            recordPublishLock.withLock {
+                val uin = store.uin ?: return
+                val signingPriv = store.signingPrivate ?: return
+                if (!signalStores.hasLocalIdentity()) return
+                val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
+                val skPub = Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded
+                val sk = Base64.encodeToString(skPub, Base64.NO_WRAP)
+                val mine = ownRecordHomes(uin)
+                // ⚠⚠ Read before publishing. The homes list belongs to the ACCOUNT,
+                // not to this install: a backup island switched on in the web, or on
+                // a second phone, is not in `MultihomeStore` here. Publishing `mine`
+                // alone put a record without it under a fresh `ts`, and since the
+                // island rejects only an OLDER ts, this device silently unpublished
+                // the other one's backup — senders stop being told the mailbox
+                // exists. Anything already in the published record and not known
+                // here is carried over untouched (we hold no credentials for it, and
+                // the record is an address list, not an authorisation).
+                //
+                // Untouched with one exception: a front in the published record is
+                // the phantom old builds left behind (they stamped the road,
+                // cdn.rcq.app, instead of the island). Carrying it forward would
+                // re-publish the very row the scrub in [start] removes, forever.
+                //
+                // ⚠⚠ And one more: a backup removed on THIS install. It is "not
+                // known here" by definition the moment it is removed, so the
+                // carry-over put it straight back from the old record and a removed
+                // backup never left the record (report 1064): senders kept
+                // depositing to a copy nobody drained, or that was deleted and
+                // whose number the island may have given to somebody else. Those
+                // hosts stay out until the island confirms a record without them
+                // ([MultihomeStore.markDropped]).
+                val dropped = MultihomeStore.dropped(sk)
+                val published = withContext(Dispatchers.IO) { Multihome.ownPublishedHomes(serverHost(), uin, sk) }
+                val homes = mine + Multihome.carriedOverHomes(published, mine, dropped, serverHost(), RelayConfigStore::isFrontHost)
+                val ts = (System.currentTimeMillis() / 1000).toInt()
+                val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
+                api.publishIslandRecord(doc.toString())
+                // Past this line the primary island has confirmed it holds THIS
+                // record (a refusal, a stale ts included, is a 409 and throws):
+                // the record read before the next publish no longer names the
+                // removed hosts, so the carry-over cannot bring them back and
+                // their entries go. A host added back meanwhile is in `mine` and
+                // keeps its entry until the add clears it.
+                MultihomeStore.clearDropped(sk, dropped.filter { d -> homes.none { it.host.equals(d, true) } })
+                if (homes.size > 1) {
+                    Multihome.publishToBackups(uin, signingPriv, skPub, doc.toString(), onGone = { h ->
+                        if (stillOn(epoch) && !duressViewUp && !burning) forgetGoneBackupHome(uin, h)
+                    })
+                }
             }
-            val ts = (System.currentTimeMillis() / 1000).toInt()
-            val doc = RcqFederation.buildRecord(ik, sk, signingPriv, homes, ts)
-            api.publishIslandRecord(doc.toString())
-            if (homes.size > 1) Multihome.publishToBackups(uin, signingPriv, skPub, doc.toString())
         } catch (e: Exception) {
             android.util.Log.w("RCQfed", "publish island record failed: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
+
+    private val recordPublishLock = Mutex()
+
+    /** Our signed home record offered with a backup copy's registration
+     *  (report 1069), naming ONLY the primary home, (serverHost, uin): all an
+     *  island needs to give the copy our number when that number is a reserved
+     *  one and free there. Never the whole home list. The island may still
+     *  refuse the registration at its door, and a shut island would have been
+     *  handed every backup we keep for nothing; register does not store the
+     *  record either, so this one cannot unpublish anything. Null when it
+     *  cannot be built, and the registration goes ahead without it as before. */
+    private fun primaryHomeRecord(uin: Int): com.google.gson.JsonObject? = runCatching {
+        val signingPriv = store.signingPrivate ?: return null
+        if (!signalStores.hasLocalIdentity()) return null
+        val ik = Base64.encodeToString(signalStores.getIdentityKeyPair().publicKey.serialize(), Base64.NO_WRAP)
+        val sk = Base64.encodeToString(Ed25519PrivateKeyParameters(signingPriv, 0).generatePublicKey().encoded, Base64.NO_WRAP)
+        val ts = (System.currentTimeMillis() / 1000).toInt()
+        RcqFederation.buildRecord(ik, sk, signingPriv, listOf(RcqFederation.Home(serverHost(), uin)), ts)
+    }.getOrNull()
 
     /** Federation gossip B1 (second half) — SELF-PUSH the signed home-island
      *  record to every contact as a v=1-sealed `homerec` envelope, so contacts
@@ -3613,6 +3660,7 @@ class Session(context: Context) {
                 signingPriv = signingPriv(),
                 signingPub = signingPub(),
                 nickname = store.nickname ?: "user-$uin",
+                homeRecord = primaryHomeRecord(uin),
             )
         }
         refreshBackupHomes()
@@ -3625,38 +3673,102 @@ class Session(context: Context) {
     enum class CopyDelete { DELETED, HAS_ROOMS, FAILED }
 
     /**
-     * Forget a backup home AND delete the copy on it (report 1062): the island
-     * frees the number, so a backup made there again can get the home number.
-     * The copy is proven ours by a fresh recover (the signing key), then
-     * deleted with that token; only then is the home forgotten, so a failure
-     * leaves everything as it was. A copy that is how we sit in rooms on that
-     * island (the guest path reuses it, recover-first) is not deleted: that
-     * would take us out of those rooms. No account there counts as deleted.
+     * Forget a backup home AND delete the copy on it (report 1062), so the
+     * number there is free. That alone does not promise the home number on a
+     * later re-add: the copy made then asks for it with a primary-only signed
+     * home record ([primaryHomeRecord]) and gets it only where it is free and
+     * the island takes registrations at all. An island that lets people in by
+     * invite or entry code only does not take the copy back without one, which
+     * the remove sheet says before anything is deleted.
+     *
+     * The copy is proven ours by a fresh recover (the signing key), then the
+     * island itself is asked, with that token, whether the copy is in any room
+     * there; only an empty answer lets the delete go, since the island deletes
+     * every room the copy OWNS for everybody in it and takes it out of the
+     * rest. A failed answer deletes nothing. Only after the delete is the home
+     * forgotten, so a failure leaves everything as it was. No account there
+     * counts as deleted.
+     *
+     * ⚠ Not cancellable once it starts, like [burnFinish]: it runs on the
+     * Settings screen's scope, and leaving the screen while the DELETE was in
+     * flight left the island's copy gone and the home still here, still
+     * drained and still published, under a number free for somebody else.
      */
-    suspend fun removeBackupIslandAndCopy(host: String): CopyDelete {
-        if (duressViewUp) return CopyDelete.FAILED
-        val onIsland = groups.value.any { it.host.equals(host, true) } ||
-            app.rcq.android.net.VisitedIslandsStore.get(host) != null
-        if (onIsland) return CopyDelete.HAS_ROOMS
-        val sp = runCatching { signingPriv() }.getOrNull() ?: return CopyDelete.FAILED
-        val pp = runCatching { signingPub() }.getOrNull() ?: return CopyDelete.FAILED
-        val gone = withContext(Dispatchers.IO) {
+    suspend fun removeBackupIslandAndCopy(host: String): CopyDelete = withContext(NonCancellable) {
+        if (duressViewUp) return@withContext CopyDelete.FAILED
+        val epoch = epochNow()
+        val uin = store.uin ?: return@withContext CopyDelete.FAILED
+        // A quick way out only. This list is not proof of the opposite:
+        // refreshGroups drops an island whose fetch failed or got a 401, and a
+        // room joined from another device of this account is not in it at all.
+        if (groups.value.any { it.host.equals(host, true) }) return@withContext CopyDelete.HAS_ROOMS
+        val sp = runCatching { signingPriv() }.getOrNull() ?: return@withContext CopyDelete.FAILED
+        val pp = runCatching { signingPub() }.getOrNull() ?: return@withContext CopyDelete.FAILED
+        // Set only when this call deleted the copy itself, not when there was
+        // none to delete (a key retired there in a rotation reads as none too).
+        var deletedHere = false
+        val result = withContext(Dispatchers.IO) {
             runCatching {
-                val cred = Multihome.recoverOn(host, sp, pp) ?: return@runCatching true
+                val cred = Multihome.recoverOn(host, sp, pp) ?: return@runCatching CopyDelete.DELETED
+                // The island's own answer decides, and a failed lookup throws:
+                // FAILED below, never "no rooms". A VisitedIslandsStore entry
+                // proves nothing either way (it outlives leaving every room).
+                val rooms = RcqApi("https://$host").apply { setToken(cred.token) }.groups(withMembers = false)
+                if (rooms.isNotEmpty()) return@runCatching CopyDelete.HAS_ROOMS
+                // The last moment the delete can still be for another account.
+                if (!stillOn(epoch)) return@runCatching CopyDelete.FAILED
                 val status = app.rcq.android.net.BurnCascade.ApiTransport.deleteAccount(host, cred.token)
-                status in 200..299 || status == 404
-            }.getOrDefault(false)
+                deletedHere = status in 200..299
+                if (status in 200..299 || status == 404) CopyDelete.DELETED else CopyDelete.FAILED
+            }.getOrDefault(CopyDelete.FAILED)
         }
-        if (!gone) return CopyDelete.FAILED
-        removeBackupIsland(host)
-        return CopyDelete.DELETED
+        if (result != CopyDelete.DELETED) return@withContext result
+        if (stillOn(epoch) && !duressViewUp) {
+            // The copy a visited entry for this island pointed at (same key,
+            // same row) is gone: a stale entry would keep handing ensureGuestOn
+            // a dead token there.
+            if (deletedHere) VisitedIslandsStore.remove(host)
+            removeBackupIsland(host)
+        } else {
+            // Switched away (or the duress view came up) while the island was
+            // deleting: forget it for the account it was, which publishes
+            // without it at its next start ([MultihomeStore.markDropped]).
+            forgetBackupHome(uin, Base64.encodeToString(pp, Base64.NO_WRAP), host)
+        }
+        CopyDelete.DELETED
     }
 
     /** Forget a backup home (the orphan mailbox account stays on that island;
      *  re-adding recovers the same per-island uin) and republish the record. */
     fun removeBackupIsland(host: String) {
         val uin = store.uin ?: return
+        forgetBackupHome(uin, runCatching { Base64.encodeToString(signingPub(), Base64.NO_WRAP) }.getOrNull(), host)
+        refreshBackupHomes()
+        scope.launch { publishHomeIslandRecord() }
+        scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
+    }
+
+    /** The local half of removing a backup: the row goes, and the host is
+     *  marked removed for the account signed by [sk], so the next publish does
+     *  not carry it back over from the record already out there (report 1064,
+     *  see [publishHomeIslandRecord]). [sk] null (no key to hand) skips the
+     *  mark, which is the old behaviour. */
+    private fun forgetBackupHome(uin: Int, sk: String?, host: String) {
         MultihomeStore.remove(uin, host)
+        sk?.let { MultihomeStore.markDropped(uin, it, host) }
+    }
+
+    /** A backup copy the island no longer knows ([Multihome.copyGone]), found
+     *  by the drain or the record PUT: deleted from another device of this
+     *  account, as a rule. Forgotten here as well, and the record republished
+     *  without it, or this device would go on telling senders to deposit to a
+     *  number that island may give to somebody else. Callers check the account
+     *  epoch, the duress view and a burn. */
+    private fun forgetGoneBackupHome(uin: Int, host: String) {
+        if (store.uin != uin) return
+        if (MultihomeStore.list(uin).none { it.host.equals(host, true) }) return
+        android.util.Log.w("RCQfed", "backup copy on $host is gone, forgetting the home")
+        forgetBackupHome(uin, runCatching { Base64.encodeToString(signingPub(), Base64.NO_WRAP) }.getOrNull(), host)
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
         scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
@@ -3750,6 +3862,7 @@ class Session(context: Context) {
                         signingPub = signingPub(),
                         nickname = store.nickname ?: "user-$uin",
                         auto = true,
+                        homeRecord = primaryHomeRecord(uin),
                     )
                 },
                 // A shut island: only a copy of this account it already holds.
@@ -3776,7 +3889,8 @@ class Session(context: Context) {
      *  islands stay) and republish the record so senders stop depositing. */
     fun disableAutoBackup() {
         val uin = store.uin ?: return
-        MultihomeStore.list(uin).filter { it.auto }.forEach { MultihomeStore.remove(uin, it.host) }
+        val sk = runCatching { Base64.encodeToString(signingPub(), Base64.NO_WRAP) }.getOrNull()
+        MultihomeStore.list(uin).filter { it.auto }.forEach { forgetBackupHome(uin, sk, it.host) }
         refreshBackupHomes()
         scope.launch { publishHomeIslandRecord() }
         scope.launch { pushHomeRecordToContacts() }   // gossip B1: hand contacts our new homes
@@ -3838,7 +3952,12 @@ class Session(context: Context) {
             // Stage 5: a backup island that keeps one log per room is drained
             // from it too, right after its queue; a log row is filed exactly
             // like a legacy group row of the same mailbox, under the alias.
-            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp && !burning }, onLogRow = { payload, groupId, host, envelopeType ->
+            Multihome.drainBackupQueues(uin, sp, pp, dev, stillOurs = { stillOn(epoch) && !duressViewUp && !burning }, onGone = { h ->
+                // The copy there was deleted, most likely by another device of
+                // this account ("delete the copy", report 1062): stop draining
+                // it and stop advertising it.
+                forgetGoneBackupHome(uin, h)
+            }, onLogRow = { payload, groupId, host, envelopeType ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null

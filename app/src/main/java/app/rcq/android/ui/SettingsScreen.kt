@@ -4131,10 +4131,20 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
     // the number there is free (report 1062).
     var removeAsk by remember { mutableStateOf<List<String>?>(null) }
     removeAsk?.let { hosts ->
+        // An island that lets people in only by invite or entry code will not
+        // take the copy back after a delete (report 1069): said BEFORE the
+        // choice. Asked once per sheet; an island that does not answer gets no
+        // warning, since "we could not ask" is not "the door is shut".
+        val shutHosts by produceState(emptyList<String>(), hosts) {
+            value = hosts.filter { islandRefusesRegistration(it) == true }
+        }
+        val removeBody = stringResource(R.string.backup_island_remove_body, hosts.joinToString(", "))
+        val shutWarning = if (shutHosts.isEmpty()) null
+            else stringResource(R.string.backup_island_remove_shut_door, shutHosts.joinToString(", "))
         RcqAskSheet(
             onDismiss = { if (!busy) removeAsk = null },
             title = stringResource(R.string.backup_island_remove_title),
-            body = stringResource(R.string.backup_island_remove_body, hosts.joinToString(", ")),
+            body = if (shutWarning == null) removeBody else removeBody + "\n\n" + shutWarning,
             actions = listOf(
                 SheetAction(stringResource(R.string.backup_island_remove_keep)) {
                     removeAsk = null
@@ -4304,11 +4314,15 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(h.host, color = c.textPrimary)
-                                    // Islands number independently: we ASK for the
-                                    // same UIN and take what we get. A short number
-                                    // is usually taken elsewhere, and saying so
-                                    // beats leaving the user to wonder why their
-                                    // backup has a different number (user report).
+                                    // Islands number independently: the copy ASKS
+                                    // for our number when it is made and takes what
+                                    // it gets. The app cannot tell why it got
+                                    // another one (taken there, a copy made before
+                                    // it asked, our number changed after the copy
+                                    // was made, a reserved number without proof),
+                                    // so the row states the fact and no cause
+                                    // (report 1069: it used to say "taken here"
+                                    // for a number that was free).
                                     Text(
                                         if (h.uin == session.uin) stringResource(R.string.backup_island_row_uin, h.uin)
                                         else stringResource(R.string.backup_island_row_uin_diff, h.uin, session.uin ?: 0),

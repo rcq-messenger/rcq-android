@@ -284,6 +284,13 @@ class RcqApi(
         // to do both, which is how somebody else's recovery could be captured.
         val challenge: String? = null,
         val signature: String? = null,
+        // A backup copy only (report 1069): our signed home record, naming the
+        // primary home and nothing else, as proof that `desired_uin` is already
+        // ours elsewhere. An island hands out a reserved (short or patterned)
+        // number only against such proof, and without it a copy re-made after a
+        // delete got a random number even where ours was free. Never sent for a
+        // primary or a guest registration; older islands ignore the field.
+        val home_record: com.google.gson.JsonObject? = null,
     )
 
     /** `moved_from` is filled by POST /auth/refresh ONLY, and only when the

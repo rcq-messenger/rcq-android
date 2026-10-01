@@ -159,7 +159,7 @@
     <string name="backup_island_body">Otomatik yedek, ikinci bir giriş değil: orada hesap değiştirmez, oturum açmazsın. Ana adan çalışırken gelen her mesajın bir kopyası yedeğe de bırakılır. Ana adan engellenir ya da çökerse uygulama kendiliğinden yedekten almayı sürdürür. Yedek adadaki numaran farklı olabilir (adalar numaraları birbirinden bağımsız verir); ana numaran hiç değişmez.</string>
     <string name="backup_island_row_uin">bu adadaki posta kutusu: %1$d</string>
     <string name="home_via_backup">Adan cevap vermiyor. Mesajlar yedek adandan geliyor. Onu ana ada yapıp oradan da göndermek için dokun.</string>
-    <string name="backup_island_row_uin_diff">bu adadaki posta kutusu: %1$d (adalar numaraları bağımsız verir ve %2$d burada alınmıştı)</string>
+    <string name="backup_island_row_uin_diff">bu adadaki posta kutusu: %1$d (adalar numaraları bağımsız verir, bu yüzden %2$d numaranla aynı değil)</string>
     <string name="backup_island_auto_title">Başka bir adada yedek tut</string>
     <string name="backup_island_auto_sub">Ada, herkese açık katalogdan kendiliğinden seçilir</string>
     <string name="backup_island_auto_busy">Ada seçiliyor…</string>
@@ -1528,6 +1528,7 @@
     <string name="group_link_invalid">Bu oda bağlantısı eksik ya da eski. Sana verenden yenisini iste.</string>
     <string name="backup_island_remove_title">Yedek ada kaldırılsın mı?</string>
     <string name="backup_island_remove_body">%1$s üzerindeki kopyan kalır ve adayı yeniden eklersen aynı kopya aynı numarayla geri gelir. İstersen onu tamamen silebilirsin, o zaman oradaki numara boşa çıkar.</string>
+    <string name="backup_island_remove_shut_door">%1$s yalnızca davetle ya da giriş koduyla içeri alıyor: kopyayı silersen bu adayı bunlardan biri olmadan yeniden ekleyemezsin.</string>
     <string name="backup_island_remove_keep">Kaldır</string>
     <string name="backup_island_remove_delete">Kaldır ve kopyayı sil</string>
     <string name="backup_island_copy_deleted">%1$s üzerindeki kopya silindi.</string>

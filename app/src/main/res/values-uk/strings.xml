@@ -159,7 +159,7 @@
     <string name="backup_island_body">Це автоматичний резерв, а не другий вхід: ти ніколи туди не перемикаєшся і не входиш. Поки твій головний острів працює, копія кожного вхідного повідомлення лягає ще й на резервний. Якщо головний острів заблокують або він впаде, застосунок сам далі прийматиме з резервного. Номер на резервному острові може бути іншим (острови нумерують незалежно), а твій головний номер не змінюється ніколи.</string>
     <string name="backup_island_row_uin">скринька на цьому острові: %1$d</string>
     <string name="home_via_backup">Твій острів не відповідає. Повідомлення приходять через резервний острів. Торкнись, щоб зробити його головним і писати з нього.</string>
-    <string name="backup_island_row_uin_diff">скринька на цьому острові: %1$d (острови нумерують незалежно, а твій %2$d тут уже зайнятий)</string>
+    <string name="backup_island_row_uin_diff">скринька на цьому острові: %1$d (острови нумерують незалежно, тож номер не збігається з твоїм %2$d)</string>
     <string name="backup_island_auto_title">Тримати резерв на іншому острові</string>
     <string name="backup_island_auto_sub">Острів обирається автоматично з публічного каталогу</string>
     <string name="backup_island_auto_busy">Обираємо острів…</string>
@@ -1554,6 +1554,7 @@
     <string name="group_link_invalid">Посилання на цю кімнату неповне або застаріле. Попроси нове в того, хто його дав.</string>
     <string name="backup_island_remove_title">Прибрати резервний острів?</string>
     <string name="backup_island_remove_body">Копія на %1$s залишиться, і якщо додати острів знову, повернеться вона ж із тим самим номером. Можна видалити її зовсім, тоді номер там звільниться.</string>
+    <string name="backup_island_remove_shut_door">На %1$s пускають лише за запрошенням або з кодом входу: якщо видалити копію, без них цей острів знову не додати.</string>
     <string name="backup_island_remove_keep">Прибрати</string>
     <string name="backup_island_remove_delete">Прибрати й видалити копію</string>
     <string name="backup_island_copy_deleted">Копію на %1$s видалено.</string>
