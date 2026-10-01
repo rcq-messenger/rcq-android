@@ -698,6 +698,17 @@ private fun RcqApp(session: Session) {
         scope.launch { state = UiState.Registered(session.switchToAccount(id)) }
     }
 
+    // The active account's trash in Manage accounts: the same hot swap as a
+    // switch, then the delete, and back to the list without it.
+    fun deleteActiveAccount(gone: String, next: String) {
+        resetNav()
+        state = UiState.Registering
+        scope.launch {
+            state = UiState.Registered(session.deleteActiveAccountLocal(gone, next))
+            showManageAccounts = true
+        }
+    }
+
     // A tapped message notification: open the thread it points at, switching to
     // the target account first when the wake was for a non-active local account.
     // The request STAYS pending across switchAccount (resetNav clears chatTarget)
@@ -1112,6 +1123,7 @@ private fun RcqApp(session: Session) {
                 onBack = { showManageAccounts = false },
                 onAddBySeed = { showManageAccounts = false; showRestore = true },
                 onSwitchAccount = { id -> showManageAccounts = false; switchAccount(id) },
+                onDeleteActive = { gone, next -> deleteActiveAccount(gone, next) },
             )
             s is UiState.Registered && showNews -> app.rcq.android.ui.NewsScreen(
                 session,

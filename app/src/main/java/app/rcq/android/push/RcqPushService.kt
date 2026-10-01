@@ -36,7 +36,15 @@ class RcqPushService : PushService() {
         }.getOrNull() ?: return
         when (json.get("type")?.takeIf { !it.isJsonNull }?.asString) {
             "msg" -> {
-                Push.showMessage(applicationContext, json)
+                // A wake for a number no account here holds is a removed
+                // account's row still on its island (report 1066): no banner,
+                // and no drain either, since there is no mailbox here for it.
+                val target = Push.wakeTarget(applicationContext, Push.toUinOf(json))
+                if (target is Push.WakeTarget.Stranger) {
+                    Push.onStrangerWake(applicationContext)
+                    return
+                }
+                Push.showMessage(applicationContext, json, target)
                 // The push got through; whether the socket did is exactly
                 // what this call finds out (#732/#830 - sound, no message).
                 runCatching { app.rcq.android.Session.live?.pushSaysDrain() }

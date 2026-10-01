@@ -102,6 +102,7 @@
     <string name="restore_already_here">Bu numara bu cihazda zaten var (%1$d). İkinci bir kopya eklenemez: bir numaranın sunucuda tek bir anahtar takımı olur, iki kopya birbirinin grup mesajlarını görmez olurdu. Ana ekrandan elindeki hesaba geç.</string>
     <string name="manage_accounts_delete_title">%1$s silinsin mi?</string>
     <string name="manage_accounts_delete_body">Bu hesabı ve mesajlarını bu cihazdan kaldırır. Hesap sunucuda kalır ve sonra tekrar eklenebilir.</string>
+    <string name="manage_accounts_delete_active_body">Bu hesabı ve mesajlarını bu cihazdan kaldırır ve %1$s hesabına geçer. Hesap sunucuda kalır ve sonra tekrar eklenebilir.</string>
     <!-- Home: misc -->
     <string name="home_create_group">Grup oluştur</string>
     <string name="home_accept">Kabul et</string>

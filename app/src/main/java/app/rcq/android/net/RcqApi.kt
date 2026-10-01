@@ -1672,15 +1672,23 @@ class RcqApi(
          *  ACCOUNT online", and one open desktop suppressed the wake for every
          *  other device of the account. */
         val device_id: String? = null,
+        /** Every number THIS install holds on the island being called, the
+         *  caller's own included (report 1066). An island that knows the field
+         *  drops the rows under the same endpoint whose number is not in it:
+         *  the accounts that left this phone without taking their row along,
+         *  which no account still here could otherwise remove. Null = omitted
+         *  (Gson skips nulls), and an island that predates it ignores it. Only
+         *  ever sent complete, see [app.rcq.android.push.Push.accountsHereOn]. */
+        val accounts_here: List<Int>? = null,
     )
 
     /** Register this device's UnifiedPush endpoint URL so the server can POST
      *  offline wakes to it. Idempotent upsert server-side (uin, token). */
-    suspend fun setPushToken(endpoint: String, deviceId: String? = null): Unit =
+    suspend fun setPushToken(endpoint: String, deviceId: String? = null, accountsHere: List<Int>? = null): Unit =
         withContext(Dispatchers.IO) {
             postNoContent(
                 "/users/me/push-token",
-                gson.toJson(PushTokenBody(endpoint, device_id = deviceId)),
+                gson.toJson(PushTokenBody(endpoint, device_id = deviceId, accounts_here = accountsHere)),
                 authed = true,
             )
         }
@@ -1689,6 +1697,14 @@ class RcqApi(
     suspend fun deletePushToken(endpoint: String): Unit =
         withContext(Dispatchers.IO) {
             sendNoResult("DELETE", "/users/me/push-token", gson.toJson(PushTokenBody(endpoint)), authed = true)
+        }
+
+    /** The same DELETE, answering with the status code: the retry queue for a
+     *  removed account's row has to tell "gone, or never ours" (2xx, 401, 403,
+     *  404) from "try again later". See [app.rcq.android.push.PendingDeregister]. */
+    suspend fun deletePushTokenStatus(endpoint: String): Int =
+        withContext(Dispatchers.IO) {
+            sendForStatus("DELETE", "/users/me/push-token", gson.toJson(PushTokenBody(endpoint)), authed = true)
         }
 
     // Server push preferences (the per-category toggles the iOS Notifications
@@ -2421,13 +2437,36 @@ class RcqApi(
             // toggle) — silently sent a bodyless GET that 200s without writing.
             "PUT" -> b.put((json ?: "{}").toRequestBody(JSON))
             "PATCH" -> b.patch((json ?: "{}").toRequestBody(JSON))
-            "DELETE" -> b.delete()
+            // ⚠ WITH its body when there is one. A bare `delete()` sends an
+            // empty one, and the push-token DELETE is the one caller that has a
+            // body and an island model that REQUIRES it (`body: PushTokenIn`):
+            // FastAPI answered every one of them 422, so no Android client ever
+            // took a push row off an island: the distributor switch, the burn
+            // and the #1037 sweeps all "deregistered" into a 422 that their
+            // runCatching swallowed (report 1066).
+            "DELETE" -> if (json != null) b.delete(json.toRequestBody(JSON)) else b.delete()
             else -> b.get()
         }
         if (authed) token?.let { b.header("Authorization", "Bearer $it") }
         viaBestRoute { it.newCall(b.build()).execute() }.use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
         }
+    }
+
+    /** [sendNoResult] that answers with the island's status code instead of
+     *  throwing on a refusal. Throws only when no answer came back at all, so a
+     *  caller can tell "the island said no" from "the island was never
+     *  reached". */
+    private fun sendForStatus(method: String, path: String, json: String, authed: Boolean): Int {
+        val body = json.toRequestBody(JSON)
+        val b = Request.Builder().url("$baseUrl$path")
+        when (method) {
+            "DELETE" -> b.delete(body)
+            "PUT" -> b.put(body)
+            else -> b.post(body)
+        }
+        if (authed) token?.let { b.header("Authorization", "Bearer $it") }
+        return viaBestRoute { it.newCall(b.build()).execute() }.use { it.code }
     }
 
     // ── media blobs (rcq-spec 9) ─────────────────────────────────────

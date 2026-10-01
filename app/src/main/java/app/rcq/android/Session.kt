@@ -1000,10 +1000,24 @@ class Session(context: Context) {
      *  the copy. A settle calls it again once the copy is a resident's. */
     private fun registerPushEndpoint() {
         if (store.isGuestCopy) return
+        // Read now, on the account being registered: the launch below can run
+        // after a switch.
+        val accountId = AccountManager.activeId.value
+        val host = serverHost()
+        val uin = store.uin
         scope.launch {
             runCatching {
                 app.rcq.android.push.Push.savedEndpoint(appCtx)?.let {
-                    api.setPushToken(it, app.rcq.android.net.DeviceId.get(appCtx))
+                    // This number is on this device again: a removal queued for
+                    // the same row would undo the POST below (report 1066).
+                    if (accountId != null && uin != null) {
+                        app.rcq.android.push.PendingDeregister.cancel(appCtx, host, uin, keepAccountId = accountId)
+                    }
+                    api.setPushToken(
+                        it,
+                        app.rcq.android.net.DeviceId.get(appCtx),
+                        app.rcq.android.push.Push.accountsHereOn(appCtx, host),
+                    )
                 }
             }
         }
@@ -1447,6 +1461,9 @@ class Session(context: Context) {
                     // everybody feels. Idempotent, and a no-op on ntfy or with
                     // push switched off.
                     runCatching { app.rcq.android.push.Push.resumeEmbedded(appCtx) }
+                    // Removals of departed accounts' push rows wait out a lock
+                    // (they never dial from one); this is where they resume.
+                    app.rcq.android.push.PendingDeregister.flush(appCtx)
                 }
             }
         }
@@ -4096,6 +4113,11 @@ class Session(context: Context) {
         val decoyId = AccountManager.decoyMode.value
         if (decoyId != null) {
             AccountManager.accounts.value.filter { it.id != decoyId }.forEach { acc ->
+                // Before the wipe, as in [removePinFromDuress], its migrated
+                // twin: once the store is gone nothing can take the hidden
+                // account's push row off its island (report 1066). One attempt
+                // and nothing written down, as on every duress path.
+                runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, acc.id) }
                 runCatching {
                     SecureStore.wipeAccount(appCtx, acc.id)
                     MessageDb.wipeAccount(appCtx, acc.id)
@@ -4113,6 +4135,9 @@ class Session(context: Context) {
                 }
                 AccountManager.remove(acc.id)
             }
+            // Removals queued before the phone changed hands carry the tokens
+            // of real accounts. See [app.rcq.android.push.PendingDeregister].
+            runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
         }
         val vaultKey = PanicPinService.dataKey ?: return@withContext false
         val deviceKey = SecureStore.deviceKey(appCtx)
@@ -4183,6 +4208,9 @@ class Session(context: Context) {
             }
             AccountManager.remove(acc.id)
         }
+        // Queued removals of accounts that left earlier hold real accounts'
+        // islands and tokens, and none of them may outlive this.
+        runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
         DecoyStore.destroy(appCtx)
         wipeDecoyNamespaceStores()
         PanicPinService.removePin(appCtx)   // destroys the vault + pepper
@@ -4320,6 +4348,10 @@ class Session(context: Context) {
             MultihomeStore.wipeAll()
             CrossIslandRequestsStore.wipeAll()
         }
+        // ⚠ And the removals still queued from accounts that left earlier:
+        // each one is an island and a live token of an account this phone once
+        // held, which is the list a wipe PIN promises not to leave.
+        runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
         // ⚠ Two more device-wide stores the account loop cannot reach, and the
         // same promise broken: the island pins are the list of every island
         // this phone ever dialled (host, port and the hour of the first
@@ -7710,6 +7742,9 @@ class Session(context: Context) {
             // island drawn on the first frame.
             app.rcq.android.data.IslandCards.wipe(appCtx)
             app.rcq.android.data.IslandLogos.clear(appCtx)
+            // Same reasoning for the removals still queued from accounts that
+            // left before: their islands and tokens, with nobody left here.
+            runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
             null
         }
     }
@@ -8129,9 +8164,20 @@ class Session(context: Context) {
 
     /** Local-only delete of a NON-active account (iOS ManageAccountsSheet):
      *  wipe its device storage + drop it from the roster, leaving its
-     *  server-side identity alive. Refuses the active account. */
-    fun deleteAccountLocal(accountId: String) {
-        if (accountId == AccountManager.activeId.value) return
+     *  server-side identity alive. Refuses the active account, and says so:
+     *  false means nothing was touched. */
+    fun deleteAccountLocal(accountId: String): Boolean {
+        if (accountId == AccountManager.activeId.value) return false
+        // Read BEFORE the wipe: the two stores swept at the end are keyed by
+        // number, not by account id.
+        val uin = runCatching { SecureStore.peekUin(appCtx, accountId) }.getOrNull()
+        // ⚠⚠ BEFORE the store is wiped, and the one removal nobody made: this
+        // is how people leave an account on Android, and it never took the
+        // account's push row off its island, so the island went on waking this
+        // phone for it (report 1066; #1037 covered four other paths and missed
+        // this one). Written down first and retried until the island answers,
+        // because the wipe below leaves nothing to retry with.
+        runCatching { app.rcq.android.push.PendingDeregister.record(appCtx, accountId) }
         SecureStore.wipeAccount(appCtx, accountId)
         MessageDb.wipeAccount(appCtx, accountId)
         SignalStoreDb.wipeAccount(appCtx, accountId)
@@ -8141,6 +8187,43 @@ class Session(context: Context) {
         LocalStores.clearAccount(accountId)
         app.rcq.android.data.AccountCards.forget(appCtx, accountId)
         AccountManager.remove(accountId)
+        // Out of the roster now, so the attempt cannot mistake the leaver for
+        // an account still holding the row.
+        app.rcq.android.push.PendingDeregister.flush(appCtx)
+        // The number-keyed stores the burn sweeps and this delete did not: §5f
+        // requests, the numbers it blocked, and LIVE JWTs to its backup
+        // islands. ⚠ Keyed by the bare number, so they stay when another
+        // account here holds the same number (on another island, as a rule):
+        // sweeping them would take that account's rows too.
+        uin?.let { u ->
+            val sharedHere = AccountManager.accounts.value.any {
+                runCatching { SecureStore.peekUin(appCtx, it.id) }.getOrNull() == u
+            }
+            if (!sharedHere) {
+                runCatching {
+                    CrossIslandRequestsStore.wipeOwn(u)
+                    MultihomeStore.wipeOwn(u)
+                }
+            }
+        }
+        return true
+    }
+
+    /** The trash on the ACTIVE account in Manage accounts: switch to [nextId]
+     *  first, then delete as above. Returns the number the session now serves.
+     *  It used to do nothing at all and still forget the account's card. */
+    suspend fun deleteActiveAccountLocal(accountId: String, nextId: String): Int {
+        // Only onto an account that is really there: switching to an id the
+        // roster does not hold rebinds the session to nothing at all.
+        val canSwitch = nextId != accountId && AccountManager.accounts.value.any { it.id == nextId }
+        val uin = if (canSwitch && accountId == AccountManager.activeId.value) {
+            switchToAccount(nextId)
+        } else {
+            store.uin ?: error("no active identity")
+        }
+        // Refuses, and touches nothing, if the switch did not happen.
+        deleteAccountLocal(accountId)
+        return uin
     }
 
     /** Move to a freshly-allocated UIN (iOS-parity). The server keeps the

@@ -102,6 +102,7 @@
     <string name="restore_already_here">Você já tem este número neste aparelho (%1$d). Não dá para adicionar uma segunda cópia: um número guarda um só conjunto de chaves no servidor, então duas cópias parariam de ver as mensagens de grupo uma da outra. Troque para a conta que você já tem, na tela principal.</string>
     <string name="manage_accounts_delete_title">Apagar %1$s?</string>
     <string name="manage_accounts_delete_body">Remove esta conta e as mensagens dela deste aparelho. A conta continua no servidor e pode ser adicionada de novo depois.</string>
+    <string name="manage_accounts_delete_active_body">Remove esta conta e as mensagens dela deste aparelho e muda para %1$s. A conta continua no servidor e pode ser adicionada de novo depois.</string>
     <!-- Home: misc -->
     <string name="home_create_group">Criar um grupo</string>
     <string name="home_accept">Aceitar</string>

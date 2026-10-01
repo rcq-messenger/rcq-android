@@ -102,6 +102,7 @@
     <string name="restore_already_here">Ya tienes este número en este dispositivo (%1$d). No se puede añadir una segunda copia: un número guarda un solo juego de claves en el servidor, así que las dos copias dejarían de ver los mensajes de grupo de la otra. Cambia desde la pantalla principal a la cuenta que ya tienes.</string>
     <string name="manage_accounts_delete_title">¿Eliminar %1$s?</string>
     <string name="manage_accounts_delete_body">Quita esta cuenta y sus mensajes de este dispositivo. La cuenta sigue en el servidor y puedes volver a añadirla más tarde.</string>
+    <string name="manage_accounts_delete_active_body">Quita esta cuenta y sus mensajes de este dispositivo y cambia a %1$s. La cuenta sigue en el servidor y puedes volver a añadirla más tarde.</string>
     <!-- Home: misc -->
     <string name="home_create_group">Crear un grupo</string>
     <string name="home_accept">Aceptar</string>

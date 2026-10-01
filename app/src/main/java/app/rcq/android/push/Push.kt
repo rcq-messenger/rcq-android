@@ -197,6 +197,19 @@ object Push {
      *  push, relaunched, it is on again" report. */
     private const val K_USER_DISABLED = "user_disabled"
 
+    /** When [registerWithBackend] last ran over the whole roster, and when a
+     *  wake for a number nobody here holds last asked for one. Timestamps only:
+     *  no number, no island. */
+    private const val K_REGISTERED_AT = "registered_at"
+    private const val K_STRANGER_REFRESH_AT = "stranger_refresh_at"
+    private const val REGISTER_REFRESH_MS = 24L * 3600 * 1000
+    private const val STRANGER_REFRESH_MS = 3600L * 1000
+
+    /** The island's ceiling on `accounts_here`. Five accounts is the most a
+     *  device holds today; a longer list is not sent at all rather than cut,
+     *  because a cut list reads as "these left". */
+    private const val ACCOUNTS_HERE_MAX = 64
+
     /** How many times the person has asked for the message channel to be put
      *  back the way RCQ ships it.
      *
@@ -1169,21 +1182,158 @@ object Push {
 
     /** POST [endpoint] to every local account's island so each can wake this
      *  device. Idempotent server-side (upsert on uin+token). Fire-and-forget;
-     *  callable headless (reads per-account creds straight from SecureStore). */
+     *  callable headless (reads per-account creds straight from SecureStore).
+     *
+     *  Each POST carries `accounts_here`, every number this device holds on
+     *  that island (report 1066): an island that knows the field takes the
+     *  rows of numbers that left this phone off the same endpoint. That is the
+     *  only cure for rows left behind by builds that never removed them, and
+     *  it needs no credentials of the account that left. */
     fun registerWithBackend(ctx: Context, endpoint: String) {
         CoroutineScope(Dispatchers.IO).launch {
+            // Read once for the sweep: the list must be the same on every POST
+            // to one island, or two of them would argue about who is here.
+            val here = runCatching { accountsHereByIsland(localNumbers(ctx)) }.getOrNull()
             for (acct in AccountManager.accounts.value) {
                 val store = SecureStore(ctx, acct.id)
                 val token = store.token ?: continue
                 // A guest copy registers no wake (spec 2026-09-15, 12.1).
                 if (store.isGuestCopy) continue
                 val host = store.serverHost ?: RcqApi.DEFAULT_HOST
+                // This number is on this phone again: a removal still queued
+                // for it would take down the row this POST is about to write.
+                store.uin?.let { PendingDeregister.cancel(ctx, host, it, keepAccountId = acct.id) }
                 runCatching {
                     RcqApi("https://$host").apply { setToken(token) }
-                        .setPushToken(endpoint, app.rcq.android.net.DeviceId.get(ctx))
+                        .setPushToken(endpoint, app.rcq.android.net.DeviceId.get(ctx), here?.get(islandKey(host)))
                 }
             }
+            runCatching { prefs(ctx).edit().putLong(K_REGISTERED_AT, System.currentTimeMillis()).apply() }
         }
+    }
+
+    /** Re-register once a day even when no new endpoint arrives (report
+     *  1066). The endpoint only changes when the distributor says so, and a
+     *  phone whose app is rarely opened would otherwise never send the
+     *  `accounts_here` that clears its leftovers. Called on process start. */
+    fun refreshRegistrationIfStale(ctx: Context) {
+        if (isUserDisabled(ctx) || AccountManager.isDecoyMode) return
+        val endpoint = savedEndpoint(ctx) ?: return
+        val age = System.currentTimeMillis() - prefs(ctx).getLong(K_REGISTERED_AT, 0L)
+        if (age in 0 until REGISTER_REFRESH_MS) return
+        registerWithBackend(ctx, endpoint)
+    }
+
+    /** One roster account as wake routing and `accounts_here` see it. A null
+     *  [uin] is one that could not be read. */
+    internal data class LocalNumber(val accountId: String, val host: String?, val uin: Int?)
+
+    /** "Which island", spelled one way: null is the default island, and the
+     *  host goes through the same canonical form the proofs use, so `Host:443`
+     *  and `host.` are the island they name and not two islands that each
+     *  disown the other's numbers. */
+    internal fun islandKey(host: String?): String =
+        app.rcq.android.crypto.GuestProof.canonicalHost(host?.takeIf { it.isNotBlank() } ?: RcqApi.DEFAULT_HOST)
+
+    /** Every roster account's island and number, straight from SecureStore so
+     *  it works headless. */
+    internal fun localNumbers(ctx: Context): List<LocalNumber> {
+        AccountManager.init(ctx)
+        return AccountManager.accounts.value.map { acct ->
+            runCatching {
+                val s = SecureStore(ctx, acct.id)
+                LocalNumber(acct.id, s.serverHost, s.uin)
+            }.getOrElse { LocalNumber(acct.id, null, null) }
+        }
+    }
+
+    /**
+     * `accounts_here` for every island this device has a number on, or null
+     * when it cannot be told in full.
+     *
+     * ⚠ Built from the ROSTER, not from the accounts that register: those skip
+     * a guest copy and an account without a token, and leaving their numbers
+     * out would have the island remove rows that are still wanted. And all or
+     * nothing: a number that could not be read is a number the island would be
+     * told is gone, so one unreadable account means no list for anybody, which
+     * an island treats exactly like an old client.
+     */
+    internal fun accountsHereByIsland(roster: List<LocalNumber>): Map<String, List<Int>>? {
+        if (roster.any { it.uin == null }) return null
+        return roster.groupBy { islandKey(it.host) }
+            .mapValues { (_, v) -> v.mapNotNull { it.uin }.distinct().sorted() }
+            .filterValues { it.size <= ACCOUNTS_HERE_MAX }
+    }
+
+    /** `accounts_here` for one island, see [accountsHereByIsland]. */
+    fun accountsHereOn(ctx: Context, host: String?): List<Int>? =
+        runCatching { accountsHereByIsland(localNumbers(ctx))?.get(islandKey(host)) }.getOrNull()
+
+    /** Who a wake is for, from its `to_uin`. */
+    internal sealed class WakeTarget {
+        abstract val accountId: String?
+
+        /** A number an account on this device holds. */
+        data class Known(override val accountId: String) : WakeTarget()
+
+        /** A number NO account on this device holds, with every account's
+         *  number read: the row of an account that left (report 1066). Nothing
+         *  is shown, rung or drained for it. */
+        object Stranger : WakeTarget() {
+            override val accountId: String? = null
+        }
+
+        /** No `to_uin` (an island older than the field), or a roster that could
+         *  not be read in full: the active account, as it always was. */
+        data class Fallback(override val accountId: String?) : WakeTarget()
+    }
+
+    /**
+     * Route a wake by `to_uin`.
+     *
+     * ⚠⚠ The active account is NOT the answer for a number nobody here holds.
+     * It used to be: a removed account's row kept waking the phone, the wake
+     * fell to whichever account was in front, its keys could not open the
+     * envelope, and the person got "RCQ / New message" with a sound for an
+     * account they had removed, a full-screen ring for a call to it, and a lit
+     * screen for a sealed one (report 1066).
+     *
+     * ⚠ The wake names a number and no island, so one number on two islands is
+     * still matched to the first account holding it. A removed account whose
+     * number another account here holds elsewhere is therefore not caught by
+     * this; only the island taking the row away is.
+     */
+    internal fun resolveWakeTarget(toUin: Int?, roster: List<LocalNumber>, activeId: String?): WakeTarget {
+        if (toUin == null) return WakeTarget.Fallback(activeId)
+        roster.firstOrNull { it.uin == toUin }?.let { return WakeTarget.Known(it.accountId) }
+        // Could the unreadable one be it? Then it is not a stranger, and a
+        // banner too many beats a message nobody hears about.
+        if (roster.any { it.uin == null }) return WakeTarget.Fallback(activeId)
+        return WakeTarget.Stranger
+    }
+
+    internal fun wakeTarget(ctx: Context, toUin: Int?): WakeTarget {
+        // No number, nothing to look up: the in-process rings land here, some
+        // on the main thread, and a read of every account's store buys nothing.
+        if (toUin == null) return WakeTarget.Fallback(AccountManager.activeId.value)
+        return resolveWakeTarget(toUin, localNumbers(ctx), AccountManager.activeId.value)
+    }
+
+    internal fun toUinOf(json: JsonObject): Int? =
+        json.get("to_uin")?.takeIf { !it.isJsonNull }?.let { runCatching { it.asInt }.getOrNull() }
+
+    /** A wake for [WakeTarget.Stranger] was dropped. Once an hour at most, ask
+     *  every island again with `accounts_here`: the island that sent it learns
+     *  the number is not here and stops. The number is not logged. */
+    internal fun onStrangerWake(ctx: Context) {
+        android.util.Log.i("RCQpush", "wake for a number no account here holds: dropped")
+        if (isUserDisabled(ctx) || AccountManager.isDecoyMode) return
+        val endpoint = savedEndpoint(ctx) ?: return
+        val p = prefs(ctx)
+        val now = System.currentTimeMillis()
+        if (now - p.getLong(K_STRANGER_REFRESH_AT, 0L) in 0 until STRANGER_REFRESH_MS) return
+        p.edit().putLong(K_STRANGER_REFRESH_AT, now).apply()
+        registerWithBackend(ctx, endpoint)
     }
 
     /**
@@ -1204,6 +1354,10 @@ object Push {
      * ⚠ Called with the account's OWN credentials, which means BEFORE its
      * SecureStore is wiped. Reads them synchronously for that reason and only
      * then goes to the network.
+     *
+     * One attempt, nothing written down: what the burn and duress paths use,
+     * where a week of the account's token on disk is the wrong trade. An
+     * ordinary removal goes through [PendingDeregister] instead.
      */
     fun deregisterAccount(ctx: Context, accountId: String) {
         val endpoint = savedEndpoint(ctx) ?: return
@@ -1272,8 +1426,11 @@ object Push {
         runCatching { NotificationManagerCompat.from(ctx).cancel(id) }
     }
 
-    /** Build + post a wake notification for a {type:"msg"} push payload. */
-    fun showMessage(ctx: Context, json: JsonObject) {
+    /** Build + post a wake notification for a {type:"msg"} push payload.
+     *  [target] is the routing the caller already did, see [wakeTarget]. */
+    internal fun showMessage(ctx: Context, json: JsonObject, target: WakeTarget = wakeTarget(ctx, toUinOf(json))) {
+        // Before anything is drawn or played: see [resolveWakeTarget].
+        if (target is WakeTarget.Stranger) return
         ensureChannels(ctx)
         fun str(k: String): String? =
             json.get(k)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
@@ -1318,10 +1475,9 @@ object Push {
         // Which local account is this wake FOR? It carries to_uin, so on a
         // multi-account device we consult the account it is addressed to —
         // checking only the active account let a sibling account's muted group
-        // keep buzzing the phone.
-        val acctId = toUin?.let { u ->
-            AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
-        } ?: app.rcq.android.data.AccountManager.activeId.value
+        // keep buzzing the phone. Resolved by [wakeTarget], which is also what
+        // refuses a number no account here holds.
+        val acctId = target.accountId
 
         // A fan-out copy addressed to one of the account's OTHER installs. The
         // push server wakes every install for every copy — it cannot know which
@@ -1876,9 +2032,13 @@ object Push {
         // on a locked screen while the sealed one below stays neutral. Worth
         // reconciling, deliberately not in a change about what leaves the box.
         val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
-        val acctId = toUin?.let { u ->
-            AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
-        } ?: AccountManager.activeId.value
+        // A call to a number no account here holds rings nobody (report 1066):
+        // it is a removed account's row, and the full-screen ring would be for
+        // a person who is not on this phone. The in-process callers pass no
+        // to_uin, or the one a wake already routed, so they are unaffected.
+        val target = wakeTarget(ctx, toUin)
+        if (target is WakeTarget.Stranger) { onStrangerWake(ctx); return }
+        val acctId = target.accountId
         val name = str("nickname")
             ?: acctId
                 ?.let { PushEnvelope.nameFor(ctx, it, fromUin, host = null) }
@@ -1912,19 +2072,21 @@ object Push {
         // Same reason as the flat path: a full-screen ring naming a real
         // contact is exactly what a duress session must never produce.
         if (app.rcq.android.security.DuressGate.isActive) return
+        // Which local account is this wake for? Same rule the message wake
+        // uses: a multi-account device shares one endpoint, so `to_uin` picks
+        // the store to decrypt against. And a number no account here holds
+        // gets nothing at all, not even the neutral alert below that turns the
+        // screen on (report 1066).
+        val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
+        val target = wakeTarget(ctx, toUin)
+        if (target is WakeTarget.Stranger) { onStrangerWake(ctx); return }
         val env = str("env")
         // The server retries a publish whose response it lost, and ntfy replays
         // its cache to a redialling distributor — both carry a byte-identical
         // ciphertext. Re-offering the same call would reset an acceptance the
         // user has already made, so the duplicate stops here.
         if (env != null && !SeenWakes.firstTime(env)) return
-        // Which local account is this wake for? Same rule the message wake
-        // uses: a multi-account device shares one endpoint, so `to_uin` picks
-        // the store to decrypt against.
-        val toUin = json.get("to_uin")?.takeIf { !it.isJsonNull }?.asInt
-        val acctId = toUin?.let { u ->
-            AccountManager.accounts.value.firstOrNull { SecureStore(ctx, it.id).uin == u }?.id
-        } ?: AccountManager.activeId.value
+        val acctId = target.accountId
         val call = if (env != null && acctId != null) {
             runCatching { PushEnvelope.openCall(ctx, acctId, env) }.getOrNull()
         } else {

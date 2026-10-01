@@ -65,6 +65,13 @@ class RcqApp : Application() {
         // Honour a user who turned push off BEFORE anything can re-register.
         app.rcq.android.push.Push.enforceUserDisabled(this)
         app.rcq.android.push.Push.resumeEmbedded(this)
+        // Push rows of accounts removed from this device that their islands
+        // have not confirmed gone yet, and the daily re-registration that tells
+        // each island which numbers are still here (report 1066). Both after
+        // IslandTrust above, both no-ops when there is nothing to do, and the
+        // first waits out a PIN lock on its own.
+        app.rcq.android.push.PendingDeregister.flush(this)
+        app.rcq.android.push.Push.refreshRegistrationIfStale(this)
         // Optional PIN-lock grace (#10): users asked not to re-enter the PIN on
         // every quick app switch. With a grace > 0 we DON'T lock on background;
         // instead we lock on RETURN if the app was away longer than the grace

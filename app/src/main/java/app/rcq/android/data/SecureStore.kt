@@ -273,6 +273,7 @@ class SecureStore(context: Context, accountId: String) {
         private const val K_PIN_PEPPER = "pin_pepper"
         private const val K_PIN_ATTEMPTS = "pin_attempts"
         private const val K_MSGDB_ENC = "msgdb_enc"
+        private const val K_PENDING_PUSH_DEREG = "pending_push_deregister"
 
         private fun getOrCreateBytes(context: Context, key: String, len: Int): ByteArray {
             val prefs = openPrefs(context)
@@ -300,6 +301,22 @@ class SecureStore(context: Context, accountId: String) {
 
         fun clearPinAttempts(context: Context) {
             openPrefs(context).edit().remove(GP + K_PIN_ATTEMPTS).apply()
+        }
+
+        /** Push rows still to be taken off the islands of accounts this device
+         *  removed ([app.rcq.android.push.PendingDeregister]). Each holds the
+         *  removed account's bearer token, which is why it lives in THIS file
+         *  and never in plain prefs. Null when there is nothing pending. */
+        fun loadPendingPushDeregisters(context: Context): String? =
+            openPrefs(context).getString(GP + K_PENDING_PUSH_DEREG, null)
+
+        /** ⚠ `commit`, not `apply`: the record is written right before the
+         *  credentials it copies are wiped, and an `apply` still queued when the
+         *  process dies is a row nothing can ever take off again. */
+        fun savePendingPushDeregisters(context: Context, raw: String?): Boolean {
+            val e = openPrefs(context).edit()
+            if (raw == null) e.remove(GP + K_PENDING_PUSH_DEREG) else e.putString(GP + K_PENDING_PUSH_DEREG, raw)
+            return e.commit()
         }
 
         /** Forget the PIN pepper + attempt-state (vault destroyed). The device

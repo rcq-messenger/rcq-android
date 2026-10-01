@@ -102,6 +102,7 @@
     <string name="restore_already_here">这台设备上已经有这个号码（%1$d）。不能再添加第二份副本：一个号码在服务器上只有一套密钥，两份副本会看不到彼此的群组消息。请从主屏幕切换到你已有的那个账号。</string>
     <string name="manage_accounts_delete_title">删除 %1$s？</string>
     <string name="manage_accounts_delete_body">从这台设备上移除这个账号和它的消息。账号仍留在服务器上，之后可以再次添加。</string>
+    <string name="manage_accounts_delete_active_body">从这台设备上移除这个账号和它的消息，并切换到 %1$s。账号仍留在服务器上，之后可以再次添加。</string>
     <!-- Home: misc -->
     <string name="home_create_group">创建群组</string>
     <string name="home_accept">接受</string>
