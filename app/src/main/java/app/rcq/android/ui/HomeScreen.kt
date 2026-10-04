@@ -217,10 +217,48 @@ internal data class AccountRow(
  *
  *  Held here rather than in LocalStores because it is transient navigation
  *  state, not a preference: it should not outlive the process.
+ *
+ *  ⚠⚠ AND IT BELONGS TO THE OWNER THAT OPENED IT ([owner], report 1068). Kept
+ *  outside the screen, it also outlived the account: a notification tap
+ *  switched accounts, the new home screen read `open` and drew the sheet again
+ *  with the previous account's query and the people it had found, and a tap
+ *  on one opened that number AS THE NEW ACCOUNT, on its island, where the
+ *  number can be somebody else. The same happened across a panic PIN, which
+ *  drew the real account's search inside the duress view. MainActivity closes
+ *  it on every account change (resetNav), and the home screen draws it only
+ *  for the owner it was opened under, so even a path that skips resetNav
+ *  never shows it to anyone else.
  */
 internal object AddSheet {
     val open = mutableStateOf(false)
     val query = mutableStateOf("")
+
+    /** [UiOwner] the sheet was opened under; null while closed. */
+    var owner: String? = null
+        private set
+
+    fun openFor(who: String) {
+        owner = who
+        open.value = true
+    }
+
+    /** Up, and up for [who]. */
+    fun isOpenFor(who: String): Boolean = open.value && owner == who
+
+    /** Closes a sheet left open by another owner; one of [who]'s stays. */
+    fun closeUnlessFor(who: String) {
+        if (open.value && owner != who) close()
+    }
+
+    /** Keeps what a search found, but only into the sheet it was run for: a
+     *  search still in flight when the owner changed must not seed the next
+     *  one with its results. */
+    fun keepResults(who: String?, q: String, foundUsers: List<app.rcq.android.net.RcqApi.UserInfo>, foundGroups: List<app.rcq.android.net.RcqApi.GroupPreviewOut>) {
+        if (who == null || owner != who) return
+        resultsFor = q
+        users = foundUsers
+        groups = foundGroups
+    }
 
     /** The results the sheet last showed, keyed by the query that produced
      *  them. A trip into a search hit's profile DISPOSES the sheet composable,
@@ -236,6 +274,7 @@ internal object AddSheet {
      *  deliberately does NOT call this. */
     fun close() {
         open.value = false
+        owner = null
         query.value = ""
         resultsFor = null
         users = emptyList()
@@ -386,8 +425,15 @@ internal fun HomeScreen(
     // to a 1:1 from this account goes, and a line says what the account is.
     val guestCopy by session.primaryIsGuest.collectAsState()
 
-    var showAdd by AddSheet.open
-    var showQr by remember { mutableStateOf(false) }
+    // Read in composition, not in an effect: a sheet another owner left open
+    // is not drawn for even one frame (see AddSheet), and is then closed.
+    val uiOwner = currentUiOwner()
+    val showAdd = AddSheet.isOpenFor(uiOwner)
+    LaunchedEffect(uiOwner) { AddSheet.closeUnlessFor(uiOwner) }
+    // Keyed by the owner too: the code is THIS account's address and key, and
+    // a sheet carried over a switch would hand out the previous one's under
+    // the new number (report 1068 review).
+    var showQr by remember(uiOwner) { mutableStateOf(false) }
     // Decision D7: the settle sheet behind the guest-copy banner.
     var showGuestSettle by remember { mutableStateOf(false) }
     // Decision E4: a room the long-press menu is about to leave, when leaving
@@ -834,7 +880,7 @@ internal fun HomeScreen(
                 accounts = accountRows,
                 canAddAccount = !inOwnStoreDecoy && accountList.size < app.rcq.android.data.AccountManager.MAX_ACCOUNTS,
                 onPickStatus = { scope.launch { session.setStatus(it) } },
-                onAddContact = { showAdd = true },
+                onAddContact = { AddSheet.openFor(uiOwner) },
                 onSearch = { showSearch = true },
                 onOpenSettings = onOpenSettings,
                 onOpenDiagnostics = onOpenDiagnostics,
@@ -1020,7 +1066,7 @@ internal fun HomeScreen(
                 // petal loader instead of the misleading "no contacts" prompt.
                 if (contacts.isEmpty() && groups.isEmpty() && pending.isEmpty()) {
                     item(key = "empty") {
-                        if (connecting) ConnectingState(stealth = stealthActive) else if (!guestCopy) EmptyState(onAdd = { showAdd = true }, myUin = uin, session = session, onOpenGroup = onOpenGroup)
+                        if (connecting) ConnectingState(stealth = stealthActive) else if (!guestCopy) EmptyState(onAdd = { AddSheet.openFor(uiOwner) }, myUin = uin, session = session, onOpenGroup = onOpenGroup)
                     }
                 } else if (contacts.isEmpty() && !connecting && !guestCopy) {
                     // ⚠ The state above is almost never reached: every new
@@ -1034,7 +1080,7 @@ internal fun HomeScreen(
                     // and nothing in the interface has ever offered them a way
                     // to bring someone.
                     item(key = "no-contacts") {
-                        InviteNudge(myUin = uin, onAdd = { showAdd = true })
+                        InviteNudge(myUin = uin, onAdd = { AddSheet.openFor(uiOwner) })
                     }
                 }
 
@@ -1284,7 +1330,7 @@ internal fun HomeScreen(
             }
 
             BottomBar(
-                onAdd = { showAdd = true },
+                onAdd = { AddSheet.openFor(uiOwner) },
                 onQr = { showQr = true },
                 onNearby = onOpenNearby,
                 onSettings = onOpenSettings,
@@ -1411,7 +1457,7 @@ internal fun HomeScreen(
         )
     }
     if (showQr) {
-        val links = remember { session.contactLinks() }
+        val links = remember(uiOwner, uin) { session.contactLinks() }
         QrDialog(uin = uin, qrPayload = links.first, shareLink = links.second, session = session, onDismiss = { showQr = false })
     }
     if (showAddAccount) {
@@ -2825,6 +2871,8 @@ private fun AddContactDialog(
     // Hoisted out of composition so a trip to a search result's profile and
     // back does not wipe what was typed (see AddSheet).
     var query by AddSheet.query
+    // Whose search this is, for writing its results back (AddSheet.keepResults).
+    val sheetOwner = remember { AddSheet.owner }
     // Seeded from AddSheet so the trip to a profile and back lands on the
     // results that were already found, not on "Поиск…" over an empty list.
     val restored = AddSheet.resultsFor != null && AddSheet.resultsFor == query.trim()
@@ -2904,7 +2952,7 @@ private fun AddContactDialog(
             groups = emptyList()
             searching = false
             lastSearched = q
-            AddSheet.resultsFor = q; AddSheet.users = users; AddSheet.groups = groups
+            AddSheet.keepResults(sheetOwner, q, users, groups)
             return@LaunchedEffect
         }
         searching = true
@@ -2915,7 +2963,7 @@ private fun AddContactDialog(
         groups = session.searchGroups(q).filter { !it.is_closed }
         searching = false
         lastSearched = q
-        AddSheet.resultsFor = q; AddSheet.users = users; AddSheet.groups = groups
+        AddSheet.keepResults(sheetOwner, q, users, groups)
     }
 
     // A sheet, not a centred dialog: Add is a search surface with a keyboard,

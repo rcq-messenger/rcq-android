@@ -227,12 +227,26 @@ sealed interface ChatTarget {
     data class Group(val id: Int) : ChatTarget
 }
 
-/** Process-lifetime composer drafts, keyed by thread ("p:<uin>" / "g:<id>").
- *  A typed-but-unsent message survives navigating to a profile or back to the
- *  chat list and returning (a fresh ChatScreen composition reads its draft
- *  back). Cleared on send. */
+/** Process-lifetime composer drafts, keyed by thread ("p:<uin>" / "g:<id>")
+ *  AND by owner. A typed-but-unsent message survives navigating to a profile
+ *  or back to the chat list and returning (a fresh ChatScreen composition
+ *  reads its draft back). Cleared on send.
+ *
+ *  ⚠⚠ THE OWNER IS PART OF THE KEY (report 1068 review). Keyed by thread
+ *  alone, a sentence typed to number 500 in one account sat in the composer
+ *  of the other account's chat with a 500, and Send delivered it there: on
+ *  another island that is another person, and a room id is a small number
+ *  every island hands out again. The duress view is an owner of its own
+ *  ([UiOwner]), and a duress PIN, a wipe or a burn forgets every draft
+ *  ([forgetChatDrafts]).
+ *
+ *  The owner is added in here ([PerOwnerMap]), behind the same `[thread]` the
+ *  call sites have always used, rather than by a new key at each of them:
+ *  ChatScreen is at the ART verifier's limit (see [MessageLongPressOverlay]),
+ *  and a new local in it is exactly what has crashed every chat on opening
+ *  before. */
 private object ChatDrafts {
-    val byThread = mutableMapOf<String, String>()
+    val byThread = PerOwnerMap()
     /** Which message the draft is answering, keyed the same way.
      *
      *  ⚠ The reply lives as long as the text it belongs to, and it did not:
@@ -243,7 +257,7 @@ private object ChatDrafts {
      *  Stores the message id, not the message: the row is re-read from the
      *  thread on the way back in, and a quote that has since been deleted
      *  simply does not come back. */
-    val replyByThread = mutableMapOf<String, String>()
+    val replyByThread = PerOwnerMap()
 
     /** A quote handed back by a send that produced nothing ([ChatScreen]'s
      *  `giveReplyBack`), as (thread, message id), for whichever screen of that
@@ -251,7 +265,17 @@ private object ChatDrafts {
      *  and waiting for the next change to the message list put the quote back
      *  at some random later moment (#1048 review). */
     val returned = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, String>?>(null)
+
+    fun forgetAll() {
+        byThread.clear()
+        replyByThread.clear()
+        returned.value = null
+    }
 }
+
+/** Every composer draft and parked quote, of every owner: the duress PIN, the
+ *  wipe PIN and a burn (MainActivity), on the main thread. */
+internal fun forgetChatDrafts() = ChatDrafts.forgetAll()
 
 /** "Show in chat" from a viewer that is not inside the chat (#1042): the
  *  group card's media wall hands over the thread ("g:<id>", the [ChatDrafts]
