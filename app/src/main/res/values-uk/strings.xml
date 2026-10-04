@@ -161,10 +161,10 @@
     <string name="backup_island_row_uin">скринька на цьому острові: %1$d</string>
     <string name="home_via_backup">Твій острів не відповідає. Повідомлення приходять через резервний острів. Торкнись, щоб зробити його головним і писати з нього.</string>
     <string name="backup_island_row_uin_diff">скринька на цьому острові: %1$d (острови нумерують незалежно, а твій %2$d тут уже зайнятий)</string>
-    <string name="backup_island_auto_title">Тримати резерв на іншому острові</string>
-    <string name="backup_island_auto_sub">Острів обирається автоматично з публічного каталогу</string>
+    <string name="backup_island_auto_title">Резерв на автоматично підібраному острові</string>
+    <string name="backup_island_auto_sub">Застосунок сам бере острів із публічного каталогу. Острови, додані вручну, цей перемикач не чіпає.</string>
     <string name="backup_island_auto_busy">Обираємо острів…</string>
-    <string name="backup_island_advanced">Додатково: додати острів вручну</string>
+    <string name="backup_island_manual_title">Додати острів вручну</string>
     <string name="backup_island_err_none">Зараз немає доступного резервного острова. Спробуй пізніше або додай вручну.</string>
     <string name="backup_island_err_no_open">Зараз жоден відкритий острів із каталогу не може прийняти резервну копію. Острів можна додати вручну нижче.</string>
     <string name="backup_island_err_entry">На цей острів пускають лише з кодом входу. Спробуй інший острів.</string>

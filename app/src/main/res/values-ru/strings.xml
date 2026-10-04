@@ -174,10 +174,10 @@
     <string name="backup_island_row_uin">почтовый ящик на этом острове: %1$d</string>
     <string name="home_via_backup">Ваш остров не отвечает. Сообщения приходят через запасной остров. Нажмите, чтобы сделать его основным и отправлять с него.</string>
     <string name="backup_island_row_uin_diff">почтовый ящик на этом острове: %1$d (острова нумеруют независимо, ваш %2$d здесь занят)</string>
-    <string name="backup_island_auto_title">Хранить резервную копию на другом острове</string>
-    <string name="backup_island_auto_sub">Остров подбирается автоматически из публичного каталога</string>
+    <string name="backup_island_auto_title">Резерв на автоматически подобранном острове</string>
+    <string name="backup_island_auto_sub">Приложение само берёт остров из публичного каталога. Острова, добавленные вручную, этот переключатель не трогает.</string>
     <string name="backup_island_auto_busy">Подбираем остров…</string>
-    <string name="backup_island_advanced">Дополнительно: добавить остров вручную</string>
+    <string name="backup_island_manual_title">Добавить остров вручную</string>
     <string name="backup_island_err_none">Сейчас нет доступного резервного острова. Попробуйте позже или добавьте вручную.</string>
     <string name="backup_island_err_no_open">Сейчас ни один открытый остров из каталога не может принять резерв. Можно добавить остров вручную ниже.</string>
     <string name="backup_island_err_entry">Этот остров впускает только по коду входа. Попробуйте другой остров.</string>

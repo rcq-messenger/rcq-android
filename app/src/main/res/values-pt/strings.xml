@@ -161,10 +161,10 @@
     <string name="backup_island_row_uin">caixa nesta ilha: %1$d</string>
     <string name="home_via_backup">Sua ilha não está respondendo. As mensagens estão chegando pela ilha de backup. Toque para torná-la a principal e enviar por ela também.</string>
     <string name="backup_island_row_uin_diff">caixa nesta ilha: %1$d (cada ilha numera por conta própria e seu %2$d já estava ocupado aqui)</string>
-    <string name="backup_island_auto_title">Manter um backup em outra ilha</string>
-    <string name="backup_island_auto_sub">A ilha é escolhida automaticamente no catálogo público</string>
+    <string name="backup_island_auto_title">Backup numa ilha escolhida automaticamente</string>
+    <string name="backup_island_auto_sub">O app escolhe uma ilha do catálogo público. As ilhas que você adicionou manualmente não mudam com esta chave.</string>
     <string name="backup_island_auto_busy">Escolhendo uma ilha…</string>
-    <string name="backup_island_advanced">Avançado: adicionar uma ilha manualmente</string>
+    <string name="backup_island_manual_title">Adicionar uma ilha manualmente</string>
     <string name="backup_island_err_none">Nenhuma ilha de backup acessível agora. Tente mais tarde ou adicione uma manualmente.</string>
     <string name="backup_island_err_no_open">Nenhuma ilha aberta do catálogo pode receber um backup agora. Você pode adicionar uma ilha manualmente abaixo.</string>
     <string name="backup_island_err_entry">Esta ilha só deixa entrar com um código de entrada. Tente outra ilha.</string>

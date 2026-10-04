@@ -161,10 +161,10 @@
     <string name="backup_island_row_uin">buzón en esta isla: %1$d</string>
     <string name="home_via_backup">Tu isla no responde. Los mensajes llegan por tu isla de reserva. Toca para hacerla la principal y enviar también desde ella.</string>
     <string name="backup_island_row_uin_diff">buzón en esta isla: %1$d (cada isla numera por su cuenta y tu %2$d ya estaba ocupado aquí)</string>
-    <string name="backup_island_auto_title">Guardar una copia en otra isla</string>
-    <string name="backup_island_auto_sub">La isla se elige sola del catálogo público</string>
+    <string name="backup_island_auto_title">Copia en una isla elegida automáticamente</string>
+    <string name="backup_island_auto_sub">La app elige una isla del catálogo público. Las islas que añadiste a mano no cambian con este interruptor.</string>
     <string name="backup_island_auto_busy">Eligiendo una isla…</string>
-    <string name="backup_island_advanced">Avanzado: añadir una isla a mano</string>
+    <string name="backup_island_manual_title">Añadir una isla a mano</string>
     <string name="backup_island_err_none">Ahora mismo no hay ninguna isla de reserva accesible. Inténtalo más tarde o añade una a mano.</string>
     <string name="backup_island_err_no_open">Ahora mismo ninguna isla abierta del catálogo puede guardar una copia de reserva. Puedes añadir una isla a mano abajo.</string>
     <string name="backup_island_err_entry">Esta isla solo deja entrar con un código de entrada. Prueba con otra isla.</string>

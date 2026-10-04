@@ -161,10 +161,10 @@
     <string name="backup_island_row_uin">bu adadaki posta kutusu: %1$d</string>
     <string name="home_via_backup">Adan cevap vermiyor. Mesajlar yedek adandan geliyor. Onu ana ada yapıp oradan da göndermek için dokun.</string>
     <string name="backup_island_row_uin_diff">bu adadaki posta kutusu: %1$d (adalar numaraları bağımsız verir ve %2$d burada alınmıştı)</string>
-    <string name="backup_island_auto_title">Başka bir adada yedek tut</string>
-    <string name="backup_island_auto_sub">Ada, herkese açık katalogdan kendiliğinden seçilir</string>
+    <string name="backup_island_auto_title">Otomatik seçilen adada yedek</string>
+    <string name="backup_island_auto_sub">Uygulama herkese açık katalogdan bir ada seçer. Elle eklediğin adalar bu anahtardan etkilenmez.</string>
     <string name="backup_island_auto_busy">Ada seçiliyor…</string>
-    <string name="backup_island_advanced">Gelişmiş: adayı elle ekle</string>
+    <string name="backup_island_manual_title">Adayı elle ekle</string>
     <string name="backup_island_err_none">Şu anda erişilebilir bir yedek ada yok. Sonra tekrar dene ya da elle ekle.</string>
     <string name="backup_island_err_no_open">Katalogdaki açık adaların hiçbiri şu anda yedek alamıyor. Aşağıdan elle bir ada ekleyebilirsin.</string>
     <string name="backup_island_err_entry">Bu ada yalnızca giriş koduyla içeri alıyor. Başka bir ada dene.</string>

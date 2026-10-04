@@ -177,7 +177,8 @@ internal fun IslandCarousel(
     // rules of the third island and return to the first.
     val startAt = islands.indexOfFirst { it.host.equals(current.trim(), ignoreCase = true) }.coerceAtLeast(0)
     val pager = rememberPagerState(initialPage = startAt) { islands.size }
-    // The island whose rules are being read, and the name to put over them.
+    // The island being read about (its rules, or its whole description when
+    // the card had to cut it), and the name to put over the text.
     //
     // ⚠ A PAGE OF THIS SAME SHEET, not a sheet of its own. Both callers draw
     // this deck INSIDE a sheet already (see [IslandPickerSheet] and the
@@ -186,15 +187,27 @@ internal fun IslandCarousel(
     // address» does, with one way back. The height changes, which is fine: it
     // changes on a deliberate tap, not on every swipe, and #736 is about the
     // latter.
-    var reading by remember { mutableStateOf<IslandRulesPage?>(null) }
+    var reading by remember { mutableStateOf<IslandReadingPage?>(null) }
     val page = reading
     if (page != null) {
         Text(page.name, color = c.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         SheetGap(8)
-        Text(
-            page.rules, color = c.textPrimary, fontSize = 14.sp,
-            modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
-        )
+        Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+            page.about?.let { Text(it, color = c.textPrimary, fontSize = 14.sp) }
+            page.rules?.let { rules ->
+                // Under a heading only when the island's own words are above
+                // them: on their own they need no label, the gavel said it.
+                if (page.about != null) {
+                    SheetGap(14)
+                    Text(
+                        stringResource(R.string.island_rules_title),
+                        color = c.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    SheetGap(4)
+                }
+                Text(rules, color = c.textPrimary, fontSize = 14.sp)
+            }
+        }
         SheetGap(12)
         Text(
             stringResource(R.string.island_back_to_list), color = c.accent, fontSize = 13.sp,
@@ -211,8 +224,8 @@ internal fun IslandCarousel(
                 pageSpacing = 12.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) { index ->
-                IslandCard(islands[index]) { name, rules ->
-                    reading = IslandRulesPage(name, rules)
+                IslandCard(islands[index]) { name, about, rules ->
+                    reading = IslandReadingPage(name, about, rules)
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -237,16 +250,19 @@ internal fun IslandCarousel(
         }
 }
 
-/// One island's house rules, being read in place of the deck.
-private class IslandRulesPage(val name: String, val rules: String)
+/// What is being read in place of the deck: the island's description in
+/// full, its house rules, or both (never neither).
+private class IslandReadingPage(val name: String, val about: String?, val rules: String?)
 
 /** One island: its painting, its logo, and what it says about itself.
  *
- *  [onRules] is handed the island's name and the rules text, and only ever
- *  from a card that HAS rules — the caller draws them, because this card is a
- *  page of a pager inside a sheet and has nowhere of its own to put them. */
+ *  [onRead] is handed the island's name and the text to read in full: the
+ *  rules alone from the rules button, or the description with the rules
+ *  under it from a description the card had to cut short. Never with nothing
+ *  to show. The caller draws the page, because this card is a page of a pager
+ *  inside a sheet and has nowhere of its own to put it. */
 @Composable
-private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) -> Unit) {
+private fun IslandCard(island: IslandCatalog.Entry, onRead: (name: String, about: String?, rules: String?) -> Unit) {
     val c = RcqTheme.colors
     val ctx = LocalContext.current
     val cards by IslandCards.cards.collectAsState()
@@ -389,7 +405,7 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
             Box(
                 Modifier.size(iconSlot).then(
                     if (rules != null) {
-                        Modifier.clip(CircleShape).clickable { onRules(name, rules) }
+                        Modifier.clip(CircleShape).clickable { onRead(name, null, rules) }
                     } else Modifier,
                 ),
                 contentAlignment = Alignment.Center,
@@ -528,13 +544,28 @@ private fun IslandCard(island: IslandCatalog.Entry, onRules: (String, String) ->
                 // and a gap that appears for some islands and not others is the
                 // twitch it was built to stop.
                 Spacer(Modifier.height(doorGap))
-                island.description?.takeIf { it.isNotBlank() }?.let {
+                // ⚠ Cut at two lines, because the box is (#736), and READABLE in
+                // full on a tap when it was cut (report 1069): a catalogue line
+                // of 85 characters lost its end on a phone and there was no way
+                // to see the rest. The tap opens the same in-sheet page the
+                // rules use, so the card keeps its height and the pager is not
+                // re-measured. An uncut description has nothing behind it and
+                // takes no tap.
+                island.description?.takeIf { it.isNotBlank() }?.let { about ->
+                    var cut by remember(island.host, about) { mutableStateOf(false) }
                     Text(
-                        it, color = c.textSecondary, fontSize = 11.sp, lineHeight = 14.sp,
+                        about, color = c.textSecondary, fontSize = 11.sp, lineHeight = 14.sp,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 14.dp),
+                        onTextLayout = { cut = it.hasVisualOverflow },
+                        modifier = Modifier.padding(horizontal = 14.dp).then(
+                            if (cut) {
+                                Modifier.clip(RoundedCornerShape(6.dp)).clickable(
+                                    onClickLabel = stringResource(R.string.chat_show_more),
+                                ) { onRead(name, about, door?.rules) }
+                            } else Modifier,
+                        ),
                     )
                 }
             }
