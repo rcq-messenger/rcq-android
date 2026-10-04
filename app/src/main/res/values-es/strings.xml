@@ -843,7 +843,7 @@
     <string name="ci_backup_copy_of">Copia de respaldo de la cuenta %1$s</string>
     <string name="ci_backup_add_home">Añadir %1$s</string>
     <string name="ci_backup_key_mismatch">No añadido: la cuenta en esa dirección tiene una clave distinta a la de esta copia de respaldo, así que la copia puede no ser suya.</string>
-    <string name="ci_contact_request">Quiere añadirte</string>
+    <string name="ci_contact_request">Quiere chatear contigo</string>
     <string name="ci_key_changed">La clave de firma no coincide con el contacto guardado. Puede ser otra persona.</string>
     <string name="ci_request_not_delivered">Añadido, pero la solicitud no llegó.</string>
     <string name="ci_remove_fav">Quitar de Favoritos</string>

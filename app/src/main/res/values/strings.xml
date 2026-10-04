@@ -889,7 +889,7 @@
     <string name="ci_backup_copy_of">Backup copy of account %1$s</string>
     <string name="ci_backup_add_home">Add %1$s</string>
     <string name="ci_backup_key_mismatch">Not added: the account at that address has a different key than this backup copy, so the copy may not be theirs.</string>
-    <string name="ci_contact_request">Wants to add you</string>
+    <string name="ci_contact_request">Wants to chat with you</string>
     <string name="ci_key_changed">The signing key does not match the saved contact. It may be someone else.</string>
     <string name="ci_request_not_delivered">Added, but the request did not reach them.</string>
     <string name="ci_remove_fav">Remove from favorites</string>

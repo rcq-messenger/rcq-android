@@ -1376,11 +1376,14 @@ class RcqApi(
         post("/contacts/respond", gson.toJson(RespondBody(requestId, accept)), authed = true, RespondResponse::class.java)
     }
 
-    data class BlockResponse(val blocked: Boolean = false)
+    /** [blocked]: the flag after the call, null when the island did not say. */
+    data class BlockResponse(val blocked: Boolean? = null)
 
-    /** Toggle block on a contact (server flips the flag). */
-    suspend fun blockContact(uin: Int): BlockResponse = withContext(Dispatchers.IO) {
-        post("/contacts/$uin/block", "{}", authed = true, BlockResponse::class.java)
+    /** Set the island's block flag on our roster row for [uin] to [blocked].
+     *  An island that predates the explicit value flips it instead, so the
+     *  caller reads the answer (report 1065). */
+    suspend fun blockContact(uin: Int, blocked: Boolean): BlockResponse = withContext(Dispatchers.IO) {
+        post("/contacts/$uin/block", "{\"blocked\":$blocked}", authed = true, BlockResponse::class.java)
     }
 
     /** ICQ-style mutual remove (DELETE /contacts/{uin}, 204). */

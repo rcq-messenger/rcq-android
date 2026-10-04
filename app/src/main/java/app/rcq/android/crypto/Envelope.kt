@@ -209,7 +209,11 @@ sealed interface Envelope {
      *  to exactly those keys.
      *
      *  [card] rides along on an accept so the other devices copy the TOFU the
-     *  accepting device did instead of each doing their own. */
+     *  accepting device did instead of each doing their own.
+     *
+     *  [act] is accept, decline, block, or `unblock` (report 1064): a block
+     *  lifted on one device is lifted on the others. Builds that do not know
+     *  an act ignore it. */
     data class CiAck(
         val uin: Int,
         val host: String,
@@ -220,6 +224,14 @@ sealed interface Envelope {
          *  file it as answered, so their own poll of that island does not offer
          *  it again. Ignored by builds that do not know it. */
         val srv: CiSrv? = null,
+        /** When the answer was given, epoch ms; 0 from builds that do not
+         *  send it. Orders a `block` against an `unblock` of the same address:
+         *  a carbon the island serves again late must not undo a newer answer
+         *  (report 1064). */
+        val ts: Long = 0L,
+        /** On a `block`: the blocked person's signing keys (base64), so the
+         *  other devices block the person and not only the address. */
+        val keys: List<String> = emptyList(),
     ) : Envelope
 
     data class CiSrv(val host: String, val id: Int)
@@ -526,6 +538,8 @@ sealed interface Envelope {
                     addProperty("id", s.id)
                 })
             }
+            if (ts > 0L) addProperty("ts", ts)
+            if (keys.isNotEmpty()) add("keys", com.google.gson.JsonArray().apply { keys.forEach { add(it) } })
         }.toString().toByteArray(Charsets.UTF_8)
         is Carbon -> JsonObject().apply {
             addProperty("kind", "carbon")
@@ -721,6 +735,11 @@ sealed interface Envelope {
         const val ACT_REQUEST = "request"
         const val ACT_ACCEPT = "accept"
         const val ACT_DECLINE = "decline"
+
+        /** At most this many keys are read off one `ciack` block: one person
+         *  rarely has more than a couple, and the list is not a place to
+         *  pour an unbounded array into. */
+        const val MAX_CIACK_KEYS = 8
 
         /** Build a §5f contact-request envelope stamped now (epoch SECONDS). */
         fun contactRequest(act: String, nickname: String, note: String? = null): ContactRequest =
@@ -946,6 +965,11 @@ sealed interface Envelope {
                         val id = runCatching { s.get("id")?.takeIf { it.isJsonPrimitive }?.asInt }.getOrNull()
                         if (h.isNullOrBlank() || id == null || id <= 0) null else CiSrv(h, id)
                     },
+                    ts = runCatching { obj.get("ts")?.takeIf { it.isJsonPrimitive }?.asLong }.getOrNull()?.takeIf { it > 0L } ?: 0L,
+                    keys = obj.get("keys")?.takeIf { it.isJsonArray }?.asJsonArray
+                        ?.mapNotNull { e -> e.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() } }
+                        ?.take(MAX_CIACK_KEYS)
+                        .orEmpty(),
                 )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,

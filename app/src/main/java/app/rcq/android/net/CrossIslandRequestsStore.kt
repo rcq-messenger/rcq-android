@@ -53,14 +53,47 @@ object CrossIslandRequestsStore {
         /** The card fetched on accept differs from a key this device saw for
          *  that number in a room on the island: the person has to confirm. */
         val viaKeyChanged: Boolean = false,
+        /** The verified signing key (base64) the latest row was sealed under,
+         *  where one was: a §5f request and a v=1 same-island row keep it here,
+         *  because neither puts one in [Held.spub]. Blocking the row blocks
+         *  this key too, see [keysOf]. */
+        val sk: String? = null,
     ) {
         val preview: String get() = msgs.firstOrNull()?.preview ?: note.orEmpty()
         val fromServer: Boolean get() = srvReqId != null
     }
 
+    /**
+     * What a block knows besides its address.
+     *
+     * [at] orders it against an unblock (epoch ms; 0 on a block written before
+     * this existed), so a `ciack` the island serves again late cannot undo a
+     * newer answer. [keys] are the signing keys (base64) of the person blocked:
+     * the address is only where their rows came from, and the same key writing
+     * from another island, or behind a `from_host` it made up, is the same
+     * person. [passContact] marks a block from before Unblock could lift one,
+     * at an address that is an accepted contact again: see [stampLegacyMeta].
+     */
+    data class BlockMeta(
+        val at: Long = 0L,
+        val keys: List<String> = emptyList(),
+        val passContact: Boolean = false,
+    )
+
+    /** One blocked address of an account. [host] "" is our own island. */
+    data class Blocked(val uin: Int, val host: String, val meta: BlockMeta)
+
     private const val PREFS = "rcq_ci_requests"
     private const val KEY = "requests"
     private const val KEY_BLOCKED = "blocked"
+    /** reqKey -> [BlockMeta]. An entry of [KEY_BLOCKED] without one is a block
+     *  an older build wrote. */
+    private const val KEY_BLOCK_META = "blocked_meta"
+    /** reqKey -> when it was last unblocked (epoch ms), see [applyUnblock]. */
+    private const val KEY_UNBLOCKED = "unblocked"
+    /** An unblock is remembered this long against a late `ciack`: the island
+     *  keeps a queued row for 30 days, so nothing older can still arrive. */
+    private const val UNBLOCK_MEMORY_MS = 45L * 24 * 3600 * 1000
     /** Server request ids this device already answered, "own:host#id". */
     private const val KEY_ANSWERED = "answered"
     private const val MAX_HELD = 20
@@ -96,7 +129,9 @@ object CrossIslandRequestsStore {
      *  wipe, which leaves no account behind to be selective about. */
     fun wipeAll() {
         if (!::prefs.isInitialized) return
-        prefs.edit().remove(KEY).remove(KEY_BLOCKED).remove(KEY_ANSWERED).apply()
+        prefs.edit().remove(KEY).remove(KEY_BLOCKED).remove(KEY_ANSWERED)
+            .remove(KEY_BLOCK_META).remove(KEY_UNBLOCKED).apply()
+        blocksChanged()
     }
 
     fun wipeOwn(ownUin: Int) {
@@ -108,7 +143,64 @@ object CrossIslandRequestsStore {
         prefs.edit()
             .putString(KEY_BLOCKED, gson.toJson(keptBlocks))
             .putString(KEY_ANSWERED, gson.toJson(keptAnswered))
+            .putString(KEY_BLOCK_META, gson.toJson(metaMap().filterKeys { !it.startsWith(pre) }))
+            .putString(KEY_UNBLOCKED, gson.toJson(unblockedMap().filterKeys { !it.startsWith(pre) }))
             .apply()
+        blocksChanged()
+    }
+
+    // ── blocks ─────────────────────────────────────────────────────────
+    //
+    // ⚠ Read on every ingested row (Session's block decision) and by the push
+    // path, so the three block structures are parsed once per change, not once
+    // per read. Every write goes through this object, which bumps [blockRev].
+
+    private val blockRev = java.util.concurrent.atomic.AtomicInteger(0)
+    private class BlockCache(val rev: Int, val blocked: Set<String>, val meta: Map<String, BlockMeta>)
+    @Volatile private var blockCache: BlockCache? = null
+    private val _blockRevision = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /** Moves on every change to the blocks: the roster memo and the Blocked
+     *  users screen key on it, because nothing else they watch moves. */
+    fun blockRevision(): Int = blockRev.get()
+
+    /** [blockRevision] for a screen to collect. */
+    val blockRevisionFlow: kotlinx.coroutines.flow.StateFlow<Int> get() = _blockRevision
+
+    private fun blocksChanged() {
+        blockCache = null
+        _blockRevision.value = blockRev.incrementAndGet()
+    }
+
+    private fun cached(): BlockCache {
+        val rev = blockRev.get()
+        blockCache?.takeIf { it.rev == rev }?.let { return it }
+        return BlockCache(rev, blockedSet(), metaMap()).also { blockCache = it }
+    }
+
+    private fun metaMap(): MutableMap<String, BlockMeta> = runCatching {
+        val raw = prefs.getString(KEY_BLOCK_META, null) ?: return mutableMapOf()
+        gson.fromJson<MutableMap<String, BlockMeta>>(raw, object : TypeToken<MutableMap<String, BlockMeta>>() {}.type)
+            // gson leaves a list it did not find null, whatever Kotlin says.
+            ?.mapValuesTo(LinkedHashMap()) { (_, m) ->
+                @Suppress("SENSELESS_COMPARISON")
+                if (m.keys == null) m.copy(keys = emptyList()) else m
+            }
+            ?: mutableMapOf()
+    }.getOrDefault(mutableMapOf())
+
+    private fun unblockedMap(): MutableMap<String, Long> = runCatching {
+        val raw = prefs.getString(KEY_UNBLOCKED, null) ?: return mutableMapOf()
+        gson.fromJson<MutableMap<String, Long>>(raw, object : TypeToken<MutableMap<String, Long>>() {}.type) ?: mutableMapOf()
+    }.getOrDefault(mutableMapOf())
+
+    private fun writeBlocks(blocked: Set<String>, meta: Map<String, BlockMeta>, unblocked: Map<String, Long>) {
+        prefs.edit()
+            .putString(KEY_BLOCKED, gson.toJson(blocked))
+            .putString(KEY_BLOCK_META, gson.toJson(meta))
+            .putString(KEY_UNBLOCKED, gson.toJson(unblocked))
+            .apply()
+        blocksChanged()
     }
 
     private fun all(): MutableMap<String, Request> = runCatching {
@@ -127,19 +219,41 @@ object CrossIslandRequestsStore {
 
     private fun answeredSet(): MutableSet<String> = stringSet(KEY_ANSWERED)
 
-    fun isBlocked(ownUin: Int, uin: Int, host: String): Boolean = blockedSet().contains(reqKey(ownUin, uin, host))
+    fun isBlocked(ownUin: Int, uin: Int, host: String): Boolean =
+        ::prefs.isInitialized && cached().blocked.contains(reqKey(ownUin, uin, host))
+
+    /** The block at exactly (uin, host), or null when there is none. A block an
+     *  older build wrote, and nothing has stamped yet, reads as a plain one. */
+    fun blockAt(ownUin: Int, uin: Int, host: String): BlockMeta? {
+        if (!::prefs.isInitialized) return null
+        val c = cached()
+        val k = reqKey(ownUin, uin, host)
+        return if (k in c.blocked) c.meta[k] ?: BlockMeta() else null
+    }
+
+    /** Every address [ownUin] blocked, our own island's strangers as host "". */
+    fun blockedFor(ownUin: Int): List<Blocked> {
+        if (!::prefs.isInitialized) return emptyList()
+        val c = cached()
+        return listBlocked(c.blocked, c.meta, ownUin)
+    }
+
+    /** The signing keys of everybody [ownUin] blocked, canonical base64. */
+    fun blockedKeys(ownUin: Int): Set<String> =
+        blockedFor(ownUin).flatMapTo(HashSet()) { it.meta.keys }
 
     /** Quarantine one sealed payload. Returns false (caller drops it) when blocked. */
     fun hold(
         ownUin: Int, uin: Int, host: String, payload: String, preview: String, keyChanged: Boolean = false,
-        id: String? = null, spub: String? = null,
+        id: String? = null, spub: String? = null, sk: String? = null,
     ): Boolean {
         if (isBlocked(ownUin, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
         val base = map[k] ?: Request(ownUin, uin, host, System.currentTimeMillis(), mutableListOf())
         // Sticky: one mismatched row is enough to warn about the whole request.
-        val r = if (keyChanged && !base.keyChanged) base.copy(keyChanged = true) else base
+        val marked = if (keyChanged && !base.keyChanged) base.copy(keyChanged = true) else base
+        val r = if (!sk.isNullOrBlank() && sk != marked.sk) marked.copy(sk = sk) else marked
         r.msgs.add(Held(payload, preview, id, spub))
         while (r.msgs.size > MAX_HELD) r.msgs.removeAt(0)
         map[k] = r
@@ -156,7 +270,9 @@ object CrossIslandRequestsStore {
      * rather than adding another. Returns false when the sender is blocked or
      * the pending list is full (caller drops the envelope).
      */
-    fun holdContactRequest(ownUin: Int, uin: Int, host: String, nickname: String?, note: String?, keyChanged: Boolean = false): Boolean {
+    fun holdContactRequest(
+        ownUin: Int, uin: Int, host: String, nickname: String?, note: String?, keyChanged: Boolean = false, sk: String? = null,
+    ): Boolean {
         if (isBlocked(ownUin, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
@@ -170,6 +286,7 @@ object CrossIslandRequestsStore {
             note = note?.takeIf { it.isNotBlank() } ?: old?.note,
             contactReq = true,
             keyChanged = keyChanged || old?.keyChanged == true,
+            sk = sk?.takeIf { it.isNotBlank() } ?: old?.sk,
         )
         writeAll(map)
         return true
@@ -299,7 +416,25 @@ object CrossIslandRequestsStore {
             .putString(KEY, gson.toJson(nextReqs))
             .putString(KEY_BLOCKED, gson.toJson(nextBlocked))
             .putString(KEY_ANSWERED, gson.toJson(nextAnswered))
+            .putString(KEY_BLOCK_META, gson.toJson(rekeyMap(metaMap(), oldOwnUin, newOwnUin)))
+            .putString(KEY_UNBLOCKED, gson.toJson(rekeyMap(unblockedMap(), oldOwnUin, newOwnUin)))
             .apply()
+        blocksChanged()
+    }
+
+    /** [rekeyBlocked] for the maps beside the blocks. An entry the new number
+     *  already holds wins, as for the requests. */
+    internal fun <V> rekeyMap(map: Map<String, V>, oldOwnUin: Int, newOwnUin: Int): Map<String, V> {
+        if (oldOwnUin == newOwnUin) return map
+        val pre = "$oldOwnUin:"
+        val out = LinkedHashMap<String, V>()
+        map.forEach { (k, v) -> if (!k.startsWith(pre)) out[k] = v }
+        map.forEach { (k, v) ->
+            if (!k.startsWith(pre)) return@forEach
+            val nk = "$newOwnUin:" + k.removePrefix(pre)
+            if (nk !in out) out[nk] = v
+        }
+        return out
     }
 
     /** Pure half of [rekeyOwner] for the requests. A row the new number
@@ -360,10 +495,175 @@ object CrossIslandRequestsStore {
         return r
     }
 
-    /** Block a sender: drop the request + remember so future deposits are dropped. */
-    fun block(ownUin: Int, uin: Int, host: String) {
+    /** The signing keys a request row was sealed under, for the block that
+     *  answers it. Every one of them signed a row the person was shown as this
+     *  request, so each belongs to whoever sent it. */
+    fun keysOf(r: Request?): List<String> =
+        if (r == null) emptyList()
+        else (listOf(r.sk) + r.msgs.map { it.spub }).mapNotNull { canonicalKey(it) }.distinct()
+
+    /**
+     * Block a sender: drop the request and remember the address, plus [keys],
+     * the signing keys known for the person (see [BlockMeta]).
+     *
+     * [at] null is a block made HERE, now, and always lands. A block another
+     * device made carries its own time and lands only when it is newer than
+     * the last unblock of that address, see [applyBlock]. Returns true when it
+     * landed.
+     */
+    @Synchronized
+    fun block(ownUin: Int, uin: Int, host: String, keys: Collection<String> = emptyList(), at: Long? = null): Boolean {
+        if (!::prefs.isInitialized) return false
+        val blocked = blockedSet()
+        val meta = metaMap()
+        val unblocked = unblockedMap()
+        val now = System.currentTimeMillis()
+        val k = reqKey(ownUin, uin, host)
+        if (!applyBlock(blocked, meta, unblocked, k, keys, at ?: now, local = at == null)) return false
         clear(ownUin, uin, host)
-        val b = blockedSet().apply { add(reqKey(ownUin, uin, host)) }
-        prefs.edit().putString(KEY_BLOCKED, gson.toJson(b)).apply()
+        writeBlocks(blocked, meta, pruneUnblocked(unblocked, now))
+        return true
+    }
+
+    /**
+     * Lift the block at exactly (uin, host), and nothing else: not the same
+     * number on another island, not a key. [at] as for [block]: an unblock
+     * another device made lands only when it is newer than the block here.
+     * Returns true when a block was lifted.
+     *
+     * ⚠⚠ There was no way to do this at all. Unblock in Settings cleared the
+     * bare number only, so an address blocked from a request row stayed
+     * blocked for good, invisibly, and everything that person sent was
+     * dropped after the ack: one tick, and a "New message" that led nowhere
+     * (report 1064).
+     */
+    @Synchronized
+    fun unblock(ownUin: Int, uin: Int, host: String, at: Long? = null): Boolean {
+        if (!::prefs.isInitialized) return false
+        val blocked = blockedSet()
+        val meta = metaMap()
+        val unblocked = unblockedMap()
+        val now = System.currentTimeMillis()
+        val lifted = applyUnblock(blocked, meta, unblocked, reqKey(ownUin, uin, host), at ?: now, local = at == null)
+        writeBlocks(blocked, meta, pruneUnblocked(unblocked, now))
+        return lifted
+    }
+
+    /**
+     * Give every block of [ownUin] an older build wrote its [BlockMeta], once.
+     *
+     * ⚠ Nothing is lifted here. The question is only what such a block did
+     * before this build, so that it keeps doing exactly that: older builds had
+     * no way to lift a block from a request row, and the person's way back to
+     * somebody they blocked was to add them again. Their messages flowed after
+     * that (an accepted contact passed the gate before the block was looked
+     * at), unless the bare number the same builds also wrote was still there.
+     * So a block at an address that is an accepted contact, with no bare entry
+     * for the number, keeps letting that contact's messages through
+     * ([BlockMeta.passContact]); everything else stays blocked. Either way the
+     * block is listed in Settings, where the person can lift it.
+     */
+    @Synchronized
+    fun stampLegacyBlocks(ownUin: Int, contactAt: (uin: Int, host: String) -> Boolean, bare: Set<Int>) {
+        if (!::prefs.isInitialized) return
+        val blocked = blockedSet()
+        val meta = metaMap()
+        if (!stampLegacyMeta(blocked, meta, ownUin, contactAt, bare)) return
+        writeBlocks(blocked, meta, unblockedMap())
+    }
+
+    // ── pure halves, pinned in BlockStoreTest ──────────────────────────
+
+    /** One base64 spelling per key (padding, line breaks and the URL alphabet
+     *  all name the same 32 bytes), or null for anything that is not an
+     *  Ed25519 public key. */
+    fun canonicalKey(b64: String?): String? {
+        if (b64.isNullOrBlank()) return null
+        val t = b64.filterNot { it.isWhitespace() }.replace('-', '+').replace('_', '/')
+        // The basic decoder takes the padding or its absence, and nothing else.
+        val raw = runCatching { java.util.Base64.getDecoder().decode(t) }.getOrNull() ?: return null
+        return if (raw.size == 32) java.util.Base64.getEncoder().encodeToString(raw) else null
+    }
+
+    internal fun applyBlock(
+        blocked: MutableSet<String>,
+        meta: MutableMap<String, BlockMeta>,
+        unblocked: MutableMap<String, Long>,
+        k: String,
+        keys: Collection<String>,
+        at: Long,
+        local: Boolean,
+    ): Boolean {
+        // A block from another device that is not newer than the last unblock
+        // here is the old answer coming round again (a carbon the island
+        // served late), not a new one.
+        if (!local && at <= (unblocked[k] ?: Long.MIN_VALUE)) return false
+        val old = meta[k]?.takeIf { k in blocked }
+        blocked.add(k)
+        meta[k] = BlockMeta(
+            at = maxOf(old?.at ?: 0L, at),
+            keys = (old?.keys.orEmpty() + keys.mapNotNull { canonicalKey(it) }).distinct(),
+            // A block made now is a block, whatever an older one let through.
+            // A timeless one from another device is most likely the echo of
+            // that older block itself, and changes nothing about it.
+            passContact = if (!local && at == 0L) old?.passContact == true else false,
+        )
+        unblocked.remove(k)
+        return true
+    }
+
+    internal fun applyUnblock(
+        blocked: MutableSet<String>,
+        meta: MutableMap<String, BlockMeta>,
+        unblocked: MutableMap<String, Long>,
+        k: String,
+        at: Long,
+        local: Boolean,
+    ): Boolean {
+        if (!local && k in blocked && at <= (meta[k]?.at ?: 0L)) return false
+        val lifted = blocked.remove(k)
+        meta.remove(k)
+        // Remembered even when nothing was blocked here: a block made on a
+        // sibling before this unblock may still be on its way.
+        unblocked[k] = maxOf(unblocked[k] ?: 0L, at)
+        return lifted
+    }
+
+    internal fun pruneUnblocked(unblocked: MutableMap<String, Long>, now: Long): MutableMap<String, Long> {
+        unblocked.entries.removeAll { now - it.value > UNBLOCK_MEMORY_MS }
+        return unblocked
+    }
+
+    internal fun listBlocked(blocked: Set<String>, meta: Map<String, BlockMeta>, ownUin: Int): List<Blocked> {
+        val pre = "$ownUin:"
+        return blocked.mapNotNull { k ->
+            if (!k.startsWith(pre)) return@mapNotNull null
+            val addr = k.removePrefix(pre)
+            val at = addr.indexOf('@')
+            if (at <= 0) return@mapNotNull null
+            val uin = addr.substring(0, at).toIntOrNull() ?: return@mapNotNull null
+            Blocked(uin, addr.substring(at + 1), meta[k] ?: BlockMeta())
+        }.sortedWith(compareBy({ it.host }, { it.uin }))
+    }
+
+    /** Pure half of [stampLegacyBlocks]. Returns true when [meta] changed. */
+    internal fun stampLegacyMeta(
+        blocked: Set<String>,
+        meta: MutableMap<String, BlockMeta>,
+        ownUin: Int,
+        contactAt: (uin: Int, host: String) -> Boolean,
+        bare: Set<Int>,
+    ): Boolean {
+        var changed = false
+        for (b in listBlocked(blocked, meta, ownUin)) {
+            val k = reqKey(ownUin, b.uin, b.host)
+            if (k in meta) continue
+            meta[k] = BlockMeta(
+                at = 0L,
+                passContact = b.host.isNotEmpty() && b.uin !in bare && contactAt(b.uin, b.host),
+            )
+            changed = true
+        }
+        return changed
     }
 }

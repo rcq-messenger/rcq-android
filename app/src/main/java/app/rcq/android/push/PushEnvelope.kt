@@ -52,7 +52,7 @@ internal object PushEnvelope {
          *  stay anonymous and must not offer to open a chat that would send
          *  the reply to the wrong island. */
         val quarantined: Boolean,
-        /** A §5f request to connect. Its line is ours ("Wants to add you"),
+        /** A §5f request to connect. Its line is ours ("Wants to chat with you"),
          *  so it may stand in the banner even for a quarantined sender, where
          *  a stranger's own words may not. */
         val contactRequest: Boolean = false,
@@ -89,6 +89,13 @@ internal object PushEnvelope {
         val quarantined = host != null &&
             !host.equals(store.serverHost ?: "", ignoreCase = true) &&
             CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host) == null
+
+        // Somebody this account blocked: no banner at all. Their message is
+        // dropped on arrival, and the "New message" its wake put up led to
+        // nothing (report 1064). The same rule ingest applies, see [blocked].
+        if (dec.senderUin != me && blocked(ctx, accountId, me, dec) == true) {
+            return Opened(dec.senderUin, "${dec.senderUin}", preview = null, mentionsMe = false, quarantined = quarantined)
+        }
 
         // Our own message, carboned to this device from another one of ours, is
         // reported as an opened envelope with NOTHING TO SHOW rather than as a
@@ -215,16 +222,44 @@ internal object PushEnvelope {
         )
         if (own.any { it.equals(host, ignoreCase = true) }) return null
         if (CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host) != null) return null
-        if (LocalStores.isBlockedFor(accountId, dec.senderUin)) return null
-        val blockedThere = runCatching {
-            // A cold wake can start the process without a Session, which is
-            // what normally opens this store. Idempotent.
-            app.rcq.android.net.CrossIslandRequestsStore.init(ctx)
-            app.rcq.android.net.CrossIslandRequestsStore.isBlocked(me, dec.senderUin, host)
-        }.getOrDefault(true)
-        if (blockedThere) return null
+        // ⚠ Unlike a message, a request stays quiet when the answer is not
+        // known: a banner too few for a request is better than a blocked
+        // sender waking the phone.
+        if (blocked(ctx, accountId, me, dec) != false) return null
         return ctx.getString(R.string.ci_contact_request)
     }
+
+    /**
+     * Whether [dec] comes from somebody [accountId] blocked, by the rule ingest
+     * applies ([app.rcq.android.net.BlockRules]): the number on our own island,
+     * the address on another, the key anywhere. Null when the stores could not
+     * be read in this (possibly cold) process.
+     *
+     * ⚠ The caller picks the default. For a MESSAGE it must be "not blocked":
+     * guessing "blocked" would silence every wake in a cold process (review of
+     * report 1064).
+     */
+    private fun blocked(ctx: Context, accountId: String, me: Int, dec: SealedSender.Decrypted): Boolean? = runCatching {
+        val bare = LocalStores.blockedNumbersFor(accountId) ?: return null
+        // A cold wake can start the process without a Session, which is what
+        // normally opens this store. Idempotent.
+        val requests = app.rcq.android.net.CrossIslandRequestsStore
+        requests.init(ctx)
+        val store = SecureStore(ctx, accountId)
+        val view = app.rcq.android.net.BlockRules.View(
+            meUin = me,
+            ownHosts = listOfNotNull(
+                store.serverHost ?: app.rcq.android.net.RcqApi.DEFAULT_HOST,
+                app.rcq.android.net.RelayConfigStore.frontHost.takeIf { it.isNotBlank() },
+            ),
+            bare = { it in bare },
+            entry = { u, h -> requests.blockAt(me, u, h) },
+            keys = LocalStores.blockedKeysFor(accountId) + requests.blockedKeys(me),
+            pinnedAt = { u, h -> CrossIslandStore.getFor(ctx, accountId, u, h)?.signingKey },
+            bareAnyIsland = !LocalStores.blocksScopedFor(accountId),
+        )
+        app.rcq.android.net.BlockRules.blocks(view, dec.senderUin, dec.senderHost, dec.senderSigningPub)
+    }.getOrNull()
 
     /** Whether a wake for [env] would have been worth a banner had it opened:
      *  the same test [open] applies, for the drain to use once it HAS opened

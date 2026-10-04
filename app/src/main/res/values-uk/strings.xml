@@ -857,7 +857,7 @@
     <string name="ci_backup_copy_of">Резервна копія акаунта %1$s</string>
     <string name="ci_backup_add_home">Додати %1$s</string>
     <string name="ci_backup_key_mismatch">Не додано: акаунт за цією адресою має інший ключ, ніж резервна копія, тож копія може бути не його.</string>
-    <string name="ci_contact_request">Хоче додати вас</string>
+    <string name="ci_contact_request">Хоче листуватися з вами</string>
     <string name="ci_key_changed">Ключ підпису не збігається зі збереженим контактом. Можливо, це інша людина.</string>
     <string name="ci_request_not_delivered">Додано, але запит до нього не дійшов.</string>
     <string name="ci_remove_fav">Прибрати з обраних</string>

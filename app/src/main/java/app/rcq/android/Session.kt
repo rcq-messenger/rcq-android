@@ -2546,6 +2546,10 @@ class Session(context: Context) {
         // delay on launch). db is opened there BEFORE connectAndSync, which is
         // the only ingest path that writes to it.
         loadCachedRoster()
+        // Before the first drain: from here on a bare number blocks only on
+        // our own island, and the blocks it stood for elsewhere must be in
+        // place by then (report 1065).
+        runCatching { scopeLegacyBlocks() }
         // Drop any stored "backup home" that is really the front or the
         // primary island itself. The front is the flagship by another road, so
         // such a row promises redundancy it cannot deliver, and the 30-second
@@ -4966,15 +4970,195 @@ class Session(context: Context) {
 
     // ── contact moderation ───────────────────────────────────────────
 
-    /** Toggle block. The LOCAL blocked set is the source of truth (it works for
-     *  non-contacts / strangers and drives ingest filtering + the Blocked list,
-     *  since sealed sender means the server can't filter for us). The server
-     *  call is best-effort: /contacts/{uin}/block toggles the contact `blocked`
-     *  flag for real contacts and 404s (harmlessly swallowed) for strangers. */
-    suspend fun toggleBlock(uin: Int) {
-        LocalStores.setBlocked(uin, !LocalStores.isBlocked(uin))
-        runCatching { api.blockContact(uin) }
+    // ── blocking (reports 1064, 1065) ─────────────────────────────────
+    //
+    // ⚠⚠ A block names ONE person: a number on one island, plus the signing
+    // key they write with when it is known. Two lists hold them, and which one
+    // is decided by the island alone:
+    //  - our own island: [LocalStores.blocked] (bare numbers, per account, on
+    //    this device), plus the island's own flag on a roster row;
+    //  - any other island: [CrossIslandRequestsStore], keyed "own:uin@host".
+    // Both used to be written for a cross-island block, the bare number was
+    // checked before any host, and nothing could lift the second one: blocking
+    // N@is2 silenced whoever holds N here (1065), and Unblock left N@is2
+    // blocked for good, invisibly (1064). [BlockRules] is the one rule that
+    // reads them.
+
+    private fun ownHostsForBlocks(): List<String> = listOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
+
+    /** [host] as a block of somebody there is filed: null for our own island
+     *  (no host, its name, or the front to it), else lowercased. */
+    private fun foreignBlockHost(host: String?): String? =
+        if (app.rcq.android.net.BlockRules.isOwnHost(host, ownHostsForBlocks())) null else host!!.lowercase()
+
+    private fun blockView(me: Int) = app.rcq.android.net.BlockRules.View(
+        meUin = me,
+        ownHosts = ownHostsForBlocks(),
+        bare = { LocalStores.isBlocked(it) },
+        entry = { u, h -> CrossIslandRequestsStore.blockAt(me, u, h) },
+        keys = LocalStores.blockedKeys() + CrossIslandRequestsStore.blockedKeys(me),
+        pinnedAt = { u, h -> CrossIslandStore.get(u, h)?.signingKey },
+        bareAnyIsland = !LocalStores.blocksScoped(),
+    )
+
+    /** A row from [uin] at [host] (as the row is attributed), signed by [spub]
+     *  (empty or null when it names no key), comes from somebody blocked here. */
+    private fun blockedSender(uin: Int, host: String?, spub: ByteArray?): Boolean {
+        val me = store.uin ?: return false
+        return app.rcq.android.net.BlockRules.blocks(blockView(me), uin, host, spub?.takeIf { it.isNotEmpty() })
+    }
+
+    /** A cross-island contact we must not hand anything to: blocked at their
+     *  address, or under the key pinned for them. */
+    private fun ciContactBlocked(me: Int, c: CrossIslandStore.Contact): Boolean {
+        if (CrossIslandRequestsStore.isBlocked(me, c.uin, c.host)) return true
+        val k = CrossIslandRequestsStore.canonicalKey(c.signingKey) ?: return false
+        return k in LocalStores.blockedKeys() || k in CrossIslandRequestsStore.blockedKeys(me)
+    }
+
+    /** Whether exactly [uin] at [host] is blocked, as the card, the chat
+     *  list menu and Settings show it. [host] null or our own island's name is
+     *  our own island, where the island's flag on a roster row counts too. */
+    fun isBlockedAddress(uin: Int, host: String?): Boolean {
+        val me = store.uin ?: return false
+        val h = foreignBlockHost(host) ?: return LocalStores.isBlocked(uin) ||
+            (listOf("") + ownHostsForBlocks()).any { CrossIslandRequestsStore.isBlocked(me, uin, it) } ||
+            _contacts.value.any { it.uin == uin && it.host == null && it.blocked }
+        return CrossIslandRequestsStore.isBlocked(me, uin, h)
+    }
+
+    /**
+     * Block or unblock exactly [uin] at [host], and nobody else: not the same
+     * number on another island, and on our own island the island's flag only
+     * for a roster row of OUR island.
+     *
+     * An unblock is also sent to our other devices (`ciack` "unblock"), so a
+     * block made from a request row, which reached them, can be lifted from
+     * any of them. A block made here from a card stays on this device, as it
+     * always has: an older build that received it could not lift it again.
+     */
+    suspend fun setBlock(uin: Int, host: String?, block: Boolean) {
+        val me = store.uin ?: return
+        if (uin == me) return
+        val now = System.currentTimeMillis()
+        val h = foreignBlockHost(host)
+        if (h != null) {
+            if (block) {
+                val keys = listOfNotNull(CrossIslandStore.get(uin, h)?.signingKey) +
+                    CrossIslandRequestsStore.keysOf(ciRequestRow(me, uin, h)) +
+                    roomKeysOf(uin) { it.equals(h, ignoreCase = true) }
+                CrossIslandRequestsStore.block(me, uin, h, keys)
+            } else {
+                CrossIslandRequestsStore.unblock(me, uin, h)
+                sendCiAck(uin, h, "unblock", ts = now)
+            }
+            // ⚠ Never POST /contacts/{uin}/block here: that number on OUR
+            // island is somebody else, and the island flipped THEIR flag.
+            syncCrossIslandContacts()
+            refreshCiRequests()
+            return
+        }
+        if (block) {
+            val keys = ownIslandKeysOf(me, uin)
+            LocalStores.setBlocked(uin, true, keys, now)
+            // The key is what still knows them when they write from another
+            // island or put one in `from_host`. Asked of our island only when
+            // nothing here knows it.
+            if (keys.isEmpty()) scope.launch { learnOwnBlockedKey(uin) }
+        } else {
+            LocalStores.setBlocked(uin, false, at = now)
+            // A same-island stranger blocked from the request row by an older
+            // build sits in the request store as well (host ""), and the old
+            // Unblock never lifted it.
+            CrossIslandRequestsStore.unblock(me, uin, "")
+            // Filed under the island's own name by some sibling build: the same
+            // people, and the same Unblock.
+            ownHostsForBlocks().forEach { if (CrossIslandRequestsStore.isBlocked(me, uin, it)) CrossIslandRequestsStore.unblock(me, uin, it) }
+            sendCiAck(uin, "", "unblock", ts = now)
+        }
+        syncServerBlock(uin, block)
         runCatching { refreshContacts() }
+        refreshCiRequests()
+    }
+
+    /**
+     * Once per account: sort the blocks older builds wrote into the model
+     * above (report 1065), without lifting a single one.
+     *
+     *  1. Blocks left in [CrossIslandRequestsStore] get their metadata, see
+     *     [CrossIslandRequestsStore.stampLegacyBlocks]. They show in Settings
+     *     with their island, and Unblock lifts them now (report 1064).
+     *  2. A bare number used to silence that number on EVERY island. Where it
+     *     names somebody we can point at, an accepted contact or a member of a
+     *     room on another island, they were silenced by it and stay blocked, at
+     *     their address now, so they show in the list and can be lifted
+     *     there. The number itself stays as it was, for our own island.
+     *  3. The key our own roster pins for a blocked number goes with the block.
+     *
+     * Until this has run, [BlockRules] reads a bare number the old way.
+     */
+    private fun scopeLegacyBlocks() {
+        if (duressViewUp || LocalStores.blocksScoped()) return
+        val me = store.uin ?: return
+        val bare = LocalStores.blocked.value
+        CrossIslandRequestsStore.stampLegacyBlocks(
+            me,
+            contactAt = { u, h -> CrossIslandStore.get(u, h) != null },
+            bare = bare,
+        )
+        if (bare.isNotEmpty()) {
+            val ownHosts = ownHostsForBlocks()
+            fun foreign(h: String?) = !app.rcq.android.net.BlockRules.isOwnHost(h, ownHosts)
+            for (c in CrossIslandStore.list()) {
+                if (c.uin in bare && foreign(c.host)) {
+                    CrossIslandRequestsStore.block(me, c.uin, c.host, listOfNotNull(c.signingKey), at = 0L)
+                }
+            }
+            for (g in _groups.value) {
+                val h = g.host?.takeIf { foreign(it) } ?: continue
+                for (m in g.members) {
+                    if (m.uin in bare) CrossIslandRequestsStore.block(me, m.uin, h, listOfNotNull(m.signingKey), at = 0L)
+                }
+            }
+            for (n in bare) {
+                _contacts.value.firstOrNull { it.uin == n && it.host == null }?.signingKey
+                    ?.let { LocalStores.rememberBlockedKey(n, it) }
+            }
+        }
+        LocalStores.markBlocksScoped()
+    }
+
+    /** The signing keys known here for [uin] on our own island. */
+    private fun ownIslandKeysOf(me: Int, uin: Int): List<String> =
+        listOfNotNull(_contacts.value.firstOrNull { it.uin == uin && it.host == null }?.signingKey) +
+            CrossIslandRequestsStore.keysOf(ciRequestRow(me, uin, "")) +
+            roomKeysOf(uin) { it == null }
+
+    /** The keys the rosters of our rooms list for member [uin], in the rooms
+     *  whose host passes [onHost] (null: a room of our own island). A block
+     *  from a member's card knows them by this and nothing else. */
+    private fun roomKeysOf(uin: Int, onHost: (String?) -> Boolean): List<String> =
+        _groups.value.filter { onHost(it.host) }
+            .flatMap { g -> g.members.filter { it.uin == uin }.mapNotNull { it.signingKey } }
+
+    /** Ask our own island for the signing key of [uin], blocked here, best
+     *  effort. A v=1 row they send later teaches it as well, see [ingest]. */
+    private suspend fun learnOwnBlockedKey(uin: Int) {
+        val ep = epochNow()
+        val key = runCatching { api.userInfo(uin, GuestCardStore.theirCard(uin)).signing_key }.getOrNull() ?: return
+        if (stillOn(ep)) LocalStores.rememberBlockedKey(uin, key)
+    }
+
+    /** Put the island's flag on our own roster row for [uin] where it differs
+     *  from [block]. Only such a row has one: for anybody else the island
+     *  answers 404, and this used to flip blindly whatever the screen said. */
+    private suspend fun syncServerBlock(uin: Int, block: Boolean) {
+        val row = _contacts.value.firstOrNull { it.uin == uin && it.host == null } ?: return
+        if (row.blocked == block) return
+        val first = runCatching { api.blockContact(uin, block) }.getOrNull() ?: return
+        // An island that predates the explicit value still flips, and from a
+        // roster this device read stale it flipped the wrong way: once more.
+        if (first.blocked != null && first.blocked != block) runCatching { api.blockContact(uin, block) }
     }
 
     /** Mutual remove + local silent-drop of future sealed messages. A
@@ -6900,17 +7084,45 @@ class Session(context: Context) {
         return updated
     }
 
-    /** Contacts the user has blocked (for the Blocked Users settings screen).
-     *  Union of the server `blocked` contact flag and the LOCAL blocked set, so
-     *  blocked strangers (no contact row) show up too — rendered as a #uin stub
-     *  when we have no roster entry for them. */
+    /** Everybody this account blocked, one row per blocked ADDRESS (for the
+     *  Blocked users screen and its count in Settings).
+     *
+     *  Our own island (host null): the local list, the island's flag on our
+     *  own roster rows, and a same-island stranger an older build blocked from
+     *  the request row (host ""). Another island: every block in
+     *  [CrossIslandRequestsStore], with its host, so it can be told apart from
+     *  the same number here and lifted on its own. That includes the blocks
+     *  older builds left there with no way to lift them (report 1064): they
+     *  are listed as they are, nothing is lifted for the person. A row with no
+     *  roster entry behind it is a stub named by its number or address. */
     fun blockedContacts(): List<Contact> {
-        val byUin = _contacts.value.associateBy { it.uin }
-        val uins = LocalStores.blocked.value + _contacts.value.filter { it.blocked }.map { it.uin }
-        return uins.toSet().map { uin ->
-            byUin[uin]?.copy(blocked = true)
+        val me = store.uin ?: return emptyList()
+        val roster = _contacts.value
+        val ownByUin = roster.filter { it.host == null }.associateBy { it.uin }
+        val ciBlocks = CrossIslandRequestsStore.blockedFor(me)
+        val ownHosts = ownHostsForBlocks()
+        val (ownCi, foreignCi) = ciBlocks.partition { app.rcq.android.net.BlockRules.isOwnHost(it.host, ownHosts) }
+        val ownUins = LocalStores.blocked.value +
+            roster.filter { it.host == null && it.blocked }.map { it.uin } +
+            ownCi.map { it.uin }
+        val own = ownUins.toSet().filter { it != me }.map { uin ->
+            ownByUin[uin]?.copy(blocked = true)
                 ?: Contact(uin = uin, nickname = "$uin", identityKey = "", signingKey = null, blocked = true)
-        }.sortedBy { it.nickname.lowercase() }
+        }
+        val foreign = foreignCi.map { b ->
+            val c = CrossIslandStore.get(b.uin, b.host)
+            Contact(
+                uin = b.uin,
+                nickname = c?.nickname?.takeIf { it.isNotBlank() } ?: RcqFederation.fullAddress(b.uin, b.host),
+                identityKey = c?.identityKey.orEmpty(),
+                signingKey = c?.signingKey,
+                blocked = true,
+                host = b.host,
+                avatarMediaId = c?.avatarMediaId,
+                avatarMediaKey = c?.avatarMediaKey,
+            )
+        }
+        return (own + foreign).sortedBy { it.nickname.lowercase() }
     }
 
     suspend fun sendGroupText(groupId: Int, text: String, replyTo: app.rcq.android.crypto.Reply? = null) {
@@ -7147,7 +7359,7 @@ class Session(context: Context) {
                     }
                 }
                 is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
-                else -> routeGroupEnvelope(env, groupId, dec.senderUin, depositAtMs)
+                else -> routeGroupEnvelope(env, groupId, dec.senderUin, depositAtMs, dec.senderSigningPub)
             }
             null
         }.getOrElse { e ->
@@ -7245,7 +7457,7 @@ class Session(context: Context) {
                 android.util.Log.w("RCQgroup", "gmsg sig did not verify; dropping gid=$groupId kid=${hdr.kid}")
                 return null
             }
-            routeGroupEnvelope(opened.envelope, groupId, key.senderUin, depositAtMs)
+            routeGroupEnvelope(opened.envelope, groupId, key.senderUin, depositAtMs, key.spub)
             null
         }.getOrElse { e ->
             logDecryptFailure(payloadB64, e)
@@ -7256,12 +7468,15 @@ class Session(context: Context) {
     /** Store a decoded group envelope under its thread. Shared by the legacy
      *  per-member path (ingestGroup) and the sender-keys broadcast (ingestGmsg);
      *  [senderUin] is the authenticated sender from either path. */
-    private fun routeGroupEnvelope(envelope: Envelope, groupId: Int, senderUin: Int, depositAtMs: Long? = null) {
+    private fun routeGroupEnvelope(envelope: Envelope, groupId: Int, senderUin: Int, depositAtMs: Long? = null, spub: ByteArray? = null) {
         // Blocked sender → drop their group content entirely (messages,
         // reactions, edits, deletes). Sealed sender means the server can't
         // filter, so we gate on the decrypted sender here. Sender-key control
         // (SKDM/SKNACK) is handled before this call, so chain recovery is safe.
-        if (LocalStores.isBlocked(senderUin)) return
+        // [senderUin] is a number on the ROOM's island, so that is the island
+        // the block is looked up on, plus the key they sign with ([spub], the
+        // chain's key or the v=1 row's) wherever they were blocked (1065).
+        if (blockedSender(senderUin, groupHost(groupId), spub)) return
         // Section 7 of the 2026-09-15 guest spec: a group frame never carries a
         // 1:1 conversation. The island cannot tell a post to the room from a
         // payload one member deposited for exactly one other member, so the
@@ -10854,15 +11069,28 @@ class Session(context: Context) {
             // Our own number under somebody else's key is dropped before ANY
             // branch runs, whatever host it stamps. See [forgedOwnNumberRow].
             if (forgedOwnNumberRow(dec)) return@runCatching
-            // Removed contacts are silently dropped — sealed sender means
-            // the server can't filter by sender, so we gate on receipt.
-            // ⚠ Never ourselves: a carbon always arrives from our own uin, and
-            // the code that CLEARS the removed flag skips our own uin, so one
-            // stray entry would silently kill every self-carbon forever.
-            if (dec.senderUin != store.uin && LocalStores.isBlocked(dec.senderUin)) {
-                // A blocked sender's request is not worth the banner its wake
-                // may have put up while it could not be opened.
-                if (dec.envelope is Envelope.ContactRequest) app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+            // Blocked senders are silently dropped — sealed sender means the
+            // server can't filter by sender, so we gate on receipt.
+            // ⚠ Never ourselves: a carbon always arrives from our own uin.
+            //
+            // ⚠⚠ By person, not by bare number (reports 1064, 1065): the
+            // number blocks only on our own island, an address on another
+            // island only there, and a blocked KEY wherever it writes from.
+            // This used to test the bare number before any host, so blocking
+            // N@is2 dropped everything from whoever holds N here as well.
+            if (dec.senderUin != store.uin && blockedSender(dec.senderUin, dec.senderHost, dec.senderSigningPub)) {
+                // A row signed under a key, blocked by number on our own island:
+                // the key now blocks them wherever they write from next, and
+                // whatever `from_host` they put on it (it is not signed).
+                if (dec.senderSigningPub.size == 32 && LocalStores.isBlocked(dec.senderUin) &&
+                    app.rcq.android.net.BlockRules.isOwnHost(dec.senderHost, ownHostsForBlocks())
+                ) {
+                    LocalStores.rememberBlockedKey(dec.senderUin, spubB64(dec))
+                }
+                // Whatever its wake put up is taken back: a blocked sender's
+                // message woke the phone with a "New message" that led nowhere
+                // (report 1064), and their request with a line of its own.
+                app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
                 return@runCatching
             }
             if (dec.senderUin != store.uin && droppedAsRemoved(dec)) {
@@ -11134,11 +11362,13 @@ class Session(context: Context) {
                 // "" for the key, as iOS and the web keep it: on our own island
                 // the ratchet (v=2) or the island vouches for the sender, and a
                 // message sealed v=1 and deleted over v=2 must still match.
-                CrossIslandRequestsStore.hold(
+                val held = CrossIslandRequestsStore.hold(
                     meUin, dec.senderUin, "", payloadB64, ciPreview(dec.envelope),
                     id = CrossIslandGate.contentId(dec.envelope), spub = "",
+                    // Kept on the row for a block from it, see [blockCrossIslandRequest].
+                    sk = spubB64(dec).takeIf { dec.senderSigningPub.size == 32 },
                 )
-                refreshCiRequests()
+                if (held) refreshCiRequests() else app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
                 return@runCatching
             }
             // A stranger deleting for everyone a message we are still holding:
@@ -12037,6 +12267,7 @@ class Session(context: Context) {
                 if (CrossIslandRequestsStore.holdContactRequest(
                         me, uin, host, cr.nickname, cr.note,
                         keyChanged = match == CrossIslandGate.ContactMatch.KEY_MISMATCH,
+                        sk = android.util.Base64.encodeToString(spub, android.util.Base64.NO_WRAP),
                     )
                 ) {
                     refreshCiRequests()
@@ -12071,6 +12302,7 @@ class Session(context: Context) {
                 if (CrossIslandRequestsStore.holdContactRequest(
                         me, uin, host, cr.nickname, cr.note,
                         keyChanged = match == CrossIslandGate.ContactMatch.KEY_MISMATCH,
+                        sk = android.util.Base64.encodeToString(spub, android.util.Base64.NO_WRAP),
                     )
                 ) {
                     refreshCiRequests()
@@ -12129,7 +12361,7 @@ class Session(context: Context) {
                 // face. Same filter web applies to this broadcast.
                 val me = store.uin ?: return@runCatching
                 val targets = CrossIslandStore.list()
-                    .filter { !CrossIslandRequestsStore.isBlocked(me, it.uin, it.host) }
+                    .filter { !ciContactBlocked(me, it) }
                 depositProfileTo(targets, pictureCleared)
             }
         }
@@ -12141,8 +12373,7 @@ class Session(context: Context) {
         scope.launch {
             runCatching {
                 val me = store.uin ?: return@runCatching
-                if (CrossIslandRequestsStore.isBlocked(me, uin, host)) return@runCatching
-                CrossIslandStore.get(uin, host)?.let { depositProfileTo(listOf(it)) }
+                CrossIslandStore.get(uin, host)?.takeIf { !ciContactBlocked(me, it) }?.let { depositProfileTo(listOf(it)) }
             }
         }
     }
@@ -12507,11 +12738,18 @@ class Session(context: Context) {
                 if (mismatch) {
                     android.util.Log.w("RCQci", "row from ${dec.senderUin}@$host is not signed by the pinned key, held as a stranger")
                 }
-                CrossIslandRequestsStore.hold(
+                val held = CrossIslandRequestsStore.hold(
                     meUin, dec.senderUin, host, payloadB64, ciPreview(dec.envelope), keyChanged = mismatch,
                     id = CrossIslandGate.contentId(dec.envelope), spub = spubB64(dec),
                 )
-                refreshCiRequests()
+                if (held) {
+                    refreshCiRequests()
+                } else {
+                    // Refused: the address is blocked. Dropped, and the wake's
+                    // "New message" goes with it (report 1064).
+                    android.util.Log.i("RCQci", "row from a blocked address dropped")
+                    app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+                }
                 true
             }
         }
@@ -12747,13 +12985,25 @@ class Session(context: Context) {
 
     /** Cross-island contacts rendered as ordinary [Contact]s so they show in the
      *  chat list (the send path still routes them by [CrossIslandStore] host). */
-    private fun crossIslandContacts(): List<Contact> = CrossIslandStore.list().map { c ->
-        // callable: §5d made cross-island 1:1 calls work (signaling crosses as
-        // sealed deposits; media is P2P either way).
-        // §5e: their picture, deposited by them into OUR island — so it is
-        // fetched with no host, exactly like a same-island one.
-        Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = true, host = c.host, gender = c.gender, statusMessage = c.statusMessage, avatarMediaId = c.avatarMediaId, avatarMediaKey = c.avatarMediaKey)
+    private fun crossIslandContacts(): List<Contact> {
+        val me = store.uin
+        return CrossIslandStore.list().map { c ->
+            // callable: §5d made cross-island 1:1 calls work (signaling crosses as
+            // sealed deposits; media is P2P either way).
+            // §5e: their picture, deposited by them into OUR island — so it is
+            // fetched with no host, exactly like a same-island one.
+            // blocked: the block at exactly their address (reports 1064, 1065).
+            // It was never set, so the card and the chat list menu always said
+            // "Block", and a second tap quietly lifted the block.
+            Contact(uin = c.uin, nickname = c.nickname, identityKey = c.identityKey, signingKey = c.signingKey, status = "offline", callable = true, host = c.host, gender = c.gender, statusMessage = c.statusMessage, avatarMediaId = c.avatarMediaId, avatarMediaKey = c.avatarMediaKey,
+                blocked = me != null && CrossIslandRequestsStore.isBlocked(me, c.uin, c.host))
+        }
     }
+
+    /** What the fold memo in [syncCrossIslandContacts] is keyed on: the store's
+     *  revision, and the blocks', which set [Contact.blocked] on the rows. */
+    private fun ciFoldRevision(): Long =
+        (CrossIslandStore.revision().toLong() shl 32) or (CrossIslandRequestsStore.blockRevision().toLong() and 0xffffffffL)
 
     /** Make the displayed roster's cross-island half equal [CrossIslandStore]:
      *  add the store's rows the list is missing, drop the list's foreign rows
@@ -12783,7 +13033,7 @@ class Session(context: Context) {
         // ⚠⚠ And it matters MORE now than it did when this only appended: with
         // an empty store the fold below would DROP rows rather than add none.
         if (duressViewUp) return
-        val rev = CrossIslandStore.revision()
+        val rev = ciFoldRevision()
         val cachedRows = synchronized(ciFoldLock) {
             // Nothing has written the store and nothing has written the list
             // since the fold that produced it, so this fold can only produce the
@@ -12798,7 +13048,7 @@ class Session(context: Context) {
                 // while we were parsing may or may not be in `fresh`, and
                 // filing it under the newer revision would pin a snapshot that
                 // is missing it for as long as nobody writes again.
-                if (CrossIslandStore.revision() == rev) {
+                if (ciFoldRevision() == rev) {
                     ciRowsRev = rev
                     ciRows = fresh
                 }
@@ -12841,9 +13091,9 @@ class Session(context: Context) {
      *  reader thread and from refreshes on the session scope, and it protects
      *  nothing those two share. */
     private val ciFoldLock = Any()
-    private var ciRowsRev: Int = -1
+    private var ciRowsRev: Long = -1
     private var ciRows: List<Contact> = emptyList()
-    private var ciFoldedRev: Int = -1
+    private var ciFoldedRev: Long = -1
     private var ciFoldedList: List<Contact>? = null
 
     /** Accept a cross-island request: save the sender as a contact FIRST (so the
@@ -12943,7 +13193,10 @@ class Session(context: Context) {
      *  effort: a lost ack costs exactly what the bug costs today, a request
      *  still sitting on the other device, so it must never fail an accept that
      *  already happened here. */
-    private fun sendCiAck(uin: Int, host: String, act: String, card: Envelope.CiCard? = null, srv: Envelope.CiSrv? = null) {
+    private fun sendCiAck(
+        uin: Int, host: String, act: String, card: Envelope.CiCard? = null, srv: Envelope.CiSrv? = null,
+        ts: Long = 0L, keys: List<String> = emptyList(),
+    ) {
         val me = store.uin ?: return
         scope.launch(Dispatchers.IO) {
             runCatching {
@@ -12960,7 +13213,7 @@ class Session(context: Context) {
                 // one only when it carries our own signature (P0.1,
                 // [CrossIslandGate.carbonAccepted]), with none of the allowance
                 // a keyless carbon of another kind still gets.
-                sendOwnCarbon(me, null, Envelope.CiAck(uin, host, act, card, srv), envelopeType = "read")
+                sendOwnCarbon(me, null, Envelope.CiAck(uin, host, act, card, srv, ts, keys), envelopeType = "read")
             }
         }
     }
@@ -12982,12 +13235,29 @@ class Session(context: Context) {
             ack.srv?.takeIf { it.host.equals(ack.host, ignoreCase = true) }
                 ?.let { CrossIslandRequestsStore.markAnswered(me, it.host, it.id) }
         }
+        // Our own island's stranger ("" from a request row), or an address on
+        // another island. Never the bare number for the latter (report 1065).
+        val ownIsland = app.rcq.android.net.BlockRules.isOwnHost(ack.host, ownHostsForBlocks())
         when (ack.act) {
-            "block" -> {
-                CrossIslandRequestsStore.block(me, ack.uin, ack.host)
-                // Same set, one surface: the visible Blocked-users list, so a
-                // block made on another device can be undone on this one.
-                LocalStores.setBlocked(ack.uin, true)
+            // [CiAck.ts] orders a block against an unblock of the same address,
+            // so the echo of an older answer, or a carbon the island serves
+            // again late, cannot undo a newer one (report 1064). A build that
+            // sends no time is taken as the older answer.
+            "block" -> if (ownIsland) {
+                CrossIslandRequestsStore.clear(me, ack.uin, ack.host)
+                if (LocalStores.blockAnswerLands(ack.uin, true, ack.ts)) {
+                    LocalStores.setBlocked(ack.uin, true, ack.keys, ack.ts.takeIf { it > 0L } ?: System.currentTimeMillis())
+                }
+            } else {
+                CrossIslandRequestsStore.block(me, ack.uin, ack.host, ack.keys, at = ack.ts)
+                syncCrossIslandContacts()
+            }
+            "unblock" -> if (ownIsland) {
+                (listOf("") + ownHostsForBlocks()).forEach { CrossIslandRequestsStore.unblock(me, ack.uin, it, at = ack.ts) }
+                if (LocalStores.blockAnswerLands(ack.uin, false, ack.ts)) LocalStores.setBlocked(ack.uin, false, at = ack.ts)
+            } else {
+                CrossIslandRequestsStore.unblock(me, ack.uin, ack.host, at = ack.ts)
+                syncCrossIslandContacts()
             }
             "decline" -> CrossIslandRequestsStore.clear(me, ack.uin, ack.host)
             "accept" -> {
@@ -13050,21 +13320,36 @@ class Session(context: Context) {
             scope.launch(Dispatchers.IO) { runCatching { withdrawServerRow(ep, me, host, srvId) } }
         }
         // ⚠ An impostor row names the address of a contact we accepted. Blocking
-        // the address (here, in the bare-number list and on sibling devices)
-        // would silence the REAL contact, so the row is only cleared.
+        // the address (here and on sibling devices) would silence the REAL
+        // contact, so the row is only cleared.
         if (isKeyChangedRequest(me, uin, host)) {
             CrossIslandRequestsStore.clear(me, uin, host)
             refreshCiRequests()
             return
         }
-        CrossIslandRequestsStore.block(me, uin, host)
-        sendCiAck(uin, host, "block", srv = srvOf(host, srvId))
-        // ...and in the list the user can actually SEE. The quarantine store
-        // keeps its own per-(uin,host) denylist, so blocking a cross-island
-        // stranger silenced them but left Settings → Blocked users empty, which
-        // reads as "the block did not take" (user report). Same set, one
-        // surface: this is also what makes Unblock possible at all.
-        LocalStores.setBlocked(uin, true)
+        // Every key that signed a row of this request is the person's: the
+        // block follows them to another island and through a `from_host`
+        // they made up.
+        val keys = CrossIslandRequestsStore.keysOf(ciRequestRow(me, uin, host))
+        val now = System.currentTimeMillis()
+        val foreign = foreignBlockHost(host)
+        if (foreign == null) {
+            // Our own island's stranger: our own island's list, the one the
+            // Blocked users screen shows and Unblock lifts.
+            CrossIslandRequestsStore.clear(me, uin, host)
+            LocalStores.setBlocked(uin, true, keys, now)
+            if (keys.isEmpty()) scope.launch { learnOwnBlockedKey(uin) }
+        } else {
+            // ⚠⚠ The address only, NOT the bare number as well (report 1065).
+            // The number was written "so the block shows in Settings", and it
+            // silenced whoever holds it on our island, in 1:1 and in rooms,
+            // while Unblock in Settings lifted only that and left this
+            // address blocked for good (report 1064). Settings lists this
+            // address itself now.
+            CrossIslandRequestsStore.block(me, uin, foreign, keys)
+            syncCrossIslandContacts()
+        }
+        sendCiAck(uin, host, "block", srv = srvOf(host, srvId), ts = now, keys = keys)
         refreshCiRequests()
     }
 
@@ -13868,7 +14153,13 @@ class Session(context: Context) {
         // delivers a blocked person's request. It is hidden here and NOT
         // answered: a decline travels back as "declined" and tells the blocked
         // person exactly what happened. Left pending, they learn nothing.
-        val kept = api.pending().filterNot { LocalStores.isBlocked(it.from_uin) }
+        val me = store.uin
+        val kept = api.pending().filterNot {
+            LocalStores.isBlocked(it.from_uin) ||
+                // Blocked from the request row by an older build, which the
+                // old Unblock left behind (report 1064).
+                (me != null && CrossIslandRequestsStore.isBlocked(me, it.from_uin, ""))
+        }
         _pending.value = kept.map {
             PendingRequest(it.id, it.from_uin, it.nickname ?: "${it.from_uin}")
         }

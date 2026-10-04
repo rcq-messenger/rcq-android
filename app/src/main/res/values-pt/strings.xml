@@ -843,7 +843,7 @@
     <string name="ci_backup_copy_of">Cópia de reserva da conta %1$s</string>
     <string name="ci_backup_add_home">Adicionar %1$s</string>
     <string name="ci_backup_key_mismatch">Não adicionado: a conta nesse endereço tem uma chave diferente desta cópia de reserva, então a cópia pode não ser dela.</string>
-    <string name="ci_contact_request">Quer adicionar você</string>
+    <string name="ci_contact_request">Quer conversar com você</string>
     <string name="ci_key_changed">A chave de assinatura não corresponde ao contato salvo. Pode ser outra pessoa.</string>
     <string name="ci_request_not_delivered">Adicionado, mas a solicitação não chegou.</string>
     <string name="ci_remove_fav">Tirar dos favoritos</string>

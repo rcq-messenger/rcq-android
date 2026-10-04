@@ -1789,6 +1789,10 @@ private fun contactActions(
     val muted = LocalStores.isMuted(thread)
     val archived = LocalStores.isArchived(thread)
     val locked = LocalStores.isLocked(thread)
+    // At exactly this row's address (reports 1064, 1065), not the row's flag:
+    // that one is the island's, and it knows nothing of the local list or of
+    // somebody on another island.
+    val blocked = session.isBlockedAddress(contact.uin, contact.host)
     fun s(id: Int) = context.getString(id)
     return listOfNotNull(
         ContextAction(s(R.string.home_send_message), Icons.AutoMirrored.Filled.Chat) { onOpenChat(contact.uin) },
@@ -1808,7 +1812,7 @@ private fun contactActions(
                 }
             }
         else null,
-        ContextAction(s(if (contact.blocked) R.string.home_unblock else R.string.home_block), if (contact.blocked) Icons.Outlined.Block else Icons.Filled.Block, destructive = !contact.blocked) { scope.launch { session.toggleBlock(contact.uin) } },
+        ContextAction(s(if (blocked) R.string.home_unblock else R.string.home_block), if (blocked) Icons.Outlined.Block else Icons.Filled.Block, destructive = !blocked) { scope.launch { runCatching { session.setBlock(contact.uin, contact.host, !blocked) } } },
         ContextAction(s(R.string.home_report), Icons.Filled.Flag, destructive = true) { onReport(contact) },
         // Clearing the conversation and removing the person are separate on
         // purpose: vss found that "remove" looked like it deleted the chat and

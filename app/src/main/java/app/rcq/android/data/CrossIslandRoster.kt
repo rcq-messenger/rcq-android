@@ -53,10 +53,19 @@ object CrossIslandRoster {
         // the displayed fields are refreshed by their own path
         // ([app.rcq.android.Session.refreshCrossIslandDisplay]) and a row that is
         // already on screen must not be rebuilt under the user for no reason.
+        // Except [Contact.blocked], which nothing else refreshes: a block or an
+        // unblock would not show until the next account switch (report 1064).
         val kept = current.filter { it.host != null }.associateBy { it.uin to it.host!!.lowercase() }
         val cross = fromStore
             .filter { it.uin !in localUins }
-            .map { row -> kept[row.uin to (row.host ?: "").lowercase()] ?: row }
+            .map { row ->
+                val k = kept[row.uin to (row.host ?: "").lowercase()]
+                when {
+                    k == null -> row
+                    k.blocked != row.blocked -> k.copy(blocked = row.blocked)
+                    else -> k
+                }
+            }
         val next = local + cross
         return if (next == current) current else next
     }

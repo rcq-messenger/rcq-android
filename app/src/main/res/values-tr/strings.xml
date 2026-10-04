@@ -843,7 +843,7 @@
     <string name="ci_backup_copy_of">%1$s hesabının yedek kopyası</string>
     <string name="ci_backup_add_home">%1$s ekle</string>
     <string name="ci_backup_key_mismatch">Eklenmedi: o adresteki hesabın anahtarı bu yedek kopyanınkinden farklı, yani kopya ona ait olmayabilir.</string>
-    <string name="ci_contact_request">Sizi eklemek istiyor</string>
+    <string name="ci_contact_request">Sizinle yazışmak istiyor</string>
     <string name="ci_key_changed">İmza anahtarı kayıtlı kişiyle eşleşmiyor. Başka biri olabilir.</string>
     <string name="ci_request_not_delivered">Eklendi, ancak istek karşı tarafa ulaşmadı.</string>
     <string name="ci_remove_fav">Favorilerden çıkar</string>

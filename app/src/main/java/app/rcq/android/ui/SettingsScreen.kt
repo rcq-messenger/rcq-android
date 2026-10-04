@@ -633,7 +633,12 @@ private fun SettingsRoot(
     var updResult by remember { mutableStateOf<app.rcq.android.net.UpdateChecker.Update?>(null) }
     // Download runs at the process level so it survives closing this dialog.
     val downloadState by app.rcq.android.net.UpdateChecker.downloadState.collectAsState()
-    val blockedCount = contacts.count { it.blocked }
+    // Every blocked address, as the Blocked users screen lists them: the local
+    // list and the blocks of people on other islands are not roster flags
+    // (reports 1064, 1065).
+    val blockedSetForCount by app.rcq.android.data.LocalStores.blocked.collectAsState()
+    val ciBlockRevForCount by app.rcq.android.net.CrossIslandRequestsStore.blockRevisionFlow.collectAsState()
+    val blockedCount = remember(contacts, blockedSetForCount, ciBlockRevForCount) { session.blockedContacts().size }
 
     fun copyUin() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -3534,9 +3539,12 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val contacts by session.contacts.collectAsState()
     val blockedSet by app.rcq.android.data.LocalStores.blocked.collectAsState()
-    // Union of server-blocked contacts + the local blocked set (incl. blocked
-    // strangers with no contact row, rendered as #uin stubs).
-    val blocked = remember(contacts, blockedSet) { session.blockedContacts() }
+    val ciBlockRev by app.rcq.android.net.CrossIslandRequestsStore.blockRevisionFlow.collectAsState()
+    // One row per blocked ADDRESS: our own island's (the local list, the
+    // island's flag on roster rows, stubs for strangers) and every address on
+    // another island, including blocks older builds left with no way to lift
+    // them (report 1064). See Session.blockedContacts.
+    val blocked = remember(contacts, blockedSet, ciBlockRev) { session.blockedContacts() }
 
     Column(Modifier.fillMaxSize().background(c.bgPrimary)) {
         SettingsTopBar(stringResource(R.string.settings_row_blocked), onBack)
@@ -3549,14 +3557,21 @@ private fun BlockedUsersScreen(session: Session, onBack: () -> Unit) {
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
-                items(blocked, key = { it.uin }) { ct ->
+                // The same number can be blocked here and on another island:
+                // two people, two rows, so the key carries the host.
+                items(blocked, key = { "${it.uin}@${it.host.orEmpty()}" }) { ct ->
+                    // `uin@host` for somebody on another island, or the row
+                    // says nothing about which person it is (report 1065).
+                    val address = ct.host?.let { app.rcq.android.net.RcqFederation.fullAddress(ct.uin, it) } ?: "${ct.uin}"
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StatusIcon(ct.presence, size = 26.dp)
                         Column(Modifier.weight(1f)) {
                             Text(ct.nickname, color = c.textPrimary, fontSize = 15.sp)
-                            Text("${ct.uin}", color = c.textMono, fontSize = 12.sp)
+                            if (address != ct.nickname) Text(address, color = c.textMono, fontSize = 12.sp)
                         }
-                        TextButton(onClick = { scope.launch { runCatching { session.toggleBlock(ct.uin) } } }) {
+                        // Lifts exactly this address, never a toggle: a toggle
+                        // read from a stale row blocked again.
+                        TextButton(onClick = { scope.launch { runCatching { session.setBlock(ct.uin, ct.host, false) } } }) {
                             Text(stringResource(R.string.blocked_unblock), color = c.accent)
                         }
                     }

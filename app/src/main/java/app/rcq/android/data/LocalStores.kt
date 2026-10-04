@@ -99,6 +99,13 @@ object LocalStores {
     private val _blocked = MutableStateFlow<Set<Int>>(emptySet())
     val blocked: StateFlow<Set<Int>> = _blocked.asStateFlow()
 
+    /** The signing keys of the people in [_blocked], as "uin:key" (canonical
+     *  base64), where one was known when they were blocked. ⚠ The bare number
+     *  speaks for OUR island only (report 1065); the key is what still knows
+     *  them when they write from somewhere else, or put another island in the
+     *  unsigned `from_host`. See [app.rcq.android.net.BlockRules]. */
+    @Volatile private var _blockedKeys: Set<String> = emptySet()
+
     /** Opt-in same-island stranger quarantine (Privacy): messages from people
      *  outside the contacts wait in the requests list instead of opening a
      *  chat. Device-local like [_blocked]: the mailbox itself stays open
@@ -515,6 +522,7 @@ object LocalStores {
             _locked.value = emptySet()
             _removed.value = emptySet()
             _blocked.value = emptySet()
+            _blockedKeys = emptySet()
             _strangerQuarantine.value = false
             _allowedStrangers.value = emptySet()
             _gonePeers.value = emptySet()
@@ -552,6 +560,7 @@ object LocalStores {
         _locked.value = prefs.getStringSet(pk(K_LOCKED), emptySet())!!.toSet()
         _removed.value = prefs.getStringSet(pk(K_REMOVED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _blocked.value = prefs.getStringSet(pk(K_BLOCKED), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
+        _blockedKeys = prefs.getStringSet(pk(K_BLOCKED_KEYS), emptySet())!!.toSet()
         _strangerQuarantine.value = prefs.getBoolean(pk(K_STRANGER_Q), false)
         _allowedStrangers.value = prefs.getStringSet(pk(K_STRANGER_ALLOW), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
         _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
@@ -820,18 +829,103 @@ object LocalStores {
         prefs.edit().putStringSet(pk(K_GONE), _gonePeers.value.map(Int::toString).toSet()).apply()
     }
 
+    /** Our OWN island's [uin] is blocked. Not a word about the same number
+     *  anywhere else: see [_blockedKeys]. */
     fun isBlocked(uin: Int) = uin in _blocked.value
 
-    /** Headless [isBlocked] for [accountId] (companion to [isMutedFor]), for
-     *  the push service. Blocked when prefs are not up yet: a banner too few
-     *  for a request is better than a blocked sender waking the phone. */
-    fun isBlockedFor(accountId: String, uin: Int): Boolean =
-        !::prefs.isInitialized || prefs.getStringSet("$accountId.$K_BLOCKED", emptySet())!!.contains(uin.toString())
-    fun setBlocked(uin: Int, on: Boolean) {
-        if (acct == null || on == (uin in _blocked.value)) return
+    /** Headless own-island blocks of [accountId] (companion to [isMutedFor]),
+     *  for the push service, or null when prefs are not up. ⚠ Null and not a
+     *  guess: the caller decides, and for a MESSAGE wake a guess of "blocked"
+     *  would silence every one of them in a cold process (review of report
+     *  1064). A request wake treats null as blocked. */
+    fun blockedNumbersFor(accountId: String): Set<Int>? =
+        if (!::prefs.isInitialized) null
+        else prefs.getStringSet("$accountId.$K_BLOCKED", emptySet())!!.mapNotNullTo(HashSet()) { it.toIntOrNull() }
+
+    /** The keys of the people this account blocked on our island. */
+    fun blockedKeys(): Set<String> = keysOfEntries(_blockedKeys)
+
+    /** Headless [blockedKeys] for [accountId], for the push service. */
+    fun blockedKeysFor(accountId: String): Set<String> =
+        if (!::prefs.isInitialized) emptySet()
+        else keysOfEntries(prefs.getStringSet("$accountId.$K_BLOCKED_KEYS", emptySet())!!)
+
+    private fun keysOfEntries(entries: Set<String>): Set<String> =
+        entries.mapNotNullTo(HashSet()) { e -> e.substringAfter(':', "").takeIf { it.isNotEmpty() } }
+
+    /** Block or unblock [uin] on our own island. [keys] are their signing keys
+     *  when known; an unblock forgets every key it held. [at] is when the
+     *  answer was given (epoch ms), kept so a sibling's `ciack` can be ordered
+     *  against it, see [blockAnswerLands]. */
+    @Synchronized
+    fun setBlocked(uin: Int, on: Boolean, keys: Collection<String> = emptyList(), at: Long = System.currentTimeMillis()) {
+        if (acct == null) return
+        val pre = "$uin:"
+        val canon = keys.mapNotNull { app.rcq.android.net.CrossIslandRequestsStore.canonicalKey(it) }
+        val nextKeys = if (on) _blockedKeys + canon.map { pre + it } else _blockedKeys.filterTo(HashSet()) { !it.startsWith(pre) }
+        // One entry per number: the latest answer, and which way it went (the
+        // sign). Never 0, which would read as neither.
+        val times = blockTimes().apply { put(uin, if (on) maxOf(at, 1L) else -maxOf(at, 1L)) }
         _blocked.value = if (on) _blocked.value + uin else _blocked.value - uin
-        prefs.edit().putStringSet(pk(K_BLOCKED), _blocked.value.map(Int::toString).toSet()).apply()
+        _blockedKeys = nextKeys
+        prefs.edit()
+            .putStringSet(pk(K_BLOCKED), _blocked.value.map(Int::toString).toSet())
+            .putStringSet(pk(K_BLOCKED_KEYS), nextKeys)
+            .putStringSet(pk(K_BLOCK_TIMES), pruneBlockTimes(times, System.currentTimeMillis()))
+            .apply()
     }
+
+    /** A key [uin] was seen signing with while blocked here, see
+     *  Session.ingest. Nothing happens unless they are blocked. */
+    @Synchronized
+    fun rememberBlockedKey(uin: Int, key: String) {
+        if (acct == null || uin !in _blocked.value) return
+        val canon = app.rcq.android.net.CrossIslandRequestsStore.canonicalKey(key) ?: return
+        val e = "$uin:$canon"
+        if (e in _blockedKeys) return
+        _blockedKeys = _blockedKeys + e
+        prefs.edit().putStringSet(pk(K_BLOCKED_KEYS), _blockedKeys).apply()
+    }
+
+    /**
+     * Whether a block ([on]) or an unblock another device made at [at] is newer
+     * than the last answer for [uin] here, and so may be applied. A block from a
+     * build that sends no time (0) lands unless this device unblocked [uin]
+     * since: it is most likely the island serving the old answer again, which
+     * must not undo the newer one (report 1064).
+     */
+    fun blockAnswerLands(uin: Int, on: Boolean, at: Long): Boolean {
+        if (acct == null) return false
+        return app.rcq.android.net.BlockRules.answerLands(blockTimes()[uin], on, at)
+    }
+
+    /** uin -> the latest answer's time, negative for an unblock. */
+    private fun blockTimes(): MutableMap<Int, Long> =
+        prefs.getStringSet(pk(K_BLOCK_TIMES), emptySet())!!.mapNotNull { e ->
+            val i = e.indexOf(':')
+            val u = e.take(maxOf(i, 0)).toIntOrNull()
+            val t = e.substring(i + 1).toLongOrNull()
+            if (i <= 0 || u == null || t == null) null else u to t
+        }.toMap(HashMap())
+
+    /** An unblock is remembered as long as the island can still hand back an
+     *  older block (it keeps a queued row for 30 days); a block for as long as
+     *  it stands. */
+    private fun pruneBlockTimes(times: Map<Int, Long>, now: Long): Set<String> =
+        times.filter { (_, t) -> t > 0 || now + t < 45L * 24 * 3600 * 1000 }
+            .mapTo(HashSet()) { (u, t) -> "$u:$t" }
+
+    /** Whether this account's blocks were moved to the per-island model
+     *  (report 1065), see Session.scopeLegacyBlocks. */
+    fun blocksScoped(): Boolean = acct != null && prefs.getBoolean(pk(K_BLOCKS_SCOPED), false)
+    fun markBlocksScoped() {
+        if (acct != null) prefs.edit().putBoolean(pk(K_BLOCKS_SCOPED), true).apply()
+    }
+
+    /** Headless [blocksScoped] for [accountId]. False when prefs are not up:
+     *  the bare list then keeps its old meaning in the push path. */
+    fun blocksScopedFor(accountId: String): Boolean =
+        ::prefs.isInitialized && prefs.getBoolean("$accountId.$K_BLOCKS_SCOPED", false)
 
     fun strangerQuarantineEnabled() = _strangerQuarantine.value
     fun setStrangerQuarantine(on: Boolean) {
@@ -1754,7 +1848,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
             // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
             // the profile key of every contact, stored BY NUMBER, so leaving it
             // behind keeps a plaintext roster of the burned identity plus the
@@ -1779,6 +1873,9 @@ object LocalStores {
     private const val K_REMOVED = "removed"
     private const val K_FINISHED_STRANGERS = "finished_strangers"
     private const val K_BLOCKED = "blocked"
+    private const val K_BLOCKED_KEYS = "blocked_keys"
+    private const val K_BLOCK_TIMES = "block_times"
+    private const val K_BLOCKS_SCOPED = "blocks_scoped_v1"
     private const val K_STRANGER_Q = "strangers_quarantine"
     private const val K_STRANGER_ALLOW = "strangers_allowed"
     private const val K_GONE = "gone_peers"

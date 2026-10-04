@@ -87,6 +87,18 @@ class CrossIslandRosterTest {
         assertSame(shown, next.single())
     }
 
+    /** Except the block, which nothing else refreshes on a row already shown:
+     *  the card and the chat list menu would keep offering "Block" after a
+     *  block, and the second tap lifted it (reports 1064, 1065). */
+    @Test fun a_row_already_shown_takes_the_block_from_the_store() {
+        val shown = cross(2, "is2.rcq.app", nick = "Renamed by §5e")
+        val blocked = CrossIslandRoster.fold(listOf(shown), listOf(cross(2, "is2.rcq.app").copy(blocked = true))).single()
+        assertEquals(true, blocked.blocked)
+        assertEquals("Renamed by §5e", blocked.nickname)
+        val lifted = CrossIslandRoster.fold(listOf(blocked), listOf(cross(2, "is2.rcq.app")))
+        assertEquals(false, lifted.single().blocked)
+    }
+
     /** Hosts are compared case-insensitively, because the store keys on a
      *  lowercased host while a card or a room can hand us any casing. Getting
      *  this wrong would show the person twice, then throw in the LazyColumn. */

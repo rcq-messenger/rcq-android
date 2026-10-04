@@ -1920,10 +1920,20 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // send looks like silence, and the obvious conclusion is "cross-island
         // messaging is broken" (vss reported exactly that). Say it once, while
         // the thread has nothing incoming in it yet.
+        //
+        // ⚠ And not once a message of ours was delivered or read: their app
+        // only confirms a message it filed in a chat, never one it held as a
+        // request, so that tick IS the acceptance. Without it the line stayed
+        // up in a conversation they had long accepted and simply not answered,
+        // which read as the very opposite of what was going on (report 1064).
         val awaitingAcceptance = !isGroup && !isSelf && peer != null &&
             (peerContact?.host != null || CrossIslandStore.findByUin(peer) != null) &&
             rows.any { it is ChatRow.Single && it.m.fromMe } &&
-            rows.none { it is ChatRow.Single && !it.m.fromMe }
+            rows.none { it is ChatRow.Single && !it.m.fromMe } &&
+            rows.none {
+                it is ChatRow.Single && it.m.fromMe &&
+                    (it.m.state == DeliveryState.DELIVERED || it.m.state == DeliveryState.READ)
+            }
         if (awaitingAcceptance) {
             Text(
                 stringResource(R.string.chat_cross_island_pending),

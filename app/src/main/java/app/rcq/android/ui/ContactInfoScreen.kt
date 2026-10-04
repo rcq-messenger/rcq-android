@@ -251,7 +251,13 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     val statusMessage = profile?.status_message?.takeIf { it.isNotBlank() }
         ?: contact?.statusMessage?.takeIf { it.isNotBlank() }
         ?: ciCardStatus?.takeIf { it.isNotBlank() }
-    val blocked = contact?.blocked == true
+    // The block at exactly this person's address: our own island's list and
+    // the island's flag, or the address on another island. Their row's flag
+    // alone was always false for somebody on another island, so the button
+    // said "Block" forever and the second tap unblocked (report 1065).
+    val blockedSet by LocalStores.blocked.collectAsState()
+    val ciBlockRev by app.rcq.android.net.CrossIslandRequestsStore.blockRevisionFlow.collectAsState()
+    val blocked = remember(uin, crossIslandHost, contact, blockedSet, ciBlockRev) { session.isBlockedAddress(uin, crossIslandHost) }
 
     // A bare number is ambiguous across islands: "#134" reaches a different
     // person depending on where you type it, so what goes to the clipboard is
@@ -594,7 +600,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 InfoAction(Icons.Filled.NotificationsOff, stringResource(if (isMuted) R.string.ci_unmute else R.string.ci_mute)) { LocalStores.toggleMute(thread) }
                 InfoDivider()
                 InfoAction(Icons.Outlined.Block, stringResource(if (blocked) R.string.ci_unblock else R.string.ci_block), danger = !blocked) {
-                    scope.launch { runCatching { session.toggleBlock(uin) } }
+                    scope.launch { runCatching { session.setBlock(uin, crossIslandHost, !blocked) } }
                 }
                 InfoDivider()
                 InfoAction(Icons.Filled.Lock, stringResource(R.string.ci_safety)) {

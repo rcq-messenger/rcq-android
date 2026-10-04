@@ -857,7 +857,7 @@
     <string name="ci_backup_copy_of">账号 %1$s 的备份副本</string>
     <string name="ci_backup_add_home">添加 %1$s</string>
     <string name="ci_backup_key_mismatch">未添加：那个地址上的账号与这个备份副本的密钥不同，这个副本可能不属于对方。</string>
-    <string name="ci_contact_request">想添加你为联系人</string>
+    <string name="ci_contact_request">想和你聊天</string>
     <string name="ci_key_changed">签名密钥与已保存的联系人不一致，可能是其他人。</string>
     <string name="ci_request_not_delivered">已添加，但请求未送达对方。</string>
     <string name="ci_remove_fav">取消星标</string>
