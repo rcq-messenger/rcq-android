@@ -198,9 +198,19 @@ object ShareIntake {
         val text: String?,
         val uris: List<android.net.Uri>,
         val to: app.rcq.android.ui.ChatTarget? = null,
+        /** Who picked [to] ([app.rcq.android.ui.UiOwner.now]): [to] is only a
+         *  number or a room id, which the next account can hold for somebody
+         *  else entirely. */
+        val owner: String? = null,
     )
     val pending = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
     val deliver = kotlinx.coroutines.flow.MutableStateFlow<Req?>(null)
+
+    /** Whether the chat [target], drawn under [owner], may send [req]: it is
+     *  the chat that was picked, by the owner that picked it. A handoff from
+     *  before [Req.to] or [Req.owner] existed names neither and passes. */
+    fun deliverableTo(req: Req, target: app.rcq.android.ui.ChatTarget, owner: String): Boolean =
+        (req.to == null || req.to == target) && (req.owner == null || req.owner == owner)
 
     fun fromIntent(i: android.content.Intent?): Req? {
         i ?: return null
@@ -594,6 +604,14 @@ private fun RcqApp(session: Session) {
         // A link dropped here can be tapped again; one confirmed from the
         // wrong account cannot be taken back.
         app.rcq.android.ui.AddSheet.close()
+        // A share already handed to a thread (waiting behind its lock gate)
+        // was picked by the account that is leaving, and its `to` is only a
+        // number or a room id: a notification tap that switched accounts then
+        // opened the same number under the next account, and the files went
+        // out to a different person on another island. The URI grants cannot
+        // be parked anyway, so it goes. [ShareIntake.pending] stays: its
+        // picker asks whoever is on screen and needs an explicit pick.
+        ShareIntake.deliver.value = null
         if (!keepLinks) {
             ContactAddLink.pending.value = null
             GroupJoinLink.pending.value = null
@@ -1032,7 +1050,7 @@ private fun RcqApp(session: Session) {
                     // something around a shared link); files are handed to the
                     // chat, which sends them the way the paperclip does.
                     shareReq.text?.let { app.rcq.android.ui.seedDraft(picked, it) }
-                    if (shareReq.uris.isNotEmpty()) ShareIntake.deliver.value = shareReq.copy(to = picked)
+                    if (shareReq.uris.isNotEmpty()) ShareIntake.deliver.value = shareReq.copy(to = picked, owner = app.rcq.android.ui.UiOwner.now())
                     // The browser outranks a chat in the `when` below, and
                     // the share of a site's address starts from the browser:
                     // left up, the chat just picked would be drawn under it

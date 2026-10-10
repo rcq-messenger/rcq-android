@@ -1116,7 +1116,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // Meant for another chat (the picked one never opened: its lock
             // gate was abandoned, or a notification replaced it). Dropped, not
             // re-parked: the URI grants must not outlive the tap that chose.
-            if (req.to != null && req.to != target) {
+            //
+            // Or picked by another account (or outside the duress view): the
+            // same number or room id here is somebody else.
+            if (!app.rcq.android.ShareIntake.deliverableTo(req, target, UiOwner.now())) {
                 android.util.Log.i("RCQshare", "dropping share for ${req.to}, not $threadKey")
                 return@collect
             }
@@ -4175,16 +4178,23 @@ internal object GroupLinkParser {
      *  both the shareable https form and the rcq:// deep-link form.
      *  [defaultHost] is the island of a bare `/g/<id>` (see [refOf]).
      *
-     *  ⚠ One entry per ROOM, the first link to it in the text. Since the key
-     *  is part of [GroupRef], `.distinct()` kept the old and the new link of a
-     *  reset room as two rows with one lazy-list key, which crashes the pin
-     *  sheet ("Key was already used"). */
+     *  ⚠ One entry per ROOM, at its first place in the text, with the key of
+     *  the LAST link to it that has one. Since the key is part of [GroupRef],
+     *  `.distinct()` kept the old and the new link of a reset room as two rows
+     *  with one lazy-list key, which crashes the pin sheet ("Key was already
+     *  used"). And the first key is the wrong one to keep: a pin edited after
+     *  a reset reads "old link ... new link", and the row's own key wins over
+     *  every fallback, so the card stayed dead and Join said "ask for a new
+     *  link" with the new one right there. The last key is also what
+     *  [RoomLinkKeys] keeps, so the two agree. */
     fun parseAll(text: String, defaultHost: String? = null): List<GroupRef> {
         val re = Regex("(?:https?://rcq\\.app/g/|rcq://group/)(\\d+(?:@[a-z0-9.-]+)?)(?:\\?k=([A-Za-z0-9_-]{8,64}))?", RegexOption.IGNORE_CASE)
         return re.findAll(text)
             .mapNotNull { refOf(it.groupValues[1], it.groupValues[2].takeIf { k -> k.isNotEmpty() }, defaultHost) }
-            .distinctBy { it.id to it.host }
             .toList()
+            // A LinkedHashMap: the rows stay in order of first appearance.
+            .groupBy { it.id to it.host }
+            .map { (_, same) -> same.lastOrNull { it.k != null } ?: same.first() }
     }
 }
 

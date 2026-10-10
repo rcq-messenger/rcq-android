@@ -91,11 +91,40 @@ object BlockRules {
      * latest answer here for the same person: its time, negative for an
      * unblock, null when there was none. Same rule as
      * [CrossIslandRequestsStore.applyBlock] / [CrossIslandRequestsStore.applyUnblock]:
-     * the newer answer wins, and a timeless block loses to any unblock.
+     * the strictly newer answer wins, at the same time the state here stays,
+     * and a block at 0 loses to any unblock. A `ciack` without a time comes
+     * here with [ackTime], not 0.
      */
     fun answerLands(last: Long?, on: Boolean, at: Long): Boolean {
         if (last == null) return true
         return if (on) last > 0 || at > -last else last < 0 || at > last
+    }
+
+    /**
+     * When a `ciack` answer from another device was given, for [answerLands]
+     * and the request store: its own [ts] when it carries one; else (an older
+     * iOS build sends none) when it reached us. That is the island's deposit
+     * stamp on the row where there is one, which bounds the answer from above:
+     * a copy the island serves again late keeps its stamp, so it cannot pass
+     * an answer made after it was deposited. [now] without a stamp.
+     */
+    fun ackTime(ts: Long, depositAtMs: Long?, now: Long): Long =
+        ts.takeIf { it > 0L } ?: depositAtMs?.takeIf { it > 0L } ?: now
+
+    /**
+     * The time to keep for an answer ([on] a block, else an unblock) given at
+     * [at] over [last] (as in [answerLands]). The newest time of the same
+     * direction stays: a block from another device that lands on a block
+     * already here (a late copy of an older one, or a block this device made
+     * since) must not pull the time back, or an unblock older than the block
+     * that stands would pass [answerLands] and lift it. Same for an unblock.
+     * Mirrors the maxOf in [CrossIslandRequestsStore.applyBlock] and
+     * [CrossIslandRequestsStore.applyUnblock]. Never 0, which reads as neither.
+     */
+    fun stampAnswer(last: Long?, on: Boolean, at: Long): Long {
+        val t = maxOf(at, 1L)
+        return if (on) maxOf(t, last?.takeIf { it > 0 } ?: 0L)
+        else -maxOf(t, last?.takeIf { it < 0 }?.let { -it } ?: 0L)
     }
 
     private const val ED25519_PUB_LEN = 32

@@ -756,6 +756,13 @@ object Multihome {
          *  second network call and the island DELETES what it acknowledges. */
         stillOurs: () -> Boolean = { true },
         onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?) -> String?)? = null,
+        /** The island said no row carries our key any more ([copyGone]): the
+         *  guest copy there was deleted (the same row as a backup copy, deleted
+         *  from another device, as a rule). Called synchronously right after a
+         *  [stillOurs] check, so the caller can forget the entry in its own
+         *  bound store. Without it the entry's dead token was handed to every
+         *  later join of a room there, which failed on every attempt. */
+        onGone: (host: String) -> Unit = {},
         /** Same contract as the backup drain's: the row's type in, "done with"
          *  (null) or a failure tag out, and only done rows are acked. */
         onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
@@ -770,7 +777,15 @@ object Multihome {
                 } catch (e: IOException) {
                     if (e.message?.startsWith("HTTP 401") == true) {
                         if (!stillOurs()) return@runCatching
-                        val fresh = recoverOn(v.host, signingPriv, signingPub) ?: return@runCatching
+                        val fresh = try {
+                            recoverOn(v.host, signingPriv, signingPub, goneIsError = true)
+                        } catch (gone: IOException) {
+                            // Only this answer: a rotated key (the row is
+                            // alive) or an island without the route stays null.
+                            if (!copyGone(gone.message)) throw gone
+                            if (stillOurs()) onGone(v.host)
+                            return@runCatching
+                        } ?: return@runCatching
                         if (!stillOurs()) return@runCatching
                         VisitedIslandsStore.updateCreds(v.host, fresh.uin, fresh.token)
                         api.setToken(fresh.token)

@@ -83,6 +83,16 @@ object CrossIslandRequestsStore {
     /** One blocked address of an account. [host] "" is our own island. */
     data class Blocked(val uin: Int, val host: String, val meta: BlockMeta)
 
+    // ⚠⚠ The blocks (and their metadata and unblock times) are keyed by the
+    // ACCOUNT, "<account id>:uin@host", and the requests by the bare number.
+    // Two accounts on one phone may hold the same number on two islands, and
+    // with the blocks keyed by that number they read and wrote each other's:
+    // A = 1234@rcq.app blocking N@is2 silenced N for B = 1234@is2, whose own
+    // island that is, handed A's blocked keys to B, and B's Unblock lifted
+    // A's block. Builds before this one wrote "<number>:..." rows; [init]
+    // copies them to every account holding that number, once, see
+    // [migrateLegacyOwners].
+
     private const val PREFS = "rcq_ci_requests"
     private const val KEY = "requests"
     private const val KEY_BLOCKED = "blocked"
@@ -96,6 +106,10 @@ object CrossIslandRequestsStore {
     private const val UNBLOCK_MEMORY_MS = 45L * 24 * 3600 * 1000
     /** Server request ids this device already answered, "own:host#id". */
     private const val KEY_ANSWERED = "answered"
+    /** Accounts whose blocks keyed by number were copied to their own key. */
+    private const val KEY_OWNERS_DONE = "block_owners_done"
+    /** Every account's blocks were; nothing keyed by number is left. */
+    private const val KEY_OWNERS_MIGRATED = "block_owners_migrated"
     private const val MAX_HELD = 20
     /** §5f anti-abuse: a deposit is open, so a stranger's request costs one
      *  HTTP call. Bound the pending list per account — a flood fills a list
@@ -104,11 +118,53 @@ object CrossIslandRequestsStore {
     private val gson = Gson()
     private lateinit var prefs: SharedPreferences
 
+    @Synchronized
     fun init(ctx: Context) {
-        if (!::prefs.isInitialized) prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (::prefs.isInitialized) return
+        prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Before anything reads a block: a cold push reads them too.
+        runCatching { migrateOwners(ctx.applicationContext) }
+            .onFailure { android.util.Log.w("RCQci", "block owners: ${it.javaClass.simpleName}") }
     }
 
     private fun reqKey(ownUin: Int, uin: Int, host: String) = "$ownUin:$uin@${host.lowercase()}"
+
+    /** A block row of account [owner] (its id, never its number). */
+    private fun blockKey(owner: String, uin: Int, host: String) = "$owner:$uin@${host.lowercase()}"
+
+    /** Copy the blocks older builds keyed by number to the accounts holding
+     *  that number, see [migrateLegacyOwners]. */
+    private fun migrateOwners(ctx: Context) {
+        if (prefs.getBoolean(KEY_OWNERS_MIGRATED, false)) return
+        val accounts = app.rcq.android.data.AccountManager.accounts.value
+        val blocked = blockedSet()
+        val meta = metaMap()
+        val unblocked = unblockedMap()
+        val anyLegacy = (blocked + meta.keys + unblocked.keys).any { isLegacyBlockKey(it) }
+        if (!anyLegacy) {
+            prefs.edit().putBoolean(KEY_OWNERS_MIGRATED, true).apply()
+            return
+        }
+        // A roster not loaded (or gone) is no answer: nothing is copied or
+        // dropped until there is one.
+        if (accounts.isEmpty()) return
+        var complete = true
+        val owners = HashMap<String, Int?>()
+        for (a in accounts) {
+            val n = runCatching { app.rcq.android.data.SecureStore.peekUin(ctx, a.id) }
+            if (n.isFailure) complete = false else owners[a.id] = n.getOrNull()
+        }
+        val done = stringSet(KEY_OWNERS_DONE)
+        migrateLegacyOwners(blocked, meta, unblocked, owners, done, complete)
+        prefs.edit()
+            .putString(KEY_BLOCKED, gson.toJson(blocked))
+            .putString(KEY_BLOCK_META, gson.toJson(meta))
+            .putString(KEY_UNBLOCKED, gson.toJson(unblocked))
+            .putString(KEY_OWNERS_DONE, gson.toJson(done))
+            .putBoolean(KEY_OWNERS_MIGRATED, complete)
+            .apply()
+        blocksChanged()
+    }
 
     internal fun answeredKey(ownUin: Int, host: String, id: Int) = "$ownUin:${host.lowercase()}#$id"
 
@@ -121,16 +177,32 @@ object CrossIslandRequestsStore {
      *  addressed to a burned identity outlived it on disk. Same shape as the
      *  fourth hole of the iOS cross-island leak (f50a7b0).
      *
-     *  ⚠ The blocked entries go with it BY NUMBER, which is right: they are
-     *  this identity's refusals, and a new identity has made none. Nothing
-     *  here is a privacy SETTING - a wipe must never quietly turn one of those
-     *  off for somebody who turned it on. */
+     *  ⚠ The blocked entries go with it, which is right: they are this
+     *  identity's refusals, and a new identity has made none. Nothing here is
+     *  a privacy SETTING - a wipe must never quietly turn one of those off for
+     *  somebody who turned it on. Only the rows older builds keyed by number
+     *  go here; the account's own are swept by id, [wipeOwner]. */
     /** Forget EVERY account's held requests and blocks. Only for the duress
      *  wipe, which leaves no account behind to be selective about. */
     fun wipeAll() {
         if (!::prefs.isInitialized) return
         prefs.edit().remove(KEY).remove(KEY_BLOCKED).remove(KEY_ANSWERED)
-            .remove(KEY_BLOCK_META).remove(KEY_UNBLOCKED).apply()
+            .remove(KEY_BLOCK_META).remove(KEY_UNBLOCKED).remove(KEY_OWNERS_DONE)
+            .putBoolean(KEY_OWNERS_MIGRATED, true).apply()
+        blocksChanged()
+    }
+
+    /** Forget the blocks of account [owner] (its id): its burn, its removal
+     *  from this device, the end of a duress view. The requests are swept by
+     *  number in [wipeOwn]. */
+    fun wipeOwner(owner: String) {
+        if (!::prefs.isInitialized || owner.isEmpty()) return
+        val pre = "$owner:"
+        prefs.edit()
+            .putString(KEY_BLOCKED, gson.toJson(blockedSet().filterTo(mutableSetOf()) { !it.startsWith(pre) }))
+            .putString(KEY_BLOCK_META, gson.toJson(metaMap().filterKeys { !it.startsWith(pre) }))
+            .putString(KEY_UNBLOCKED, gson.toJson(unblockedMap().filterKeys { !it.startsWith(pre) }))
+            .apply()
         blocksChanged()
     }
 
@@ -219,35 +291,39 @@ object CrossIslandRequestsStore {
 
     private fun answeredSet(): MutableSet<String> = stringSet(KEY_ANSWERED)
 
-    fun isBlocked(ownUin: Int, uin: Int, host: String): Boolean =
-        ::prefs.isInitialized && cached().blocked.contains(reqKey(ownUin, uin, host))
+    /** Whether account [owner] (its id) blocked exactly [uin] at [host]. */
+    fun isBlocked(owner: String, uin: Int, host: String): Boolean =
+        ::prefs.isInitialized && cached().blocked.contains(blockKey(owner, uin, host))
 
     /** The block at exactly (uin, host), or null when there is none. A block an
      *  older build wrote, and nothing has stamped yet, reads as a plain one. */
-    fun blockAt(ownUin: Int, uin: Int, host: String): BlockMeta? {
+    fun blockAt(owner: String, uin: Int, host: String): BlockMeta? {
         if (!::prefs.isInitialized) return null
         val c = cached()
-        val k = reqKey(ownUin, uin, host)
+        val k = blockKey(owner, uin, host)
         return if (k in c.blocked) c.meta[k] ?: BlockMeta() else null
     }
 
-    /** Every address [ownUin] blocked, our own island's strangers as host "". */
-    fun blockedFor(ownUin: Int): List<Blocked> {
+    /** Every address account [owner] blocked, our own island's strangers as
+     *  host "". */
+    fun blockedFor(owner: String): List<Blocked> {
         if (!::prefs.isInitialized) return emptyList()
         val c = cached()
-        return listBlocked(c.blocked, c.meta, ownUin)
+        return listBlocked(c.blocked, c.meta, owner)
     }
 
-    /** The signing keys of everybody [ownUin] blocked, canonical base64. */
-    fun blockedKeys(ownUin: Int): Set<String> =
-        blockedFor(ownUin).flatMapTo(HashSet()) { it.meta.keys }
+    /** The signing keys of everybody account [owner] blocked, canonical base64. */
+    fun blockedKeys(owner: String): Set<String> =
+        blockedFor(owner).flatMapTo(HashSet()) { it.meta.keys }
 
-    /** Quarantine one sealed payload. Returns false (caller drops it) when blocked. */
+    /** Quarantine one sealed payload. Returns false (caller drops it) when
+     *  account [owner] blocked the address (null: no account bound, nothing
+     *  is blocked). */
     fun hold(
         ownUin: Int, uin: Int, host: String, payload: String, preview: String, keyChanged: Boolean = false,
-        id: String? = null, spub: String? = null, sk: String? = null,
+        id: String? = null, spub: String? = null, sk: String? = null, owner: String?,
     ): Boolean {
-        if (isBlocked(ownUin, uin, host)) return false
+        if (owner != null && isBlocked(owner, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
         val base = map[k] ?: Request(ownUin, uin, host, System.currentTimeMillis(), mutableListOf())
@@ -272,8 +348,9 @@ object CrossIslandRequestsStore {
      */
     fun holdContactRequest(
         ownUin: Int, uin: Int, host: String, nickname: String?, note: String?, keyChanged: Boolean = false, sk: String? = null,
+        owner: String?,
     ): Boolean {
-        if (isBlocked(ownUin, uin, host)) return false
+        if (owner != null && isBlocked(owner, uin, host)) return false
         val map = all()
         val k = reqKey(ownUin, uin, host)
         val old = map[k]
@@ -401,10 +478,11 @@ object CrossIslandRequestsStore {
 
     /** An island-proven UIN move (the migrate response, or `moved_from` from
      *  /auth/refresh, never a socket frame): re-file this account's pending
-     *  requests and blocks under the new number, or they vanish from the list
-     *  after the move and a blocked sender's deposits start landing again. The
-     *  answered server ids go with them (F1), or the poll would offer every
-     *  answered request again. */
+     *  requests under the new number, or they vanish from the list after the
+     *  move. The answered server ids go with them (F1), or the poll would offer
+     *  every answered request again. The blocks are keyed by the account and
+     *  stay where they are; only rows an older build keyed by the number, not
+     *  copied yet, move with it. */
     fun rekeyOwner(oldOwnUin: Int, newOwnUin: Int) {
         if (!::prefs.isInitialized || oldOwnUin == newOwnUin) return
         val reqs = all()
@@ -503,23 +581,28 @@ object CrossIslandRequestsStore {
         else (listOf(r.sk) + r.msgs.map { it.spub }).mapNotNull { canonicalKey(it) }.distinct()
 
     /**
-     * Block a sender: drop the request and remember the address, plus [keys],
-     * the signing keys known for the person (see [BlockMeta]).
+     * Block a sender for account [owner]: drop [ownUin]'s request and remember
+     * the address, plus [keys], the signing keys known for the person (see
+     * [BlockMeta]).
      *
      * [at] null is a block made HERE, now, and always lands. A block another
      * device made carries its own time and lands only when it is newer than
-     * the last unblock of that address, see [applyBlock]. Returns true when it
-     * landed.
+     * the last unblock of that address, see [applyBlock]. [timeless]: that
+     * time is not the sender's but when the answer reached us (a build that
+     * sends none), see [applyBlock]. Returns true when it landed.
      */
     @Synchronized
-    fun block(ownUin: Int, uin: Int, host: String, keys: Collection<String> = emptyList(), at: Long? = null): Boolean {
+    fun block(
+        owner: String, ownUin: Int, uin: Int, host: String, keys: Collection<String> = emptyList(),
+        at: Long? = null, timeless: Boolean = false,
+    ): Boolean {
         if (!::prefs.isInitialized) return false
         val blocked = blockedSet()
         val meta = metaMap()
         val unblocked = unblockedMap()
         val now = System.currentTimeMillis()
-        val k = reqKey(ownUin, uin, host)
-        if (!applyBlock(blocked, meta, unblocked, k, keys, at ?: now, local = at == null)) return false
+        val k = blockKey(owner, uin, host)
+        if (!applyBlock(blocked, meta, unblocked, k, keys, at ?: now, local = at == null, timeless = timeless)) return false
         clear(ownUin, uin, host)
         writeBlocks(blocked, meta, pruneUnblocked(unblocked, now))
         return true
@@ -538,13 +621,13 @@ object CrossIslandRequestsStore {
      * (report 1064).
      */
     @Synchronized
-    fun unblock(ownUin: Int, uin: Int, host: String, at: Long? = null): Boolean {
+    fun unblock(owner: String, uin: Int, host: String, at: Long? = null): Boolean {
         if (!::prefs.isInitialized) return false
         val blocked = blockedSet()
         val meta = metaMap()
         val unblocked = unblockedMap()
         val now = System.currentTimeMillis()
-        val lifted = applyUnblock(blocked, meta, unblocked, reqKey(ownUin, uin, host), at ?: now, local = at == null)
+        val lifted = applyUnblock(blocked, meta, unblocked, blockKey(owner, uin, host), at ?: now, local = at == null)
         writeBlocks(blocked, meta, pruneUnblocked(unblocked, now))
         return lifted
     }
@@ -564,11 +647,11 @@ object CrossIslandRequestsStore {
      * block is listed in Settings, where the person can lift it.
      */
     @Synchronized
-    fun stampLegacyBlocks(ownUin: Int, contactAt: (uin: Int, host: String) -> Boolean, bare: Set<Int>) {
+    fun stampLegacyBlocks(owner: String, contactAt: (uin: Int, host: String) -> Boolean, bare: Set<Int>) {
         if (!::prefs.isInitialized) return
         val blocked = blockedSet()
         val meta = metaMap()
-        if (!stampLegacyMeta(blocked, meta, ownUin, contactAt, bare)) return
+        if (!stampLegacyMeta(blocked, meta, owner, contactAt, bare)) return
         writeBlocks(blocked, meta, unblockedMap())
     }
 
@@ -593,10 +676,12 @@ object CrossIslandRequestsStore {
         keys: Collection<String>,
         at: Long,
         local: Boolean,
+        timeless: Boolean = false,
     ): Boolean {
         // A block from another device that is not newer than the last unblock
         // here is the old answer coming round again (a carbon the island
-        // served late), not a new one.
+        // served late), not a new one. Strictly newer: at the same time the
+        // state here stays as it is.
         if (!local && at <= (unblocked[k] ?: Long.MIN_VALUE)) return false
         val old = meta[k]?.takeIf { k in blocked }
         blocked.add(k)
@@ -604,9 +689,10 @@ object CrossIslandRequestsStore {
             at = maxOf(old?.at ?: 0L, at),
             keys = (old?.keys.orEmpty() + keys.mapNotNull { canonicalKey(it) }).distinct(),
             // A block made now is a block, whatever an older one let through.
-            // A timeless one from another device is most likely the echo of
-            // that older block itself, and changes nothing about it.
-            passContact = if (!local && at == 0L) old?.passContact == true else false,
+            // A timeless one from another device (no time of its own; it may
+            // carry when it reached us) is most likely the echo of that older
+            // block itself, and changes nothing about it.
+            passContact = if (!local && (at == 0L || timeless)) old?.passContact == true else false,
         )
         unblocked.remove(k)
         return true
@@ -620,6 +706,7 @@ object CrossIslandRequestsStore {
         at: Long,
         local: Boolean,
     ): Boolean {
+        // Strictly newer than the block, as for [applyBlock].
         if (!local && k in blocked && at <= (meta[k]?.at ?: 0L)) return false
         val lifted = blocked.remove(k)
         meta.remove(k)
@@ -634,8 +721,8 @@ object CrossIslandRequestsStore {
         return unblocked
     }
 
-    internal fun listBlocked(blocked: Set<String>, meta: Map<String, BlockMeta>, ownUin: Int): List<Blocked> {
-        val pre = "$ownUin:"
+    internal fun listBlocked(blocked: Set<String>, meta: Map<String, BlockMeta>, owner: String): List<Blocked> {
+        val pre = "$owner:"
         return blocked.mapNotNull { k ->
             if (!k.startsWith(pre)) return@mapNotNull null
             val addr = k.removePrefix(pre)
@@ -650,18 +737,69 @@ object CrossIslandRequestsStore {
     internal fun stampLegacyMeta(
         blocked: Set<String>,
         meta: MutableMap<String, BlockMeta>,
-        ownUin: Int,
+        owner: String,
         contactAt: (uin: Int, host: String) -> Boolean,
         bare: Set<Int>,
     ): Boolean {
         var changed = false
-        for (b in listBlocked(blocked, meta, ownUin)) {
-            val k = reqKey(ownUin, b.uin, b.host)
+        for (b in listBlocked(blocked, meta, owner)) {
+            val k = blockKey(owner, b.uin, b.host)
             if (k in meta) continue
             meta[k] = BlockMeta(
                 at = 0L,
                 passContact = b.host.isNotEmpty() && b.uin !in bare && contactAt(b.uin, b.host),
             )
+            changed = true
+        }
+        return changed
+    }
+
+    /** A block row an older build keyed by the bare number. */
+    internal fun isLegacyBlockKey(k: String): Boolean {
+        val i = k.indexOf(':')
+        return i > 0 && k.substring(0, i).toIntOrNull() != null
+    }
+
+    /**
+     * Pure half of [migrateOwners]: copy every block, its metadata and its
+     * unblock time keyed by a bare number to each account in [owners] (id ->
+     * its number, null for one holding none) that holds that number and is not
+     * in [done]. Two accounts here with that number both get it: which one
+     * made it cannot be told, and a block must never be lifted by a migration.
+     * A row the account already has in its own key wins. Every account looked
+     * at goes into [done]. [complete] (every account on the device could be
+     * read): the rows keyed by number go, so no account added later inherits
+     * them. Returns true when anything changed.
+     */
+    internal fun migrateLegacyOwners(
+        blocked: MutableSet<String>,
+        meta: MutableMap<String, BlockMeta>,
+        unblocked: MutableMap<String, Long>,
+        owners: Map<String, Int?>,
+        done: MutableSet<String>,
+        complete: Boolean,
+    ): Boolean {
+        var changed = false
+        val legacy = (blocked + meta.keys + unblocked.keys).filterTo(LinkedHashSet()) { isLegacyBlockKey(it) }
+        for (k in legacy) {
+            val n = k.substringBefore(':').toInt()
+            val rest = k.substringAfter(':')
+            for ((id, held) in owners) {
+                if (held != n || id in done) continue
+                val nk = "$id:$rest"
+                if (nk in blocked || nk in unblocked) continue
+                if (k in blocked) {
+                    blocked.add(nk)
+                    meta[k]?.let { meta[nk] = it }
+                    changed = true
+                }
+                unblocked[k]?.let { unblocked[nk] = it; changed = true }
+            }
+        }
+        if (done.addAll(owners.keys)) changed = true
+        if (complete && legacy.isNotEmpty()) {
+            blocked.removeAll(legacy)
+            legacy.forEach { meta.remove(it); unblocked.remove(it) }
             changed = true
         }
         return changed

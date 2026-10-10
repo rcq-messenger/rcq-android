@@ -865,7 +865,7 @@ object LocalStores {
         val nextKeys = if (on) _blockedKeys + canon.map { pre + it } else _blockedKeys.filterTo(HashSet()) { !it.startsWith(pre) }
         // One entry per number: the latest answer, and which way it went (the
         // sign). Never 0, which would read as neither.
-        val times = blockTimes().apply { put(uin, if (on) maxOf(at, 1L) else -maxOf(at, 1L)) }
+        val times = blockTimes().apply { put(uin, app.rcq.android.net.BlockRules.stampAnswer(get(uin), on, at)) }
         _blocked.value = if (on) _blocked.value + uin else _blocked.value - uin
         _blockedKeys = nextKeys
         prefs.edit()
@@ -875,17 +875,40 @@ object LocalStores {
             .apply()
     }
 
-    /** A key [uin] was seen signing with while blocked here, see
-     *  Session.ingest. Nothing happens unless they are blocked. */
+    /** A key [uin] is known to sign with while blocked here. Nothing happens
+     *  unless they are blocked.
+     *
+     *  [fromRow]: the key was read off an incoming row (Session.ingest). A
+     *  v=1 row's key is whatever its sender put in it, and the sender's number
+     *  is not bound to it, so a stream of rows each under a fresh key would
+     *  grow this set, and the prefs file rewritten on every add, without
+     *  bound. Those stop at [MAX_ROW_KEYS_PER_BLOCK] per number. Nothing is
+     *  ever evicted to make room: a forger flooding fresh keys as [uin] would
+     *  push out the person's real key, and with it the block of them on every
+     *  other island. Keys from a trusted source (the contact row, the island's
+     *  user info, the one-time sort) are not limited. */
     @Synchronized
-    fun rememberBlockedKey(uin: Int, key: String) {
+    fun rememberBlockedKey(uin: Int, key: String, fromRow: Boolean = false) {
         if (acct == null || uin !in _blocked.value) return
         val canon = app.rcq.android.net.CrossIslandRequestsStore.canonicalKey(key) ?: return
-        val e = "$uin:$canon"
-        if (e in _blockedKeys) return
-        _blockedKeys = _blockedKeys + e
-        prefs.edit().putStringSet(pk(K_BLOCKED_KEYS), _blockedKeys).apply()
+        val next = withBlockedKey(_blockedKeys, uin, canon, fromRow) ?: return
+        _blockedKeys = next
+        prefs.edit().putStringSet(pk(K_BLOCKED_KEYS), next).apply()
     }
+
+    /** Pure half of [rememberBlockedKey]: [entries] with "uin:key" added, or
+     *  null when nothing is to be written. */
+    internal fun withBlockedKey(entries: Set<String>, uin: Int, canonKey: String, fromRow: Boolean): Set<String>? {
+        val pre = "$uin:"
+        val e = pre + canonKey
+        if (e in entries) return null
+        if (fromRow && entries.count { it.startsWith(pre) } >= MAX_ROW_KEYS_PER_BLOCK) return null
+        return entries + e
+    }
+
+    /** At most this many keys learned off incoming rows per blocked number,
+     *  see [rememberBlockedKey]. One person rarely has more than a couple. */
+    internal const val MAX_ROW_KEYS_PER_BLOCK = 8
 
     /**
      * Whether a block ([on]) or an unblock another device made at [at] is newer

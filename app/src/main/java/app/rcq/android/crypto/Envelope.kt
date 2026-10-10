@@ -227,12 +227,31 @@ sealed interface Envelope {
         /** When the answer was given, epoch ms; 0 from builds that do not
          *  send it. Orders a `block` against an `unblock` of the same address:
          *  a carbon the island serves again late must not undo a newer answer
-         *  (report 1064). */
+         *  (report 1064). Wire `ts`, the one name every client writes; read
+         *  from `at` as well, where the web put it in its first builds. A
+         *  reader takes 0 as "when it reached us", see
+         *  [app.rcq.android.net.BlockRules.ackTime]. */
         val ts: Long = 0L,
         /** On a `block`: the blocked person's signing keys (base64), so the
          *  other devices block the person and not only the address. */
         val keys: List<String> = emptyList(),
-    ) : Envelope
+        /** What a `block` or `unblock` names: null (or [CIACK_SCOPE_ADDRESS])
+         *  the address [uin]@[host]; [CIACK_SCOPE_KEY] only the signing key
+         *  [sk], for a request that used a contact's address under another
+         *  key. ⚠⚠ Such a block must never land on the address: that is the
+         *  real contact's, and blocking it silenced them. Any other value is
+         *  from a newer build and the act is ignored rather than guessed at.
+         *  The web's first builds sent `keyOnly: true` with the key in [keys];
+         *  that reads as [CIACK_SCOPE_KEY]. */
+        val scope: String? = null,
+        /** On a key-scoped act: the key it names, base64. */
+        val sk: String? = null,
+    ) : Envelope {
+        /** Names only a key, never the address, see [scope]. */
+        val keyScoped: Boolean get() = scope == CIACK_SCOPE_KEY
+        /** Names the address, as every act did before [scope]. */
+        val addressScoped: Boolean get() = scope == null || scope == CIACK_SCOPE_ADDRESS
+    }
 
     data class CiSrv(val host: String, val id: Int)
 
@@ -540,6 +559,8 @@ sealed interface Envelope {
             }
             if (ts > 0L) addProperty("ts", ts)
             if (keys.isNotEmpty()) add("keys", com.google.gson.JsonArray().apply { keys.forEach { add(it) } })
+            scope?.let { addProperty("scope", it) }
+            sk?.let { addProperty("sk", it) }
         }.toString().toByteArray(Charsets.UTF_8)
         is Carbon -> JsonObject().apply {
             addProperty("kind", "carbon")
@@ -683,6 +704,17 @@ sealed interface Envelope {
             return t to System.currentTimeMillis() / 1000
         }
 
+        /** [name] as a positive number, or null (absent, not a number, <= 0). */
+        private fun positiveLong(obj: JsonObject, name: String): Long? =
+            runCatching { obj.get(name)?.takeIf { it.isJsonPrimitive }?.asLong }.getOrNull()?.takeIf { it > 0L }
+
+        /** A `ciack`'s `keys`, non-blank strings, at most [MAX_CIACK_KEYS]. */
+        private fun ciackKeys(obj: JsonObject): List<String> =
+            obj.get("keys")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?.mapNotNull { e -> e.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() } }
+                ?.take(MAX_CIACK_KEYS)
+                .orEmpty()
+
         fun text(body: String, replyTo: Reply? = null, ttl: Int? = null, card: String? = null): Text {
             val (t, ts) = dying(ttl)
             return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts, card = card)
@@ -735,6 +767,11 @@ sealed interface Envelope {
         const val ACT_REQUEST = "request"
         const val ACT_ACCEPT = "accept"
         const val ACT_DECLINE = "decline"
+
+        /** [CiAck.scope]: the act names the address (also when absent). */
+        const val CIACK_SCOPE_ADDRESS = "address"
+        /** [CiAck.scope]: the act names only the key in [CiAck.sk]. */
+        const val CIACK_SCOPE_KEY = "key"
 
         /** At most this many keys are read off one `ciack` block: one person
          *  rarely has more than a couple, and the list is not a place to
@@ -965,11 +1002,19 @@ sealed interface Envelope {
                         val id = runCatching { s.get("id")?.takeIf { it.isJsonPrimitive }?.asInt }.getOrNull()
                         if (h.isNullOrBlank() || id == null || id <= 0) null else CiSrv(h, id)
                     },
-                    ts = runCatching { obj.get("ts")?.takeIf { it.isJsonPrimitive }?.asLong }.getOrNull()?.takeIf { it > 0L } ?: 0L,
-                    keys = obj.get("keys")?.takeIf { it.isJsonArray }?.asJsonArray
-                        ?.mapNotNull { e -> e.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() } }
-                        ?.take(MAX_CIACK_KEYS)
-                        .orEmpty(),
+                    ts = positiveLong(obj, "ts") ?: positiveLong(obj, "at") ?: 0L,
+                    keys = ciackKeys(obj),
+                    scope = obj.get("scope")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asString }.getOrNull() }
+                        ?.takeIf { it.isNotBlank() }
+                        ?: CIACK_SCOPE_KEY.takeIf {
+                            obj.get("keyOnly")?.takeIf { k -> k.isJsonPrimitive }?.let { k -> runCatching { k.asBoolean }.getOrNull() } == true
+                        },
+                    sk = obj.get("sk")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asString }.getOrNull() }
+                        ?.takeIf { it.isNotBlank() }
+                        // keyOnly from the web's first builds: the key rode in `keys`.
+                        ?: ciackKeys(obj).firstOrNull()?.takeIf {
+                            obj.get("keyOnly")?.takeIf { k -> k.isJsonPrimitive }?.let { k -> runCatching { k.asBoolean }.getOrNull() } == true
+                        },
                 )
                 "carbon" -> Carbon(
                     to = obj.get("to")?.asInt,

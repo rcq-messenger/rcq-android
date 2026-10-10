@@ -27,12 +27,33 @@ class GroupLinkKeyTest {
 
     // #990 step 2 review: the key is part of GroupRef, and `.distinct()` kept
     // the old and the new link of a reset room as two pin rows with one key.
-    @Test fun two_links_to_one_room_are_one_pin_row_the_first_one() {
+    // A pin edited after a reset reads "old ... new": the row takes the key of
+    // the last link, the one that still works, as the fallback map does.
+    @Test fun two_links_to_one_room_are_one_pin_row_with_the_last_key() {
         val refs = GroupLinkParser.parseAll(
             "old https://rcq.app/g/4101@is2.rcq.app?k=OldOldOld1 new https://rcq.app/g/4101@is2.rcq.app?k=NewNewNew1",
         )
         assertEquals(1, refs.size)
-        assertEquals("OldOldOld1", refs[0].k)
+        assertEquals("NewNewNew1", refs[0].k)
+        assertEquals("NewNewNew1", RoomLinkKeys.find(4101, listOf("is2.rcq.app")))
+    }
+
+    // A keyless copy after the keyed link does not take the key away.
+    @Test fun a_keyless_link_after_a_keyed_one_keeps_the_key() {
+        val refs = GroupLinkParser.parseAll(
+            "https://rcq.app/g/4102@is2.rcq.app?k=KeepKeep12 again https://rcq.app/g/4102@is2.rcq.app",
+        )
+        assertEquals(1, refs.size)
+        assertEquals("KeepKeep12", refs[0].k)
+    }
+
+    // Rows keep the order in which their rooms first appear.
+    @Test fun rows_stay_in_first_appearance_order() {
+        val refs = GroupLinkParser.parseAll(
+            "https://rcq.app/g/1@a.rcq.app https://rcq.app/g/2@a.rcq.app https://rcq.app/g/1@a.rcq.app?k=LateLate12",
+        )
+        assertEquals(listOf(1, 2), refs.map { it.id })
+        assertEquals("LateLate12", refs[0].k)
     }
 
     // A bare link in a pin of a room on another island is THAT island's room:

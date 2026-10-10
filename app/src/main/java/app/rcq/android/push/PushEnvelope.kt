@@ -253,8 +253,10 @@ internal object PushEnvelope {
                 app.rcq.android.net.RelayConfigStore.frontHost.takeIf { it.isNotBlank() },
             ),
             bare = { it in bare },
-            entry = { u, h -> requests.blockAt(me, u, h) },
-            keys = LocalStores.blockedKeysFor(accountId) + requests.blockedKeys(me),
+            // The blocks are the account's, by id: another account here with
+            // the same number on another island has its own.
+            entry = { u, h -> requests.blockAt(accountId, u, h) },
+            keys = LocalStores.blockedKeysFor(accountId) + requests.blockedKeys(accountId),
             pinnedAt = { u, h -> CrossIslandStore.getFor(ctx, accountId, u, h)?.signingKey },
             bareAnyIsland = !LocalStores.blocksScopedFor(accountId),
         )

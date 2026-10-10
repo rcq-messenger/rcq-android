@@ -129,9 +129,9 @@ class BlockStoreTest {
     }
 
     @Test fun the_list_is_one_account_and_every_island() {
-        val blocked = setOf("100:7@a.example", "100:8@", "200:9@a.example", "100:junk", "100:x@b")
-        val meta = mapOf("100:7@a.example" to CrossIslandRequestsStore.BlockMeta(at = 5))
-        val out = s.listBlocked(blocked, meta, 100)
+        val blocked = setOf("acct-A:7@a.example", "acct-A:8@", "acct-B:9@a.example", "acct-A:junk", "acct-A:x@b")
+        val meta = mapOf("acct-A:7@a.example" to CrossIslandRequestsStore.BlockMeta(at = 5))
+        val out = s.listBlocked(blocked, meta, "acct-A")
         assertEquals(listOf(8 to "", 7 to "a.example"), out.map { it.uin to it.host })
         assertEquals(5L, out[1].meta.at)
         // A block with no metadata reads as a plain one.
@@ -139,23 +139,126 @@ class BlockStoreTest {
     }
 
     @Test fun legacy_blocks_are_stamped_and_nothing_is_lifted() {
-        val blocked = setOf("100:7@a.example", "100:8@b.example", "100:9@c.example", "100:10@", "100:11@d.example")
-        val meta = mutableMapOf("100:11@d.example" to CrossIslandRequestsStore.BlockMeta(at = 3))
+        val blocked = setOf("acct-A:7@a.example", "acct-A:8@b.example", "acct-A:9@c.example", "acct-A:10@", "acct-A:11@d.example")
+        val meta = mutableMapOf("acct-A:11@d.example" to CrossIslandRequestsStore.BlockMeta(at = 3))
         val contacts = setOf(7 to "a.example", 8 to "b.example", 10 to "")
-        val changed = s.stampLegacyMeta(blocked, meta, 100, { u, h -> (u to h) in contacts }, bare = setOf(8))
+        val changed = s.stampLegacyMeta(blocked, meta, "acct-A", { u, h -> (u to h) in contacts }, bare = setOf(8))
         assertTrue(changed)
         // Added back as a contact, and nothing bare in the way: its messages
         // flowed before this build, and keep flowing.
-        assertTrue(meta.getValue("100:7@a.example").passContact)
+        assertTrue(meta.getValue("acct-A:7@a.example").passContact)
         // The bare number dropped everything from it: still blocked.
-        assertFalse(meta.getValue("100:8@b.example").passContact)
+        assertFalse(meta.getValue("acct-A:8@b.example").passContact)
         // Not a contact: blocked as before.
-        assertFalse(meta.getValue("100:9@c.example").passContact)
+        assertFalse(meta.getValue("acct-A:9@c.example").passContact)
         // Our own island's stranger: no gate there to have let them through.
-        assertFalse(meta.getValue("100:10@").passContact)
+        assertFalse(meta.getValue("acct-A:10@").passContact)
         // Already stamped: untouched.
-        assertEquals(CrossIslandRequestsStore.BlockMeta(at = 3), meta.getValue("100:11@d.example"))
-        assertFalse(s.stampLegacyMeta(blocked, meta, 100, { _, _ -> true }, bare = emptySet()))
+        assertEquals(CrossIslandRequestsStore.BlockMeta(at = 3), meta.getValue("acct-A:11@d.example"))
+        assertFalse(s.stampLegacyMeta(blocked, meta, "acct-A", { _, _ -> true }, bare = emptySet()))
+    }
+
+    // Two accounts here hold 1234, on rcq.app and on is2. A's block of N@is2
+    // (filed under is2, another island for A) is not B's: for B is2 is home.
+    @Test fun two_accounts_with_one_number_keep_their_own_blocks() {
+        val blocked = setOf("acct-A:55@is2.rcq.app")
+        val meta = mapOf("acct-A:55@is2.rcq.app" to CrossIslandRequestsStore.BlockMeta(at = 5, keys = listOf(key(1))))
+        assertEquals(1, s.listBlocked(blocked, meta, "acct-A").size)
+        assertTrue(s.listBlocked(blocked, meta, "acct-B").isEmpty())
+    }
+
+    @Test fun at_the_same_time_the_state_here_stays() {
+        val st = State()
+        st.block("A:7@a.example", 10, local = true)
+        // An unblock at the very time of the block: the block stays.
+        assertFalse(st.unblock("A:7@a.example", 10, local = false))
+        assertTrue("A:7@a.example" in st.blocked)
+        st.unblock("A:7@a.example", 20, local = true)
+        // A block at the very time of the unblock: stays unblocked.
+        assertFalse(st.block("A:7@a.example", 20, local = false))
+        assertTrue(st.blocked.isEmpty())
+    }
+
+    // A ciack with no time of its own comes in at its deposit time, and is
+    // still the timeless echo of a legacy block as far as passContact goes.
+    @Test fun a_block_timed_by_its_deposit_keeps_what_a_legacy_block_let_through() {
+        val k = "A:7@a.example"
+        val st = State(
+            blocked = linkedSetOf(k),
+            meta = linkedMapOf(k to CrossIslandRequestsStore.BlockMeta(passContact = true)),
+        )
+        assertTrue(s.applyBlock(st.blocked, st.meta, st.unblocked, k, emptyList(), 500, local = false, timeless = true))
+        assertTrue(st.meta.getValue(k).passContact)
+        assertEquals(500L, st.meta.getValue(k).at)
+        // One that carries its own time is a block.
+        st.block(k, 600, local = false)
+        assertFalse(st.meta.getValue(k).passContact)
+    }
+
+    @Test fun rows_keyed_by_number_are_told_apart() {
+        assertTrue(s.isLegacyBlockKey("1234:7@a.example"))
+        assertTrue(s.isLegacyBlockKey("1234:7@"))
+        assertFalse(s.isLegacyBlockKey("8f3c1a64-2d5b-4e07-9a18-c6b0d7e42f95:7@a.example"))
+        assertFalse(s.isLegacyBlockKey("acct-A:7@a.example"))
+        assertFalse(s.isLegacyBlockKey(":7@a.example"))
+        assertFalse(s.isLegacyBlockKey("nothing"))
+    }
+
+    // Builds before this one keyed blocks by the number. Every account here
+    // holding it gets a copy (which one made it cannot be told, and nothing
+    // may be lifted by a migration); one with another number gets none.
+    @Test fun blocks_keyed_by_number_go_to_every_account_holding_it() {
+        val blocked = linkedSetOf("1234:55@is2.rcq.app", "1234:9@", "777:3@x.example")
+        val meta = linkedMapOf(
+            "1234:55@is2.rcq.app" to CrossIslandRequestsStore.BlockMeta(at = 5, keys = listOf(key(1))),
+        )
+        val unblocked = linkedMapOf("1234:8@is3.rcq.app" to 40L)
+        val done = mutableSetOf<String>()
+        val owners = mapOf("acct-A" to 1234, "acct-B" to 1234, "acct-C" to 4321, "acct-D" to null)
+        assertTrue(s.migrateLegacyOwners(blocked, meta, unblocked, owners, done, complete = true))
+        for (o in listOf("acct-A", "acct-B")) {
+            assertTrue("$o:55@is2.rcq.app" in blocked)
+            assertTrue("$o:9@" in blocked)
+            assertEquals(5L, meta.getValue("$o:55@is2.rcq.app").at)
+            assertEquals(listOf(key(1)), meta.getValue("$o:55@is2.rcq.app").keys)
+            assertEquals(40L, unblocked["$o:8@is3.rcq.app"])
+        }
+        assertTrue(blocked.none { it.startsWith("acct-C:") || it.startsWith("acct-D:") })
+        // Complete: nothing keyed by number is left for an account added later.
+        assertTrue(blocked.none { s.isLegacyBlockKey(it) })
+        assertTrue(meta.keys.none { s.isLegacyBlockKey(it) })
+        assertTrue(unblocked.keys.none { s.isLegacyBlockKey(it) })
+        assertEquals(setOf("acct-A", "acct-B", "acct-C", "acct-D"), done)
+    }
+
+    // An account that could not be read keeps the rows keyed by number for a
+    // later try, and the accounts already done are not copied to again: a
+    // block they lifted since must not come back.
+    @Test fun an_unreadable_account_keeps_the_old_rows_for_a_later_try() {
+        val blocked = linkedSetOf("1234:55@is2.rcq.app")
+        val meta = linkedMapOf<String, CrossIslandRequestsStore.BlockMeta>()
+        val unblocked = linkedMapOf<String, Long>()
+        val done = mutableSetOf<String>()
+        s.migrateLegacyOwners(blocked, meta, unblocked, mapOf("acct-A" to 1234), done, complete = false)
+        assertTrue("1234:55@is2.rcq.app" in blocked)
+        assertTrue("acct-A:55@is2.rcq.app" in blocked)
+        // A lifts it, and the remembered unblock is pruned in time.
+        blocked.remove("acct-A:55@is2.rcq.app")
+        // The next try: B is readable now, A is done.
+        s.migrateLegacyOwners(blocked, meta, unblocked, mapOf("acct-A" to 1234, "acct-B" to 1234), done, complete = true)
+        assertFalse("acct-A:55@is2.rcq.app" in blocked)
+        assertTrue("acct-B:55@is2.rcq.app" in blocked)
+        assertFalse("1234:55@is2.rcq.app" in blocked)
+    }
+
+    // A row the account already has under its own key wins over the copy.
+    @Test fun an_accounts_own_row_wins_over_the_old_one() {
+        val blocked = linkedSetOf("1234:55@is2.rcq.app")
+        val meta = linkedMapOf("1234:55@is2.rcq.app" to CrossIslandRequestsStore.BlockMeta(at = 5))
+        val unblocked = linkedMapOf("acct-A:55@is2.rcq.app" to 50L)
+        s.migrateLegacyOwners(blocked, meta, unblocked, mapOf("acct-A" to 1234), mutableSetOf(), complete = true)
+        assertFalse("acct-A:55@is2.rcq.app" in blocked)
+        assertEquals(50L, unblocked["acct-A:55@is2.rcq.app"])
     }
 
     @Test fun one_spelling_per_key() {

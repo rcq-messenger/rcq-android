@@ -145,4 +145,57 @@ class BlockRulesTest {
         assertTrue(BlockRules.answerLands(20, false, 30))
         assertTrue(BlockRules.answerLands(20, true, 0))
     }
+
+    // Cross-platform rule: strictly newer wins; at the same time the state
+    // here stays, so an echo of our own act at its own time changes nothing.
+    @Test fun at_the_same_time_the_state_here_stays() {
+        assertFalse(BlockRules.answerLands(-20, true, 20))
+        assertFalse(BlockRules.answerLands(20, false, 20))
+    }
+
+    // A ciack without a time (older iOS) counts from when it reached us: the
+    // deposit stamp, else now. Read as 0 it could never lift a block.
+    @Test fun a_timeless_ack_takes_the_deposit_time() {
+        assertEquals(30L, BlockRules.ackTime(30, 50, 99))
+        assertEquals(50L, BlockRules.ackTime(0, 50, 99))
+        assertEquals(99L, BlockRules.ackTime(0, null, 99))
+        assertEquals(99L, BlockRules.ackTime(0, 0, 99))
+        // Blocked here at 20; the web or the iPhone unblocked afterwards.
+        assertTrue(BlockRules.answerLands(20, false, BlockRules.ackTime(0, 40, 99)))
+        // A copy of an unblock deposited before the block here: still older.
+        assertFalse(BlockRules.answerLands(20, false, BlockRules.ackTime(0, 10, 99)))
+    }
+
+    // Blocked from the request row at 1 (ciack sent), unblocked at 2 (ciack
+    // sent), blocked again from the card at 3 (local). The island serves the
+    // block of 1 and then the unblock of 2 again: neither may move the time
+    // of the block at 3 back, or the unblock of 2 lifts it.
+    @Test fun a_late_older_answer_does_not_pull_the_time_back() {
+        var last: Long? = null
+        fun apply(on: Boolean, at: Long, local: Boolean = false) {
+            if (local || BlockRules.answerLands(last, on, at)) last = BlockRules.stampAnswer(last, on, at)
+        }
+        apply(true, 1, local = true)
+        apply(false, 2, local = true)
+        apply(true, 3, local = true)
+        apply(true, 1)
+        assertEquals(3L, last)
+        apply(false, 2)
+        assertEquals(3L, last)
+        // A newer unblock still lifts it.
+        apply(false, 4)
+        assertEquals(-4L, last)
+        // And a late older unblock does not pull the unblock time back.
+        apply(false, 2)
+        assertEquals(-4L, last)
+        assertFalse(BlockRules.answerLands(last, true, 3))
+    }
+
+    @Test fun a_stamp_is_never_zero() {
+        assertEquals(1L, BlockRules.stampAnswer(null, true, 0))
+        assertEquals(-1L, BlockRules.stampAnswer(null, false, 0))
+        // Changing direction takes the new time as it is.
+        assertEquals(-5L, BlockRules.stampAnswer(9, false, 5))
+        assertEquals(5L, BlockRules.stampAnswer(-9, true, 5))
+    }
 }
