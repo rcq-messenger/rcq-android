@@ -32,6 +32,7 @@ import app.rcq.android.model.OutgoingRequest
 import app.rcq.android.model.PendingRequest
 import app.rcq.android.model.RcqGroup
 import app.rcq.android.model.UserStatus
+import app.rcq.android.push.PushMuteSync
 import app.rcq.android.net.PendingPollSchedule
 import app.rcq.android.net.GuestPendingRequests
 import app.rcq.android.net.BurnCascade
@@ -1139,8 +1140,13 @@ class Session(context: Context) {
      *  (is_group_muted / should_push_for) SKIPS the APNs/UnifiedPush wake for a
      *  muted thread. Without this a muted group still woke the device — the mute
      *  was client-only and the server (which gates on muted_group_ids) never
-     *  knew. Observed off [LocalStores.muted] in [start], so it both reconciles
-     *  existing mutes once on launch and re-syncs on every mute/unmute. */
+     *  knew. Observed off [LocalStores.muted] in [start].
+     *
+     *  ⚠⚠ Only a change made on THIS device is sent, merged into the island's
+     *  current lists (report 1072). The collector replays the current set on
+     *  every start, unlock and switch, and this used to PUT it whole each time:
+     *  the island replaces its lists wholesale, so every launch here took back
+     *  whatever another install of the account had muted. See [PushMuteSync]. */
     private suspend fun syncPushMutes() {
         // In a migrated decoy session LocalStores is bound to the DECOY
         // namespace while `api` still carries the real account's token, so this
@@ -1148,14 +1154,32 @@ class Session(context: Context) {
         // server-side one — silently un-muting everything the user muted. The
         // collector that drives this is started by start() and outlives the lock.
         if (duressViewUp) return
-        if (!LocalStores.isAccountBound()) return
+        val ep = epochNow()
+        // The account and its set in one read: the set is only meaningful for
+        // the account it was loaded for, and `api` speaks for the active one.
+        val (acct, muted) = LocalStores.boundMutes() ?: return
+        if (acct != AccountManager.activeId.value) return
+        val local = PushMuteSync.syncable(muted)
+        val sent = LocalStores.pushMutesSent(acct)
+        if (PushMuteSync.upToDate(local, sent)) return
         runCatching {
-            api.setPushPreferences(
-                RcqApi.PushPrefsBody(
-                    muted_group_ids = LocalStores.mutedGroupIds(),
-                    muted_uins = LocalStores.mutedPeerUins(),
-                ),
-            )
+            // Fresh, not cached: what another install did since we last spoke
+            // is exactly what must survive this PUT. No answer, no PUT; the
+            // snapshot stays behind so the next start tries again.
+            val prefs = api.getPushPreferences()
+            if (!stillOn(ep)) return
+            val server = PushMuteSync.serverThreads(prefs.muted_uins, prefs.muted_group_ids)
+            val next = PushMuteSync.merge(local, sent, server)
+            if (next != server) {
+                api.setPushPreferences(
+                    RcqApi.PushPrefsBody(
+                        muted_group_ids = PushMuteSync.groupIdsOf(next),
+                        muted_uins = PushMuteSync.uinsOf(next),
+                    ),
+                )
+            }
+            if (!stillOn(ep)) return
+            LocalStores.setPushMutesSent(acct, local)
         }
     }
 

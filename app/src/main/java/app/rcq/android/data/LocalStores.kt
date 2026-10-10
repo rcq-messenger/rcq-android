@@ -705,8 +705,10 @@ object LocalStores {
         thread in _mentionsOnly.value -> NotifyMode.MENTIONS
         else -> NotifyMode.ALL
     }
+    /** Same monitor and single account read as [toggle], for the same reason. */
+    @Synchronized
     fun setNotifyMode(thread: String, mode: NotifyMode) {
-        if (acct == null) return
+        val a = acct ?: return
         val muted = _muted.value.toMutableSet()
         val mentions = _mentionsOnly.value.toMutableSet()
         muted.remove(thread); mentions.remove(thread)
@@ -717,24 +719,26 @@ object LocalStores {
         }
         _muted.value = muted; _mentionsOnly.value = mentions
         prefs.edit()
-            .putStringSet(pk(K_MUTE), muted)
-            .putStringSet(pk(K_MENTIONS), mentions)
+            .putStringSet("$a.$K_MUTE", muted)
+            .putStringSet("$a.$K_MENTIONS", mentions)
             .apply()
     }
 
-    /** Whether an account is bound (post-login). Guards the push-mute sync from
-     *  PUTting an empty set before the muted threads have loaded. */
-    fun isAccountBound(): Boolean = acct != null
+    /** The bound account and its fully muted threads, read together under the
+     *  [bindAccount] monitor, for the island's push-suppression lists
+     *  (Session.syncPushMutes). Null before any account is bound, so an empty
+     *  set that has not loaded yet is never taken for "nothing is muted". */
+    @Synchronized
+    fun boundMutes(): Pair<String, Set<String>>? = acct?.let { it to _muted.value }
 
-    /** Group ids the user has FULLY muted (NotifyMode.NONE), for the server
-     *  push-suppression sync (`muted_group_ids`). The server's `is_group_muted`
-     *  gate reads this so a muted group never wakes the device. */
-    fun mutedGroupIds(): List<Int> =
-        _muted.value.mapNotNull { if (it.startsWith("group:")) it.substringAfter("group:").toIntOrNull() else null }
+    /** The mute set this install last delivered to [accountId]'s island, or
+     *  null if it never has. See [app.rcq.android.push.PushMuteSync]. */
+    fun pushMutesSent(accountId: String): Set<String>? =
+        if (::prefs.isInitialized) prefs.getStringSet("$accountId.$K_PUSH_MUTES_SENT", null)?.toSet() else null
 
-    /** Peer uins the user has fully muted, for the server `muted_uins` sync. */
-    fun mutedPeerUins(): List<Int> =
-        _muted.value.mapNotNull { if (it.startsWith("peer:")) it.substringAfter("peer:").toIntOrNull() else null }
+    fun setPushMutesSent(accountId: String, threads: Set<String>) {
+        if (::prefs.isInitialized) prefs.edit().putStringSet("$accountId.$K_PUSH_MUTES_SENT", threads.toSet()).apply()
+    }
 
     /** Headless mute check: read [thread]'s NONE-mute flag straight from prefs for
      *  [accountId], WITHOUT binding the global per-account state. Safe to call from
@@ -1611,12 +1615,19 @@ object LocalStores {
         prefs.edit().putStringSet(pk(key), flow.value.toSet()).commit()
     }
 
+    /** ⚠ Under the [bindAccount] monitor, with the account read ONCE (report
+     *  1072). Unguarded, a mute tapped while the switcher rebound read account
+     *  A's set out of the flow and wrote it under account B's key (or the
+     *  reverse): B's mutes replaced by A's, which reads as "my notification
+     *  settings reset themselves". */
+    @Synchronized
     private fun toggle(flow: MutableStateFlow<Set<String>>, key: String, thread: String) {
-        if (acct == null) return
-        flow.value = if (thread in flow.value) flow.value - thread else flow.value + thread
+        val a = acct ?: return
+        val next = if (thread in flow.value) flow.value - thread else flow.value + thread
+        flow.value = next
         // StringSet must be copied — SharedPreferences keeps the same
         // instance otherwise and silently no-ops on the next read.
-        prefs.edit().putStringSet(pk(key), flow.value.toSet()).apply()
+        prefs.edit().putStringSet("$a.$key", next.toSet()).apply()
     }
 
     // ── multi-account migration / teardown ───────────────────────────
@@ -1871,7 +1882,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS,
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS, K_PUSH_MUTES_SENT,
             // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
             // the profile key of every contact, stored BY NUMBER, so leaving it
             // behind keeps a plaintext roster of the burned identity plus the
@@ -1890,6 +1901,7 @@ object LocalStores {
 
     private const val K_FAV = "favorites"
     private const val K_MUTE = "muted"
+    private const val K_PUSH_MUTES_SENT = "push_mutes_sent"
     private const val K_MENTIONS = "mentions_only"
     private const val K_ARCH = "archived"
     private const val K_LOCKED = "locked"

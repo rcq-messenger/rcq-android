@@ -1723,6 +1723,11 @@ class RcqApi(
         val contact_requests: Boolean = true,
         val trades_from_contacts: Boolean = true,
         val trades_from_strangers: Boolean = false,
+        // The island's current mute lists, read before a mute change is sent so
+        // what another install muted survives it (PushMuteSync). Null = the
+        // island did not send them.
+        val muted_uins: List<Int>? = null,
+        val muted_group_ids: List<Int>? = null,
     )
 
     data class PushPrefsBody(
