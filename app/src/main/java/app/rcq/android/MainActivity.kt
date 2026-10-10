@@ -580,9 +580,25 @@ private fun RcqApp(session: Session) {
     }
 
     // Clear every secondary screen so a switch/add lands on a clean Home.
-    fun resetNav() {
+    //
+    // [keepLinks]: only for a restore from onboarding. No account was on
+    // screen, so a link opened before it (a friend's invite, on a fresh
+    // install) was never shown to anybody and still waits for its first one.
+    fun resetNav(keepLinks: Boolean = false) {
         unlockedChatThread = null
         app.rcq.android.ui.SectionUnlocks.clear()
+        // ⚠ Not screens, but state that would act for whoever is signed in
+        // NEXT (report 1068): the Add sheet kept the previous account's search
+        // and the people it found, and a contact, room or web link still
+        // waiting for its confirm would add, join or link as the new account.
+        // A link dropped here can be tapped again; one confirmed from the
+        // wrong account cannot be taken back.
+        app.rcq.android.ui.AddSheet.close()
+        if (!keepLinks) {
+            ContactAddLink.pending.value = null
+            GroupJoinLink.pending.value = null
+            WebLinkRequest.pending.value = null
+        }
         chatTarget = null; groupInfoId = null; peerInfoUin = null
         showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false; showProfile = false; showManageAccounts = false; showNews = false; showRandom = false; showAudioRooms = false; showNearby = false; showRadio = false; showSites = false; sitesAddress = null; sitesPage = null; showRestore = false; showOutgoing = false
     }
@@ -698,6 +714,17 @@ private fun RcqApp(session: Session) {
         resetNav()
         state = UiState.Registering
         scope.launch { state = UiState.Registered(session.switchToAccount(id)) }
+    }
+
+    // The active account's trash in Manage accounts: the same hot swap as a
+    // switch, then the delete, and back to the list without it.
+    fun deleteActiveAccount(gone: String, next: String) {
+        resetNav()
+        state = UiState.Registering
+        scope.launch {
+            state = UiState.Registered(session.deleteActiveAccountLocal(gone, next))
+            showManageAccounts = true
+        }
     }
 
     // A tapped message notification: open the thread it points at, switching to
@@ -919,6 +946,24 @@ private fun RcqApp(session: Session) {
         // room SCREEN (not the room).
         LaunchedEffect(chatTarget) { if (chatTarget != null) showAudioRooms = false }
         val stateHolder = rememberSaveableStateHolder()
+        // ⚠ Saved state is per OWNER, not per screen (report 1068). Keyed
+        // "home" and "settings" alone, a switch handed the home list's scroll,
+        // the Settings search and the half-written bug report to the next
+        // account, and the panic PIN handed the real account's to the duress
+        // view, which keeps the same account id (see UiOwner). A new key also
+        // starts the screen over, so `remember` state on it (an open QR sheet,
+        // a half-made group) goes with the owner too.
+        val uiOwner = app.rcq.android.ui.currentUiOwner()
+        // Every key handed to the holder, so a wipe or a burn can take back
+        // what it keeps for screens that are not on display. Saveable like the
+        // holder's own map: a rotation must not forget keys the holder still
+        // remembers.
+        val screenKeys = androidx.compose.runtime.saveable.rememberSaveable { HashSet<String>() }
+        fun screenKey(name: String): String = "$name@$uiOwner".also { screenKeys += it }
+        fun forgetScreens() {
+            screenKeys.forEach { stateHolder.removeState(it) }
+            screenKeys.clear()
+        }
         // Everything below the minimised-call bar moves down by exactly its
         // height, so the bar never covers a screen's own header — which on the
         // chat is where Back lives.
@@ -941,8 +986,23 @@ private fun RcqApp(session: Session) {
             }
             s is UiState.Registered && locked -> app.rcq.android.ui.PinLockScreen(
                 session,
-                onWiped = { resetNav(); state = UiState.Onboarding },
-                onAccountChanged = { newUin -> resetNav(); state = UiState.Registered(newUin) },
+                // A wipe leaves nothing typed behind: not the drafts, not the
+                // saved screens (the bug report, the Settings search).
+                onWiped = {
+                    forgetScreens()
+                    app.rcq.android.ui.forgetChatDrafts()
+                    resetNav(); state = UiState.Onboarding
+                },
+                // Only the duress PIN changes the account here. The real
+                // account's drafts and saved screens are keyed by owner and
+                // would not show in the duress view anyway; they go so that
+                // nothing typed as the real person is still in memory behind
+                // it.
+                onAccountChanged = { newUin ->
+                    forgetScreens()
+                    app.rcq.android.ui.forgetChatDrafts()
+                    resetNav(); state = UiState.Registered(newUin)
+                },
             )
             // One-time decoy rebuild (panic-PIN): shown straight after a REAL
             // unlock when a pre-own-store decoy is still in the vault. Sits
@@ -957,7 +1017,7 @@ private fun RcqApp(session: Session) {
             !locked && showRestore -> app.rcq.android.ui.RestoreScreen(
                 session,
                 onBack = { showRestore = false },
-                onRestored = { uin -> resetNav(); state = UiState.Registered(uin) },
+                onRestored = { uin -> resetNav(keepLinks = s !is UiState.Registered); state = UiState.Registered(uin) },
             )
             // Another app shared something into RCQ: pick the thread before
             // anything else is drawn. It sits above the rest of the stack on
@@ -1089,7 +1149,7 @@ private fun RcqApp(session: Session) {
                     if (sectionLock != null && !chatLocked && unlockedChatThread != openKey) {
                         androidx.compose.runtime.SideEffect { unlockedChatThread = openKey }
                     }
-                    stateHolder.SaveableStateProvider("chat:$chatThread") {
+                    stateHolder.SaveableStateProvider(screenKey("chat:$chatThread")) {
                         ChatScreen(
                             session, target,
                             onBack = { chatTarget = null; unlockedChatThread = null },
@@ -1114,6 +1174,7 @@ private fun RcqApp(session: Session) {
                 onBack = { showManageAccounts = false },
                 onAddBySeed = { showManageAccounts = false; showRestore = true },
                 onSwitchAccount = { id -> showManageAccounts = false; switchAccount(id) },
+                onDeleteActive = { gone, next -> deleteActiveAccount(gone, next) },
             )
             s is UiState.Registered && showNews -> app.rcq.android.ui.NewsScreen(
                 session,
@@ -1145,11 +1206,19 @@ private fun RcqApp(session: Session) {
                     if (profileReturnsToRandom) { profileReturnsToRandom = false; showRandom = true }
                 },
             )
-            s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider("settings") {
+            s is UiState.Registered && showSettings -> stateHolder.SaveableStateProvider(screenKey("settings")) {
                 SettingsScreen(
                     session, s.uin,
                     onBack = { showSettings = false; settingsToDiagnostics = false; settingsToReports = false; settingsToDevices = false; settingsToBackupIsland = false },
-                    onBurned = { next -> resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding },
+                    // A burn leaves nothing typed behind either. Every owner's,
+                    // not only the burned one's: by now the next account is
+                    // active and the burned id is not at hand here, so the
+                    // other accounts' unsent drafts go with it.
+                    onBurned = { next ->
+                        forgetScreens()
+                        app.rcq.android.ui.forgetChatDrafts()
+                        resetNav(); state = next?.let { UiState.Registered(it) } ?: UiState.Onboarding
+                    },
                     onMigrated = { newUin -> chatTarget = null; state = UiState.Registered(newUin) },
                     openDiagnostics = settingsToDiagnostics,
                     openMyReports = settingsToReports,
@@ -1157,7 +1226,7 @@ private fun RcqApp(session: Session) {
                     openLinkedDevices = settingsToDevices,
                 )
             }
-            s is UiState.Registered -> stateHolder.SaveableStateProvider("home") {
+            s is UiState.Registered -> stateHolder.SaveableStateProvider(screenKey("home")) {
                 HomeScreen(
                     session, s.uin,
                     onOpenChat = { chatTarget = ChatTarget.Peer(it) },

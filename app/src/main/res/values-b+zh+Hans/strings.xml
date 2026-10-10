@@ -102,6 +102,7 @@
     <string name="restore_already_here">这台设备上已经有这个号码（%1$d）。不能再添加第二份副本：一个号码在服务器上只有一套密钥，两份副本会看不到彼此的群组消息。请从主屏幕切换到你已有的那个账号。</string>
     <string name="manage_accounts_delete_title">删除 %1$s？</string>
     <string name="manage_accounts_delete_body">从这台设备上移除这个账号和它的消息。账号仍留在服务器上，之后可以再次添加。</string>
+    <string name="manage_accounts_delete_active_body">从这台设备上移除这个账号和它的消息，并切换到 %1$s。账号仍留在服务器上，之后可以再次添加。</string>
     <!-- Home: misc -->
     <string name="home_create_group">创建群组</string>
     <string name="home_accept">接受</string>
@@ -160,10 +161,10 @@
     <string name="backup_island_row_uin">这个岛上的信箱：%1$d</string>
     <string name="home_via_backup">你的岛没有响应。消息正在通过备用岛送达。点按即可把它设为主岛，并从那里发送。</string>
     <string name="backup_island_row_uin_diff">这个岛上的信箱：%1$d（各个岛独立编号，所以和你的 %2$d 不一样）</string>
-    <string name="backup_island_auto_title">在另一个岛上保留备份</string>
-    <string name="backup_island_auto_sub">从公共目录里自动挑选岛</string>
+    <string name="backup_island_auto_title">在自动挑选的岛上保留备份</string>
+    <string name="backup_island_auto_sub">应用会从公开目录里挑选一个岛。你手动添加的岛不受这个开关影响。</string>
     <string name="backup_island_auto_busy">正在挑选岛…</string>
-    <string name="backup_island_advanced">高级：手动添加岛</string>
+    <string name="backup_island_manual_title">手动添加岛</string>
     <string name="backup_island_err_none">当前没有可用的备用岛。请稍后再试，或者手动添加一个。</string>
     <string name="backup_island_err_no_open">目录中暂时没有开放的岛可以接收备份。你可以在下方手动添加一个岛。</string>
     <string name="backup_island_err_entry">这个岛只允许持有入场代码的人进入。请换一个岛。</string>

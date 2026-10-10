@@ -55,14 +55,15 @@ import app.rcq.android.net.RcqApi
 /**
  * Local-only management of the account roster — the Android port of the iOS
  * `ManageAccountsSheet`. Lists every account on the device and lets the user
- * delete the ones they no longer want. The active account can't be deleted
- * here (switch to another first via the Home switcher); this keeps the data
- * flow simple — a delete only ever touches a non-mounted account's stores.
+ * delete the ones they no longer want. A delete only ever touches a
+ * non-mounted account's stores: deleting the ACTIVE account switches to
+ * another one first ([onDeleteActive]), and the last account on the device has
+ * no delete here at all (Burn account is the way out of that one).
  *
  * "Delete" is local: it wipes this device's per-account SecureStore /
- * MessageDb / VisitStore / LocalStores entries. The server-side UIN stays
- * alive; to fully burn it, switch to the account and use Burn account in
- * Privacy & Network.
+ * MessageDb / VisitStore / LocalStores entries and takes the account's push
+ * row off its island. The server-side UIN stays alive; to fully burn it,
+ * switch to the account and use Burn account in Privacy & Network.
  */
 @Composable
 internal fun ManageAccountsScreen(
@@ -70,6 +71,8 @@ internal fun ManageAccountsScreen(
     onBack: () -> Unit,
     onAddBySeed: () -> Unit = {},
     onSwitchAccount: (String) -> Unit = {},
+    /** Delete the active account (first id) after switching to the second. */
+    onDeleteActive: (String, String) -> Unit = { _, _ -> },
 ) {
     val c = RcqTheme.colors
     val context = LocalContext.current
@@ -199,12 +202,19 @@ internal fun ManageAccountsScreen(
                     // letters. A glyph is the same size in every language,
                     // which is the property the row needs.
                     if (isActive) {
-                        IconButton(onClick = { pendingDelete = account }) {
-                            Icon(
-                                Icons.Filled.DeleteOutline,
-                                stringResource(R.string.manage_accounts_delete),
-                                tint = Color(0xFFE5484D),
-                            )
+                        // Only with somewhere to go: the active account is
+                        // deleted by switching away from it first, and the last
+                        // one has no other account to switch to. This trash used
+                        // to sit here regardless, do nothing when confirmed, and
+                        // still forget the account's card (report 1066).
+                        if (sorted.size > 1) {
+                            IconButton(onClick = { pendingDelete = account }) {
+                                Icon(
+                                    Icons.Filled.DeleteOutline,
+                                    stringResource(R.string.manage_accounts_delete),
+                                    tint = Color(0xFFE5484D),
+                                )
+                            }
                         }
                     } else {
                         IconButton(onClick = { onSwitchAccount(account.id) }) {
@@ -258,24 +268,35 @@ internal fun ManageAccountsScreen(
     }
 
     pendingDelete?.let { account ->
-        val nick = SecureStore.peekNickname(context, account.id)
-            ?: cards[account.id]?.nickname
-            ?: (account.serverHost ?: RcqApi.DEFAULT_HOST)
+        fun nameOf(a: Account): String = SecureStore.peekNickname(context, a.id)
+            ?: cards[a.id]?.nickname
+            ?: (a.serverHost ?: RcqApi.DEFAULT_HOST)
+        val nick = nameOf(account)
+        // Deleting the account in front means landing on another first: the
+        // next one in the list, the same order the switcher shows. From the
+        // VISIBLE roster, so a legacy decoy can never switch into a hidden
+        // account (it is alone there, and so has no trash at all).
+        val next = if (account.id == activeId) sorted.firstOrNull { it.id != account.id } else null
         RcqAskSheet(
             onDismiss = { pendingDelete = null },
             title = stringResource(R.string.manage_accounts_delete_title, nick),
-            body = stringResource(R.string.manage_accounts_delete_body),
+            body = next?.let { stringResource(R.string.manage_accounts_delete_active_body, nameOf(it)) }
+                ?: stringResource(R.string.manage_accounts_delete_body),
             actions = listOf(
                 SheetAction(
                     label = stringResource(R.string.manage_accounts_delete),
                     destructive = true,
                     onClick = {
-                        session.deleteAccountLocal(account.id)
-                        // The face goes with the account. A cached picture and
-                        // nickname left behind after a LOCAL delete is exactly
-                        // the leftover the delete was asked to remove.
-                        AccountCards.forget(context, account.id)
                         pendingDelete = null
+                        // The face goes with the account, inside the delete and
+                        // only once the account is really gone. Forgetting it
+                        // here as well wiped the card of an active account the
+                        // delete had refused.
+                        when {
+                            account.id != activeId -> session.deleteAccountLocal(account.id)
+                            next != null -> onDeleteActive(account.id, next.id)
+                            else -> Unit
+                        }
                     },
                 ),
             ),

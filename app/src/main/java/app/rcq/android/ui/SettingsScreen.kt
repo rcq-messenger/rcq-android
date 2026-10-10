@@ -4094,9 +4094,6 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
     var error by remember { mutableStateOf<String?>(null) }
     val autoHomes = homes.filter { it.auto }
     val manualHomes = homes.filter { !it.auto }
-    // The manual block starts open only for self-hosters who already added an
-    // island by hand; everyone else just sees the toggle.
-    var advanced by remember { mutableStateOf(manualHomes.isNotEmpty()) }
 
     fun errorText(
         e: Throwable,
@@ -4202,11 +4199,8 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                         scope.launch {
                             runCatching { session.promoteBackupToPrimary(target.host) }
                                 .onSuccess {
-                                    // The old primary comes back as a MANUAL backup, and
-                                    // the block that lists those starts closed for anyone
-                                    // who never added one by hand: open it, or the island
-                                    // they just left is nowhere on screen.
-                                    advanced = true
+                                    // The old primary comes back as a MANUAL backup, in
+                                    // the manual list below, which is always on screen.
                                     Toast.makeText(
                                         context,
                                         context.getString(R.string.backup_island_promoted, target.host),
@@ -4260,13 +4254,9 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
                     runCatching {
                         if (on) session.enableAutoBackup() else session.disableAutoBackup()
                     }.onFailure {
+                        // #988: NO_OPEN_ISLAND sends the person to the manual
+                        // block "below"; it is drawn right under this sentence.
                         error = errorText(it)
-                        // #988: that sentence sends the person to the manual
-                        // block "below", so the block is open, and stays open
-                        // once they start typing there (which clears the error).
-                        if (app.rcq.android.net.BackupIslandPick.sentenceOf(it.message) ==
-                            app.rcq.android.net.BackupIslandPick.Sentence.NO_OPEN_ISLAND
-                        ) advanced = true
                     }
                     autoBusy = false
                 }
@@ -4308,17 +4298,18 @@ private fun BackupIslandScreen(session: Session, onPromoted: (Int) -> Unit, onBa
             }
             error?.let { Text(it, color = c.statusBusy, fontSize = 13.sp) }
 
-            // Manual host entry stays for self-hosters, tucked away. Never
-            // tucked away while the "no open island" sentence is on screen: it
-            // says "add an island by hand below", so below has to be there.
-            val manualOpen = advanced || error == stringResource(R.string.backup_island_err_no_open)
+            // The manual block, always on screen (report 1069). Folded under
+            // «Advanced», it hid the islands added by hand, and the old primary
+            // after «Make primary», until somebody thought to open it. ⚠ Right
+            // under the error line on purpose: the "no open island" sentence
+            // says "add an island by hand below", and this heading is that
+            // below.
             Text(
-                (if (manualOpen) "▾ " else "▸ ") + stringResource(R.string.backup_island_advanced),
+                stringResource(R.string.backup_island_manual_title),
                 color = c.textSecondary,
                 fontSize = 13.sp,
-                modifier = Modifier.clickable { advanced = !manualOpen },
             )
-            if (manualOpen) {
+            run { // the list, the field, the picker and the button
                 if (manualHomes.isNotEmpty()) {
                     SettingsGroup {
                         manualHomes.forEachIndexed { index, h ->

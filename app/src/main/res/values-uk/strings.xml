@@ -102,6 +102,7 @@
     <string name="restore_already_here">Цей номер уже є на цьому пристрої (%1$d). Другу копію додати не можна: на сервері номер тримає один набір ключів, тож дві копії перестали б бачити групові повідомлення одна одної. Перемкнися на акаунт, який у тебе вже є, з головного екрана.</string>
     <string name="manage_accounts_delete_title">Видалити %1$s?</string>
     <string name="manage_accounts_delete_body">Прибирає цей акаунт і його повідомлення з цього пристрою. Сам акаунт лишається на сервері, і його можна додати знову.</string>
+    <string name="manage_accounts_delete_active_body">Прибирає цей акаунт і його повідомлення з цього пристрою та перемикає на %1$s. Сам акаунт лишається на сервері, і його можна додати знову.</string>
     <!-- Home: misc -->
     <string name="home_create_group">Створити групу</string>
     <string name="home_accept">Прийняти</string>
@@ -160,10 +161,10 @@
     <string name="backup_island_row_uin">скринька на цьому острові: %1$d</string>
     <string name="home_via_backup">Твій острів не відповідає. Повідомлення приходять через резервний острів. Торкнись, щоб зробити його головним і писати з нього.</string>
     <string name="backup_island_row_uin_diff">скринька на цьому острові: %1$d (острови нумерують незалежно, тож номер не збігається з твоїм %2$d)</string>
-    <string name="backup_island_auto_title">Тримати резерв на іншому острові</string>
-    <string name="backup_island_auto_sub">Острів обирається автоматично з публічного каталогу</string>
+    <string name="backup_island_auto_title">Резерв на автоматично підібраному острові</string>
+    <string name="backup_island_auto_sub">Застосунок сам бере острів із публічного каталогу. Острови, додані вручну, цей перемикач не чіпає.</string>
     <string name="backup_island_auto_busy">Обираємо острів…</string>
-    <string name="backup_island_advanced">Додатково: додати острів вручну</string>
+    <string name="backup_island_manual_title">Додати острів вручну</string>
     <string name="backup_island_err_none">Зараз немає доступного резервного острова. Спробуй пізніше або додай вручну.</string>
     <string name="backup_island_err_no_open">Зараз жоден відкритий острів із каталогу не може прийняти резервну копію. Острів можна додати вручну нижче.</string>
     <string name="backup_island_err_entry">На цей острів пускають лише з кодом входу. Спробуй інший острів.</string>
