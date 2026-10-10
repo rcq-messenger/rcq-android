@@ -4554,6 +4554,11 @@ class Session(context: Context) {
         _groups.value = emptyList(); _groupMessages.value = emptyMap(); _devices.value = null
         memberNames.clear()
         activeRandomPeer = null; activeRandomPairId = null; _randomMessages.value = emptyList(); _random.value = RandomState.Idle
+        // No account is left, so nothing may stay bound to the one just erased:
+        // a write before the next sign-in would land in its slots and leave a
+        // trace the wipe promised not to. The next Activity recreate used to
+        // fix this by accident; it no longer rebinds (see StoreBinding).
+        bindPerAccountStores(null)
     }
 
     /** Every roster account's home island and session token, copied into
@@ -15728,6 +15733,11 @@ class Session(context: Context) {
 
         fun obtain(context: Context): Session =
             instance ?: synchronized(this) { instance ?: Session(context).also { instance = it } }
+
+        /** Whether this process already has its Session. Once it does, the
+         *  Session owns which account the per-account stores are bound to
+         *  (see [app.rcq.android.data.StoreBinding]). */
+        val isBuilt: Boolean get() = instance != null
 
         /** How long the socket must stay down before the route ladder is walked
          *  again. Longer than the socket's own max backoff (30s) so ordinary

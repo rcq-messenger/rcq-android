@@ -335,9 +335,21 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         // Account[0]) before binding the active account's per-account stores
         // and building the session against it.
         app.rcq.android.data.AccountManager.init(applicationContext)
-        val activeAccountId = app.rcq.android.data.AccountManager.activeId.value
-        LocalStores.bindAccount(activeAccountId)
-        app.rcq.android.data.VisitStore.bindAccount(activeAccountId)
+        // Only on the first onCreate of the process. A recreate (language,
+        // locale or font change, a relaunch over a live process) finds the
+        // Session already holding the binding, possibly on the decoy namespace,
+        // and moving it back to the active account here put the REAL account's
+        // stores under the duress view (report 1072). See [StoreBinding].
+        val binding = app.rcq.android.data.StoreBinding.onActivityCreate(
+            sessionBuilt = Session.isBuilt,
+            duressViewUp = app.rcq.android.security.DuressGate.isActive ||
+                app.rcq.android.data.AccountManager.decoySession.value,
+            activeId = app.rcq.android.data.AccountManager.activeId.value,
+        )
+        if (binding is app.rcq.android.data.StoreBinding.OnCreate.Bind) {
+            LocalStores.bindAccount(binding.accountId)
+            app.rcq.android.data.VisitStore.bindAccount(binding.accountId)
+        }
         // The process's one Session, not a new one per Activity: see
         // [Session.obtain] for the two-sockets-per-account fight the per-
         // Activity build produced whenever the process outlived the screen.
