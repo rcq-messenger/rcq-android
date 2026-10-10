@@ -11559,6 +11559,19 @@ class Session(context: Context) {
                     return@runCatching
                 }
             }
+            // Report 1072, cause 1: a message from somebody we file, past every
+            // gate. Its wake could not say who wrote, so a muted chat rang; the
+            // verdict is given here, where the sender is finally known. Muted:
+            // the wake's banner is taken back (and a held alert never sounds).
+            // Otherwise an alert held for this sounds now. Own carbons were
+            // settled above with the control kinds.
+            if (dec.senderUin != meUin && app.rcq.android.push.PushEnvelope.announces(appCtx, dec.envelope)) {
+                app.rcq.android.push.Push.noteOpenedMessage(
+                    appCtx,
+                    payloadB64,
+                    rings = LocalStores.notifyMode(LocalStores.peerThread(dec.senderUin)) == LocalStores.NotifyMode.ALL,
+                )
+            }
             // ⚠ No clearRemoved here any more (#1055 review). Nothing hides a
             // thread by that list now, and clearing it for every row that got
             // this far let an accepted contact on ANOTHER island undo the
@@ -15715,6 +15728,15 @@ class Session(context: Context) {
      *  after the next background/foreground flip (#732, #830). Throttled:
      *  a burst of pushes for one conversation costs one drain. */
     private var lastPushDrain = 0L
+
+    /** Whether a message wake for [accountId] is one this session will open
+     *  in a moment: it is running, unlocked, not the duress view, and serving
+     *  exactly that account. The push path holds a sealed 1:1 wake's alert on
+     *  this (report 1072, [app.rcq.android.push.Push.holdsForDrain]); the
+     *  drain [pushSaysDrain] starts then gives the verdict in [ingest]. */
+    fun willDrainFor(accountId: String): Boolean =
+        started && !duressViewUp && !PanicPinService.isLocked && ::db.isInitialized &&
+            AccountManager.activeId.value == accountId
 
     fun pushSaysDrain() {
         if (!started || duressViewUp) return

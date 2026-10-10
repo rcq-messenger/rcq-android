@@ -747,6 +747,12 @@ object LocalStores {
     fun isMutedFor(accountId: String, thread: String): Boolean =
         ::prefs.isInitialized && prefs.getStringSet("$accountId.$K_MUTE", emptySet())!!.contains(thread)
 
+    /** Whether [accountId] has any 1:1 chat fully muted. Headless, like
+     *  [isMutedFor]: the push path asks it before it knows who wrote. */
+    fun hasMutedPeerFor(accountId: String): Boolean =
+        ::prefs.isInitialized &&
+            prefs.getStringSet("$accountId.$K_MUTE", emptySet())!!.any { it.startsWith("peer:") }
+
     /** Headless "mentions only" check (companion to [isMutedFor]): read [thread]'s
      *  mentions-only notify flag straight from prefs for [accountId], no account
      *  binding. The UnifiedPush service uses it to stay quiet for a mentions-only

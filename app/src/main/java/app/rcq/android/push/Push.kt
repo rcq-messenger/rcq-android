@@ -1615,6 +1615,20 @@ object Push {
         if (groupId == null && peerUin == null && str("notif_kind")?.startsWith("device_") != true) {
             AnonWakes.posted(str("env"))
         }
+        // A 1:1 we could not open, for an account that has muted somebody: the
+        // alert may wait for the session to open it (report 1072, cause 1).
+        val holdFor = str("env")?.takeIf {
+            holdsForDrain(
+                sealedDirect = envType == "message" && groupId == null && opened == null &&
+                    str("notif_kind") == null,
+                quiet = quiet,
+                accountMutesSomeone = acctId != null &&
+                    app.rcq.android.data.LocalStores.hasMutedPeerFor(acctId),
+                drainWillOpen = acctId != null &&
+                    app.rcq.android.Session.live?.willDrainFor(acctId) == true,
+                processStaysUp = savedDistributor(ctx) == ctx.packageName,
+            )
+        }
         post(
             ctx,
             title = title,
@@ -1625,6 +1639,7 @@ object Push {
             openReports = str("notif_kind") == "report_reply",
             openDevices = str("notif_kind")?.startsWith("device_") == true,
             forceQuiet = repeat,
+            holdFor = holdFor,
         )
     }
 
@@ -1666,6 +1681,9 @@ object Push {
         openReports: Boolean,
         openDevices: Boolean = false,
         forceQuiet: Boolean,
+        /** The sealed wake's `env`, when [showMessage] decided the alert waits
+         *  for the drain to open it ([holdsForDrain]). */
+        holdFor: String? = null,
     ) {
         // Distinct groups get their own notification, and so does each sender we
         // could identify. Wakes we could not open still collapse into one shared
@@ -1702,6 +1720,35 @@ object Push {
             ctx, id, tap,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // The app in front makes its own noise (in-app tone + banner), so a
+        // second, louder chime from the system on top of it is the "о-оу
+        // несколько раз, тихо и громко" report. The notification is still
+        // posted — silently — so the shade holds it once the user leaves.
+        // …but only for the account that IS in front. A wake addressed to a
+        // SECOND local account has no screen and no in-app tone of its own, so
+        // suppressing the system sound left it entirely silent: the message
+        // arrived, the shade filled up, and nothing ever made a noise ("пуш без
+        // звука, так и должно быть, когда на одном устройстве оба?").
+        //
+        // ⚠ "Another account" must mean a uin we POSITIVELY resolved and that
+        // differs — not "we could not tell". The old expression read
+        // `activeId?.let { store.uin } != toUin`, which is also true when there
+        // is no active account id yet, when the SecureStore has no uin, and on
+        // any headless start that raced AccountManager.init: the null on the
+        // left never equals the uin on the right. Every one of those cases
+        // un-muted the foreground path, so a message that had just played the
+        // in-app tone chimed a second time from the shade — one message, two
+        // sounds (#553).
+        val activeUin = runCatching {
+            AccountManager.activeId.value?.let { SecureStore(ctx, it).uin }
+        }.getOrNull()
+        val forAnotherAccount = toUin != null && activeUin != null && activeUin != toUin
+        val foregroundQuiet = app.rcq.android.RcqApp.foreground && !forAnotherAccount
+        // Honour the app's own sound switches. The channel carries our tone, so
+        // "App sounds: off" or "Message sounds: off" used to silence only half
+        // of the paths and the phone kept chiming.
+        val settingsQuiet = !app.rcq.android.data.LocalStores.soundMasterOn() ||
+            !app.rcq.android.data.LocalStores.soundMessagesOn()
         // Ring once per burst, not once per message. Reported: a night offline
         // then reconnect meant fifty wakes for fifty queued messages, so the
         // phone chimed fifty times for one conversation. The notification
@@ -1748,6 +1795,12 @@ object Push {
         val isDirect = groupId == null
         val now = android.os.SystemClock.elapsedRealtime()
         var supersedesAnon = false
+        // Asked to hold the alert for the drain ([holdFor], report 1072), and
+        // nothing else would silence it anyway. A held post stamps no clock:
+        // it has not alerted, and a stamp would make the alert it may still
+        // owe look like a duplicate of itself.
+        val holding = holdFor != null && !(forceQuiet || foregroundQuiet || settingsQuiet) &&
+            HeldWakes.hasRoom()
         val burstQuiet = synchronized(lastAlertAt) {
             val prev = lastAlertAt[id]
             // The clock belonging to the OTHER shape this same message could
@@ -1762,7 +1815,7 @@ object Push {
             // reverse would take down the better title in favour of the worse.
             supersedesAnon = crossWithin && peerUin != null && id != anonId
             val within = (prev != null && now - prev < BURST_WINDOW_MS) || crossWithin
-            if (!within) {
+            if (!within && !holding) {
                 lastAlertAt[id] = now
                 if (isDirect) lastDirectAlertAt = now
             }
@@ -1776,36 +1829,10 @@ object Push {
             runCatching { NotificationManagerCompat.from(ctx).cancel(anonId) }
             AnonWakes.cleared()
         }
-        // The app in front makes its own noise (in-app tone + banner), so a
-        // second, louder chime from the system on top of it is the "о-оу
-        // несколько раз, тихо и громко" report. The notification is still
-        // posted — silently — so the shade holds it once the user leaves.
-        // …but only for the account that IS in front. A wake addressed to a
-        // SECOND local account has no screen and no in-app tone of its own, so
-        // suppressing the system sound left it entirely silent: the message
-        // arrived, the shade filled up, and nothing ever made a noise ("пуш без
-        // звука, так и должно быть, когда на одном устройстве оба?").
-        //
-        // ⚠ "Another account" must mean a uin we POSITIVELY resolved and that
-        // differs — not "we could not tell". The old expression read
-        // `activeId?.let { store.uin } != toUin`, which is also true when there
-        // is no active account id yet, when the SecureStore has no uin, and on
-        // any headless start that raced AccountManager.init: the null on the
-        // left never equals the uin on the right. Every one of those cases
-        // un-muted the foreground path, so a message that had just played the
-        // in-app tone chimed a second time from the shade — one message, two
-        // sounds (#553).
-        val activeUin = runCatching {
-            AccountManager.activeId.value?.let { SecureStore(ctx, it).uin }
-        }.getOrNull()
-        val forAnotherAccount = toUin != null && activeUin != null && activeUin != toUin
-        val foregroundQuiet = app.rcq.android.RcqApp.foreground && !forAnotherAccount
-        // Honour the app's own sound switches. The channel carries our tone, so
-        // "App sounds: off" or "Message sounds: off" used to silence only half
-        // of the paths and the phone kept chiming.
-        val settingsQuiet = !app.rcq.android.data.LocalStores.soundMasterOn() ||
-            !app.rcq.android.data.LocalStores.soundMessagesOn()
-        val quiet = forceQuiet || burstQuiet || foregroundQuiet || settingsQuiet
+        // Inside a burst window the alert is not owed at all, so there is
+        // nothing to hold: the post is quiet for the reason it always was.
+        val held = holding && !burstQuiet
+        val quiet = forceQuiet || burstQuiet || foregroundQuiet || settingsQuiet || held
         // The volume slider, on the half of the tone it never used to reach
         // (#978). A channel's loudness is Android's and cannot be scaled, so
         // since v3 the channel's own sound is silence and the tone is ours to
@@ -1882,6 +1909,13 @@ object Push {
                 app.rcq.android.media.SoundService.soundMessageNotification(ctx)
             }
         }
+        // The alert this post held back is still owed, to the drain's verdict
+        // or to the clock, whichever comes first. See [HeldWakes].
+        if (posted && held) {
+            HeldWakes.hold(ctx, holdFor!!) {
+                post(ctx, title, body, groupId, peerUin, toUin, openReports, openDevices, forceQuiet = false)
+            }
+        }
     }
 
     /** Last time each notification id made a sound, for burst coalescing. */
@@ -1915,8 +1949,122 @@ object Push {
      *  works: a wake that lands after the drain already explained it is never
      *  posted ([showMessage] checks [AnonWakes.knownSilent] first). */
     fun noteSilentEnvelope(ctx: Context, envB64: String) {
+        // An alert held for this verdict is not owed after all (report 1072).
+        HeldWakes.take(envB64)
         if (AnonWakes.explained(envB64)) {
             runCatching { NotificationManagerCompat.from(ctx).cancel("dm".hashCode()) }
+        }
+    }
+
+    /** The drain (or the live socket) opened [envB64] and it is a message from
+     *  somebody this account files, about to be stored (report 1072, cause 1).
+     *
+     *  [rings] false (the 1:1 chat is muted): whatever its wake put in the
+     *  shade is taken back exactly as for a receipt ([noteSilentEnvelope]), and
+     *  a wake that arrives after this stays down. That covers the wakes that
+     *  already rang, too: with no session to wait for, the banner went up with
+     *  its sound, and this is the first moment anyone can tell it was a chat
+     *  the person had muted. [rings] true: an alert held for this verdict
+     *  sounds now, and anything else is left as it is. */
+    fun noteOpenedMessage(ctx: Context, envB64: String, rings: Boolean) {
+        if (!rings) {
+            noteSilentEnvelope(ctx, envB64)
+            return
+        }
+        HeldWakes.take(envB64)?.invoke()
+    }
+
+    /**
+     * Whether a wake's alert may wait for the drain (report 1072, cause 1).
+     *
+     * A sealed 1:1 wake (every v=2 envelope, which is the 1:1 default) cannot
+     * say who wrote, so the mute of that chat could never be consulted and a
+     * muted chat rang on every message that came by push. Only the session can
+     * open the envelope, and it does so a moment later, when [RcqPushService]
+     * asks it to drain. So, and only when all of this holds, the banner goes up
+     * silently and its alert waits for that verdict:
+     *
+     *  - [sealedDirect]: a 1:1 message we could not open. Groups carry their id
+     *    in the clear and are decided before this; an opened 1:1 already knows
+     *    its sender and was decided too.
+     *  - [quiet]: false. A locked or duress phone has no session to wait for.
+     *  - [accountMutesSomeone]: the account has at least one 1:1 chat muted.
+     *    With none, there is nothing the verdict could change, and nobody pays
+     *    the wait.
+     *  - [drainWillOpen]: a running, unlocked session serves exactly that
+     *    account. A sibling account's wake, a cold process or a PIN lock leave
+     *    nobody to open it, and the wake rings as it always has.
+     *  - [processStaysUp]: this process holds the push socket's foreground
+     *    service (our own distributor), so it is not frozen or reclaimed while
+     *    it waits. A wake handed over by another distributor app leaves us a
+     *    cached process the system may freeze in seconds, and a held alert in
+     *    a frozen process is a message that never makes a sound.
+     *
+     * The hold is bounded ([HeldWakes.HOLD_MS]) and ends in exactly one of: the
+     * alert now (any chat that rings), nothing (a muted chat, a receipt, a
+     * blocked sender), or the alert at the deadline (no verdict came). So a
+     * message that rings today never goes unheard; at worst it sounds a few
+     * seconds late.
+     */
+    internal fun holdsForDrain(
+        sealedDirect: Boolean,
+        quiet: Boolean,
+        accountMutesSomeone: Boolean,
+        drainWillOpen: Boolean,
+        processStaysUp: Boolean,
+    ): Boolean = sealedDirect && !quiet && accountMutesSomeone && drainWillOpen && processStaysUp
+
+    /** Alerts held back from sealed 1:1 wakes, by ciphertext, each waiting for
+     *  the drain's verdict or its deadline. See [holdsForDrain]. In memory on
+     *  purpose: a hold only exists while the process that will deliver its
+     *  alert is alive, and a CPU wake lock keeps the deadline honest while the
+     *  screen is off. */
+    internal object HeldWakes {
+        /** How long an alert waits for the drain before it sounds anyway. */
+        const val HOLD_MS = 6_000L
+        private const val CAP = 64
+
+        private class Held(val alert: () -> Unit, val deadline: Runnable)
+
+        private val held = HashMap<Int, Held>()
+        private val main by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+        private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+        @Synchronized fun hasRoom(): Boolean = held.size < CAP
+
+        @Synchronized fun hold(ctx: Context, envB64: String, alert: () -> Unit) {
+            val h = envB64.hashCode()
+            held.remove(h)?.let { main.removeCallbacks(it.deadline) }
+            val deadline = Runnable { take(envB64)?.invoke() }
+            held[h] = Held(alert, deadline)
+            keepAwake(ctx)
+            main.postDelayed(deadline, HOLD_MS)
+        }
+
+        /** The alert [envB64] still owes, off the clock; null when it owes none. */
+        @Synchronized fun take(envB64: String): (() -> Unit)? {
+            val e = held.remove(envB64.hashCode()) ?: return null
+            main.removeCallbacks(e.deadline)
+            if (held.isEmpty()) letSleep()
+            return e.alert
+        }
+
+        /** Without it a screen-off phone may sleep through the deadline, and the
+         *  alert it owes comes whenever the device next wakes, if at all. */
+        private fun keepAwake(ctx: Context) {
+            val lock = wakeLock ?: runCatching {
+                ctx.getSystemService(android.os.PowerManager::class.java)
+                    ?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "rcq:held-wake")
+                    ?.apply { setReferenceCounted(false) }
+            }.getOrNull()?.also { wakeLock = it } ?: return
+            // Re-armed by every hold, and timed, so a lock can never outlive the
+            // last deadline by more than a moment even if a release is missed.
+            runCatching { lock.acquire(HOLD_MS + 2_000L) }
+        }
+
+        private fun letSleep() {
+            val lock = wakeLock ?: return
+            runCatching { if (lock.isHeld) lock.release() }
         }
     }
 
