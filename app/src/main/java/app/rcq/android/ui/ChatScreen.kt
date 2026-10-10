@@ -82,6 +82,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Forward
 // Direction arrows for the call log. Auto-mirrored on purpose: "outgoing" is
 // the direction you read in, so it has to flip with the layout.
 import androidx.compose.material.icons.automirrored.filled.CallMade
@@ -95,6 +96,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
@@ -520,6 +522,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     /// for a lone message, which is what keeps "delete the whole batch" off
     /// the menu everywhere it would make no sense.
     var actionAlbum by remember { mutableStateOf<List<ChatMessage>?>(null) }
+    // Multi-select and forwarding (report 1063). All of it lives in
+    // ChatSelection.kt; this function only holds the hooks (ART limit, see
+    // MessageLongPressOverlay).
+    val selection = remember(threadKey) { ChatSelection() }
     // The composer emoticon panel. The state lives HERE rather than inside
     // Composer (where the draft stays) because the message LIST closes it now:
     // a tap on the list or the start of a scroll puts the panel away, iOS
@@ -2055,6 +2061,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                             // quote INTO. With the read-only strip gone (item 24)
                             // a swipe would raise a reply chip above nothing, and
                             // the chip's only way out is the little cross on it.
+                            SelectableRow(selection, listOf(m.id)) {
                             SwipeToReply(side = swipeSide, onReply = { if (canPost) startReply(m) }) {
                             MessageBubble(
                                 session, m,
@@ -2095,9 +2102,11 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                                 continued = row.continued,
                             )
                             }
+                            }
                         }
                     }
-                    is ChatRow.Album -> AlbumBubble(
+                    // An album is ticked as a whole, as on iOS.
+                    is ChatRow.Album -> SelectableRow(selection, row.items.map { it.id }) { AlbumBubble(
                         session, row.items,
                         senderName = if (isGroup && !row.items.first().fromMe && row.showSender) authorName(row.items.first()) else null,
                         senderBadge = if (isGroup && !row.items.first().fromMe && row.showSender) group?.memberBadge(row.items.first().senderUin ?: 0) else null,
@@ -2116,7 +2125,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                         replyAuthorOverride = if (row.replyMine) youLabel else null,
                         deletedQuoted = deletedQuoted,
                         onTapReply = onTapReply,
-                    )
+                    ) }
                 }
             }
         }
@@ -2383,7 +2392,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // and a tap did nothing (#964). A tap opens it now; the bar grows with
         // the text, and ChromeGrowthEffect keeps the newest message pinned.
         var replyStripOpen by remember(replyTarget?.id) { mutableStateOf(false) }
-        replyTarget?.let { rt ->
+        replyTarget?.takeUnless { selection.active }?.let { rt ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -2411,7 +2420,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // the absence of a composer already states, it never stops being true,
         // and it eats a row of the chat for ever. The missing composer is the
         // message.
-        if (canPost) {
+        // While selecting, the selection bar stands where the composer was,
+        // read-only rooms included (report 1063).
+        if (selection.active) ChatSelectionBar(session, selection, messages)
+        else if (canPost) {
             // A photo produces no row until its upload finishes, so without this
             // the screen is blank for the whole upload and the user cannot tell
             // a slow send from one that never started (#473). Sits directly above
@@ -2511,6 +2523,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // the last child of the chat root Box so it paints over everything here
     // (header, list, bottom chrome). The body lives in [MessageLongPressOverlay];
     // see its kdoc for why it must NOT be inlined back into this function.
+    ChatSelectionLayer(session, selection, messages, isSelf, group, ownUin) { wireAuthorName(it) }
     actionMsg?.let { m ->
         MessageLongPressOverlay(
             session = session,
@@ -2526,6 +2539,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             onSave = { saveMessageMedia(it) },
             onEdit = { editMsg = it },
             album = actionAlbum?.takeIf { batch -> batch.size > 1 && batch.any { it.id == m.id } },
+            onForward = { selection.forwarding = listOf(it) },
+            onSelect = { batch -> showEmoji = false; selection.enter(batch.map { it.id }) },
             onDismiss = { actionMsg = null; actionAlbum = null },
         )
     }
@@ -3404,7 +3419,7 @@ private fun sendRefusalText(context: android.content.Context, message: String?):
  *  /https?:\/\//i verbatim. Deliberately BROADER than the render-side
  *  [Emoticons.URL_RE] tail-trimming: for refusing a send, "contains a scheme
  *  anywhere" is the right question, where a URL ends is not. */
-private val HTTP_URL_GATE = Regex("https?://", RegexOption.IGNORE_CASE)
+internal val HTTP_URL_GATE = Regex("https?://", RegexOption.IGNORE_CASE)
 
 /** May the links in THIS row's text be tapped? True unless the room has links
  *  off for the reader ([linksOff] already folds in the reader's own
@@ -3557,6 +3572,10 @@ private fun MessageLongPressOverlay(
     /// The whole batch, when [m] is one tile of an album (#831). Null for a
     /// lone message.
     album: List<ChatMessage>? = null,
+    /// Report 1063: forward this one message, and start multi-select with it
+    /// (or with its whole album) ticked.
+    onForward: (ChatMessage) -> Unit = {},
+    onSelect: (List<ChatMessage>) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val c = RcqTheme.colors
@@ -3788,11 +3807,17 @@ private fun MessageLongPressOverlay(
                             },
                         )
                     }
+                    // Report 1063. Built out of line so this list does not
+                    // grow two more branches of its own (the ART note above).
+                    addAll(forwardSelectItems(session, m, album, onForward, onSelect, onDismiss))
                     // #739: a photo/video/file caption is the row's body, and the
                     // edit envelope replaces a body by id on every client - so
                     // captions have always been editable in the protocol, only
                     // this menu said no.
-                    if (m.fromMe && (m.kind == "text" || m.kind == "photo" || m.kind == "video" || m.kind == "file")) {
+                    // Not on a forward (report 1063): those are somebody else's
+                    // words under my name, and an edit would put mine in their
+                    // mouth on every screen that shows the label.
+                    if (m.fromMe && m.fwdName == null && (m.kind == "text" || m.kind == "photo" || m.kind == "video" || m.kind == "file")) {
                         add(MsgOverlayItem(stringResource(R.string.chat_edit), Icons.Filled.Edit) { onEdit(m); onDismiss() })
                     }
                     if (m.fromMe && m.state == DeliveryState.FAILED) {
@@ -3889,6 +3914,28 @@ private fun MessageLongPressOverlay(
                 }
             }
         }
+}
+
+/** Forward and Select for the message menu (report 1063). Forward only when
+ *  the message may go ([ForwardRules.forwardable]); Select for anything that
+ *  can be ticked, an album as a whole. */
+@Composable
+private fun forwardSelectItems(
+    session: Session,
+    m: ChatMessage,
+    album: List<ChatMessage>?,
+    onForward: (ChatMessage) -> Unit,
+    onSelect: (List<ChatMessage>) -> Unit,
+    onDismiss: () -> Unit,
+): List<MsgOverlayItem> {
+    val canForward = remember(m.id) { ForwardRules.forwardable(m, session::mediaOnDevice, ::isInviteText) }
+    val forwardLabel = stringResource(R.string.chat_forward)
+    val selectLabel = stringResource(R.string.chat_select)
+    if (!ForwardRules.selectable(m)) return emptyList()
+    return buildList {
+        if (canForward) add(MsgOverlayItem(forwardLabel, Icons.AutoMirrored.Filled.Forward) { onForward(m); onDismiss() })
+        add(MsgOverlayItem(selectLabel, Icons.Filled.CheckCircle) { onSelect(album ?: listOf(m)); onDismiss() })
+    }
 }
 
 /** One row of the message long-press overlay's actions panel (L2.11): fixed
@@ -4889,6 +4936,11 @@ private fun AlbumBubble(session: Session, items: List<ChatMessage>, senderName: 
                 senderBadge?.let { BadgeMark(it, size = 11.dp) }
             }
         }
+        // A forwarded album came from one person, so one label names it
+        // (report 1063).
+        items.firstNotNullOfOrNull { it.fwdName }?.let {
+            ForwardedLabel(it, Modifier.padding(start = 4.dp, bottom = 2.dp), pill = onWallpaper)
+        }
         // Like the caption below: the quote belongs to the item that carries
         // it (the first one sent, #1048), and names the batch as a whole.
         items.firstOrNull { it.replyToSnippet != null }?.let { q ->
@@ -5239,6 +5291,12 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                 senderBadge?.let { BadgeMark(it, size = 11.dp) }
             }
         }
+        // "Forwarded from" (report 1063): above the media, under the name,
+        // on the wallpaper plate the time below gets. A text bubble draws it
+        // inside itself instead, further down.
+        if (!isPlainText) m.fwdName?.let {
+            ForwardedLabel(it, Modifier.padding(start = 4.dp, bottom = 2.dp), pill = onWallpaper)
+        }
         if (!isPlainText && groupLinkId == null && m.replyToSnippet != null) {
             MediaReplyQuote(m, replyAuthorOverride, replyTargetDeleted, onTapReply, mediaBubbleMaxW())
         }
@@ -5290,6 +5348,7 @@ private fun MessageBubble(session: Session, m: ChatMessage, senderName: String?,
                         senderBadge?.let { BadgeMark(it, size = 12.dp) }
                     }
                 }
+                m.fwdName?.let { ForwardedLabel(it, Modifier.padding(bottom = 2.dp)) }
                 if (m.replyToSnippet != null) {
                     ReplyQuote(m, replyAuthorOverride, replyTargetDeleted, onTapReply, Modifier.padding(bottom = 4.dp))
                 }

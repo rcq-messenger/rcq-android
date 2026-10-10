@@ -69,11 +69,14 @@
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">Você já tem um contato com o número %1$d em outra ilha. A conversa continua sendo guardada só pelo número, então um segundo %1$d dividiria esse histórico. Não foi adicionado.</string>
     <string name="share_to_title">Enviar para…</string>
+    <string name="chat_forward_title">Encaminhar para…</string>
+    <string name="chat_forwarded_to">Encaminhado para %1$s</string>
     <string name="share_to_search">Buscar conversas</string>
     <string name="share_to_empty">Nenhuma conversa para enviar ainda.</string>
     <string name="chat_media_send_failed">Não foi possível enviar. Verifique a conexão e tente de novo.</string>
     <string name="share_to_unreadable">Não foi possível ler o que foi compartilhado. Tente enviar de novo pelo outro app.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d arquivo</item><item quantity="other">%1$d arquivos</item></plurals>
+    <plurals name="chat_forward_summary"><item quantity="one">%1$d mensagem</item><item quantity="other">%1$d mensagens</item></plurals>
     <string name="outgoing_state_pending">Aguardando</string>
     <string name="outgoing_state_backup">Cópia de reserva, não vai chegar. Endereço real: %1$s</string>
     <string name="outgoing_state_declined">Recusada</string>
@@ -911,6 +914,8 @@
     <string name="chat_report">Denunciar</string>
     <string name="chat_reply">Responder</string>
     <string name="chat_copy">Copiar</string>
+    <string name="chat_forward">Encaminhar</string>
+    <string name="chat_select">Selecionar</string>
     <string name="media_share">Compartilhar</string>
     <string name="media_show_in_chat">Mostrar na conversa</string>
     <string name="media_save">Salvar</string>
@@ -932,6 +937,8 @@
     <string name="chat_deleted">Mensagem apagada</string>
     <string name="chat_edit_title">Editar mensagem</string>
     <string name="chat_edited">editada</string>
+    <string name="chat_forwarded_from">Encaminhado de %1$s</string>
+    <string name="chat_forward_someone">Alguém</string>
     <string name="chat_cross_island_pending">Esta pessoa está em outra ilha. Sua primeira mensagem chega lá como um pedido de conexão: nem mensagens nem chamadas passam até ela aceitar.</string>
     <string name="chat_peer_gone">Esta conta não existe mais: a ilha diz que não há tal número. As mensagens não vão ser entregues.</string>
     <string name="reactions_who_title">Reações</string>
@@ -1334,6 +1341,9 @@
     <string name="push_channel_upload_desc">Arquivos ainda sendo enviados enquanto o RCQ não está na tela.</string>
     <string name="chat_delete_album_all">Excluir todas as %1$d fotos para todos</string>
     <string name="chat_delete_album_me">Excluir todas as %1$d fotos para mim</string>
+    <string name="chat_selection_count">%1$d selecionadas</string>
+    <string name="chat_selection_delete_title">Excluir as mensagens selecionadas?</string>
+    <string name="chat_selection_too_many">Você pode selecionar até %1$d mensagens</string>
     <string name="last_seen_recently">há pouco</string>
     <string name="last_seen_today">hoje</string>
     <string name="last_seen_yesterday">ontem</string>

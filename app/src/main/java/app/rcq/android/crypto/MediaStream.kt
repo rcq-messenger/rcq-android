@@ -411,6 +411,48 @@ object MediaStream {
         }
     }.getOrDefault(false)
 
+    /**
+     * The container's plaintext as a stream, one VERIFIED chunk at a time.
+     *
+     * For re-sending a big file somewhere else (a forward, report 1063): the
+     * upload reads it a megabyte at a time and never holds the film. Unlike
+     * [Reader.readAt], which has to end the stream quietly because of what
+     * MediaDataSource can say, a chunk that fails its tag THROWS here: a
+     * forward of a tampered container fails as a send, rather than going out
+     * as a shorter file that looks like what was received.
+     */
+    fun openPlain(file: File, key: ByteArray): InputStream = object : InputStream() {
+        private val reader = Reader(file, key)
+        private var index = 0
+        private var chunk: ByteArray? = null
+        private var at = 0
+
+        private fun current(): ByteArray? {
+            val c = chunk
+            if (c != null && at < c.size) return c
+            if (index >= reader.chunkCount) return null
+            chunk = reader.chunk(index++)
+            at = 0
+            return chunk
+        }
+
+        override fun read(): Int {
+            val c = current() ?: return -1
+            return c[at++].toInt() and 0xFF
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            val c = current() ?: return -1
+            val n = minOf(len, c.size - at)
+            System.arraycopy(c, at, b, off, n)
+            at += n
+            return n
+        }
+
+        override fun close() = reader.close()
+    }
+
     /** An [android.media.MediaDataSource] that decrypts on demand, so playback
      *  never materialises the film: not in RAM, and not as a plaintext file a
      *  FileProvider would have to hand to another process.

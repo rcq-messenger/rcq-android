@@ -69,11 +69,14 @@
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">У тебе вже є контакт з номером %1$d на іншому острові. Розмова зберігається лише за номером, тож другий %1$d ділив би з ним ту саму історію. Не додано.</string>
     <string name="share_to_title">Надіслати…</string>
+    <string name="chat_forward_title">Переслати…</string>
+    <string name="chat_forwarded_to">Переслано: %1$s</string>
     <string name="share_to_search">Пошук чатів</string>
     <string name="share_to_empty">Поки немає чатів, куди надіслати.</string>
     <string name="chat_media_send_failed">Не вдалося надіслати. Перевір зв\'язок і спробуй ще раз.</string>
     <string name="share_to_unreadable">Не вдалося прочитати те, чим поділилися. Спробуй надіслати це з іншого застосунку ще раз.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d файл</item><item quantity="few">%1$d файли</item><item quantity="many">%1$d файлів</item><item quantity="other">%1$d файла</item></plurals>
+    <plurals name="chat_forward_summary"><item quantity="one">%1$d повідомлення</item><item quantity="few">%1$d повідомлення</item><item quantity="many">%1$d повідомлень</item><item quantity="other">%1$d повідомлення</item></plurals>
     <string name="outgoing_state_pending">Очікує</string>
     <string name="outgoing_state_backup">Резервна копія, запит не дійде. Їхня адреса: %1$s</string>
     <string name="outgoing_state_declined">Відхилено</string>
@@ -925,6 +928,8 @@
     <string name="chat_report">Поскаржитися</string>
     <string name="chat_reply">Відповісти</string>
     <string name="chat_copy">Копіювати</string>
+    <string name="chat_forward">Переслати</string>
+    <string name="chat_select">Вибрати</string>
     <string name="media_share">Поділитися</string>
     <string name="media_show_in_chat">Показати в чаті</string>
     <string name="media_save">Зберегти</string>
@@ -947,6 +952,8 @@
     <string name="chat_deleted">Повідомлення видалено</string>
     <string name="chat_edit_title">Редагування повідомлення</string>
     <string name="chat_edited">змінено</string>
+    <string name="chat_forwarded_from">Переслано від %1$s</string>
+    <string name="chat_forward_someone">Хтось</string>
     <string name="chat_cross_island_pending">Ця людина на іншому острові. Твоє перше повідомлення приходить туди як запит на листування: ні повідомлення, ні дзвінки не пройдуть, поки вона його не прийме.</string>
     <string name="chat_peer_gone">Цього акаунта більше немає: острів каже, що такого номера в нього немає. Повідомлення не доставлятимуться.</string>
     <string name="reactions_who_title">Реакції</string>
@@ -1357,6 +1364,9 @@
     <string name="push_channel_upload_desc">Файли, що ще завантажуються, поки RCQ не на екрані.</string>
     <string name="chat_delete_album_all">Видалити всі %1$d фото в усіх</string>
     <string name="chat_delete_album_me">Видалити всі %1$d фото в мене</string>
+    <string name="chat_selection_count">Вибрано: %1$d</string>
+    <string name="chat_selection_delete_title">Видалити вибрані повідомлення?</string>
+    <string name="chat_selection_too_many">Можна вибрати не більше %1$d повідомлень</string>
     <string name="last_seen_recently">нещодавно</string>
     <string name="last_seen_today">сьогодні</string>
     <string name="last_seen_yesterday">вчора</string>

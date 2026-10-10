@@ -114,6 +114,11 @@ object BackupService {
          *  Additive and optional; an archive written by an older build or by
          *  another client simply has no such field and reads as null. */
         val call_id: String? = null,
+        /** "Forwarded from" (report 1063). The key iOS has always written
+         *  (`BackupRecordMapping.swift` `forwarded_from`), so a forward keeps
+         *  its label across a restore on either client. Absent = not a
+         *  forward. */
+        val forwarded_from: String? = null,
     )
 
     private fun ChatMessage.toRecord() = Record(
@@ -143,6 +148,7 @@ object BackupService {
         reactions = reactions.mapKeys { it.key.toString() },
         expires_at = expiresAt,
         call_id = callId,
+        forwarded_from = fwdName,
     )
 
     /** Back into this client's shape, or null when the line cannot be a message
@@ -183,6 +189,9 @@ object BackupService {
             albumId = album_id,
             expiresAt = expires_at,
             callId = call_id,
+            // Cleaned like the wire field: an archive is a file anyone can
+            // hand this client, and the label is drawn as one line.
+            fwdName = app.rcq.android.crypto.Envelope.sanitizeFwdName(forwarded_from),
         )
     }
 

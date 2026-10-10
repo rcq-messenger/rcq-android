@@ -121,4 +121,10 @@ data class ChatMessage(
      *  a call it already filed itself (#678/#686). Null on every other kind,
      *  and on call rows written before this column existed. */
     val callId: String? = null,
+    /** "Forwarded from" (report 1063): the name the ORIGINAL author chose for
+     *  themselves, as the forward carried it (wire key `fwdName`), or the
+     *  neutral word the forwarder put there instead of a number. Null on
+     *  everything that is not a forward. Drawn as a small label over the
+     *  bubble, on the receiving side and on the forwarder's own copy. */
+    val fwdName: String? = null,
 )

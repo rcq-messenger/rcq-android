@@ -64,105 +64,14 @@ class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
     /** Close the underlying connection (called when the session rebinds/locks). */
     fun close() { isOpen = false; runCatching { db.close() } }
 
+    /** The SQL lives in [MessageDbSchema], where a JVM test can hold the
+     *  fresh schema and the upgrade path up against each other. */
     private fun createSchema(db: SQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE messages (
-              id        TEXT PRIMARY KEY,
-              peer_uin  INTEGER NOT NULL,
-              from_me   INTEGER NOT NULL,
-              body      TEXT NOT NULL,
-              sent_at   INTEGER NOT NULL,
-              state     TEXT NOT NULL DEFAULT 'DELIVERED',
-              kind      TEXT NOT NULL DEFAULT 'text',
-              media_id  TEXT,
-              media_key TEXT,
-              reply_snippet TEXT,
-              reply_author  TEXT,
-              group_id   INTEGER,
-              sender_uin INTEGER,
-              reactions  TEXT,
-              edited     INTEGER NOT NULL DEFAULT 0,
-              file_name  TEXT,
-              file_mime  TEXT,
-              file_size  INTEGER,
-              duration_sec INTEGER,
-              thumb_b64  TEXT,
-              lat        REAL,
-              lng        REAL,
-              spoiler    INTEGER NOT NULL DEFAULT 0,
-              album_id   TEXT,
-              reply_to_id TEXT,
-              expires_at INTEGER,
-              call_id    TEXT
-            )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE INDEX idx_messages_peer ON messages(peer_uin, sent_at)")
-        db.execSQL("CREATE INDEX idx_messages_group ON messages(group_id, sent_at)")
-        db.execSQL(CALL_ID_INDEX_DDL)
-        db.execSQL(DELETED_IDS_DDL)
-        db.execSQL(DECOY_CONTACTS_DDL)
-        db.execSQL(MEMBER_NAMES_DDL)
+        MessageDbSchema.createStatements().forEach { db.execSQL(it) }
     }
 
     private fun upgrade(db: SQLiteDatabase, oldVersion: Int) {
-        if (oldVersion < 2) db.execSQL("ALTER TABLE messages ADD COLUMN state TEXT NOT NULL DEFAULT 'DELIVERED'")
-        if (oldVersion < 3) {
-            db.execSQL("ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
-            db.execSQL("ALTER TABLE messages ADD COLUMN media_id TEXT")
-            db.execSQL("ALTER TABLE messages ADD COLUMN media_key TEXT")
-        }
-        if (oldVersion < 4) {
-            db.execSQL("ALTER TABLE messages ADD COLUMN reply_snippet TEXT")
-            db.execSQL("ALTER TABLE messages ADD COLUMN reply_author TEXT")
-        }
-        if (oldVersion < 5) {
-            db.execSQL("ALTER TABLE messages ADD COLUMN group_id INTEGER")
-            db.execSQL("ALTER TABLE messages ADD COLUMN sender_uin INTEGER")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id, sent_at)")
-        }
-        if (oldVersion < 6) db.execSQL("ALTER TABLE messages ADD COLUMN reactions TEXT")
-        if (oldVersion < 7) db.execSQL("ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0")
-        if (oldVersion < 8) {
-            db.execSQL("ALTER TABLE messages ADD COLUMN file_name TEXT")
-            db.execSQL("ALTER TABLE messages ADD COLUMN file_mime TEXT")
-            db.execSQL("ALTER TABLE messages ADD COLUMN file_size INTEGER")
-        }
-        if (oldVersion < 9) db.execSQL("ALTER TABLE messages ADD COLUMN duration_sec INTEGER")
-        if (oldVersion < 10) db.execSQL("ALTER TABLE messages ADD COLUMN thumb_b64 TEXT")
-        if (oldVersion < 11) {
-            db.execSQL("ALTER TABLE messages ADD COLUMN lat REAL")
-            db.execSQL("ALTER TABLE messages ADD COLUMN lng REAL")
-        }
-        if (oldVersion < 12) db.execSQL("ALTER TABLE messages ADD COLUMN spoiler INTEGER NOT NULL DEFAULT 0")
-        if (oldVersion < 13) db.execSQL("ALTER TABLE messages ADD COLUMN album_id TEXT")
-        if (oldVersion < 14) db.execSQL("ALTER TABLE messages ADD COLUMN reply_to_id TEXT")
-        if (oldVersion < 15) db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER")
-        if (oldVersion < 16) db.execSQL(DELETED_IDS_DDL)
-        if (oldVersion < 17) db.execSQL(DECOY_CONTACTS_DDL)
-        // 18: an inbound row's `state` becomes the read-receipt ledger (READ
-        // once our receipt for it has left; see Session.sendReadReceipts).
-        // Everything already here was acked under the old rule, which sent
-        // a receipt for the whole thread on every open, so it starts READ:
-        // otherwise the first open of a long chat would re-ack its entire
-        // history in one envelope.
-        if (oldVersion < 18) db.execSQL("UPDATE messages SET state = 'READ' WHERE from_me = 0")
-        // 19: the call id on the history row (#678/#686). Existing call rows
-        // stay NULL and can never be filled in, because the id lived only in
-        // the CallController's per-call state and was gone the moment the call
-        // ended. An old row therefore never matches a dedupe probe, which is
-        // the safe direction: at worst one already-known call from before the
-        // upgrade is filed a second time, where guessing would have hidden a
-        // real one.
-        if (oldVersion < 19) {
-            db.execSQL("ALTER TABLE messages ADD COLUMN call_id TEXT")
-            db.execSQL(CALL_ID_INDEX_DDL)
-        }
-        // 20: last-known group member names (#982). Starts empty and fills on
-        // the next roster fetch; a member who left before the upgrade stays a
-        // number unless a quote in the chat still names them.
-        if (oldVersion < 20) db.execSQL(MEMBER_NAMES_DDL)
+        MessageDbSchema.upgradeStatements(oldVersion).forEach { db.execSQL(it) }
     }
 
     // ── decoy roster (only ever populated in the DECOY store) ────────────
@@ -286,6 +195,7 @@ class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
             put("album_id", msg.albumId)
             put("reply_to_id", msg.replyToId)
             put("expires_at", msg.expiresAt)
+            put("fwd_name", msg.fwdName)
         }
         val rowId = db.insertWithOnConflict("messages", null, values, SQLiteDatabase.CONFLICT_IGNORE)
         return rowId != -1L
@@ -430,9 +340,8 @@ class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
 
     fun all(): List<ChatMessage> {
         val out = ArrayList<ChatMessage>()
-        db.rawQuery(
-            "SELECT id, peer_uin, from_me, body, sent_at, state, kind, media_id, media_key, reply_snippet, reply_author, group_id, sender_uin, reactions, edited, file_name, file_mime, file_size, duration_sec, thumb_b64, lat, lng, spoiler, album_id, reply_to_id, expires_at, call_id FROM messages ORDER BY sent_at ASC", null,
-        ).use { c ->
+        // Read by index, in [MessageDbSchema.COLUMNS] order.
+        db.rawQuery(MessageDbSchema.SELECT_ALL, null).use { c ->
             while (c.moveToNext()) {
                 out.add(
                     ChatMessage(
@@ -463,6 +372,7 @@ class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
                         replyToId = c.getString(24),
                         expiresAt = if (c.isNull(25)) null else c.getLong(25),
                         callId = c.getString(26),
+                        fwdName = c.getString(27),
                     )
                 )
             }
@@ -475,31 +385,7 @@ class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
         // Runs once when the class is first touched (constructor or migration).
         init { System.loadLibrary("sqlcipher") }
 
-        const val VERSION = 20
-
-        /** Last-known group member names (#982), keyed like the cache in
-         *  memory: island host (lowercase) + local group id + uin. */
-        private const val MEMBER_NAMES_DDL =
-            "CREATE TABLE IF NOT EXISTS member_names (host TEXT NOT NULL, group_id INTEGER NOT NULL, " +
-                "uin INTEGER NOT NULL, nickname TEXT NOT NULL, PRIMARY KEY (host, group_id, uin))"
-
-        /** Partial on purpose: `call_id` is NULL on everything that is not a
-         *  call summary, which is all but a handful of rows, and SQLite would
-         *  otherwise index every one of them. A `call_id = ?` probe implies
-         *  `call_id IS NOT NULL`, so the planner still uses it. */
-        private const val CALL_ID_INDEX_DDL =
-            "CREATE INDEX IF NOT EXISTS idx_messages_call ON messages(call_id) WHERE call_id IS NOT NULL"
-
-        /** The decoy store's own contact list (synthetic uins). Created on
-         *  every db so the schema is uniform; empty everywhere but the decoy. */
-        private const val DECOY_CONTACTS_DDL =
-            "CREATE TABLE IF NOT EXISTS decoy_contacts (uin INTEGER PRIMARY KEY, nickname TEXT NOT NULL)"
-
-        /** Envelopes deleted on this device. Kept forever on purpose: a copy can
-         *  come back from the offline queue at any later launch, and one row per
-         *  deleted message is nothing next to the message itself. */
-        private const val DELETED_IDS_DDL =
-            "CREATE TABLE IF NOT EXISTS deleted_ids (id TEXT PRIMARY KEY, at INTEGER NOT NULL)"
+        const val VERSION = MessageDbSchema.VERSION
         private const val LEGACY_NAME = "rcq-messages.db"
         private val SIDECARS = listOf("", "-wal", "-shm", "-journal")
 
