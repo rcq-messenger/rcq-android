@@ -24,7 +24,16 @@ object CrossIslandRequestsStore {
     /** [id] and [spub] (the sealing key, base64; empty for a v=2 row, whose
      *  ratchet vouches for the sender) let the sender take a held message back
      *  with a delete for everyone, see [retract]. Null on rows held before. */
-    data class Held(val payload: String, val preview: String, val id: String? = null, val spub: String? = null)
+    data class Held(
+        val payload: String,
+        val preview: String,
+        val id: String? = null,
+        val spub: String? = null,
+        /** Sealed under a key other than the one pinned for the number it
+         *  names (a forged row, see Session.fileForgedRow). Gson leaves it
+         *  false on rows stored before, which is what they were. */
+        val forged: Boolean = false,
+    )
 
     data class Request(
         val ownUin: Int,
@@ -59,7 +68,9 @@ object CrossIslandRequestsStore {
          *  this key too, see [keysOf]. */
         val sk: String? = null,
     ) {
-        val preview: String get() = msgs.firstOrNull()?.preview ?: note.orEmpty()
+        /** An impostor's text never shows under a real person's number while
+         *  a genuine row of theirs is held next to it. */
+        val preview: String get() = (msgs.firstOrNull { !it.forged } ?: msgs.firstOrNull())?.preview ?: note.orEmpty()
         val fromServer: Boolean get() = srvReqId != null
     }
 
@@ -327,15 +338,42 @@ object CrossIslandRequestsStore {
         val map = all()
         val k = reqKey(ownUin, uin, host)
         val base = map[k] ?: Request(ownUin, uin, host, System.currentTimeMillis(), mutableListOf())
-        // Sticky: one mismatched row is enough to warn about the whole request.
-        val marked = if (keyChanged && !base.keyChanged) base.copy(keyChanged = true) else base
-        val r = if (!sk.isNullOrBlank() && sk != marked.sk) marked.copy(sk = sk) else marked
-        r.msgs.add(Held(payload, preview, id, spub))
-        while (r.msgs.size > MAX_HELD) r.msgs.removeAt(0)
-        map[k] = r
+        map[k] = withHeld(base, Held(payload, preview, id, spub, forged = keyChanged), sk)
         writeAll(map)
         return true
     }
+
+    /**
+     * Pure half of [hold]: [held] added to [base].
+     *
+     * ⚠ A forged row is marked on its own, not on the whole request. One forged
+     * row used to flag the request a real person's messages were held in, and
+     * a flagged row offers Dismiss only: anybody could take Accept and Block
+     * away from a genuine same-island request, again after every dismiss.
+     *
+     *  - Over the cap, forged rows go first: a forger must not push the real
+     *    person's messages out.
+     *  - Our own island (host ""): the row reads "key changed" only while it
+     *    holds nothing but forged rows. Next to a genuine row it keeps Accept
+     *    and Block: the accept replays every payload with `final`, and a forged
+     *    one is held again on its own.
+     *  - Other islands keep the sticky flag (a §5f or gate mismatch; genuine
+     *    content of an accepted contact never lands there).
+     *  - Only a genuine row names the key a Block takes, see [keysOf].
+     */
+    internal fun withHeld(base: Request, held: Held, sk: String?): Request {
+        base.msgs.add(held)
+        while (base.msgs.size > MAX_HELD) {
+            val i = base.msgs.indexOfFirst { it.forged }
+            base.msgs.removeAt(if (i >= 0) i else 0)
+        }
+        val flagged = if (base.host.isEmpty()) sameIslandFlag(base.msgs) else base.keyChanged || held.forged
+        val nextSk = if (!held.forged && !sk.isNullOrBlank()) sk else base.sk
+        return base.copy(keyChanged = flagged, sk = nextSk)
+    }
+
+    /** A same-island request is "key changed" only while every row it holds is forged. */
+    private fun sameIslandFlag(msgs: List<Held>): Boolean = msgs.isNotEmpty() && msgs.all { it.forged }
 
     /**
      * §5f: open (or refresh) a PENDING cross-island contact request. Unlike
@@ -581,7 +619,9 @@ object CrossIslandRequestsStore {
         val before = r.msgs.size
         r.msgs.removeAll { it.id == targetId && sameIslandRetracts(it.spub, spub) }
         if (r.msgs.size == before) return false
-        if (r.msgs.isEmpty() && !r.contactReq && r.srvReqId == null) map.remove(k) else map[k] = r
+        // A forged row taken back leaves the genuine ones with Accept and Block.
+        if (r.msgs.isEmpty() && !r.contactReq && r.srvReqId == null) map.remove(k)
+        else map[k] = r.copy(keyChanged = sameIslandFlag(r.msgs))
         writeAll(map)
         return true
     }
@@ -599,10 +639,11 @@ object CrossIslandRequestsStore {
 
     /** The signing keys a request row was sealed under, for the block that
      *  answers it. Every one of them signed a row the person was shown as this
-     *  request, so each belongs to whoever sent it. */
+     *  request, so each belongs to whoever sent it. A forged row's key is the
+     *  forger's: blocking the real person must not tie it to their number. */
     fun keysOf(r: Request?): List<String> =
         if (r == null) emptyList()
-        else (listOf(r.sk) + r.msgs.map { it.spub }).mapNotNull { canonicalKey(it) }.distinct()
+        else (listOf(r.sk) + r.msgs.filterNot { it.forged }.map { it.spub }).mapNotNull { canonicalKey(it) }.distinct()
 
     /**
      * Block a sender for account [owner]: drop [ownUin]'s request and remember

@@ -62,6 +62,15 @@ object GroupLogPage {
      *  be written off while the answer that would admit it is on the wire. */
     val WAITING_ON_ISLAND = setOf("key_check", "roster_check", "identity_check")
 
+    /** The island was asked about the sender and never answered within the
+     *  wait (every read failed): the row was decided on the clock alone, so
+     *  it is not dropped on that. These DO strike: the row stays for
+     *  [FAIL_DRAINS] more drains, each of which asks again, and only then is
+     *  it written off. */
+    const val ROSTER_UNREACHABLE = "roster_unreachable"
+    const val KEY_UNREACHABLE = "key_unreachable"
+    const val IDENTITY_UNREACHABLE = "identity_unreachable"
+
     /** Whether [why] books a strike against the row. */
     fun strikes(why: String): Boolean = why !in NOT_THE_ROWS_FAULT && why !in WAITING_ON_ISLAND
 

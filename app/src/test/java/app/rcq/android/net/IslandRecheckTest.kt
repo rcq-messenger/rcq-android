@@ -22,7 +22,7 @@ class IslandRecheckTest {
         now += 100
         assertEquals(IslandRecheck.Kind.WAIT, gate.step("roster:5", "7").kind)
         now += 100
-        gate.finished("roster:5")
+        gate.finished("roster:5", answered = true)
         assertEquals(IslandRecheck.Kind.DECIDE, gate.step("roster:5", "7").kind)
     }
 
@@ -32,14 +32,14 @@ class IslandRecheckTest {
         // Member 8 posts while the read for 7 is on the wire.
         assertEquals(IslandRecheck.Kind.WAIT, gate.step("roster:5", "8").kind)
         now += 1_000
-        gate.finished("roster:5")
+        gate.finished("roster:5", answered = true)
         assertEquals(IslandRecheck.Kind.DECIDE, gate.step("roster:5", "7").kind)
         // 8 needs a read of its own, spaced from the last one.
         val next = gate.step("roster:5", "8")
         assertEquals(IslandRecheck.Kind.FETCH, next.kind)
         assertTrue(next.delayMs > 0)
         now += next.delayMs + 500
-        gate.finished("roster:5")
+        gate.finished("roster:5", answered = true)
         assertEquals(IslandRecheck.Kind.DECIDE, gate.step("roster:5", "8").kind)
     }
 
@@ -53,12 +53,82 @@ class IslandRecheckTest {
         assertEquals(IslandRecheck.Kind.FETCH, gate.step("ident:7", "1:x").kind)
         // The read never finishes (a dead island, a killed coroutine).
         now += 300_000L
-        assertEquals(IslandRecheck.Kind.DECIDE, gate.step("ident:7", "1:x").kind)
+        val d = gate.step("ident:7", "1:x")
+        assertEquals(IslandRecheck.Kind.DECIDE, d.kind)
+        // Decided on the clock, not on the island's word.
+        assertFalse(d.answered)
+        assertEquals(1, d.unheardRounds)
+    }
+
+    @Test fun a_read_the_island_answered_says_so() {
+        gate.step("roster:5", "7")
+        gate.finished("roster:5", answered = true)
+        val d = gate.step("roster:5", "7")
+        assertEquals(IslandRecheck.Kind.DECIDE, d.kind)
+        assertTrue(d.answered)
+        assertEquals(0, d.unheardRounds)
+    }
+
+    @Test fun a_failed_read_is_not_an_answer_and_spaces_the_next_one() {
+        // Bob joined and posted; the roster read times out.
+        assertEquals(IslandRecheck.Kind.FETCH, gate.step("roster:5", "9").kind)
+        now += 1_000
+        gate.finished("roster:5", answered = false)
+        // Not decided against a roster the island never served: read again,
+        // spaced from the failed attempt, not at once and not in a loop.
+        val again = gate.step("roster:5", "9")
+        assertEquals(IslandRecheck.Kind.FETCH, again.kind)
+        assertEquals(19_000L, again.delayMs)
+        assertEquals(IslandRecheck.Kind.WAIT, gate.step("roster:5", "9").kind)
+        now += again.delayMs + 500
+        gate.finished("roster:5", answered = true)
+        val d = gate.step("roster:5", "9")
+        assertEquals(IslandRecheck.Kind.DECIDE, d.kind)
+        assertTrue(d.answered)
+    }
+
+    @Test fun every_read_failing_ends_on_the_clock_and_counts_the_rounds() {
+        repeat(2) { round ->
+            var d = gate.step("card:7", "k")
+            val start = now
+            while (d.kind != IslandRecheck.Kind.DECIDE) {
+                if (d.kind == IslandRecheck.Kind.FETCH) {
+                    now += d.delayMs + 1_000
+                    gate.finished("card:7", answered = false)
+                } else {
+                    now += 1_000
+                }
+                d = gate.step("card:7", "k")
+            }
+            assertFalse(d.answered)
+            assertEquals(round + 1, d.unheardRounds)
+            assertTrue(now - start >= 300_000L)
+        }
+        // One read that answers resets the count.
+        val f = gate.step("card:7", "k")
+        assertEquals(IslandRecheck.Kind.FETCH, f.kind)
+        now += f.delayMs + 1_000
+        gate.finished("card:7", answered = true)
+        assertTrue(gate.step("card:7", "k").answered)
+        assertEquals(IslandRecheck.Kind.FETCH, gate.step("card:7", "k").kind)
+        now += 300_000L
+        assertEquals(1, gate.step("card:7", "k").unheardRounds)
+    }
+
+    @Test fun only_a_4xx_naming_the_subject_is_an_answer() {
+        assertTrue(IslandRecheck.failureIsAnswer(java.io.IOException("HTTP 404: no such user")))
+        assertTrue(IslandRecheck.failureIsAnswer(java.io.IOException("HTTP 403: not a member")))
+        assertFalse(IslandRecheck.failureIsAnswer(java.io.IOException("HTTP 401: token expired")))
+        assertFalse(IslandRecheck.failureIsAnswer(java.io.IOException("HTTP 408")))
+        assertFalse(IslandRecheck.failureIsAnswer(java.io.IOException("HTTP 429: slow down")))
+        assertFalse(IslandRecheck.failureIsAnswer(java.io.IOException("HTTP 502")))
+        assertFalse(IslandRecheck.failureIsAnswer(java.net.SocketTimeoutException("timeout")))
+        assertFalse(IslandRecheck.failureIsAnswer(RuntimeException()))
     }
 
     @Test fun a_flood_costs_one_read_per_gap() {
         assertEquals(IslandRecheck.Kind.FETCH, gate.step("card:7", "k1").kind)
-        gate.finished("card:7")
+        gate.finished("card:7", answered = true)
         now += 1_000
         val second = gate.step("card:7", "k2")
         assertEquals(IslandRecheck.Kind.FETCH, second.kind)
@@ -83,6 +153,20 @@ class IslandRecheckTest {
         }
         assertTrue(GroupLogPage.strikes("identity_refused"))
         assertTrue(GroupLogPage.strikes("NoSessionException"))
+    }
+
+    @Test fun a_row_the_island_never_answered_for_strikes_and_is_kept_a_few_drains() {
+        for (tag in listOf(GroupLogPage.ROSTER_UNREACHABLE, GroupLogPage.KEY_UNREACHABLE, GroupLogPage.IDENTITY_UNREACHABLE)) {
+            assertFalse(tag in GroupLogPage.WAITING_ON_ISLAND)
+            assertTrue(GroupLogPage.strikes(tag))
+            var prev: String? = null
+            repeat(GroupLogPage.FAIL_DRAINS - 1) {
+                val fate = GroupLogPage.fate(prev, tag)
+                assertFalse("kept while the island may still answer", fate.done)
+                prev = fate.record
+            }
+            assertTrue(GroupLogPage.fate(prev, tag).done)
+        }
     }
 
     @Test fun a_same_island_request_is_retracted_only_under_its_own_key() {

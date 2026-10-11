@@ -111,6 +111,13 @@ class MessageAuthorityTest {
         assertEquals(RoomKeyRule.Verdict.REFUSE, RoomKeyRule.accept(3, 2, null, null))
         // Never trade a key that opens the room's sealed state for one that does not.
         assertEquals(RoomKeyRule.Verdict.REFUSE, RoomKeyRule.accept(3, 4, opensNew = false, opensHeld = true))
+        assertEquals(RoomKeyRule.Verdict.REFUSE, RoomKeyRule.accept(4, 4, opensNew = false, opensHeld = true, blobVer = 4))
+        assertEquals(RoomKeyRule.Verdict.REFUSE, RoomKeyRule.accept(3, 4, opensNew = false, opensHeld = true, blobVer = 4))
+        // A rotation lands before its re-seal: the blob is still sealed under
+        // the old version and says nothing about the new key.
+        assertEquals(RoomKeyRule.Verdict.ACCEPT, RoomKeyRule.accept(3, 4, opensNew = false, opensHeld = true, blobVer = 3))
+        // The step rule still bounds it.
+        assertEquals(RoomKeyRule.Verdict.REFUSE, RoomKeyRule.accept(3, 9, opensNew = false, opensHeld = true, blobVer = 3))
         // A key that opens it wins whatever its version, which repairs a wedge.
         assertEquals(RoomKeyRule.Verdict.FORCE, RoomKeyRule.accept(1L shl 53, 2, opensNew = true, opensHeld = false))
         // Neither opens a stale blob: the step rule decides.

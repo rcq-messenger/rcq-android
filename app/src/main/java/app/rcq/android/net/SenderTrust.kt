@@ -47,7 +47,8 @@ object SenderTrust {
         val v2: Boolean = false,
         /** The island's key card for this number may still change the answer:
          *  FORGED against a same-island pin (a phrase change re-keys an
-         *  account), or somebody we talk to whose key we never had. */
+         *  account), somebody we talk to whose key we never had, or a number
+         *  on our island we hold nothing for yet. */
         val askCard: Boolean = false,
     )
 
@@ -123,7 +124,10 @@ object SenderTrust {
             // No island named, and the number is a contact on another one: the
             // thread `peer:<uin>` is theirs, so this is somebody wearing it.
             crossIsland.isNotEmpty() -> Decision(Level.FORGED, null)
-            else -> Decision(Level.UNPINNED, null)
+            // Nobody we hold a key for at this number: one read of the
+            // island's key card before believing the unsigned `from`, so a
+            // first message cannot wear a number it does not own.
+            else -> Decision(Level.UNPINNED, null, askCard = true)
         }
     }
 
@@ -275,15 +279,21 @@ object MessageAuthority {
  * [opensNew]/[opensHeld]: whether the offered and the held key open the room's
  * sealed state as the island serves it (null when there is no sealed state).
  * A key that opens it is taken whatever its version ([force]), which is also
- * how a room wedged by such a key before this rule repairs itself.
+ * how a room wedged by such a key before this rule repairs itself. [blobVer]:
+ * the key version the blob names in its open header (null for the
+ * pre-versioned format).
  */
 object RoomKeyRule {
     enum class Verdict { REFUSE, ACCEPT, FORCE }
 
-    fun accept(heldVer: Long?, offeredVer: Long, opensNew: Boolean?, opensHeld: Boolean?): Verdict = when {
+    fun accept(heldVer: Long?, offeredVer: Long, opensNew: Boolean?, opensHeld: Boolean?, blobVer: Long? = null): Verdict = when {
         opensNew == true -> Verdict.FORCE
-        // Never trade a key that opens the room for one that does not.
-        opensHeld == true -> Verdict.REFUSE
+        // Never trade a key that opens the room for one that does not, unless
+        // the blob predates the offered key: a rotation lands before its
+        // re-seal (web and desktop fan the new key out first and only then
+        // write the sealed state), and a blob sealed under an older version
+        // says nothing about a newer key. The step rule below still bounds it.
+        opensHeld == true && (blobVer == null || blobVer >= offeredVer) -> Verdict.REFUSE
         heldVer == null -> Verdict.ACCEPT
         // One step at a time; an equal version is the wedge-repair rule.
         offeredVer < heldVer || offeredVer > heldVer + 1 -> Verdict.REFUSE

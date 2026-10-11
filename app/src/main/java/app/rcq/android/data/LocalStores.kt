@@ -539,6 +539,7 @@ object LocalStores {
             // "number -> key to their face" live in memory for the next one.
             _pkeys.value = emptyMap()
             _peerPins = emptyMap()
+            _departures = emptyMap()
             _reactionInbox.value = emptySet()
             _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
@@ -578,6 +579,7 @@ object LocalStores {
         loadRoomKeys()
         loadProfileKeys()
         _peerPins = parsePins(prefs.getStringSet(pk(K_PEER_PINS), emptySet()))
+        _departures = app.rcq.android.net.RoomDepartures.decode(prefs.getStringSet(pk(K_DEPARTURES), emptySet()))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
@@ -1511,6 +1513,36 @@ object LocalStores {
         return changed
     }
 
+    // ── who left a room, and when this device saw it ─────────────────
+    // Per account, "room:uin" -> (their key as a member, when seen gone). Lets
+    // a backlog row a member posted BEFORE they left be read after they are
+    // out of the roster, see [app.rcq.android.net.RoomDepartures].
+
+    @Volatile private var _departures: Map<String, app.rcq.android.net.RoomDepartures.Left> = emptyMap()
+
+    fun roomDeparture(room: Int, uin: Int): app.rcq.android.net.RoomDepartures.Left? =
+        _departures[app.rcq.android.net.RoomDepartures.recordKey(room, uin)]
+
+    /** The roster of [room] went from [old] to [new], see
+     *  [app.rcq.android.net.RoomDepartures.afterRosterChange]. */
+    @Synchronized
+    fun noteRosterChange(
+        room: Int,
+        old: List<app.rcq.android.model.GroupMember>?,
+        new: List<app.rcq.android.model.GroupMember>?,
+        now: Long,
+        keyOf: (app.rcq.android.model.GroupMember) -> String?,
+    ) {
+        if (acct == null) return
+        val next = app.rcq.android.net.RoomDepartures.afterRosterChange(_departures, room, old, new, now, keyOf)
+        if (next == _departures) return
+        _departures = next
+        prefs.edit().putStringSet(
+            pk(K_DEPARTURES),
+            next.map { (k, v) -> app.rcq.android.net.RoomDepartures.encode(k, v) }.toSet(),
+        ).apply()
+    }
+
     /** Headless pins of [accountId], for the push service. */
     fun peerSigningPinsFor(accountId: String): Map<Int, String> =
         if (!::prefs.isInitialized) emptyMap() else parsePins(prefs.getStringSet("$accountId.$K_PEER_PINS", emptySet()))
@@ -2145,6 +2177,7 @@ object LocalStores {
     private const val K_PKEYS = "pkeys"      // peer uin -> their profile key
     private const val K_MY_PKEY = "mypkey"   // my own, handed to contacts
     private const val K_PEER_PINS = "peer_signing_pins" // own-island uin -> pinned Ed25519 key
+    private const val K_DEPARTURES = "room_departures"   // "room:uin" -> when seen gone, their key
     private const val K_REACT_INBOX = "reaction_inbox"
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_REACTION_USES = "reaction_uses"

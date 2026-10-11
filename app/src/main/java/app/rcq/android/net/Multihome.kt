@@ -529,14 +529,14 @@ object Multihome {
         host: String,
         rows: List<RcqApi.QueuedEnvelope>,
         stillOurs: () -> Boolean,
-        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
+        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?, receivedAt: String?) -> String?,
     ): GroupLogPage.QueueAcks? {
         val acks = GroupLogPage.QueueAcks()
         for (q in rows) {
             if (!stillOurs()) return null
             val key = "$host:${if (q.group_id != null) "g" else "d"}:${q.id}"
             val payload = q.payload
-            val why = if (payload == null) null else onPayload(payload, q.group_id, host, q.envelope_type)
+            val why = if (payload == null) null else onPayload(payload, q.group_id, host, q.envelope_type, q.received_at)
             val fate = GroupLogPage.fate(queueRowFails[key], why)
             if (fate.record == null) queueRowFails.remove(key) else queueRowFails[key] = fate.record
             if (why != null && fate.done) {
@@ -591,7 +591,7 @@ object Multihome {
          *  cannot be asked to start from a given seq, so an ack over rows that
          *  were never filed loses them for good, in silence. */
         stillOurs: () -> Boolean = { true },
-        onRow: (payload: String, groupId: Int, host: String, envelopeType: String?) -> String?,
+        onRow: (payload: String, groupId: Int, host: String, envelopeType: String?, receivedAt: String?) -> String?,
     ) {
         runCatching {
             var pages = 0
@@ -615,7 +615,7 @@ object Multihome {
                     val payload = r.payload
                     // The type rides along: a `gmsg` opens through the
                     // sender-key chain, every other row is sealed per member.
-                    val why = if (payload == null) null else onRow(payload, r.gid, host, r.envelope_type)
+                    val why = if (payload == null) null else onRow(payload, r.gid, host, r.envelope_type, r.received_at)
                     val key = "$host:${r.gid}:${r.seq}"
                     // Same bookkeeping as the queue rows above, including the
                     // failures that are not the row's fault (a closed store,
@@ -670,7 +670,7 @@ object Multihome {
          *  going does not merely misfile account A's mail under account B, it
          *  destroys the only copy. */
         stillOurs: () -> Boolean = { true },
-        onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?) -> String?)? = null,
+        onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?, receivedAt: String?) -> String?)? = null,
         /** The island no longer has an account for our key ([copyGone]): the
          *  copy was deleted, as a rule by another device of this account that
          *  removed the backup with "delete the copy". Before this, a 401 then
@@ -682,7 +682,7 @@ object Multihome {
         /** The session's ingest for one row, with the row's `envelope_type`.
          *  Its answer decides the ack: null = done with, a tag = may pass on a
          *  later drain (see [fileQueueRows]). */
-        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
+        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?, receivedAt: String?) -> String?,
     ) {
         for (home in MultihomeStore.list(ownUin)) {
             if (!stillOurs()) return
@@ -755,7 +755,7 @@ object Multihome {
          *  Checked before every write and before the ack, because the ack is a
          *  second network call and the island DELETES what it acknowledges. */
         stillOurs: () -> Boolean = { true },
-        onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?) -> String?)? = null,
+        onLogRow: ((payload: String, groupId: Int, host: String, envelopeType: String?, receivedAt: String?) -> String?)? = null,
         /** The island said no row carries our key any more ([copyGone]): the
          *  guest copy there was deleted (the same row as a backup copy, deleted
          *  from another device, as a rule). Called synchronously right after a
@@ -765,7 +765,7 @@ object Multihome {
         onGone: (host: String) -> Unit = {},
         /** Same contract as the backup drain's: the row's type in, "done with"
          *  (null) or a failure tag out, and only done rows are acked. */
-        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?) -> String?,
+        onPayload: (payload: String, groupId: Int?, host: String, envelopeType: String?, receivedAt: String?) -> String?,
     ) {
         for (v in visited) {
             if (!stillOurs()) return

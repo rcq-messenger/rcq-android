@@ -19,10 +19,16 @@ import java.util.concurrent.ConcurrentHashMap
  * the row waits (the caller leaves it on the island, without a strike). One
  * read per resource is in flight at a time, and reads of one resource are at
  * least [minGapMs] apart: a stream of forged rows costs the island one read
- * per gap, not one per row. A read that fails still counts as asked, so a
- * row is never held for ever: after one finished read, or [maxWaitMs], it is
- * decided on what we have. Pure apart from the clock, so it is checked on the
- * JVM.
+ * per gap, not one per row. A row is never held for ever: after one read that
+ * ANSWERED, or [maxWaitMs], it is decided on what we have.
+ *
+ * ⚠ A read that failed (a timeout, a 5xx, no network) is not an answer. It
+ * used to count as one, and a new member's post was then decided against a
+ * roster the island never got to serve, dropped and acked. A failed read only
+ * spaces the next one; [Step.answered] tells the caller whether the decision
+ * rests on the island's word or on the clock alone, and [Step.unheardRounds]
+ * how many times in a row the clock decided for this row. Pure apart from the
+ * clock, so it is checked on the JVM.
  */
 class IslandRecheck(
     private val minGapMs: Long,
@@ -31,14 +37,23 @@ class IslandRecheck(
 ) {
     enum class Kind { FETCH, WAIT, DECIDE }
 
-    /** [delayMs]: for FETCH, how long the read waits before it starts. */
-    data class Step(val kind: Kind, val delayMs: Long = 0L)
+    /** [delayMs]: for FETCH, how long the read waits before it starts.
+     *  [answered]: for DECIDE, a read that started after the row was held
+     *  came back with the island's answer; false when [maxWaitMs] ran out
+     *  without one. [unheardRounds]: for DECIDE without an answer, how many
+     *  such decisions this row has had in a row, this one included. */
+    data class Step(val kind: Kind, val delayMs: Long = 0L, val answered: Boolean = false, val unheardRounds: Int = 0)
 
     private val heldSince = ConcurrentHashMap<String, Long>()
     /** resource -> when the read in flight was granted. */
     private val inFlight = ConcurrentHashMap<String, Long>()
-    /** resource -> when the last finished read started. */
+    /** resource -> when the last read that the island ANSWERED started. */
     private val answeredFrom = ConcurrentHashMap<String, Long>()
+    /** resource -> when the last finished read started, answered or not:
+     *  what the next read is spaced from. */
+    private val lastTried = ConcurrentHashMap<String, Long>()
+    /** "$resource|$subject" -> (decisions on the clock alone in a row, when the last was). */
+    private val unheard = ConcurrentHashMap<String, Pair<Int, Long>>()
 
     fun step(resource: String, subject: String): Step = synchronized(this) {
         val now = clock()
@@ -47,22 +62,38 @@ class IslandRecheck(
         // entry behind; a forger minting a fresh key per row would grow this
         // without bound otherwise.
         if (heldSince.size > MAX_HELD) heldSince.entries.removeIf { now - it.value >= maxWaitMs }
+        // A row decided on the clock comes back on the next drain or not at
+        // all; a count nobody asked for in a while is stale.
+        if (unheard.size > MAX_HELD) unheard.entries.removeIf { now - it.value.second >= UNHEARD_MEMORY * maxWaitMs }
         val since = heldSince.getOrPut(k) { now }
         val answered = answeredFrom[resource]
-        if ((answered != null && answered >= since) || now - since >= maxWaitMs) {
+        if (answered != null && answered >= since) {
             heldSince.remove(k)
-            return Step(Kind.DECIDE)
+            unheard.remove(k)
+            return Step(Kind.DECIDE, answered = true)
+        }
+        if (now - since >= maxWaitMs) {
+            heldSince.remove(k)
+            val rounds = (unheard[k]?.first ?: 0) + 1
+            unheard[k] = rounds to now
+            return Step(Kind.DECIDE, answered = false, unheardRounds = rounds)
         }
         if (inFlight.containsKey(resource)) return Step(Kind.WAIT)
-        val delay = if (answered == null) 0L else (answered + minGapMs - now).coerceAtLeast(0L)
+        // Spaced from the last ATTEMPT: a failing island costs one read per
+        // gap, not a loop of them.
+        val last = listOfNotNull(answered, lastTried[resource]).maxOrNull()
+        val delay = if (last == null) 0L else (last + minGapMs - now).coerceAtLeast(0L)
         inFlight[resource] = now + delay
         return Step(Kind.FETCH, delay)
     }
 
-    /** The read granted by [step] for [resource] finished, answered or not. */
-    fun finished(resource: String) = synchronized(this) {
+    /** The read granted by [step] for [resource] finished. [answered]: the
+     *  island answered it (a 4xx that names the subject is an answer too); a
+     *  failed read only spaces the next one. */
+    fun finished(resource: String, answered: Boolean) = synchronized(this) {
         val started = inFlight.remove(resource) ?: return@synchronized
-        answeredFrom[resource] = started
+        lastTried[resource] = started
+        if (answered) answeredFrom[resource] = started
     }
 
     /** Forget everything (an account switch: another account's rows). */
@@ -70,9 +101,24 @@ class IslandRecheck(
         heldSince.clear()
         inFlight.clear()
         answeredFrom.clear()
+        lastTried.clear()
+        unheard.clear()
     }
 
-    private companion object {
-        const val MAX_HELD = 512
+    companion object {
+        private const val MAX_HELD = 512
+        /** An unheard count is kept this many [maxWaitMs] after its last use. */
+        private const val UNHEARD_MEMORY = 6
+
+        /** Whether a read that threw still carries the island's answer: a 4xx
+         *  names the subject (no such user, no such room, not a member, a
+         *  closed island refusing the lookup). A timeout, a 5xx, no network,
+         *  our own expired token (401) and a rate limit (408, 425, 429) say
+         *  nothing about it. */
+        fun failureIsAnswer(e: Throwable): Boolean {
+            val m = e.message.orEmpty()
+            if (!m.startsWith("HTTP 4")) return false
+            return listOf("HTTP 401", "HTTP 408", "HTTP 425", "HTTP 429").none { m.startsWith(it) }
+        }
     }
 }

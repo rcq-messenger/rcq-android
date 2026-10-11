@@ -134,9 +134,14 @@ class SenderTrustTest {
     @Test fun nobody_we_hold_a_key_for_is_a_stranger() {
         val d = decide(7, keyA)
         assertEquals(SenderTrust.Level.UNPINNED, d.level)
-        assertFalse(d.askCard)
+        // A first row naming a number on our island: the island's key card is
+        // read before the unsigned `from` is believed (official, support, or
+        // anyone we have not written to yet).
+        assertTrue(d.askCard)
         assertNull(d.host)
         assertEquals("is2.rcq.app", decide(7, keyA, host = "is2.rcq.app").host)
+        // A stranger at an address on another island asks nothing of ours.
+        assertFalse(decide(7, keyA, host = "is2.rcq.app").askCard)
     }
 
     @Test fun a_roster_contact_without_a_key_asks_the_card_first() {

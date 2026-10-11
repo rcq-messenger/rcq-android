@@ -4170,7 +4170,7 @@ class Session(context: Context) {
                 // this account ("delete the copy", report 1062): stop draining
                 // it and stop advertising it.
                 forgetGoneBackupHome(uin, h)
-            }, onLogRow = { payload, groupId, host, envelopeType ->
+            }, onLogRow = { payload, groupId, host, envelopeType, receivedAt ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -4178,8 +4178,8 @@ class Session(context: Context) {
                 // the log cannot be re-read from a given seq. The switch is
                 // handled where it can actually stop the work, in
                 // drainGroupLog's page loop, before the ack.
-                asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = false) }
-            }) { payload, groupId, host, envelopeType ->
+                asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = false, receivedAt = receivedAt) }
+            }) { payload, groupId, host, envelopeType, receivedAt ->
                 // ⚠ VisitedIslandsStore is a SINGLETON re-pointed by rebindTo,
                 // so aliasFor here would mint account A's room aliases in
                 // account B's namespace, and no decryption is needed for that
@@ -4190,7 +4190,7 @@ class Session(context: Context) {
                 // answer decides the ack; "switched" is not the row's fault, so
                 // it is neither booked nor acked.
                 if (!stillOn(epoch)) "switched"
-                else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = false) }
+                else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = false, receivedAt = receivedAt) }
             }
         }
     }
@@ -4223,7 +4223,7 @@ class Session(context: Context) {
                 // recovers a working one instead of sending this dead token.
                 android.util.Log.w("RCQfed", "guest copy on $h is gone, forgetting the visited entry")
                 VisitedIslandsStore.remove(h)
-            }, onLogRow = { payload, groupId, host, envelopeType ->
+            }, onLogRow = { payload, groupId, host, envelopeType, receivedAt ->
                 // ⚠⚠ NO account guard here, deliberately. This lambda's answer
                 // means "is the row done with": null closes it and lets the
                 // room's ack move past it. Refusing a row by answering null
@@ -4231,11 +4231,11 @@ class Session(context: Context) {
                 // the log cannot be re-read from a given seq. The switch is
                 // handled where it can actually stop the work, in
                 // drainGroupLog's page loop, before the ack.
-                asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true) }
-            }) { payload, groupId, host, envelopeType ->
+                asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true, receivedAt = receivedAt) }
+            }) { payload, groupId, host, envelopeType, receivedAt ->
                 // Same routing and the same ack contract as the backup drain.
                 if (!stillOn(epoch)) "switched"
-                else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true) }
+                else asBacklog { ingestForeignRow(payload, groupId, host, envelopeType, guestMailbox = true, receivedAt = receivedAt) }
             }
         }
         // F1: the contact requests addressed to our guest copies, from the SAME
@@ -6023,6 +6023,7 @@ class Session(context: Context) {
         if (!stillOn(ep)) return
         // Foreign rooms come WITH their roster; the own list does not (#982).
         foreign.forEach(::rememberMemberNames)
+        for (g in own + foreign) noteRosterChange(g.id, known[g.id]?.members, g.members)
         _groups.value = (own + foreign).distinctBy { it.id }.sortedByDescending { it.createdAt ?: 0L }
         // Persist the roster so groups are reachable offline (report #7).
         runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
@@ -6048,10 +6049,29 @@ class Session(context: Context) {
             forgetMemberNames(g.host, g.id)
             return
         }
+        noteRosterChange(g.id, group(g.id)?.members, g.members)
         _groups.value = (_groups.value.filterNot { it.id == g.id } + g)
             .sortedByDescending { it.createdAt ?: 0L }
         rememberMemberNames(g)
     }
+
+    /** The roster of [room] we hold is about to go from [old] to [new]: note
+     *  who left, and when we saw it, see [app.rcq.android.net.RoomDepartures].
+     *  The key kept is the roster's, or on our own island the pin. */
+    private fun noteRosterChange(room: Int, old: List<GroupMember>?, new: List<GroupMember>?) {
+        LocalStores.noteRosterChange(room, old, new, System.currentTimeMillis()) { m ->
+            m.signingKey?.takeIf { it.isNotBlank() } ?: if (room >= 0) LocalStores.peerSigningPin(m.uin) else null
+        }
+    }
+
+    /** Whether a row of [uin] in [groupId], who is not in the roster we hold,
+     *  was deposited while they still were, under the key they held then, see
+     *  [app.rcq.android.net.RoomDepartures.leftAfterDeposit]. A live frame
+     *  carries no island stamp and gets no grace. */
+    private fun leftAfterDeposit(groupId: Int, uin: Int, spub: ByteArray, depositAtMs: Long?, v2: Boolean): Boolean =
+        app.rcq.android.net.RoomDepartures.leftAfterDeposit(
+            LocalStores.roomDeparture(groupId, uin), depositAtMs, spub, v2 = v2, ownRoom = groupId >= 0,
+        )
 
     /** Move the crown on a locally-held group, for the COMPACT
      *  `group_membership_changed` a big room gets (id + `owner_uin`, no
@@ -6636,12 +6656,23 @@ class Session(context: Context) {
      *  that puts a status in front of somebody asks for it fresh; anything
      *  that only needs keys or names does not, because the roster of a big
      *  room is expensive (the beta group is 2200 people). */
-    suspend fun ensureRoster(id: Int, refresh: Boolean = false): RcqGroup? {
+    /** [strict]: a roster that cannot be read THROWS instead of handing back
+     *  the cached one, for a caller that must tell "the island answered" from
+     *  "the island was not reached" (see [refreshRoomRoster]). [ep]: the epoch
+     *  the call belongs to; a roster that comes back after a switch is the
+     *  previous account's and is not written down. */
+    suspend fun ensureRoster(id: Int, refresh: Boolean = false, strict: Boolean = false, ep: Int = epochNow()): RcqGroup? {
         val cached = group(id) ?: return null
         if (cached.host != null) return cached
         if (!refresh && cached.members.isNotEmpty() && id in rosterFetched) return cached
-        val full = runCatching { mapGroup(api.groupInfo(id)) }.getOrNull() ?: return cached
+        val full = if (strict) {
+            mapGroup(api.groupInfo(id))
+        } else {
+            runCatching { mapGroup(api.groupInfo(id)) }.getOrNull() ?: return cached
+        }
+        if (!stillOn(ep)) return null
         rosterFetched.add(id)
+        noteRosterChange(id, group(id)?.members ?: cached.members, full.members)
         // ⚠ `ownerUin` comes from the ANSWER, not from the cached row. The
         // roster and the crown are one fact: a handover we missed (socket down,
         // an island too old to put the owner in the compact frame) is on this
@@ -7610,13 +7641,17 @@ class Session(context: Context) {
             // Only a member proven by the key held for them passes, see
             // [decideRoomSender]; a row that is not is dropped, after the
             // island was asked once more about the roster and the key.
-            when (val who = decideRoomSender(groupId, dec.senderUin, dec.senderSigningPub)) {
-                SenderTrust.Room.SELF, SenderTrust.Room.PINNED -> Unit
-                else -> {
-                    android.util.Log.w("RCQgroup", "row in room $groupId naming ${dec.senderUin} not proven ($who), dropped")
-                    app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
-                    return null
-                }
+            val who = decideRoomSender(groupId, dec.senderUin, dec.senderSigningPub)
+            // Somebody who has since left, on a row the island stamped while
+            // they were still in, under the key they held then: what they said
+            // as a member stays readable for whoever drains late. Not a key
+            // ask (answerSknack wants a roster row anyway).
+            val leftLater = who == SenderTrust.Room.NOT_MEMBER && dec.envelope !is Envelope.Sknack &&
+                leftAfterDeposit(groupId, dec.senderUin, dec.senderSigningPub, depositAtMs, v2 = dec.senderSigningPub.isEmpty())
+            if (who != SenderTrust.Room.SELF && who != SenderTrust.Room.PINNED && !leftLater) {
+                android.util.Log.w("RCQgroup", "row in room $groupId naming ${dec.senderUin} not proven ($who), dropped")
+                app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+                return null
             }
             when (val env = dec.envelope) {
                 // Sender-keys distribution / recovery (never rendered). SKDM binds
@@ -7666,13 +7701,19 @@ class Session(context: Context) {
      *  it, the capability is per number), its members sent one broadcast instead
      *  of a sealed copy each, and the drain acked the unreadable rows away
      *  (#986(a)). */
-    private fun ingestForeignRow(payload: String, groupId: Int?, host: String, envelopeType: String?, guestMailbox: Boolean): String? {
+    private fun ingestForeignRow(
+        payload: String, groupId: Int?, host: String, envelopeType: String?, guestMailbox: Boolean, receivedAt: String? = null,
+    ): String? {
         // ⚠ The mailbox host is handed on only for a GUEST mailbox. A backup
         // home is our own identity's mailbox, and a contact from our own island
         // failing over to it rightly stamps our own host there.
         if (groupId == null) return ingest(payload, mailboxHost = if (guestMailbox) host else null)
+        // That island's own stamp on a room row: the fallback anchor of a
+        // disappearing message, and what a member who has since left is
+        // judged by, see [leftAfterDeposit].
+        val depositAt = parseIso(receivedAt)
         val alias = VisitedIslandsStore.aliasFor(host, groupId)
-        return if (envelopeType == "gmsg") ingestGmsg(payload, alias) else ingestGroup(payload, alias)
+        return if (envelopeType == "gmsg") ingestGmsg(payload, alias, depositAt) else ingestGroup(payload, alias, depositAt)
     }
 
     /** The room id a broadcast was SEALED under. A room on another island is
@@ -7715,7 +7756,7 @@ class Session(context: Context) {
             // before deriving: a row the island has to answer for comes back.
             SenderKeyStore.chainSender(me, hdr.kid)?.let { chain ->
                 val spub = runCatching { Base64.decode(chain.spub, Base64.NO_WRAP) }.getOrDefault(ByteArray(0))
-                when (val who = gmsgSenderVerdict(groupId, chain.senderUin, spub, legacy = chain.legacy)) {
+                when (val who = gmsgSenderVerdict(groupId, chain.senderUin, spub, legacy = chain.legacy, depositAtMs = depositAtMs)) {
                     SenderTrust.Room.SELF, SenderTrust.Room.PINNED ->
                         // A chain from before rooms were kept, now proven here:
                         // bound to this room from now on.
@@ -7750,7 +7791,7 @@ class Session(context: Context) {
                 // приходит уведомление, что есть сообщение в группе, захожу —
                 // а его там нет" (#547), and the reason a newly added member
                 // hears nothing for messages everyone else can read (#544).
-                val held = holdGmsg(hdr.kid, groupId, payloadB64)
+                val held = holdGmsg(hdr.kid, groupId, payloadB64, depositAtMs)
                 if (!SenderKeyStore.knowsKid(me, hdr.kid)) sendSknack(groupId, hdr.kid)
                 // Refused a slot (the table is full of other kids still waiting
                 // for their chains): not held, so not done with; the log drain
@@ -7775,15 +7816,26 @@ class Session(context: Context) {
      *  only from a proven member, so it is checked against the roster we
      *  already hold and never makes us fetch one ([legacy] false): the room's
      *  key may have moved on (the member re-keyed) or they left. A chain from
-     *  before that was accepted from anybody and gets the full check once. */
-    private fun gmsgSenderVerdict(groupId: Int, senderUin: Int, spub: ByteArray, legacy: Boolean): SenderTrust.Room {
+     *  before that was accepted from anybody and gets the full check once.
+     *  [depositAtMs]: the island's stamp on the row, see [leftAfterDeposit]. */
+    private fun gmsgSenderVerdict(groupId: Int, senderUin: Int, spub: ByteArray, legacy: Boolean, depositAtMs: Long? = null): SenderTrust.Room {
         if (legacy) return decideRoomSender(groupId, senderUin, spub)
         return when (val r = decideRoomSender(groupId, senderUin, spub, final = true)) {
             // Nothing to compare against without a roster or a key: the SKDM was.
             SenderTrust.Room.ASK_ROSTER, SenderTrust.Room.ASK_CARD -> SenderTrust.Room.PINNED
             // Missing from the roster we hold: one read of it before dropping
-            // (a roster frame can arrive partial).
-            SenderTrust.Room.NOT_MEMBER -> decideRoomSender(groupId, senderUin, spub)
+            // (a roster frame can arrive partial). Still missing, but the
+            // island stamped the broadcast before we saw them leave, under the
+            // chain's own key: what they posted as a member stays readable.
+            // The chain is not bound anew here.
+            SenderTrust.Room.NOT_MEMBER -> {
+                val again = decideRoomSender(groupId, senderUin, spub)
+                if (again == SenderTrust.Room.NOT_MEMBER && leftAfterDeposit(groupId, senderUin, spub, depositAtMs, v2 = false)) {
+                    SenderTrust.Room.PINNED
+                } else {
+                    again
+                }
+            }
             else -> r
         }
     }
@@ -7910,17 +7962,21 @@ class Session(context: Context) {
      *  its own bug. [HELD_GMSG_CAP] payloads per kid, [HELD_GMSG_KIDS] kids —
      *  enough for the real case (a handful of posts between "you were added"
      *  and "your SKDM arrived"), nowhere near enough to matter for memory. */
-    private val heldGmsg = java.util.concurrent.ConcurrentHashMap<String, MutableList<Pair<Int, String>>>()
+    private val heldGmsg = java.util.concurrent.ConcurrentHashMap<String, MutableList<HeldGmsg>>()
+
+    /** One held broadcast, with the island's stamp it came with (null for a
+     *  live frame), which still decides for a sender who has since left. */
+    private data class HeldGmsg(val groupId: Int, val payload: String, val depositAtMs: Long?)
 
     /** False when the table has no room for a new kid: the caller then knows
      *  the row was neither opened nor kept. */
-    private fun holdGmsg(kid: String, groupId: Int, payloadB64: String): Boolean {
+    private fun holdGmsg(kid: String, groupId: Int, payloadB64: String, depositAtMs: Long? = null): Boolean {
         if (heldGmsg.size >= HELD_GMSG_KIDS && !heldGmsg.containsKey(kid)) return false
         val list = heldGmsg.getOrPut(kid) { java.util.Collections.synchronizedList(mutableListOf()) }
         synchronized(list) {
-            if (list.any { it.second == payloadB64 }) return true
+            if (list.any { it.payload == payloadB64 }) return true
             if (list.size >= HELD_GMSG_CAP) list.removeAt(0)
-            list.add(groupId to payloadB64)
+            list.add(HeldGmsg(groupId, payloadB64, depositAtMs))
         }
         return true
     }
@@ -7932,7 +7988,7 @@ class Session(context: Context) {
     private fun replayHeldGmsg(kid: String) {
         val held = heldGmsg.remove(kid) ?: return
         val copy = synchronized(held) { held.toList() }
-        copy.forEach { (gid, payload) -> ingestGmsg(payload, gid) }
+        copy.forEach { ingestGmsg(it.payload, it.groupId, it.depositAtMs) }
     }
 
     /** Per-kid ask ledger: attempts + last-ask stamp. The flat ten-minute
@@ -13419,31 +13475,36 @@ class Session(context: Context) {
 
     private fun ownHosts(): List<String> = listOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
 
-    /** Whether the island still has to answer [resource] for this row. Starts
-     *  the read when [IslandRecheck] grants one; its end drains both mailboxes,
-     *  which is how the waiting row comes back. False: decide now. */
-    private fun islandStillToAnswer(resource: String, subject: String, read: suspend () -> Unit): Boolean {
+    /** Asks [IslandRecheck] about this row and starts the read it grants; the
+     *  read's end drains both mailboxes, which is how a waiting row comes
+     *  back. Anything but DECIDE: the row waits. On DECIDE, [IslandRecheck.Step.answered]
+     *  says whether the island was heard or the wait ran out.
+     *
+     *  [read] gets the epoch it was granted under and checks [stillOn] after
+     *  each of its network calls before it writes anything: a switch mid-read
+     *  must not leave account A's island answer in account B's stores. A read
+     *  that throws counts as answered only for a 4xx that names the subject,
+     *  see [IslandRecheck.failureIsAnswer]. */
+    private fun askIsland(resource: String, subject: String, read: suspend (ep: Int) -> Unit): IslandRecheck.Step {
         val step = islandRecheck.step(resource, subject)
-        when (step.kind) {
-            IslandRecheck.Kind.DECIDE -> return false
-            IslandRecheck.Kind.WAIT -> return true
-            IslandRecheck.Kind.FETCH -> {
-                val ep = epochNow()
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        if (step.delayMs > 0) delay(step.delayMs)
-                        if (stillOn(ep)) runCatching { read() }
-                    } finally {
-                        islandRecheck.finished(resource)
-                    }
-                    if (stillOn(ep) && !duressViewUp) {
-                        runCatching { drainQueue() }
-                        runCatching { drainGroupLog() }
-                    }
+        if (step.kind != IslandRecheck.Kind.FETCH) return step
+        val ep = epochNow()
+        scope.launch(Dispatchers.IO) {
+            var answered = false
+            try {
+                if (step.delayMs > 0) delay(step.delayMs)
+                if (stillOn(ep)) {
+                    answered = runCatching { read(ep) }.fold({ true }) { e -> IslandRecheck.failureIsAnswer(e) }
                 }
-                return true
+            } finally {
+                islandRecheck.finished(resource, answered = answered)
+            }
+            if (stillOn(ep) && !duressViewUp) {
+                runCatching { drainQueue() }
+                runCatching { drainGroupLog() }
             }
         }
+        return step
     }
 
     /** The roster row for [uin] on our own island, from the live list or,
@@ -13507,10 +13568,13 @@ class Session(context: Context) {
         )
     }
 
-    /** Read [uin]'s key card off our island and pin what it says. */
-    private suspend fun fetchKeyCard(uin: Int) {
+    /** Read [uin]'s key card off our island and pin what it says. [ep]: the
+     *  epoch the read was granted under, read before the first suspension; an
+     *  answer that comes back after a switch is the previous account's and is
+     *  not pinned. */
+    private suspend fun fetchKeyCard(uin: Int, ep: Int = epochNow()) {
         val info = api.userInfo(uin, GuestCardStore.theirCard(uin))
-        if (info.uin != uin) return
+        if (!stillOn(ep) || info.uin != uin) return
         notePeerSigningKey(uin, info.signing_key)
     }
 
@@ -13536,11 +13600,20 @@ class Session(context: Context) {
         val d = decide()
         if (!d.askCard || final) return d
         // One read of the key card before deciding against the row: a phrase
-        // change re-keys an account, and a roster row may carry no key.
-        if (islandStillToAnswer("card:${dec.senderUin}", spubB64(dec)) { fetchKeyCard(dec.senderUin) }) {
-            throw RowWaits("key_check")
+        // change re-keys an account, a roster row may carry no key, and a
+        // first row from a number we hold nothing for must not wear it
+        // unchecked.
+        val step = askIsland("card:${dec.senderUin}", spubB64(dec)) { ep -> fetchKeyCard(dec.senderUin, ep) }
+        if (step.kind != IslandRecheck.Kind.DECIDE) throw RowWaits("key_check")
+        val again = decide().copy(askCard = false)
+        // Decided on the clock alone: the card could not be read, which says
+        // nothing about a contact who re-keyed. Struck and asked again on the
+        // next drain; after that it is filed as "key changed", a trace the
+        // person sees, never written off in silence.
+        if (!step.answered && again.level == SenderTrust.Level.FORGED && step.unheardRounds < GroupLogPage.FAIL_DRAINS - 1) {
+            throw RowWaits(GroupLogPage.KEY_UNREACHABLE)
         }
-        return decide().copy(askCard = false)
+        return again
     }
 
     /** A 1:1 row that names a number we hold a key for, under another key.
@@ -13574,9 +13647,41 @@ class Session(context: Context) {
      *  room list of that island. A room we do not hold at all yet (added a
      *  moment ago, the list not refreshed since) needs the list first: the
      *  island only hands its rows to members, so it is there to be found. */
-    private suspend fun refreshRoomRoster(groupId: Int) {
-        if (groupId < 0 || group(groupId) == null) refreshGroups()
-        if (groupId >= 0) ensureRoster(groupId, refresh = true)
+    private suspend fun refreshRoomRoster(groupId: Int, ep: Int = epochNow()) {
+        // ⚠ Every read here THROWS when it fails: a roster that could not be
+        // read is not the island's answer, and a row decided on it would drop
+        // a member who joined a minute ago (see [IslandRecheck]).
+        if (groupId < 0) {
+            val host = groupHost(groupId)
+            val creds = host?.let { foreignCreds(it) }
+            // An alias we hold nothing for: the list is the only way to it.
+            if (host == null || creds == null) {
+                refreshGroups()
+                return
+            }
+            // That island alone, without the swallow refreshGroups applies to
+            // every island but ours.
+            val listed = RcqApi("https://$host").apply { setToken(creds.second) }.groups()
+            if (!stillOn(ep)) return
+            upsertForeignRooms(listed.map { mapForeignGroup(it, host) })
+            return
+        }
+        if (group(groupId) == null) refreshGroups()
+        if (!stillOn(ep)) return
+        ensureRoster(groupId, refresh = true, strict = true, ep = ep)
+    }
+
+    /** Rooms one other island just listed (with their rosters), put in place
+     *  of the ones we hold. A room it no longer lists is left to [refreshGroups]. */
+    private fun upsertForeignRooms(rooms: List<RcqGroup>) {
+        if (rooms.isEmpty()) return
+        val known = _groups.value.associateBy { it.id }
+        for (g in rooms) noteRosterChange(g.id, known[g.id]?.members, g.members)
+        rooms.forEach(::rememberMemberNames)
+        val ids = rooms.mapTo(HashSet()) { it.id }
+        _groups.value = (_groups.value.filterNot { it.id in ids } + rooms).sortedByDescending { it.createdAt ?: 0L }
+        runCatching { LocalStores.setCachedGroupsJson(profileGson.toJson(_groups.value)) }
+        runCatching { store.cacheGroupNames(_groups.value.associate { it.id to it.name }) }
     }
 
     /** What a row from [senderUin] under [spub] may do in room [groupId]. Asks
@@ -13610,15 +13715,24 @@ class Session(context: Context) {
             (foreign && r == SenderTrust.Room.FORGED && spub.size == 32)
         ) {
             // The roster we hold may be from before they joined (or re-keyed).
-            if (islandStillToAnswer("roster:$groupId", "$senderUin") { refreshRoomRoster(groupId) }) throw RowWaits("roster_check")
+            val step = askIsland("roster:$groupId", "$senderUin") { ep -> refreshRoomRoster(groupId, ep) }
+            if (step.kind != IslandRecheck.Kind.DECIDE) throw RowWaits("roster_check")
             r = decide()
             if (r == SenderTrust.Room.ASK_ROSTER) r = SenderTrust.Room.NOT_MEMBER
+            // Every read of the roster failed: decided on the clock alone, which
+            // says nothing about the sender. Struck, and asked again next drain;
+            // written off only after GroupLogPage.FAIL_DRAINS of those.
+            if (!step.answered && (r == SenderTrust.Room.NOT_MEMBER || (foreign && r == SenderTrust.Room.FORGED))) {
+                throw RowWaits(GroupLogPage.ROSTER_UNREACHABLE)
+            }
         }
         if (!foreign && spub.size == 32 && (r == SenderTrust.Room.ASK_CARD || r == SenderTrust.Room.FORGED)) {
             val sub = android.util.Base64.encodeToString(spub, android.util.Base64.NO_WRAP)
-            if (islandStillToAnswer("card:$senderUin", sub) { fetchKeyCard(senderUin) }) throw RowWaits("key_check")
+            val step = askIsland("card:$senderUin", sub) { ep -> fetchKeyCard(senderUin, ep) }
+            if (step.kind != IslandRecheck.Kind.DECIDE) throw RowWaits("key_check")
             r = decide()
             if (r == SenderTrust.Room.ASK_CARD) r = SenderTrust.Room.FORGED
+            if (!step.answered && r == SenderTrust.Room.FORGED) throw RowWaits(GroupLogPage.KEY_UNREACHABLE)
         }
         return r
     }
@@ -13630,10 +13744,15 @@ class Session(context: Context) {
     private fun identityVouch(final: Boolean) = SignalSession.IdentityVouch { uin, dev, incoming, _ ->
         if (publishedIdentityIs(uin, dev, incoming)) return@IdentityVouch
         val ik = android.util.Base64.encodeToString(incoming.serialize(), android.util.Base64.NO_WRAP)
-        if (!final && islandStillToAnswer("ident:$uin", "$dev:$ik") { fetchIslandIdentities(uin, dev) }) {
+        val step = if (final) null else askIsland("ident:$uin", "$dev:$ik") { ep -> fetchIslandIdentities(uin, dev, ep) }
+        if (step != null && step.kind != IslandRecheck.Kind.DECIDE) {
             throw SignalSession.IdentityUnconfirmed(waiting = true, "identity of $uin/$dev not confirmed by the island yet")
         }
         if (publishedIdentityIs(uin, dev, incoming)) return@IdentityVouch
+        // Every read failed: the island never said, which is not "another identity".
+        if (step != null && !step.answered) {
+            throw SignalSession.IdentityUnconfirmed(waiting = false, "the island did not answer for $uin/$dev", unreachable = true)
+        }
         throw SignalSession.IdentityUnconfirmed(waiting = false, "the island publishes another identity for $uin/$dev")
     }
 
@@ -13649,34 +13768,44 @@ class Session(context: Context) {
      *  user info on an island without a device registry, and, only when
      *  neither names [dev] (an island too old to put identities in the list),
      *  that device's bundle, which costs one of its one-time prekeys. */
-    private suspend fun fetchIslandIdentities(uin: Int, dev: Int) {
+    private suspend fun fetchIslandIdentities(uin: Int, dev: Int, ep: Int) {
+        // [ep] is checked after every network call: what an island said for
+        // account A is never written where account B reads it.
         val rows = try {
             api.fetchPeerDevices(uin).devices
         } catch (e: Exception) {
             if (e.message?.startsWith("HTTP 404") != true) throw e
             emptyList()
         }
+        if (!stillOn(ep)) return
         for (r in rows) r.signal_identity_key?.let { peerDeviceIdentity["$uin:${r.device_id}"] = it }
         if (rows.any { it.device_id == dev && it.signal_identity_key != null }) return
         val primary = SealedSender.PRIMARY_DEVICE_ID
         if (dev == primary) {
             val ik = runCatching { api.userInfo(uin, GuestCardStore.theirCard(uin)) }.getOrNull()
                 ?.takeIf { it.uin == uin }?.signal_identity_key
+            if (!stillOn(ep)) return
             if (ik != null) {
                 peerDeviceIdentity["$uin:$primary"] = ik
                 return
             }
         }
+        // Not on the next account's island: the bundle costs a one-time prekey.
+        if (!stillOn(ep)) return
         // Asked about a device and told nothing about it: its bundle says.
         val bundle = if (dev == primary) api.fetchPeerBundle(uin) else api.fetchPeerDeviceBundle(uin, dev)
-        if (bundle.uin == uin) peerDeviceIdentity["$uin:$dev"] = bundle.signal_identity_key
+        if (stillOn(ep) && bundle.uin == uin) peerDeviceIdentity["$uin:$dev"] = bundle.signal_identity_key
     }
 
     /** The ingest tag for a failure, null when the row is done with. */
     private fun ingestTag(e: Throwable): String? = when (e) {
         is DuplicateMessageException -> null
         is RowWaits -> e.tag
-        is SignalSession.IdentityUnconfirmed -> if (e.waiting) "identity_check" else "identity_refused"
+        is SignalSession.IdentityUnconfirmed -> when {
+            e.waiting -> "identity_check"
+            e.unreachable -> GroupLogPage.IDENTITY_UNREACHABLE
+            else -> "identity_refused"
+        }
         else -> e.javaClass.simpleName
     }
 
@@ -13844,6 +13973,7 @@ class Session(context: Context) {
             offeredVer = env.ver,
             opensNew = blob?.let { opens(env.key) },
             opensHeld = if (blob != null && held != null) opens(held.second) else null,
+            blobVer = blob?.let { app.rcq.android.crypto.GroupState.sealedKeyVer(it) },
         )
         val stored = when (verdict) {
             RoomKeyRule.Verdict.REFUSE -> {

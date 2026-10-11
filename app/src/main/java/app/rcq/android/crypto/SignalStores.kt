@@ -144,9 +144,32 @@ class SignalStores(private val db: SignalStoreDb) :
         admitted.add(admittedKey(address, identityKey))
     }
 
+    /** Set while a SignalMessage is being opened, see [IdentityTrustRule]:
+     *  it decrypts only on a session state this store already holds. libsignal
+     *  calls back on the calling thread, inside synchronized(stores). */
+    private val establishedReceive = ThreadLocal<Boolean>()
+
+    /** Run [block] (the decrypt of a SignalMessage) with the pin check and
+     *  the pin movement of an established session, see [IdentityTrustRule]. */
+    fun <T> openOnEstablishedSession(block: () -> T): T {
+        establishedReceive.set(true)
+        try {
+            return block()
+        } finally {
+            establishedReceive.remove()
+        }
+    }
+
+    private fun onEstablishedSession(): Boolean = establishedReceive.get() == true
+
     override fun saveIdentity(address: SignalProtocolAddress, identityKey: IdentityKey): IdentityKeyStore.IdentityChange {
         val key = addressKey(address)
         val existing = db.blobByAddress("identities", "identity_key", key)
+        // An archived state's identity must not pull the pin back: no
+        // ping-pong, no false "safety number changed".
+        if (IdentityTrustRule.keepsPin(onEstablishedSession(), existing != null)) {
+            return IdentityKeyStore.IdentityChange.NEW_OR_UNCHANGED
+        }
         val serialized = identityKey.serialize()
         db.putBlobByAddress("identities", "identity_key", key, serialized)
         admitted.remove(admittedKey(address, identityKey))
@@ -171,20 +194,30 @@ class SignalStores(private val db: SignalStoreDb) :
 
     /**
      * SENDING: a session we build is built from a bundle the island served, so
-     * its identity is the island's word already. RECEIVING: the pinned identity,
-     * a first one (the caller checks a first identity against the island before
-     * it decrypts), or one admitted by [admitIdentity]. A different identity
-     * that nobody checked is refused: libsignal then throws before any state
-     * moves, and the row stays on the island for the check.
+     * its identity is the island's word already. RECEIVING a SignalMessage: a
+     * state we already hold, built on an identity trusted when it was made
+     * ([openOnEstablishedSession]). RECEIVING anything else: the pinned
+     * identity, a first one (the caller checks a first identity against the
+     * island before it decrypts), or one admitted by [admitIdentity]. A
+     * different identity that nobody checked is refused: libsignal then throws
+     * before any state moves, and the row stays on the island for the check.
+     * See [IdentityTrustRule].
      */
     override fun isTrustedIdentity(
         address: SignalProtocolAddress,
         identityKey: IdentityKey,
         direction: IdentityKeyStore.Direction,
     ): Boolean {
-        if (direction == IdentityKeyStore.Direction.SENDING) return true
-        val pinned = getIdentity(address) ?: return true
-        return pinned == identityKey || admittedKey(address, identityKey) in admitted
+        val sending = direction == IdentityKeyStore.Direction.SENDING
+        val established = onEstablishedSession()
+        if (sending || established) return IdentityTrustRule.trusted(sending, established, null, false)
+        val pinned = getIdentity(address)
+        return IdentityTrustRule.trusted(
+            sending = false,
+            established = false,
+            pinnedMatches = pinned?.let { it == identityKey },
+            admitted = pinned != null && admittedKey(address, identityKey) in admitted,
+        )
     }
 
     override fun getIdentity(address: SignalProtocolAddress): IdentityKey? {

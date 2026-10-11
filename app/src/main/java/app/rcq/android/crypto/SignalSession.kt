@@ -391,9 +391,10 @@ object SignalSession {
 
     /** The island has not confirmed a v=2 sender's identity. [waiting]: a read
      *  of what it publishes is under way, the row stays on the island for it;
-     *  otherwise the island answered and publishes something else. Thrown
-     *  BEFORE the ratchet moves, so the same row can still open later. */
-    class IdentityUnconfirmed(val waiting: Boolean, message: String) : Exception(message)
+     *  [unreachable]: every read failed, so the island never said; otherwise
+     *  the island answered and publishes something else. Thrown BEFORE the
+     *  ratchet moves, so the same row can still open later. */
+    class IdentityUnconfirmed(val waiting: Boolean, message: String, val unreachable: Boolean = false) : Exception(message)
 
     /**
      * Decrypt a v=2 payload: peel the outer ECIES, then run the inner
@@ -427,7 +428,10 @@ object SignalSession {
             try {
                 when (u.kind) {
                     "prekey" -> cipher.decrypt(prekey ?: PreKeySignalMessage(u.msgBytes))
-                    "signal" -> cipher.decrypt(SignalMessage(u.msgBytes))
+                    // Opens only on a session state we already hold: its
+                    // identity was trusted when the state was made, whatever
+                    // the pin says now (see IdentityTrustRule).
+                    "signal" -> stores.openOnEstablishedSession { cipher.decrypt(SignalMessage(u.msgBytes)) }
                     else -> throw SealedSender.DecryptException("unknown v2 kind ${u.kind}")
                 }
             } catch (e: DuplicateMessageException) {
