@@ -113,6 +113,20 @@ class IslandMutesTest {
         assertEquals(setOf("peer:1234@is2.example", "peer:1234"), LocalStores.muted.value)
     }
 
+    @Test fun aBackupFromBeforeTheMoveIsFiledByIslandOnRestore() {
+        LocalStores.bindAccount(acct)
+        LocalStores.migrateIslandMutes(acct, emptyList(), ownIsland = emptySet())
+        // The archive's bare peer:1234 is the contact on is2. The move has run,
+        // so nothing would file it later: the restore files it as it writes.
+        LocalStores.withIslandMutes(setOf("peer:1234", "group:7"), listOf(1234 to "is2.example"), emptySet())
+            .forEach { LocalStores.setNotifyMode(it, LocalStores.NotifyMode.NONE) }
+
+        assertEquals(setOf("peer:1234@is2.example", "group:7"), LocalStores.muted.value)
+        assertTrue(LocalStores.isPeerMutedFor(acct, 1234, "is2.example"))
+        assertFalse(LocalStores.isPeerMutedFor(acct, 1234, null))
+        assertEquals(setOf("group:7"), PushMuteSync.syncable(LocalStores.muted.value))
+    }
+
     @Test fun anotherAccountsMovesNothing() {
         LocalStores.bindAccount(acct)
         LocalStores.toggleMute("peer:1234")

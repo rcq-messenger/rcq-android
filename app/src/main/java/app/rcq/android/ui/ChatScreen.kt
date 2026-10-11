@@ -280,7 +280,8 @@ private object ChatDrafts {
 internal fun forgetChatDrafts() = ChatDrafts.forgetAll()
 
 /** The drafts and parked quotes of one account that has left this device
- *  (Manage accounts), as itself or under the duress view over it. The other
+ *  (Manage accounts, or its island saying it no longer exists), as itself or
+ *  under the duress view over it. The other
  *  accounts keep theirs. Main thread. */
 internal fun forgetChatDraftsOf(accountId: String) {
     ChatDrafts.byThread.forgetAccount(accountId)

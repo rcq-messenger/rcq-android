@@ -1189,14 +1189,10 @@ class Session(context: Context) {
         }
     }
 
-    /** See [LocalStores.migrateIslandMutes]: the active account's contacts on
-     *  other islands, and the numbers of its contacts on ours from the cached
-     *  roster (null when there is none yet, which drops nothing). Never in the
-     *  duress view, where the stores belong to the decoy namespace. */
-    private fun migrateIslandMutes() {
-        if (duressViewUp) return
-        val id = AccountManager.activeId.value ?: return
-        if (LocalStores.boundAccount() != id) return
+    /** What [LocalStores.withIslandMutes] files mutes by: the account's
+     *  contacts on other islands, and the numbers of its contacts on ours from
+     *  the cached roster (null when there is none yet, which drops nothing). */
+    private fun islandMuteRosters(id: String): Pair<List<Pair<Int, String>>, Set<Int>?> {
         // Gson leaves a field a damaged row lacks as null, whatever the type says.
         val crossIsland = CrossIslandStore.listFor(appCtx, id).mapNotNull { c ->
             val host: String? = c.host
@@ -1205,7 +1201,27 @@ class Session(context: Context) {
         val own = LocalStores.cachedContactsJson()?.let { json ->
             runCatching { profileGson.fromJson(json, Array<Contact>::class.java) }.getOrNull()
         }?.filter { it.host.isNullOrBlank() }?.mapTo(HashSet()) { it.uin }
+        return crossIsland to own
+    }
+
+    /** See [LocalStores.migrateIslandMutes] and [islandMuteRosters]. Never in
+     *  the duress view, where the stores belong to the decoy namespace. */
+    private fun migrateIslandMutes() {
+        if (duressViewUp) return
+        val id = AccountManager.activeId.value ?: return
+        if (LocalStores.boundAccount() != id) return
+        val (crossIsland, own) = islandMuteRosters(id)
         LocalStores.migrateIslandMutes(id, crossIsland, own)
+    }
+
+    /** Mutes from a backup, filed by island with the same rule as the live set
+     *  ([LocalStores.withIslandMutes]). An archive from before b2809de holds a
+     *  bare `peer:<uin>` for a contact on another island, and by now the
+     *  one-time migration has already run. */
+    fun islandMutesForRestore(keys: Set<String>): Set<String> {
+        val id = LocalStores.boundAccount() ?: return keys
+        val (crossIsland, own) = islandMuteRosters(id)
+        return LocalStores.withIslandMutes(keys, crossIsland, own)
     }
 
     // ── decoy (duress) session identity ──────────────────────────────
@@ -8286,7 +8302,7 @@ class Session(context: Context) {
      *  account was wiped locally. `nextUin` is the account the session
      *  hot-swapped onto, or null for onboarding. MainActivity collects this
      *  to move the UI; the wipe itself already happened down here. */
-    data class AccountLost(val uin: Int, val nextUin: Int?)
+    data class AccountLost(val uin: Int, val nextUin: Int?, val accountId: String?)
     private val _accountLost = MutableSharedFlow<AccountLost>(extraBufferCapacity = 1)
     val accountLost: SharedFlow<AccountLost> = _accountLost
 
@@ -8521,8 +8537,9 @@ class Session(context: Context) {
                         return
                     }
                     android.util.Log.w("RCQburn", "island no longer knows #$me - wiping the local copy (#655)")
-                    val next = eraseActiveAccountLocally(AccountManager.activeId.value)
-                    _accountLost.tryEmit(AccountLost(me, next))
+                    val gone = AccountManager.activeId.value
+                    val next = eraseActiveAccountLocally(gone)
+                    _accountLost.tryEmit(AccountLost(me, next, gone))
                 }
                 app.rcq.android.net.AuthRefusal.ProbeOutcome.KEEP -> if (!allowErase) {
                     // A revoked install stays revoked: nothing a retry can change.

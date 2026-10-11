@@ -362,7 +362,7 @@ object BackupService {
                     // Mute is one of three notify modes rather than a flag of its
                     // own, so it is set through the mode: the sets behind it have
                     // to stay mutually exclusive.
-                    threads("muted").forEach {
+                    session.islandMutesForRestore(threads("muted").toSet()).forEach {
                         if (LocalStores.notifyMode(it) == LocalStores.NotifyMode.ALL) {
                             LocalStores.setNotifyMode(it, LocalStores.NotifyMode.NONE)
                         }

@@ -639,7 +639,9 @@ private fun RcqApp(session: Session) {
     LaunchedEffect(Unit) {
         session.accountLost.collect { ev ->
             // The account is erased already; nothing typed as it stays either.
-            app.rcq.android.ui.forgetChatDrafts()
+            // Only its own drafts: the account we landed on keeps its. A null
+            // id is a legacy identity outside the roster, with no other owner.
+            ev.accountId?.let { app.rcq.android.ui.forgetChatDraftsOf(it) } ?: app.rcq.android.ui.forgetChatDrafts()
             resetNav()
             state = ev.nextUin?.let { UiState.Registered(it) } ?: UiState.Onboarding
             Toast.makeText(context, context.getString(R.string.account_burned_elsewhere), Toast.LENGTH_LONG).show()
