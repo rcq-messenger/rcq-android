@@ -56,14 +56,23 @@ object PushMuteSync {
      * it holds now ([server]).
      *
      * [sent] null means this install has never delivered a set for the account
-     * (first run after the update, a restore): nothing it holds is known to be a
-     * removal, so the island keeps everything it has and gains what is muted
-     * here. Taking a mute back is something only a recorded removal may do.
+     * (first run after the update, a restore): everything muted here goes in,
+     * since the island may never have received it. Taking a mute back is
+     * something only a recorded removal may do.
+     *
+     * [legacy] is where removals are counted from until the first set is
+     * delivered: the set this install held the first time it tried to sync
+     * after the update, which is what older builds PUT on every start. ⚠ The
+     * two baselines are kept apart on purpose. Without [legacy], an unmute made
+     * before the first sync got through (offline at start, an island that did
+     * not answer) was no removal at all: the island kept the mute, the snapshot
+     * was then saved without it, and that chat never woke the phone again
+     * while the app showed it unmuted. Seeding [sent] instead would have
+     * stopped the first sync adding anything.
      */
-    fun merge(local: Set<String>, sent: Set<String>?, server: Set<String>): Set<String> {
-        val before = sent.orEmpty()
-        val added = local - before
-        val removed = before - local
+    fun merge(local: Set<String>, sent: Set<String>?, server: Set<String>, legacy: Set<String>? = null): Set<String> {
+        val added = local - sent.orEmpty()
+        val removed = (sent ?: legacy).orEmpty() - local
         return (server + added) - removed
     }
 

@@ -81,6 +81,12 @@ class ForwardRulesTest {
         assertNull(ForwardRules.credit(msg(), "#123456", emptyList()))
         assertNull(ForwardRules.credit(msg(), "  ", emptyList()))
         assertNull(ForwardRules.credit(msg(), null, emptyList()))
+        // A person on another island with no name is stored as number@island:
+        // that is their address, not a name.
+        assertNull(ForwardRules.credit(msg(), "1234@is2.example", emptyList()))
+        assertNull(ForwardRules.credit(msg(), "#1234@is2.example", emptyList()))
+        assertEquals("Alice@work", ForwardRules.credit(msg(), "Alice@work", emptyList()))
+        assertEquals("@alice", ForwardRules.credit(msg(), "@alice", emptyList()))
         // One line, whatever the name holds.
         assertEquals("Al ice", ForwardRules.credit(msg(), "Al\nice", emptyList()))
     }
@@ -95,6 +101,7 @@ class ForwardRulesTest {
         assertEquals("my pet name", ForwardRules.credit(msg(fromMe = false, fwdName = "my pet name"), "Bob", listOf("my pet name")))
         // A numeric label is no better the second time round.
         assertEquals("Bob", ForwardRules.credit(msg(fwdName = "555"), "Bob", emptyList()))
+        assertEquals("Bob", ForwardRules.credit(msg(fwdName = "1234@is2.example"), "Bob", emptyList()))
     }
 
     private fun room(files: Boolean = true, links: Boolean = true, slow: Int = 0, members: List<GroupMember> = emptyList()) =

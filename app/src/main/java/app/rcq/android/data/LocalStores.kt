@@ -746,6 +746,16 @@ object LocalStores {
         if (::prefs.isInitialized) prefs.edit().putStringSet("$accountId.$K_PUSH_MUTES_SENT", threads.toSet()).apply()
     }
 
+    /** The mute set this install held the first time it tried to sync after
+     *  the update, written once per account: where removals are counted from
+     *  until a set is delivered. See [app.rcq.android.push.PushMuteSync.merge]. */
+    fun pushMutesLegacy(accountId: String): Set<String>? =
+        if (::prefs.isInitialized) prefs.getStringSet("$accountId.$K_PUSH_MUTES_LEGACY", null)?.toSet() else null
+
+    fun setPushMutesLegacy(accountId: String, threads: Set<String>) {
+        if (::prefs.isInitialized) prefs.edit().putStringSet("$accountId.$K_PUSH_MUTES_LEGACY", threads.toSet()).apply()
+    }
+
     /** Headless mute check: read [thread]'s NONE-mute flag straight from prefs for
      *  [accountId], WITHOUT binding the global per-account state. Safe to call from
      *  the UnifiedPush service (no Activity, no active account bound). Returns false
@@ -1920,7 +1930,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_LIVENESS, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS, K_PUSH_MUTES_SENT,
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_LIVENESS, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS, K_PUSH_MUTES_SENT, K_PUSH_MUTES_LEGACY,
             // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
             // the profile key of every contact, stored BY NUMBER, so leaving it
             // behind keeps a plaintext roster of the burned identity plus the
@@ -1940,6 +1950,7 @@ object LocalStores {
     private const val K_FAV = "favorites"
     private const val K_MUTE = "muted"
     private const val K_PUSH_MUTES_SENT = "push_mutes_sent"
+    private const val K_PUSH_MUTES_LEGACY = "push_mutes_legacy"
     private const val K_MENTIONS = "mentions_only"
     private const val K_ARCH = "archived"
     private const val K_LOCKED = "locked"

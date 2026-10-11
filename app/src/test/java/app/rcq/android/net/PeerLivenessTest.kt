@@ -172,6 +172,21 @@ class PeerLivenessTest {
         assertFalse(PeerLiveness.holds(m, null, 500))
     }
 
+    @Test fun a_new_stamp_on_a_contact_added_again_starts_from_a_clean_mark() {
+        val old = Mark(sk = sk, gone = 1_000, probedAt = 900, failProbeAt = 950)
+        // Still about this row: kept as it is.
+        assertEquals(old, PeerLiveness.base(old, sk, 500))
+        // Added again after the mark: the old "gone" goes, the probe stamps
+        // stay, so a GONE verdict now stamps a time that holds.
+        val again = PeerLiveness.base(old, sk, 2_000)
+        assertEquals(Mark(sk = sk, probedAt = 900, failProbeAt = 950), again)
+        val marked = again.copy(gone = again.gone ?: 3_000)
+        assertTrue(PeerLiveness.holds(marked, sk, 2_000))
+        // Another key, or nothing yet: a fresh record.
+        assertEquals(Mark(sk = key(9)), PeerLiveness.base(old, key(9), 500))
+        assertEquals(Mark(sk = sk), PeerLiveness.base(null, sk, 500))
+    }
+
     @Test fun gone_keys_are_the_marked_addresses_that_still_hold() {
         val marks = mapOf(
             "$uin@$host" to Mark(sk = sk, gone = 1_000),

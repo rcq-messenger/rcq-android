@@ -96,11 +96,18 @@ internal object ForwardRules {
     /** A credit fit for the wire: what [Envelope.sanitizeFwdName] keeps, and
      *  null when that is nothing or only a number (with or without "#"), which
      *  is how a person with no name reads everywhere in this app. Same rule as
-     *  iOS `cleanForwardCredit`. */
+     *  iOS `cleanForwardCredit`.
+     *
+     *  ⚠ A number followed by "@island" is not a name either: it is how a
+     *  person on another island with no name of their own is stored
+     *  ([app.rcq.android.Session.addCrossIslandContactDetailed], the accept
+     *  path), and would put their number AND island in every recipient's
+     *  chat. A chosen name like "@alice" or "Alice@work" stays. */
     fun cleanCredit(raw: String?): String? {
         val name = Envelope.sanitizeFwdName(raw) ?: return null
         val bare = name.removePrefix("#")
-        if (bare.isEmpty() || bare.all { it.isDigit() }) return null
+        val number = if ('@' in bare) bare.substringBefore('@') else bare
+        if (bare.isEmpty() || (number.isNotEmpty() && number.all { it.isDigit() })) return null
         return name
     }
 

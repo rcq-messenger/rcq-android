@@ -260,6 +260,20 @@ object PeerLiveness {
         return rowAddedAt <= markedAt
     }
 
+    /** The mark a new probe stamp or verdict is written on top of, for the row
+     *  pinned at that address now ([rowSk], added at [rowAddedAt]). A record
+     *  about another key starts over. One that no longer [holds] (the contact
+     *  was added again since, on whichever device) keeps only its probe
+     *  stamps: carrying its old "gone" along stamped a GONE verdict with the
+     *  OLD time, which never holds for the row added after it, so the contact
+     *  was never shown as deleted and was asked about every day for good.
+     *  Same as the web's `update()` (peer-liveness.ts). */
+    fun base(m: Mark?, rowSk: String, rowAddedAt: Long): Mark = when {
+        m == null || !sameKey(m.sk, rowSk) -> Mark(sk = rowSk)
+        holds(m, rowSk, rowAddedAt) -> m
+        else -> m.copy(gone = null)
+    }
+
     /** Is a probe due? [prevAt] is the stamp of the last one of this kind. A
      *  clock that went backwards reads as "long ago", not as "never again". */
     fun probeDue(prevAt: Long?, now: Long, everyMs: Long): Boolean {

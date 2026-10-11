@@ -51,6 +51,34 @@ class PushMuteSyncTest {
         assertEquals(setOf("peer:9", "group:3", "peer:5"), next)
     }
 
+    @Test fun anUnmuteBeforeTheFirstSyncGotThroughStillComesOff() {
+        // Older builds PUT peer:5 and group:7. The first sync after the update
+        // failed (offline), and peer:5 was unmuted before the next one.
+        val next = PushMuteSync.merge(
+            local = setOf("group:7"),
+            sent = null,
+            server = setOf("peer:5", "group:7", "peer:9"),
+            legacy = setOf("peer:5", "group:7"),
+        )
+        assertEquals(setOf("group:7", "peer:9"), next)
+    }
+
+    @Test fun theLegacyBaselineAloneTakesNothingBackAndStillAdds() {
+        // The first sync, seeded with the set held right then.
+        val next = PushMuteSync.merge(
+            local = setOf("peer:5"),
+            sent = null,
+            server = setOf("peer:9"),
+            legacy = setOf("peer:5"),
+        )
+        assertEquals(setOf("peer:9", "peer:5"), next)
+        // Once a set was delivered, removals count from that, not the legacy.
+        assertEquals(
+            setOf("peer:9", "peer:5"),
+            PushMuteSync.merge(local = setOf("peer:5"), sent = setOf("peer:5"), server = setOf("peer:9", "peer:5"), legacy = setOf("peer:9")),
+        )
+    }
+
     @Test fun anIslandThatSendsNoListsIsEmpty() {
         assertEquals(emptySet<String>(), PushMuteSync.serverThreads(null, null))
         assertEquals(setOf("peer:1", "group:2"), PushMuteSync.serverThreads(listOf(1), listOf(2)))

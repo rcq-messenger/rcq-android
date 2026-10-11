@@ -1162,6 +1162,11 @@ class Session(context: Context) {
         if (acct != AccountManager.activeId.value) return
         val local = PushMuteSync.syncable(muted)
         val sent = LocalStores.pushMutesSent(acct)
+        // Before anything goes out, once per account: what older builds PUT
+        // on every start, so an unmute made before the first sync gets
+        // through still counts as a removal (see [PushMuteSync.merge]).
+        val legacy = LocalStores.pushMutesLegacy(acct)
+            ?: local.takeIf { sent == null }?.also { LocalStores.setPushMutesLegacy(acct, it) }
         if (PushMuteSync.upToDate(local, sent)) return
         runCatching {
             // Fresh, not cached: what another install did since we last spoke
@@ -1170,7 +1175,7 @@ class Session(context: Context) {
             val prefs = api.getPushPreferences()
             if (!stillOn(ep)) return
             val server = PushMuteSync.serverThreads(prefs.muted_uins, prefs.muted_group_ids)
-            val next = PushMuteSync.merge(local, sent, server)
+            val next = PushMuteSync.merge(local, sent, server, legacy)
             if (next != server) {
                 api.setPushPreferences(
                     RcqApi.PushPrefsBody(
@@ -5289,6 +5294,18 @@ class Session(context: Context) {
         // [host]: the island, when the caller knows exactly which contact it
         // means (the "account deleted" banner, report 1067).
         val ci = if (host != null) CrossIslandStore.get(uin, host) else CrossIslandStore.findByUin(uin)
+        if (ci == null && host != null) {
+            // The caller named another island and that row is already gone (a
+            // vault tombstone from another device, a refusal). Nothing on our
+            // own island is meant: the removed list and DELETE /contacts are
+            // bare numbers and would hit whoever holds this number HERE, and
+            // then silently drop what they write.
+            LocalStores.forgetPeerMark(LocalStores.aliasKey(uin, host))
+            syncCrossIslandContacts()
+            forgetSectionMember(app.rcq.android.data.Sections.peerKey(uin, host))
+            if (alsoDeleteMessages) clearPeerThread(uin)
+            return
+        }
         // Only for our own island (#1055): the list is bare numbers, and a
         // foreign contact's number named whoever holds it here too. Once out
         // of CrossIslandStore they are a stranger to the cross-island gate,
@@ -10392,42 +10409,63 @@ class Session(context: Context) {
      *  silently: the chat only offers this when the rule passes for all of
      *  them, so a refusal here means the rights changed underneath.
      *
-     *  [skipInFlight] leaves out my rows still SENDING, as the web does: a
+     *  [skipInFlight] holds back my rows still SENDING until their send
+     *  settles (SENT or FAILED), then takes them by the same rule: a
      *  retraction can overtake the message it retracts, and a recipient who
-     *  gets the delete first and the message second keeps the message. The
-     *  album item never did this and keeps its behaviour.
+     *  gets the delete first and the message second keeps the message. The web
+     *  leaves them out; that left them on screen without a word and then
+     *  delivered them (review of report 1063). A row stranded in SENDING
+     *  (nothing sweeps those) goes after [IN_FLIGHT_WAIT_MS] anyway, exactly
+     *  as the single-message delete would take it. The album item never did
+     *  any of this and keeps its behaviour.
      *
      *  Everything allowed vanishes locally at once, then the wire half runs
      *  one item at a time through [pushRetraction] (see the note there about
      *  parallel fan-outs). A failure restores only the item that failed. */
     fun deleteManyForEveryone(items: List<ChatMessage>, skipInFlight: Boolean = true) {
-        val rows = if (skipInFlight) items.filterNot { it.fromMe && it.state == DeliveryState.SENDING } else items
-        if (rows.isEmpty()) return
+        if (items.isEmpty()) return
+        val (inFlight, ready) =
+            if (skipInFlight) items.partition { it.fromMe && it.state == DeliveryState.SENDING }
+            else emptyList<ChatMessage>() to items
         val ep = epochNow()
         scope.launch {
-            val me = store.uin
-            val moderates = HashMap<Int, Boolean>()
-            val allowed = rows.filter { m ->
-                val gid = m.groupId
-                when {
-                    m.fromMe || (gid == null && m.peerUin == me) -> true
-                    gid == null -> false
-                    else -> moderates.getOrPut(gid) {
-                        ensureRoster(gid)
-                        val g = group(gid)
-                        g != null && me != null && g.moderator(me)
-                    }
+            retractBatch(ready, ep)
+            if (inFlight.isEmpty()) return@launch
+            kotlinx.coroutines.withTimeoutOrNull(IN_FLIGHT_WAIT_MS) {
+                while (stillOn(ep) && inFlight.any { liveRow(it)?.state == DeliveryState.SENDING }) delay(250)
+            }
+            // Re-read: the state they settled in decides how the retraction
+            // goes out. Gone meanwhile: nothing left to do.
+            retractBatch(inFlight.mapNotNull { liveRow(it) }, ep)
+        }
+    }
+
+    /** The permission check, local delete and retraction of
+     *  [deleteManyForEveryone], for rows that are ready to go. */
+    private suspend fun retractBatch(rows: List<ChatMessage>, ep: Int) {
+        if (rows.isEmpty() || !stillOn(ep)) return
+        val me = store.uin
+        val moderates = HashMap<Int, Boolean>()
+        val allowed = rows.filter { m ->
+            val gid = m.groupId
+            when {
+                m.fromMe || (gid == null && m.peerUin == me) -> true
+                gid == null -> false
+                else -> moderates.getOrPut(gid) {
+                    ensureRoster(gid)
+                    val g = group(gid)
+                    g != null && me != null && g.moderator(me)
                 }
             }
-            // The roster fetch can outlast an account switch, and the deletes
-            // below would land in the next account's database.
-            if (allowed.isEmpty() || !stillOn(ep)) return@launch
-            // Local first, all of it: the point of the action is that the
-            // batch goes in one go.
-            val wasFailed = allowed.associate { m -> m.id to (liveRow(m)?.let { it.fromMe && it.state == DeliveryState.FAILED } ?: false) }
-            allowed.forEach { deleteLocal(it) }
-            allowed.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId, wasFailed[m.id] == true) }
         }
+        // The roster fetch can outlast an account switch, and the deletes
+        // below would land in the next account's database.
+        if (allowed.isEmpty() || !stillOn(ep)) return
+        // Local first, all of it: the point of the action is that the
+        // batch goes in one go.
+        val wasFailed = allowed.associate { m -> m.id to (liveRow(m)?.let { it.fromMe && it.state == DeliveryState.FAILED } ?: false) }
+        allowed.forEach { deleteLocal(it) }
+        allowed.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId, wasFailed[m.id] == true) }
     }
 
     /** Undo the optimistic half of a retraction that never made it out.
@@ -14143,10 +14181,11 @@ class Session(context: Context) {
         }
         if (!livenessInFlight.add(key)) return
         // Stamped before the network, so a screen opened twice in a row does
-        // not ask twice. A record about another key starts over.
+        // not ask twice. A record about another key starts over, and one that
+        // no longer holds sheds its "gone" ([PeerLiveness.base]).
         if (trigger != ProbeTrigger.DELIVERED) {
             LocalStores.updatePeerMark(account, key) { m ->
-                val base = m?.takeIf { PeerLiveness.sameKey(it.sk, ci.signingKey) } ?: PeerLiveness.Mark(sk = ci.signingKey)
+                val base = PeerLiveness.base(m, ci.signingKey, ci.addedAt)
                 if (trigger == ProbeTrigger.OPEN) base.copy(probedAt = now) else base.copy(probedAt = now, failProbeAt = now)
             }
         }
@@ -14164,7 +14203,9 @@ class Session(context: Context) {
                 val row = CrossIslandStore.get(ci.uin, ci.host)
                 if (row == null || !PeerLiveness.sameKey(row.signingKey, ci.signingKey)) return@launch
                 LocalStores.updatePeerMark(account, key) { m ->
-                    val base = m?.takeIf { PeerLiveness.sameKey(it.sk, ci.signingKey) } ?: PeerLiveness.Mark(sk = ci.signingKey)
+                    // Against the row as it is NOW: it may have been added
+                    // again while the island was being asked.
+                    val base = PeerLiveness.base(m, row.signingKey, row.addedAt)
                     when (verdict) {
                         PeerLiveness.Liveness.GONE -> base.copy(gone = base.gone ?: System.currentTimeMillis())
                         // The island serves this number under the pinned keys:
@@ -16192,6 +16233,11 @@ class Session(context: Context) {
         /** The largest `batch_size` the island accepts on a group send
          *  (`messages.py`, `le=10`): the album picker's own limit. */
         private const val FORWARD_BATCH_MAX = 10
+
+        /** How long a picked row of mine still SENDING is waited for before
+         *  [deleteManyForEveryone] retracts it anyway. A fan-out to a big room
+         *  takes 10-15 s; a row stranded in SENDING never settles. */
+        private const val IN_FLIGHT_WAIT_MS = 120_000L
 
         /** The session of this process, for the one caller that lives outside
          *  it: the push service. A message push while the process is alive is

@@ -244,9 +244,10 @@ internal fun ChatSelectionBar(session: Session, selection: ChatSelection, messag
  * everyone" is offered only when it would be true of EVERY ticked message:
  * all mine, or a room I moderate. Saved Messages has one Delete, which
  * reaches my other devices like the single one does. A row of mine still
- * on its way out is left out of a retraction, which could overtake it (see
- * Session.deleteManyForEveryone); "for me" takes it like the single one does,
- * since nobody else is told anything.
+ * on its way out is retracted once its send settles, not before, since the
+ * retraction could overtake it (see Session.deleteManyForEveryone); "for me"
+ * takes it at once like the single one does, since nobody else is told
+ * anything.
  */
 @Composable
 internal fun ChatSelectionLayer(

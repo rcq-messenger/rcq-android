@@ -1623,22 +1623,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // the list past the cursor and brings the FAB back for that one.
     val mentionsLeft = (mentionIds.size - mentionCursor).coerceAtLeast(0)
 
-    // "This account no longer exists" (report 1067). Their island is asked
-    // when the chat opens, at most once a day per address (on another island
-    // only; ours drops a burned contact from the roster itself), and after a
-    // send fails. The address is the one a send takes, so the same number on
-    // two islands never shares a banner. The mark comes off only when a row
-    // signed by the pinned key arrives (Session.ingest), never because the last
-    // message in the thread happens to be theirs: a burned person usually
-    // wrote last, and that rule wiped the probe's answer on the next open.
-    val goneSet by session.goneAddresses.collectAsState()
-    val peerAddress = remember(peer, contacts) { if (isGroup || isSelf || peer == null) null else session.peerAddressKey(peer) }
-    val peerGone = peerAddress != null && peerAddress in goneSet
-    LaunchedEffect(peer) {
-        if (!isGroup && !isSelf && peer != null) session.probeCrossIslandPeer(peer)
-    }
-    var confirmRemoveGone by remember(peer) { mutableStateOf(false) }
-
     // Frosted chrome over the wallpaper (founder item L2.9). One slice state
     // for the whole screen, built from the same selection ChatBackground()
     // itself reads; inert with no wallpaper set. The veil washes follow the
@@ -1943,50 +1927,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             )
         }
 
-        if (peerGone) {
-            Row(
-                Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    stringResource(R.string.chat_peer_gone),
-                    color = c.statusBusy,
-                    fontSize = 12.sp,
-                    modifier = Modifier.weight(1f),
-                )
-                // The one action that helps, for a contact on another island:
-                // the same removal as the card's, so it is buried in the vault
-                // and another device does not bring the ghost back. It asks
-                // what to do with the history, and nothing is erased unasked.
-                // Our own island already dropped a burned contact itself.
-                if (peerAddress?.contains('@') == true) {
-                    Text(
-                        stringResource(R.string.home_remove),
-                        color = c.accent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(50))
-                            .clickable { confirmRemoveGone = true }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                }
-            }
-        }
-        if (confirmRemoveGone && peer != null) {
-            RemoveContactDialog(
-                nickname = session.contactName(peer),
-                onDismiss = { confirmRemoveGone = false },
-                onRemove = { alsoDelete ->
-                    confirmRemoveGone = false
-                    val host = peerAddress?.substringAfter('@', "")?.takeIf { it.isNotEmpty() }
-                    scope.launch {
-                        runCatching { session.removeContact(peer, alsoDeleteMessages = alsoDelete, host = host) }
-                        onBack()
-                    }
-                },
-            )
-        }
+        // "This account no longer exists" (report 1067): see [PeerGoneBanner].
+        PeerGoneBanner(session, if (isGroup || isSelf) null else peer, contacts, scope, onBack)
 
         // Writing to somebody on ANOTHER island for the first time: their app
         // files it as a conversation REQUEST, not a chat, and nothing comes
@@ -3591,6 +3533,90 @@ private fun AttachSheet(
                 // button intact - see RelayBubble below.
             }
         }
+    }
+}
+
+/** "This account no longer exists" (report 1067), for the 1:1 chat with
+ *  [peer] (null in a room, Notes, or anything else with no one person).
+ *
+ *  Their island is asked when the chat opens, at most once a day per address
+ *  (on another island only; ours drops a burned contact from the roster
+ *  itself), and after a send fails. The address is the one a send takes, so
+ *  the same number on two islands never shares a banner. The mark comes off
+ *  only when a row signed by the pinned key arrives (Session.ingest), never
+ *  because the last message in the thread happens to be theirs: a burned
+ *  person usually wrote last, and that rule wiped the probe's answer on the
+ *  next open.
+ *
+ *  ⚠⚠ Kept OUT of ChatScreen on purpose: that method is at the ART verifier's
+ *  limit (see [MessageLongPressOverlay]), and an inlined block with its own
+ *  state and a dialog is what has crashed every chat on opening before.
+ *  [contacts] is only the remember key: the address is worked out again
+ *  when the roster changes. */
+@Composable
+private fun PeerGoneBanner(
+    session: Session,
+    peer: Int?,
+    contacts: List<app.rcq.android.model.Contact>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onBack: () -> Unit,
+) {
+    val c = RcqTheme.colors
+    val goneSet by session.goneAddresses.collectAsState()
+    val peerAddress = remember(peer, contacts) { peer?.let { session.peerAddressKey(it) } }
+    LaunchedEffect(peer) {
+        if (peer != null) session.probeCrossIslandPeer(peer)
+    }
+    // The island the Remove is for, pinned when it is TAPPED. [peerAddress]
+    // is worked out again whenever the roster changes, and once the row is
+    // gone (removed on another device, a refusal) it reads as the bare
+    // number: a removal confirmed then would land on whoever holds that
+    // number on OUR island.
+    var removeGoneHost by remember(peer) { mutableStateOf<String?>(null) }
+    if (peerAddress != null && peerAddress in goneSet) {
+        Row(
+            Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                stringResource(R.string.chat_peer_gone),
+                color = c.statusBusy,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            // The one action that helps, for a contact on another island:
+            // the same removal as the card's, so it is buried in the vault
+            // and another device does not bring the ghost back. It asks
+            // what to do with the history, and nothing is erased unasked.
+            // Our own island already dropped a burned contact itself.
+            val host = peerAddress.substringAfter('@', "").takeIf { it.isNotEmpty() }
+            if (host != null) {
+                Text(
+                    stringResource(R.string.home_remove),
+                    color = c.accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(50))
+                        .clickable { removeGoneHost = host }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
+    val pinnedHost = removeGoneHost
+    if (pinnedHost != null && peer != null) {
+        RemoveContactDialog(
+            nickname = session.contactName(peer),
+            onDismiss = { removeGoneHost = null },
+            onRemove = { alsoDelete ->
+                removeGoneHost = null
+                scope.launch {
+                    runCatching { session.removeContact(peer, alsoDeleteMessages = alsoDelete, host = pinnedHost) }
+                    onBack()
+                }
+            },
+        )
     }
 }
 
