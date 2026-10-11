@@ -54,6 +54,13 @@ internal data class HomeLists(
  */
 internal fun contactKey(prefix: String, contact: Contact) = "${prefix}_${contact.uin}@${contact.host ?: ""}"
 
+/** Is [contact] a row on another island whose account is gone (report 1067)?
+ *  [gone] is [app.rcq.android.Session.goneAddresses]. A row on our own island
+ *  is never drawn as gone: the island itself drops a burned contact from the
+ *  roster, so a row there is somebody it still holds. */
+internal fun goneInList(contact: Contact, gone: Set<String>): Boolean =
+    contact.host != null && gone.isNotEmpty() && LocalStores.aliasKey(contact.uin, contact.host) in gone
+
 /**
  * Slice [contacts] and [groups] into the home screen's sections.
  *
@@ -62,6 +69,11 @@ internal fun contactKey(prefix: String, contact: Contact) = "${prefix}_${contact
  * [lastActivity] is the sent-at of the newest message with a peer, 0 when there
  * is none: a function rather than the message map, so a test does not have to
  * build chat history to check an order.
+ *
+ * [isGone]: their island says this account no longer exists (report 1067). The
+ * row sinks to the end of whichever section it is in rather than vanishing: a
+ * false "gone" exists (a restored island database, a number that moved), and
+ * the history stays one tap away.
  */
 internal fun buildHomeLists(
     contacts: List<Contact>,
@@ -71,12 +83,15 @@ internal fun buildHomeLists(
     archived: Set<String>,
     sectionsTree: JsonObject,
     sectionsOk: Boolean?,
+    isGone: (Contact) -> Boolean = { false },
     lastActivity: (Int) -> Long,
 ): HomeLists {
-    // Unread threads float to the top (iOS parity), then by recency.
+    // Unread threads float to the top (iOS parity), then by recency. An
+    // account that is gone goes below all of it, unread or not.
     fun byRecency(list: List<Contact>) =
         list.sortedWith(
-            compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
+            compareBy<Contact> { isGone(it) }
+                .thenByDescending { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
                 .thenByDescending { lastActivity(it.uin) },
         )
     // Inside a user section: unread first, then favorite, then the sort
@@ -85,7 +100,8 @@ internal fun buildHomeLists(
     // it goes on doing the only other thing it ever did.
     fun bySectionOrder(list: List<Contact>) =
         list.sortedWith(
-            compareByDescending<Contact> { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
+            compareBy<Contact> { isGone(it) }
+                .thenByDescending { (unread[LocalStores.peerThread(it.uin)] ?: 0) > 0 }
                 .thenByDescending { LocalStores.peerThread(it.uin) in favorites }
                 .thenByDescending { lastActivity(it.uin) },
         )

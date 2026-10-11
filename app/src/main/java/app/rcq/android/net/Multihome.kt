@@ -914,6 +914,17 @@ object Multihome {
         }
     }.getOrNull()
 
+    /** [fetchGossipRecord] for the liveness probe (report 1067), which has to
+     *  tell the island's own "no record" apart from a refused or failed read:
+     *  the status and the body as JSON, or null when nothing answered. */
+    fun gossipRecordReply(host: String, signingKeyB64: String): PeerLiveness.Reply? = runCatching {
+        val sk = java.net.URLEncoder.encode(signingKeyB64, "UTF-8")
+        val req = Request.Builder().url("https://$host/federation/gossip-record?sk=$sk").get().build()
+        http().newBuilder().callTimeout(10, TimeUnit.SECONDS).build().newCall(req).execute().use { resp ->
+            PeerLiveness.Reply(resp.code, PeerLiveness.jsonBody(resp.peekBody(16_384L).string()))
+        }
+    }.getOrNull()
+
     private fun homesOf(doc: JsonObject): List<RcqFederation.Home> =
         doc.getAsJsonArray("homes").map {
             val h = it.asJsonObject

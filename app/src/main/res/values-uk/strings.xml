@@ -949,6 +949,7 @@
     <string name="chat_edited">змінено</string>
     <string name="chat_cross_island_pending">Ця людина на іншому острові. Твоє перше повідомлення приходить туди як запит на листування: ні повідомлення, ні дзвінки не пройдуть, поки вона його не прийме.</string>
     <string name="chat_peer_gone">Цього акаунта більше немає: острів каже, що такого номера в нього немає. Повідомлення не доставлятимуться.</string>
+    <string name="chat_peer_gone_row">Акаунт видалено</string>
     <string name="reactions_who_title">Реакції</string>
     <string name="chat_failed_retry">помилка · натисни, щоб повторити</string>
     <string name="chat_attach">Прикріпити</string>

@@ -172,13 +172,18 @@ internal fun ContactRowItem(contact: Contact, unread: Int, session: Session, onC
     val thread = LocalStores.peerThread(contact.uin)
     val hasReaction = thread in reactSet
     val hasMention = thread in mentionSet
+    // Their island says this account no longer exists (report 1067): the row is
+    // muted and the address line says so. Same row otherwise, so the history
+    // and the long-press menu (remove included) stay one tap away.
+    val goneSet by session.goneAddresses.collectAsState()
+    val gone = goneInList(contact, goneSet)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             // See [GroupRow]: read the press animation in the draw phase, not
             // in composition.
-            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
+            .graphicsLayer { scaleX = scale.value; scaleY = scale.value; alpha = if (gone) 0.6f else 1f }
             .combinedClickable(interactionSource = src, indication = null, onClick = onClick, onLongClick = onLongPress)
             .background(c.bgPrimary.copy(alpha = LocalHomeVeil.current))
             .padding(horizontal = 10.dp, vertical = 4.dp),
@@ -238,7 +243,10 @@ internal fun ContactRowItem(contact: Contact, unread: Int, session: Session, onC
                     AltText(seen, msg, c.textSecondary, 12.sp)
                     return@Row
                 }
+                val goneLabel = stringResource(R.string.chat_peer_gone_row)
                 val sub = when {
+                    // Instead of the island: it is still there, the person is not.
+                    gone -> goneLabel
                     // §5c: a cross-island peer shows its island (presence/last_seen
                     // don't cross islands), then any status message.
                     contact.host != null -> contact.host + (msg?.let { " · $it" } ?: "")
@@ -254,7 +262,7 @@ internal fun ContactRowItem(contact: Contact, unread: Int, session: Session, onC
                         // last seen can share the line, italics would be a lie
                         // about half of it, so it is kept only when the line is
                         // nothing BUT their words.
-                        fontStyle = if (seen == null && msg != null) FontStyle.Italic else FontStyle.Normal,
+                        fontStyle = if (!gone && seen == null && msg != null) FontStyle.Italic else FontStyle.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

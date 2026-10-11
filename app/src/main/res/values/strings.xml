@@ -986,6 +986,7 @@
     <string name="chat_edited">edited</string>
     <string name="chat_cross_island_pending">This person is on another island. Your first message arrives there as a request to connect: neither messages nor calls go through until they accept it.</string>
     <string name="chat_peer_gone">This account no longer exists: the island says there is no such number. Messages will not be delivered.</string>
+    <string name="chat_peer_gone_row">Account deleted</string>
     <string name="reactions_who_title">Reactions</string>
     <string name="chat_failed_retry">failed · tap to retry</string>
     <string name="chat_attach">Attach</string>

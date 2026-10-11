@@ -934,6 +934,7 @@
     <string name="chat_edited">editado</string>
     <string name="chat_cross_island_pending">Esta persona está en otra isla. Tu primer mensaje llega allí como una solicitud para conectar: ni los mensajes ni las llamadas pasan hasta que la acepte.</string>
     <string name="chat_peer_gone">Esta cuenta ya no existe: la isla dice que no hay tal número. Los mensajes no se entregarán.</string>
+    <string name="chat_peer_gone_row">Cuenta eliminada</string>
     <string name="reactions_who_title">Reacciones</string>
     <string name="chat_failed_retry">falló · toca para reintentar</string>
     <string name="chat_attach">Adjuntar</string>

@@ -418,6 +418,8 @@ internal fun HomeScreen(
     val favorites by LocalStores.favorites.collectAsState()
     val archived by LocalStores.archived.collectAsState()
     val unread by LocalStores.unread.collectAsState()
+    // Contacts on other islands whose island says the account is gone (report 1067).
+    val goneAddresses by session.goneAddresses.collectAsState()
     // Operator-toggleable features (admin console → Features); default true.
     val nearbyEnabled by session.nearbyEnabled.collectAsState()
     val randomEnabled by session.randomEnabled.collectAsState()
@@ -600,10 +602,13 @@ internal fun HomeScreen(
     // result and on nothing else. (Scrolling itself never recomposes this body,
     // which is why the fix is worth having and also why it is not the whole of
     // the answer; see the notes on the row composables.)
-    val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk) {
+    val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk, goneAddresses) {
         // The slicing itself lives in [buildHomeLists], so the share picker
         // (#987) files every chat into the section it has here and nowhere else.
-        buildHomeLists(contacts, groups, unread, favorites, archived, sectionsTree, sectionsOk) { peer ->
+        buildHomeLists(
+            contacts, groups, unread, favorites, archived, sectionsTree, sectionsOk,
+            isGone = { goneInList(it, goneAddresses) },
+        ) { peer ->
             messages[peer]?.lastOrNull()?.sentAt ?: 0L
         }
     }

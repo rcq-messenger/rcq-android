@@ -949,6 +949,7 @@
     <string name="chat_edited">已编辑</string>
     <string name="chat_cross_island_pending">这个人在另一个岛上。你的第一条消息会作为好友请求送达那里：在对方接受之前，消息和通话都无法接通。</string>
     <string name="chat_peer_gone">这个账号已经不存在了：岛上说没有这个号码。消息不会送达。</string>
+    <string name="chat_peer_gone_row">账号已删除</string>
     <string name="reactions_who_title">回应</string>
     <string name="chat_failed_retry">发送失败 · 点击重试</string>
     <string name="chat_attach">附件</string>

@@ -934,6 +934,7 @@
     <string name="chat_edited">düzenlendi</string>
     <string name="chat_cross_island_pending">Bu kişi başka bir adada. İlk mesajın oraya bağlanma isteği olarak ulaşır: kabul edene kadar ne mesaj ne arama geçer.</string>
     <string name="chat_peer_gone">Bu hesap artık yok: ada böyle bir numara olmadığını söylüyor. Mesajlar teslim edilmeyecek.</string>
+    <string name="chat_peer_gone_row">Hesap silindi</string>
     <string name="reactions_who_title">Tepkiler</string>
     <string name="chat_failed_retry">gitmedi · tekrar denemek için dokun</string>
     <string name="chat_attach">Ekle</string>

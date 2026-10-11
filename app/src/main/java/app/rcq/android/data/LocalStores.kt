@@ -118,15 +118,21 @@ object LocalStores {
      *  their FUTURE messages flow too, so the allowance persists here. */
     private val _allowedStrangers = MutableStateFlow<Set<Int>>(emptySet())
 
-    /** Peers whose island answered "no such number" after a send failed — i.e.
-     *  they burned the account. Discovered lazily, never polled: asking the
-     *  server periodically whether each of your contacts still exists is
-     *  exactly the metadata traffic this project avoids, so the question is
-     *  only asked when a send has already failed (user report: "I burned my
-     *  other account, writing to it from the main one just says it could not
-     *  send — mark them instead"). Cleared if they ever come back. */
-    private val _gonePeers = MutableStateFlow<Set<Int>>(emptySet())
-    val gonePeers: StateFlow<Set<Int>> = _gonePeers.asStateFlow()
+    /** What this device learned about whether a contact still exists, keyed
+     *  [aliasKey]: `uin@host` for another island, the bare number for ours.
+     *  Discovered lazily, never polled: asking periodically whether each of
+     *  your contacts still exists is exactly the metadata traffic this project
+     *  avoids, so the question is asked when a chat or a card is opened (at
+     *  most once a day) and when a send has failed (report 1067). The rules
+     *  are [app.rcq.android.net.PeerLiveness]; what reads "gone" right now is
+     *  [app.rcq.android.Session.goneAddresses].
+     *
+     *  ⚠ Replaces a set of BARE numbers ("gone_peers"), which put the banner
+     *  of somebody on another island on whoever holds the same number here,
+     *  and was cleared by whichever message came last in the thread. That set
+     *  is no longer read, and goes from disk with the first write here. */
+    private val _peerMarks = MutableStateFlow<Map<String, app.rcq.android.net.PeerLiveness.Mark>>(emptyMap())
+    val peerMarks: StateFlow<Map<String, app.rcq.android.net.PeerLiveness.Mark>> = _peerMarks.asStateFlow()
 
     /** Persistent per-thread unread counters, keyed "peer:<uin>"/"group:<id>".
      *  Mirrors the iOS UnreadStore: survives cold starts, bumped on inbound
@@ -525,7 +531,7 @@ object LocalStores {
             _blockedKeys = emptySet()
             _strangerQuarantine.value = false
             _allowedStrangers.value = emptySet()
-            _gonePeers.value = emptySet()
+            _peerMarks.value = emptyMap()
             _unread.value = emptyMap()
             _gskeys.value = emptyMap()
             // ⚠ The profile keys of every contact. Added with the feature and
@@ -563,7 +569,7 @@ object LocalStores {
         _blockedKeys = prefs.getStringSet(pk(K_BLOCKED_KEYS), emptySet())!!.toSet()
         _strangerQuarantine.value = prefs.getBoolean(pk(K_STRANGER_Q), false)
         _allowedStrangers.value = prefs.getStringSet(pk(K_STRANGER_ALLOW), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
-        _gonePeers.value = prefs.getStringSet(pk(K_GONE), emptySet())!!.mapNotNull { it.toIntOrNull() }.toSet()
+        _peerMarks.value = app.rcq.android.net.PeerLiveness.decode(prefs.getString(pk(K_LIVENESS), null))
         _unread.value = loadCounts(pk(K_UNREAD))
         readUpTo = (prefs.getStringSet(pk(K_READ_UPTO), null) ?: emptySet()).mapNotNull { s ->
             val i = s.lastIndexOf('='); if (i <= 0) null else s.substring(0, i) to (s.substring(i + 1).toLongOrNull() ?: return@mapNotNull null)
@@ -832,11 +838,37 @@ object LocalStores {
         prefs.edit().putStringSet(pk(K_REMOVED), _removed.value.map(Int::toString).toSet()).apply()
     }
 
-    fun isGone(uin: Int) = uin in _gonePeers.value
-    fun setGone(uin: Int, on: Boolean) {
-        if (acct == null || on == (uin in _gonePeers.value)) return
-        _gonePeers.value = if (on) _gonePeers.value + uin else _gonePeers.value - uin
-        prefs.edit().putStringSet(pk(K_GONE), _gonePeers.value.map(Int::toString).toSet()).apply()
+    /** The liveness record for [key] (an [aliasKey]), or null. */
+    fun peerMark(key: String): app.rcq.android.net.PeerLiveness.Mark? = _peerMarks.value[key]
+
+    /** Rewrite the liveness record for [key] with [fn] (null removes it), for
+     *  [accountId] only: a probe answers seconds after it was asked, and an
+     *  account switch or the duress PIN in between must not land its mark in
+     *  whoever is bound now. True when something was written. */
+    @Synchronized
+    fun updatePeerMark(
+        accountId: String?,
+        key: String,
+        fn: (app.rcq.android.net.PeerLiveness.Mark?) -> app.rcq.android.net.PeerLiveness.Mark?,
+    ): Boolean {
+        if (accountId == null || acct != accountId) return false
+        val prev = _peerMarks.value[key]
+        val next = fn(prev)
+        if (next == prev) return false
+        val m = LinkedHashMap(_peerMarks.value)
+        if (next == null) m.remove(key) else m[key] = next
+        _peerMarks.value = m
+        prefs.edit()
+            .putString(pk(K_LIVENESS), app.rcq.android.net.PeerLiveness.encode(m))
+            .remove(pk(K_GONE))
+            .apply()
+        return true
+    }
+
+    /** The contact at [key] was removed: whatever we knew about that address
+     *  goes with it. */
+    fun forgetPeerMark(key: String) {
+        updatePeerMark(acct, key) { null }
     }
 
     /** Our OWN island's [uin] is blocked. Not a word about the same number
@@ -1888,7 +1920,7 @@ object LocalStores {
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS, K_PUSH_MUTES_SENT,
+        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_LIVENESS, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS, K_PUSH_MUTES_SENT,
             // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
             // the profile key of every contact, stored BY NUMBER, so leaving it
             // behind keeps a plaintext roster of the burned identity plus the
@@ -1919,7 +1951,9 @@ object LocalStores {
     private const val K_BLOCKS_SCOPED = "blocks_scoped_v1"
     private const val K_STRANGER_Q = "strangers_quarantine"
     private const val K_STRANGER_ALLOW = "strangers_allowed"
+    /** Legacy: bare numbers, not read any more. See [_peerMarks]. */
     private const val K_GONE = "gone_peers"
+    private const val K_LIVENESS = "peer_liveness"
     private const val K_THEME = "theme_mode"
     private const val K_CHAT_BG = "chat_background"
     private const val K_HOME_BG = "home_background"

@@ -91,11 +91,13 @@ fun ShareTargetScreen(
 
     // Filtering the input before slicing gives the same result as slicing and
     // then filtering, because every chat's section depends on that chat alone.
-    val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk, aliases, query) {
+    val goneAddresses by session.goneAddresses.collectAsState()
+    val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk, aliases, query, goneAddresses) {
         buildHomeLists(
             filterShareContacts(contacts, query, aliases),
             filterShareGroups(groups, query),
             unread, favorites, archived, sectionsTree, sectionsOk,
+            isGone = { goneInList(it, goneAddresses) },
         ) { peer -> messages[peer]?.lastOrNull()?.sentAt ?: 0L }
     }
     val showSaved = ownUin != null && shareQueryMatches(

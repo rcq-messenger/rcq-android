@@ -148,14 +148,66 @@ object CrossIslandSender {
         }
     }
 
-    /** Does [host] answer a definite "no such number" for [uin]? Used once,
-     *  after a send to that peer has already failed, to tell "they burned the
-     *  account" apart from "the island is unreachable right now". Anything but
-     *  a clean 404 returns false: we never mark someone gone on a maybe. */
-    fun peerMissing(host: String, uin: Int): Boolean = runCatching {
-        val req = Request.Builder().url("https://$host/federation/keys/$uin").get().build()
-        viaBestRoute(host) { it.newCall(req).execute() }.use { it.code == 404 }
-    }.getOrDefault(false)
+    /** A probe that hangs is an unknown, not a spinner. */
+    private const val PROBE_TIMEOUT_S = 10L
+    /** A key card or a `detail` is a few hundred bytes; a decoy page is not
+     *  read past this. */
+    private const val PROBE_BODY_MAX = 16_384L
+
+    /** One GET for the liveness probe, as a [PeerLiveness.Reply], or null when
+     *  nothing answered.
+     *
+     *  ⚠ NOT through [viaBestRoute]. The probe runs when a chat is merely
+     *  opened, and opening a chat must not raise the relays or put up a Toast
+     *  about somebody's island: a route that is blocked here is simply no
+     *  answer, which is UNKNOWN, which changes nothing. Through the tunnel when
+     *  it is already up, like every other call in this file, and with the
+     *  gateway key for a masquerade island we hold one for. */
+    private fun probeGet(url: String): PeerLiveness.Reply? = runCatching {
+        app.rcq.android.security.DuressGate.check()
+        val req = Request.Builder().url(url).get().build()
+        http().newBuilder().callTimeout(PROBE_TIMEOUT_S, TimeUnit.SECONDS).build()
+            .newCall(req).execute().use { resp ->
+                PeerLiveness.Reply(resp.code, PeerLiveness.jsonBody(resp.peekBody(PROBE_BODY_MAX).string()))
+            }
+    }.getOrNull()
+
+    /**
+     * Does the contact pinned at [uin]@[host] still exist (report 1067)? The
+     * three steps and why each answer means what it means are in
+     * [PeerLiveness]: their open key card, then the account for the pinned key
+     * on the same island, then their own signed record on OUR island
+     * ([ownHost]). Blocking; never throws.
+     *
+     * This replaces a check that read ANY 404 for the key card as "they burned
+     * the account": a decoy page, a parked domain or a person who moved to
+     * another number all said "this account no longer exists".
+     *
+     * ⚠ Step 3 reads our island's gossip mirror, and a read keeps the mirrored
+     * record alive there. That is why a contact already marked gone is never
+     * probed again, and why sends to one skip the mirror ([deliver]).
+     */
+    fun peerLiveness(ownHost: String, host: String, uin: Int, pinnedIk: String, pinnedSk: String): PeerLiveness.Liveness {
+        val sk = java.net.URLEncoder.encode(pinnedSk, "UTF-8")
+        return runCatching {
+            PeerLiveness.classify(
+                host, uin, pinnedIk, pinnedSk,
+                card = { probeGet("https://$host/federation/keys/$uin") },
+                owner = { probeGet("https://$host/federation/uin-for-key?signing_key=$sk") },
+                record = { Multihome.gossipRecordReply(ownHost, pinnedSk) },
+                verifiedHomes = { doc ->
+                    (RcqFederation.verifyRecord(doc, expectedIk = null, expectedSk = pinnedSk) as? RcqFederation.VerifyResult.Ok)
+                        ?.doc?.getAsJsonArray("homes")
+                        ?.map { val h = it.asJsonObject; h.get("host").asString to h.get("uin").asInt }
+                },
+            )
+        }.getOrDefault(PeerLiveness.Liveness.UNKNOWN)
+    }
+
+    /** Their open key card alone, held against the pinned keys: ALIVE or
+     *  UNKNOWN. See [PeerLiveness.cardOnly]. Blocking; never throws. */
+    fun peerCardLiveness(host: String, uin: Int, pinnedIk: String, pinnedSk: String): PeerLiveness.Liveness =
+        PeerLiveness.cardOnly(probeGet("https://$host/federation/keys/$uin"), pinnedIk, pinnedSk)
 
     /** §5c cross-island group add: resolve the local uin bound to [signingKeyB64]
      *  on [host], or null when no account there has that key yet. Open inverse
@@ -530,6 +582,8 @@ object CrossIslandSender {
          *  own ("read", "edit", ...), or the peer's island pushes a "New
          *  message" for each of them (#1047's phantom wake, across islands). */
         envelopeType: String = "message",
+        /** False for a contact marked gone (report 1067): see below. */
+        resolveHomes: Boolean = true,
     ): Boolean {
         val recipientPub = Base64.decode(contact.identityKey, Base64.NO_WRAP)
         val payload = SealedSender.encryptV1(env, recipientPub, ownUin, signingPriv, signingPub, ownHost)
@@ -538,7 +592,13 @@ object CrossIslandSender {
         // key (not a live card fetch), so the send reaches the peer via our
         // gossip mirror even when their own island is blocked or dead. Floor to
         // the single address we have when nothing verifies anywhere.
-        val homes = Multihome.resolveAndMirrorHomes(ownHost, contact.host, contact.uin, contact.signingKey)
+        //
+        // ⚠ Not for a contact marked gone. Reading the mirror renews the record
+        // it serves, so every retry to a burned account kept "this person lives
+        // on these islands" alive on OUR island, against the whole point of
+        // burning it. The address we hold is still tried: if the mark was
+        // wrong, the island takes the deposit and the mark is checked again.
+        val homes = (if (resolveHomes) Multihome.resolveAndMirrorHomes(ownHost, contact.host, contact.uin, contact.signingKey) else emptyList())
             .ifEmpty { listOf(RcqFederation.Home(contact.host, contact.uin)) }
         for (h in homes) {
             // Per-home best route: a home whose island is blocked for this

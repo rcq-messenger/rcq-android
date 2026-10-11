@@ -238,6 +238,16 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         }
     }
 
+    // Is a contact on another island still there (report 1067)? Asked when
+    // their card opens, at most once a day per address, the same question and
+    // the same daily stamp as opening their chat. Only for a contact we hold:
+    // the pinned key is half of the question.
+    LaunchedEffect(uin, contact?.host) {
+        contact?.host?.let { session.probeCrossIslandPeer(uin, it) }
+    }
+    val goneSet by session.goneAddresses.collectAsState()
+    val ciGone = contact?.host != null && app.rcq.android.data.LocalStores.aliasKey(uin, contact.host) in goneSet
+
     // My own name for them wins over anything the island says. Kept separate
     // from `theirNickname` so the card can show both: "what I call them" on top,
     // "what they call themselves" underneath, otherwise a rename quietly hides
@@ -314,7 +324,9 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 // "away" underneath is the same fact twice. What is NOT on the
                 // avatar goes here — the island for a cross-island person, and
                 // when someone was last around if they are offline.
+                val goneLabel = stringResource(R.string.chat_peer_gone_row)
                 val sub = when {
+                    crossIslandHost != null && ciGone -> "$crossIslandHost · $goneLabel"
                     crossIslandHost != null -> crossIslandHost
                     presence == UserStatus.OFFLINE && contact?.lastSeen != null ->
                         lastSeenPhrase(contact.lastSeen!!, contact.gender, context)

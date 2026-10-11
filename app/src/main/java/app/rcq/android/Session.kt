@@ -37,6 +37,7 @@ import app.rcq.android.net.PendingPollSchedule
 import app.rcq.android.net.GuestPendingRequests
 import app.rcq.android.net.BurnCascade
 import app.rcq.android.net.CrossIslandSender
+import app.rcq.android.net.PeerLiveness
 import app.rcq.android.net.DeviceId
 import app.rcq.android.net.JwtPeek
 import app.rcq.android.net.CrossIslandStore
@@ -2653,6 +2654,9 @@ class Session(context: Context) {
         // and re-fires on every mute/unmute. Single collector per ACCOUNT: it
         // rides [accountJob], so a switch ends it instead of adding one.
         accountScope.launch { LocalStores.muted.collect { syncPushMutes() } }
+        // The "account deleted" set follows the marks (report 1067), the same
+        // way: replays the current value on subscribe, one collector per account.
+        accountScope.launch { LocalStores.peerMarks.collect { refreshGoneAddresses() } }
         // Multihoming v1: poll the backup-island mailboxes. Deliberately
         // independent of the primary socket — when the primary island is down,
         // this loop IS the delivery path.
@@ -3668,7 +3672,7 @@ class Session(context: Context) {
                         // under the same non-pushable type as the same-island branch:
                         // as a "message" it woke their phone with a "New message" for
                         // a record nobody reads.
-                        CrossIslandSender.deliver(ci, env, uin, signingPriv, skPub, ownHost, envelopeType = "homerec")
+                        deliverToCi(ci, env, uin, signingPriv, skPub, ownHost, envelopeType = "homerec")
                     } else {
                         // Flagship contact: v=1-seal (NOT v=2 — the receiver binds the
                         // record to the v=1 `spub`) and deposit. Non-pushable type so
@@ -5281,8 +5285,10 @@ class Session(context: Context) {
      *  cross-island contact lives only in CrossIslandStore (the own island has
      *  no roster row to DELETE) — drop it there, or refreshContacts would
      *  merge it right back (beta report #207). */
-    suspend fun removeContact(uin: Int, alsoDeleteMessages: Boolean = false) {
-        val ci = CrossIslandStore.findByUin(uin)
+    suspend fun removeContact(uin: Int, alsoDeleteMessages: Boolean = false, host: String? = null) {
+        // [host]: the island, when the caller knows exactly which contact it
+        // means (the "account deleted" banner, report 1067).
+        val ci = if (host != null) CrossIslandStore.get(uin, host) else CrossIslandStore.findByUin(uin)
         // Only for our own island (#1055): the list is bare numbers, and a
         // foreign contact's number named whoever holds it here too. Once out
         // of CrossIslandStore they are a stranger to the cross-island gate,
@@ -5303,6 +5309,8 @@ class Session(context: Context) {
             }
         } else {
             CrossIslandStore.remove(ci.uin, ci.host)
+            // And whatever a probe said about the address (report 1067).
+            LocalStores.forgetPeerMark(LocalStores.aliasKey(ci.uin, ci.host))
             // ⚠ The refreshContacts() at the end of this function cannot do it:
             // dropping a foreign row moves nothing on our island, so that call
             // answers 304 and the person stayed on screen until the account was
@@ -10082,7 +10090,7 @@ class Session(context: Context) {
             val me = store.uin
             val ok = me != null && runCatching {
                 val sp = signingPriv(); val pp = signingPub()
-                withContext(Dispatchers.IO) { CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost()) }
+                withContext(Dispatchers.IO) { deliverToCi(ci, env, me, sp, pp, serverHost()) }
             }.getOrDefault(false)
             updateMessageState(id, toUin, if (ok) DeliveryState.SENT else DeliveryState.FAILED)
             if (!ok) notePeerLivenessAfterFailure(toUin)
@@ -10604,7 +10612,7 @@ class Session(context: Context) {
                 val ok = runCatching {
                     val sp = signingPriv(); val pp = signingPub()
                     withContext(Dispatchers.IO) {
-                        CrossIslandSender.deliver(ci, env, me, sp, pp, serverHost(), envelopeType = envelopeTypeFor(env))
+                        deliverToCi(ci, env, me, sp, pp, serverHost(), envelopeType = envelopeTypeFor(env))
                     }
                 }.getOrDefault(false)
                 if (ok) return true
@@ -11557,6 +11565,19 @@ class Session(context: Context) {
                 if (e is Envelope.Delete && CrossIslandRequestsStore.retract(meUin, dec.senderUin, "", e.targetId, "")) {
                     refreshCiRequests()
                     return@runCatching
+                }
+            }
+            // Report 1067: past every gate, so on another island this row is
+            // signed by the key pinned for the contact it names. They are
+            // there, whatever a probe said about the address. Our own island
+            // vouches for its own senders. Nothing marked is the common case,
+            // decided on the in-memory map before the store is read.
+            if (dec.senderUin != meUin && LocalStores.peerMarks.value.values.any { it.gone != null }) {
+                if (ciHost != null && ciHost !in ownHosts) {
+                    verifiedCiRow(dec.senderUin, ciHost, dec.senderSigningPub)
+                        ?.let { notePeerHeardFrom(LocalStores.aliasKey(it.uin, it.host), depositAtMs) }
+                } else {
+                    notePeerHeardFrom(LocalStores.aliasKey(dec.senderUin), depositAtMs)
                 }
             }
             // Report 1072, cause 1: a message from somebody we file, past every
@@ -12525,6 +12546,7 @@ class Session(context: Context) {
                 // them as mutual, which is what a refusal means.
                 if (CrossIslandStore.get(uin, host) != null) {
                     CrossIslandStore.remove(uin, host)
+                    LocalStores.forgetPeerMark(LocalStores.aliasKey(uin, host))
                     scope.launch { runCatching { syncCrossIslandContacts() } }
                 }
                 refreshCiRequests()
@@ -13182,7 +13204,11 @@ class Session(context: Context) {
      *  chat list (the send path still routes them by [CrossIslandStore] host). */
     private fun crossIslandContacts(): List<Contact> {
         val owner = blockOwner()
-        return CrossIslandStore.list().map { c ->
+        val rows = CrossIslandStore.list()
+        // A fresh read means the store changed: a mark about an address that
+        // was removed, re-pinned or added again stops holding (report 1067).
+        refreshGoneAddresses(rows)
+        return rows.map { c ->
             // callable: §5d made cross-island 1:1 calls work (signaling crosses as
             // sealed deposits; media is P2P either way).
             // §5e: their picture, deposited by them into OUR island — so it is
@@ -13798,35 +13824,181 @@ class Session(context: Context) {
         return (roster + chains).distinct()
     }
 
-    /** Server-side search for the Add window (users + joinable groups). */
-    /** After a send FAILED, ask once whether the peer still exists. A clean
-     *  "no such number" from their island means they burned the account, and
-     *  the chat can say so instead of leaving a red retry arrow the user will
-     *  keep tapping. Only ever called on failure: polling every contact for
-     *  liveness would be exactly the metadata traffic we avoid. Any other
-     *  outcome (network error, blocked island, anything but a definite 404)
-     *  changes nothing — silence is not evidence of death. */
-    private fun notePeerLivenessAfterFailure(uin: Int) {
-        scope.launch(Dispatchers.IO) {
-            val ci = CrossIslandStore.findByUin(uin)
-            val gone = if (ci != null) {
-                CrossIslandSender.peerMissing(ci.host, uin)
-            } else {
-                // ⚠ NO CARD HERE, deliberately. This asks "has this account
-                // gone away", and a closed island answers a caller with no
-                // card using the SAME 404 it uses for a number that never
-                // existed. Presenting a card would make the answer depend on
-                // whether we happen to hold one, so an account we simply
-                // cannot see would be reported as deleted and its thread
-                // marked gone. The ambiguity is the point of the refusal; this
-                // caller has to live with it rather than paper over it.
-                runCatching { api.userInfo(uin) }.exceptionOrNull()
-                    ?.message?.startsWith("HTTP 404") == true
+    // ── Is a contact on another island still there? (report 1067) ──────────
+    //
+    // A burned account on another island sends no signal anywhere: its contacts
+    // there live only on our devices, and its island does not know we hold
+    // them. So their island is asked, lazily, by [probePeer]: when their chat
+    // or their card is opened (at most once a day per address), after a send
+    // to them failed, and after a send to one marked gone was taken. Never in
+    // the background. The rules are [PeerLiveness]; the marks [LocalStores.peerMarks].
+
+    private enum class ProbeTrigger { OPEN, FAILURE, DELIVERED }
+
+    /** Addresses ([LocalStores.aliasKey]) with a probe on the wire right now. */
+    private val livenessInFlight: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** The addresses marked gone right now whose mark still holds: the same
+     *  pinned key at that address, and not added again since. What the chat
+     *  banner, the chat list and the contact card read. Derived, never
+     *  written to disk: recomputed when a mark changes and when the
+     *  cross-island store does ([crossIslandContacts]). */
+    private val _goneAddresses = MutableStateFlow<Set<String>>(emptySet())
+    val goneAddresses: StateFlow<Set<String>> = _goneAddresses.asStateFlow()
+
+    /** Recompute [goneAddresses]. [rows] is a fresh read of the store when the
+     *  caller already holds one; otherwise it is read only if some address on
+     *  another island is marked at all, which is almost never. */
+    private fun refreshGoneAddresses(rows: List<CrossIslandStore.Contact>? = null) {
+        val marks = LocalStores.peerMarks.value
+        val needRows = marks.any { (k, m) -> m.gone != null && '@' in k }
+        val byKey = if (!needRows) emptyMap()
+            else (rows ?: CrossIslandStore.list()).associateBy { LocalStores.aliasKey(it.uin, it.host) }
+        _goneAddresses.value = PeerLiveness.goneKeys(marks) { k -> byKey[k]?.let { it.signingKey to it.addedAt } }
+    }
+
+    /** The address a 1:1 with [uin] is about: `uin@host` when it goes to a
+     *  contact on another island, the bare number when it stays here. The
+     *  same route every send takes ([ciRouteFor]). */
+    fun peerAddressKey(uin: Int): String = LocalStores.aliasKey(uin, ciRouteFor(uin)?.host)
+
+    private fun isAddressGone(ci: CrossIslandStore.Contact): Boolean =
+        LocalStores.aliasKey(ci.uin, ci.host) in _goneAddresses.value
+
+    /** The chat or the card of [uin] was opened: ask their island whether they
+     *  still exist, if they are on another island and it was not asked in the
+     *  last day. [host] names the island when the caller knows it (a card);
+     *  otherwise the route a send would take. */
+    fun probeCrossIslandPeer(uin: Int, host: String? = null) = probePeer(uin, host, ProbeTrigger.OPEN)
+
+    private fun probePeer(uin: Int, host: String?, trigger: ProbeTrigger) {
+        if (duressViewUp || app.rcq.android.security.DuressGate.isActive) return
+        val ci = (if (host != null) CrossIslandStore.get(uin, host) else ciRouteFor(uin)) ?: return
+        // The pinned keys are half of the question: without them there is
+        // nobody to ask about.
+        if (ci.signingKey.isBlank() || ci.identityKey.isBlank()) return
+        val account = LocalStores.boundAccount() ?: return
+        val key = LocalStores.aliasKey(ci.uin, ci.host)
+        val now = System.currentTimeMillis()
+        val prev = LocalStores.peerMark(key)?.takeIf { PeerLiveness.sameKey(it.sk, ci.signingKey) }
+        val marked = prev != null && prev.gone != null && PeerLiveness.holds(prev, ci.signingKey, ci.addedAt)
+        when (trigger) {
+            // Already gone: the mark stands until they write or a send finds
+            // their card under the pinned keys again. Asking again would only
+            // renew their record in our island's mirror (step 3).
+            ProbeTrigger.OPEN ->
+                if (marked || !PeerLiveness.probeDue(prev?.probedAt, now, PeerLiveness.OPEN_EVERY_MS)) return
+            ProbeTrigger.FAILURE ->
+                if (marked || !PeerLiveness.probeDue(prev?.failProbeAt, now, PeerLiveness.FAILURE_EVERY_MS)) return
+            ProbeTrigger.DELIVERED -> if (!marked) return
+        }
+        if (!livenessInFlight.add(key)) return
+        // Stamped before the network, so a screen opened twice in a row does
+        // not ask twice. A record about another key starts over.
+        if (trigger != ProbeTrigger.DELIVERED) {
+            LocalStores.updatePeerMark(account, key) { m ->
+                val base = m?.takeIf { PeerLiveness.sameKey(it.sk, ci.signingKey) } ?: PeerLiveness.Mark(sk = ci.signingKey)
+                if (trigger == ProbeTrigger.OPEN) base.copy(probedAt = now) else base.copy(probedAt = now, failProbeAt = now)
             }
-            if (gone) LocalStores.setGone(uin, true)
+        }
+        val ep = epochNow()
+        val ownHost = serverHost()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val verdict = if (trigger == ProbeTrigger.DELIVERED) {
+                    CrossIslandSender.peerCardLiveness(ci.host, ci.uin, ci.identityKey, ci.signingKey)
+                } else {
+                    CrossIslandSender.peerLiveness(ownHost, ci.host, ci.uin, ci.identityKey, ci.signingKey)
+                }
+                if (!stillOn(ep)) return@launch
+                // The mark is about the contact pinned there NOW: the same key.
+                val row = CrossIslandStore.get(ci.uin, ci.host)
+                if (row == null || !PeerLiveness.sameKey(row.signingKey, ci.signingKey)) return@launch
+                LocalStores.updatePeerMark(account, key) { m ->
+                    val base = m?.takeIf { PeerLiveness.sameKey(it.sk, ci.signingKey) } ?: PeerLiveness.Mark(sk = ci.signingKey)
+                    when (verdict) {
+                        PeerLiveness.Liveness.GONE -> base.copy(gone = base.gone ?: System.currentTimeMillis())
+                        // The island serves this number under the pinned keys:
+                        // an earlier "deleted" was a false one.
+                        PeerLiveness.Liveness.ALIVE -> base.copy(gone = null)
+                        // Moved, unknown: nothing to say, nothing changes.
+                        else -> m
+                    }
+                }
+            } finally {
+                livenessInFlight.remove(key)
+            }
         }
     }
 
+    /** A row from the contact at [key] arrived, deposited at [depositAtMs]:
+     *  they are there, whatever a probe concluded about the address. The ONLY
+     *  place a mark on another island comes off besides a card under the
+     *  pinned keys, and never on the number alone: the caller passes the
+     *  address whose pinned key signed the row, so a reissued number writing
+     *  under another key (held as a stranger by the gate) cannot bring the old
+     *  contact back to life. Mail deposited before the mark is old mail
+     *  arriving late, not a sign of life. */
+    private fun notePeerHeardFrom(key: String, depositAtMs: Long?) {
+        // Every row passes here, so the common case (nothing marked) is
+        // decided on the in-memory map alone.
+        val gone = LocalStores.peerMark(key)?.gone ?: return
+        if (!PeerLiveness.depositAfterMark(depositAtMs, gone)) return
+        LocalStores.updatePeerMark(LocalStores.boundAccount(), key) { m -> m?.copy(gone = null) }
+    }
+
+    /** A send FAILED. On another island: ask their island, as above, at most
+     *  every few minutes. On our own: a definite "no such number" from our
+     *  island means they burned the account, and the chat says so instead of
+     *  leaving a red retry arrow the user will keep tapping. Any other outcome
+     *  (network error, blocked island, anything but a definite answer) changes
+     *  nothing: silence is not evidence of death. */
+    private fun notePeerLivenessAfterFailure(uin: Int) {
+        if (ciRouteFor(uin) != null) {
+            probePeer(uin, null, ProbeTrigger.FAILURE)
+            return
+        }
+        val account = LocalStores.boundAccount() ?: return
+        val ep = epochNow()
+        scope.launch(Dispatchers.IO) {
+            // ⚠ NO CARD HERE, deliberately. This asks "has this account gone
+            // away", and a closed island answers a caller with no card using
+            // the SAME 404 it uses for a number that never existed. Presenting
+            // a card would make the answer depend on whether we happen to hold
+            // one, so an account we simply cannot see would be reported as
+            // deleted and its thread marked gone. The ambiguity is the point of
+            // the refusal; this caller has to live with it rather than paper
+            // over it.
+            val gone = runCatching { api.userInfo(uin) }.exceptionOrNull()
+                ?.message?.startsWith("HTTP 404") == true
+            if (!gone || !stillOn(ep)) return@launch
+            LocalStores.updatePeerMark(account, LocalStores.aliasKey(uin)) { m ->
+                (m ?: PeerLiveness.Mark(sk = "")).let { it.copy(gone = it.gone ?: System.currentTimeMillis()) }
+            }
+        }
+    }
+
+    /** [CrossIslandSender.deliver] for every 1:1 road to a contact on another
+     *  island. A contact marked gone is reached at the address we hold only,
+     *  without reading our island's mirror of their record; and when their
+     *  island takes the deposit anyway, the card says whether the mark was
+     *  wrong. Blocking. */
+    private fun deliverToCi(
+        ci: CrossIslandStore.Contact,
+        env: Envelope,
+        me: Int,
+        sp: ByteArray,
+        pp: ByteArray,
+        ownHost: String,
+        envelopeType: String = "message",
+    ): Boolean {
+        val gone = isAddressGone(ci)
+        val ok = CrossIslandSender.deliver(ci, env, me, sp, pp, ownHost, envelopeType = envelopeType, resolveHomes = !gone)
+        if (ok && gone) probePeer(ci.uin, ci.host, ProbeTrigger.DELIVERED)
+        return ok
+    }
+
+    /** Server-side search for the Add window (users + joinable groups). */
     /** Resolve ONE exact UIN (the `#911` search form). Null when nobody holds
      *  that number, which is a different answer from "no name matched". */
     suspend fun lookupUin(uin: Int): RcqApi.UserInfo? =
