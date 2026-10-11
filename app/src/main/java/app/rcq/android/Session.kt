@@ -13837,7 +13837,7 @@ class Session(context: Context) {
         android.util.Base64.encodeToString(dec.senderSigningPub, android.util.Base64.NO_WRAP)
 
     private fun isKeyChangedRequest(me: Int, uin: Int, host: String): Boolean =
-        CrossIslandRequestsStore.list(me).any { it.uin == uin && it.host.equals(host, ignoreCase = true) && it.keyChanged }
+        CrossIslandRequestsStore.impostorOnly(ciRequestRow(me, uin, host))
 
     private fun crossIslandGateStops(dec: SealedSender.Decrypted, payloadB64: String, host: String, meUin: Int): Boolean {
         val match = ciContactMatch(dec.senderUin, host, dec.senderSigningPub)

@@ -136,6 +136,9 @@ object CrossIslandRequestsStore {
         // Before anything reads a block: a cold push reads them too.
         runCatching { migrateOwners(ctx.applicationContext) }
             .onFailure { android.util.Log.w("RCQci", "block owners: ${it.javaClass.simpleName}") }
+        // Written back once; [all] marks them on every read until then.
+        runCatching { rawAll().let { if (markLegacyForged(it)) writeAll(it) } }
+            .onFailure { android.util.Log.w("RCQci", "legacy forged rows: ${it.javaClass.simpleName}") }
     }
 
     private fun reqKey(ownUin: Int, uin: Int, host: String) = "$ownUin:$uin@${host.lowercase()}"
@@ -286,7 +289,14 @@ object CrossIslandRequestsStore {
         blocksChanged()
     }
 
-    private fun all(): MutableMap<String, Request> = runCatching {
+    /** Every request, rows an older build held marked as [markLegacyForged]
+     *  says, so no read and no write ever sees them unmarked. */
+    private fun all(): MutableMap<String, Request> = rawAll().also { m ->
+        runCatching { markLegacyForged(m) }
+            .onFailure { android.util.Log.w("RCQci", "legacy forged rows: ${it.javaClass.simpleName}") }
+    }
+
+    private fun rawAll(): MutableMap<String, Request> = runCatching {
         val raw = prefs.getString(KEY, null) ?: return mutableMapOf()
         gson.fromJson<MutableMap<String, Request>>(raw, object : TypeToken<MutableMap<String, Request>>() {}.type) ?: mutableMapOf()
     }.getOrDefault(mutableMapOf())
@@ -373,7 +383,49 @@ object CrossIslandRequestsStore {
     }
 
     /** A same-island request is "key changed" only while every row it holds is forged. */
-    private fun sameIslandFlag(msgs: List<Held>): Boolean = msgs.isNotEmpty() && msgs.all { it.forged }
+    internal fun sameIslandFlag(msgs: List<Held>): Boolean = msgs.isNotEmpty() && msgs.all { it.forged }
+
+    /**
+     * Mark the rows of every same-island request an older build flagged "key
+     * changed". Returns true when [map] changed.
+     *
+     * ⚠⚠ Older builds flagged the whole request when a forged row arrived and
+     * kept no mark on the row, so Gson reads every row of such a request as
+     * genuine. The first new row or retraction then recomputed the flag from
+     * them ([sameIslandFlag]) as false: a request holding nothing but an
+     * impostor's messages offered Accept and Block again, with the impostor's
+     * text as its preview. Which rows were the forger's cannot be told any
+     * more, so all of them are marked; the request reads "key changed" until a
+     * genuine row arrives, and an Accept replays every payload anyway, each
+     * decided again on its own key. [Request.sk] goes too: a forged row wrote
+     * the forger's key there, and a Block of the real number must not take it
+     * along ([keysOf]).
+     *
+     * Only a same-island request: elsewhere the flag is sticky and nothing
+     * recomputes it. Idempotent: a request with any row marked was written by
+     * this build, and is left alone.
+     */
+    internal fun markLegacyForged(map: MutableMap<String, Request>): Boolean {
+        var changed = false
+        for ((k, r) in map.entries.toList()) {
+            @Suppress("SENSELESS_COMPARISON") // Gson leaves a list it did not find null.
+            if (r.msgs == null) continue
+            if (r.host.isNotEmpty() || !r.keyChanged || r.msgs.isEmpty() || r.msgs.any { it.forged }) continue
+            map[k] = r.copy(msgs = r.msgs.mapTo(mutableListOf()) { it.copy(forged = true) }, sk = null)
+            changed = true
+        }
+        return changed
+    }
+
+    /**
+     * Whether a Block of [r] may only take the row away. Such a row names a
+     * number under somebody else's key: blocking the address (with the key
+     * our island serves for it, when the row names none) would silence the
+     * real person and not the one who wrote. Read off the rows too, not only
+     * the flag, so a stale flag can never block the real number.
+     */
+    fun impostorOnly(r: Request?): Boolean =
+        r != null && (r.keyChanged || (r.host.isEmpty() && sameIslandFlag(r.msgs)))
 
     /**
      * §5f: open (or refresh) a PENDING cross-island contact request. Unlike

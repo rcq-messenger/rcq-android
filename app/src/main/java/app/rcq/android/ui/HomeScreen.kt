@@ -1034,18 +1034,19 @@ internal fun HomeScreen(
                             // host "" = a same-island stranger from the Privacy
                             // quarantine: a plain #uin, not a dangling "@".
                             val address = if (r.host.isEmpty()) "${r.uin}" else "${r.uin}@${r.host}"
+                            val impostor = CrossIslandRequestsStore.impostorOnly(r)
                             CiPendingRow(
                                 tag = r.nickname?.takeIf { it.isNotBlank() }?.let { "$it · $address" } ?: address,
                                 // A row that claims an accepted contact's address
                                 // under a different signing key says so instead of
                                 // its preview: it may not be them.
-                                preview = if (r.keyChanged) stringResource(R.string.ci_key_changed) else if (r.fromServer) ciServerLine(r, groups) else r.preview.ifEmpty {
+                                preview = if (impostor) stringResource(R.string.ci_key_changed) else if (r.fromServer) ciServerLine(r, groups) else r.preview.ifEmpty {
                                     if (r.contactReq) stringResource(R.string.ci_contact_request) else ""
                                 },
                                 // ⚠ A key-changed row offers Dismiss only: Accept and
                                 // Block act on the ADDRESS, so they would re-pin or
                                 // silence the real contact instead of the impostor.
-                                onAccept = if (r.keyChanged) null else {
+                                onAccept = if (impostor) null else {
                                     {
                                         if (r.fromServer) { ciServerAsk = r to r.viaKeyChanged } else scope.launch {
                                             // Accepting a same-island stranger releases their
@@ -1061,7 +1062,7 @@ internal fun HomeScreen(
                                     }
                                 },
                                 onDismiss = { session.dismissCrossIslandRequest(r.uin, r.host) },
-                                onBlock = if (r.keyChanged) null else { { session.blockCrossIslandRequest(r.uin, r.host) } },
+                                onBlock = if (impostor) null else { { session.blockCrossIslandRequest(r.uin, r.host) } },
                             )
                         }
                     }
