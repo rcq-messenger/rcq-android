@@ -8,6 +8,7 @@ import app.rcq.android.data.LocalStores
 import app.rcq.android.data.SecureStore
 import app.rcq.android.model.Contact
 import app.rcq.android.net.CrossIslandStore
+import app.rcq.android.net.SenderTrust
 import app.rcq.android.security.PanicPinService
 import com.google.gson.Gson
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
@@ -90,7 +91,12 @@ internal object PushEnvelope {
         val dec = decrypt(ctx, accountId, envB64) ?: return null
 
         val host = dec.senderHost
-        val quarantined = host != null &&
+        // A row naming somebody we hold a key for, under another key, is no
+        // more theirs on the lock screen than in the app: their name and the
+        // forger's words must not appear together (the app holds it as a
+        // "key changed" request, see SenderTrust).
+        val forged = forged(ctx, accountId, me, store, dec)
+        val quarantined = forged || host != null &&
             !host.equals(store.serverHost ?: "", ignoreCase = true) &&
             CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host) == null
         val foreignHost = host?.takeUnless {
@@ -124,6 +130,38 @@ internal object PushEnvelope {
             senderHost = foreignHost,
         )
     }
+
+    /** Whether [dec] names a number this account holds a key for under a
+     *  different key, decided the way the app decides it ([SenderTrust]) from
+     *  what is on disk: the pins, the cached roster and the cross-island
+     *  contacts. Our own number under a foreign key counts too. */
+    private fun forged(ctx: Context, accountId: String, me: Int, store: SecureStore, dec: SealedSender.Decrypted): Boolean = runCatching {
+        val roster = LocalStores.cachedContactsJsonFor(accountId)?.let { json ->
+            runCatching { Gson().fromJson(json, Array<Contact>::class.java) }.getOrNull()
+        }?.firstOrNull { it.uin == dec.senderUin && it.host.isNullOrBlank() }
+        val pin = LocalStores.peerSigningPinsFor(accountId)[dec.senderUin]
+            ?: SenderTrust.canonical(roster?.signingKey)
+        val ownSpub = store.signingPrivate?.let {
+            org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters(it, 0).generatePublicKey().encoded
+        }
+        val ownHosts = listOfNotNull(
+            store.serverHost ?: app.rcq.android.net.RcqApi.DEFAULT_HOST,
+            app.rcq.android.net.RelayConfigStore.frontHost.takeIf { it.isNotBlank() },
+        )
+        SenderTrust.decide(
+            senderUin = dec.senderUin,
+            spub = dec.senderSigningPub,
+            meUin = me,
+            ownSpub = ownSpub,
+            claimedHost = dec.senderHost,
+            ownHosts = ownHosts,
+            sameIsland = pin,
+            sameIslandKeyless = pin == null && roster != null,
+            crossIsland = CrossIslandStore.listFor(ctx, accountId).filter { it.uin == dec.senderUin }
+                .map { SenderTrust.Pin(it.host, it.signingKey) },
+            v2Vouched = false,
+        ).level == SenderTrust.Level.FORGED
+    }.getOrDefault(false)
 
     /** v=1 decrypt with [accountId]'s identity key, or null when the envelope
      *  is not v=1, the account has no key, or it does not open for us. The
@@ -194,7 +232,10 @@ internal object PushEnvelope {
             app.rcq.android.net.RelayConfigStore.frontHost,
         ).filter { it.isNotBlank() }
         if (ownHosts.any { it.equals(host, ignoreCase = true) }) return null
+        // The contact at that address only under the key pinned for them: the
+        // address is not signed, so anybody could ring as them otherwise.
         val ci = CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host)
+            ?.takeIf { app.rcq.android.net.CrossIslandGate.signingKeyMatches(it.signingKey, dec.senderSigningPub) }
         return Call(
             senderUin = dec.senderUin,
             senderHost = host,

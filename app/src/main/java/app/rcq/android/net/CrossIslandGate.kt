@@ -100,19 +100,6 @@ object CrossIslandGate {
     fun verifiedMember(members: List<GroupMember>, senderUin: Int, spub: ByteArray): GroupMember? =
         members.firstOrNull { it.uin == senderUin }?.takeIf { signingKeyMatches(it.signingKey, spub) }
 
-    /** The roster member of one of OUR OWN rooms that sent a room-key row. A
-     *  v=2 row (empty [spub]) is authenticated by the ratchet, so the number is
-     *  enough. A v=1 row must be signed by the key the roster lists for that
-     *  number: `from` is outside the signature, and a bare number check let
-     *  anyone who can deposit a row replace a room's state key. Only a roster
-     *  that carries no signing key for the member falls back to the number,
-     *  because there is nothing to compare against. */
-    fun ownRoomMember(members: List<GroupMember>, senderUin: Int, spub: ByteArray): GroupMember? {
-        val m = members.firstOrNull { it.uin == senderUin } ?: return null
-        if (spub.isEmpty() || m.signingKey.isNullOrBlank()) return m
-        return m.takeIf { signingKeyMatches(it.signingKey, spub) }
-    }
-
     /** How a 1:1 row relates to OUR OWN number. */
     enum class OwnNumber {
         /** Names somebody else. */
@@ -163,14 +150,15 @@ object CrossIslandGate {
      *    becomes the primary), so this is an allowance, not a check. NEVER a ciack: it pins keys, so it is
      *    taken only under our own signature.
      *
-     * ⚠⚠ The v=2 allowance is transitional and weaker than it looks. The spec's
-     * premise, "the session vouches for the sender", does NOT hold on Android:
-     * `from` and `dev` sit inside the outer ECIES with no signature, the Signal
-     * identity store trusts every identity on first use
-     * (SignalStores.isTrustedIdentity is always true), and unwrapV2 defaults a
-     * missing `dev` to the primary, so the device check never fires. Anyone
-     * holding our prekey bundle can open a fresh session that claims our number
-     * and file or rewrite our own rows through it. The allowance stays because
+     * ⚠⚠ The v=2 allowance is transitional and weaker than a signature. `from`
+     * and `dev` sit inside the outer ECIES with no signature, and unwrapV2
+     * defaults a missing `dev` to the primary, so the device check never
+     * fires. What stands behind such a row is its ratchet identity, admitted
+     * for a new or changed device only when our island publishes it for our
+     * number (Session.identityVouch). It used to be trusted on first use, so
+     * anyone holding our prekey bundle could open a fresh session that claimed
+     * our number and file or rewrite our own rows through it; now it takes the
+     * island's word, which is still not our key's. The allowance stays because
      * Android builds before this one sealed EVERY carbon over v=2 without a
      * key, and a carbon refused here is acked and gone: without it, whatever is
      * sent, edited, deleted or read on such a phone would never reach this

@@ -249,6 +249,29 @@ class MessageDb(context: Context, val accountId: String, dataKey: ByteArray) {
         }
     }
 
+    /** Where [id] lives (thread and author), or null when no such message is
+     *  on this device. What an incoming edit, delete or reaction is checked
+     *  against, see [app.rcq.android.net.MessageAuthority]: the id alone names
+     *  a row in ANY thread. */
+    fun rowRef(id: String): app.rcq.android.net.MessageAuthority.Row? {
+        db.query("messages", arrayOf("peer_uin", "from_me", "group_id", "sender_uin"), "id = ?", arrayOf(id), null, null, null, "1").use { c ->
+            if (!c.moveToFirst()) return null
+            return app.rcq.android.net.MessageAuthority.Row(
+                peerUin = c.getInt(0),
+                fromMe = c.getInt(1) != 0,
+                groupId = if (c.isNull(2)) null else c.getInt(2),
+                senderUin = if (c.isNull(3)) null else c.getInt(3),
+            )
+        }
+    }
+
+    /** Whether the 1:1 thread with [peer] holds any row at all. */
+    fun hasPeerThread(peer: Int): Boolean {
+        db.rawQuery("SELECT 1 FROM messages WHERE peer_uin = ? AND group_id IS NULL LIMIT 1", arrayOf(peer.toString())).use { c ->
+            return c.moveToFirst()
+        }
+    }
+
     fun updateReactions(id: String, reactions: Map<Int, String>) {
         db.update("messages", ContentValues().apply { put("reactions", reactionsToJson(reactions)) }, "id = ?", arrayOf(id))
     }

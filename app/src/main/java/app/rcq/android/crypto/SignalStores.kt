@@ -21,10 +21,14 @@ import org.signal.libsignal.protocol.state.SignedPreKeyStore
  * secrecy. Android port of the iOS SignalProtocolStores. One instance per
  * active account (its [SignalStoreDb] is per-account).
  *
- * Trust model mirrors iOS: TOFU + accept rotations ([isTrustedIdentity]
- * always true). Key-fingerprint verification (safety numbers) is a separate
- * future feature; until then a malicious server could MITM by key
- * substitution, same caveat as iOS.
+ * Trust model: a NEW peer identity, or a CHANGED one, is admitted only after
+ * the caller checked it against what the island publishes for that number and
+ * device ([admitIdentity], see Session.decryptInbound); a receiving identity
+ * that differs from the pinned one is refused otherwise ([isTrustedIdentity]).
+ * It used to be trust-on-first-use with every rotation accepted, and since a
+ * v=2 envelope names its sender in unsigned fields, anybody holding our bundle
+ * could open a session as any number, our own included. A change that is
+ * admitted is still flagged for the safety-number screen ([saveIdentity]).
  */
 class SignalStores(private val db: SignalStoreDb) :
     IdentityKeyStore, PreKeyStore, SignedPreKeyStore, KyberPreKeyStore, SessionStore {
@@ -126,11 +130,26 @@ class SignalStores(private val db: SignalStoreDb) :
     override fun getLocalRegistrationId(): Int =
         db.loadLocalIdentity()?.third ?: error("no local libsignal identity")
 
+    /** "<uin>:<device>|<identity b64>" admitted for the next receive: the
+     *  caller checked them against the island. In memory: a restart re-checks. */
+    private val admitted: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    private fun admittedKey(address: SignalProtocolAddress, identityKey: IdentityKey): String =
+        addressKey(address) + "|" + java.util.Base64.getEncoder().encodeToString(identityKey.serialize())
+
+    /** [identityKey] for [address] was checked against the island's published
+     *  bundle: a receiving session may be built on it even though it differs
+     *  from the identity pinned there. */
+    fun admitIdentity(address: SignalProtocolAddress, identityKey: IdentityKey) {
+        admitted.add(admittedKey(address, identityKey))
+    }
+
     override fun saveIdentity(address: SignalProtocolAddress, identityKey: IdentityKey): IdentityKeyStore.IdentityChange {
         val key = addressKey(address)
         val existing = db.blobByAddress("identities", "identity_key", key)
         val serialized = identityKey.serialize()
         db.putBlobByAddress("identities", "identity_key", key, serialized)
+        admitted.remove(admittedKey(address, identityKey))
         return if (existing != null && !existing.contentEquals(serialized)) {
             // The peer's identity key changed under a known address: re-register,
             // new device, or a server swapping keys (MITM). Flag it so the UI can
@@ -150,11 +169,23 @@ class SignalStores(private val db: SignalStoreDb) :
     fun acknowledgePeerIdentity(uin: Int) =
         db.clearIdentityChanged(addressKey(SignalProtocolAddress(uin.toString(), 1)))
 
+    /**
+     * SENDING: a session we build is built from a bundle the island served, so
+     * its identity is the island's word already. RECEIVING: the pinned identity,
+     * a first one (the caller checks a first identity against the island before
+     * it decrypts), or one admitted by [admitIdentity]. A different identity
+     * that nobody checked is refused: libsignal then throws before any state
+     * moves, and the row stays on the island for the check.
+     */
     override fun isTrustedIdentity(
         address: SignalProtocolAddress,
         identityKey: IdentityKey,
         direction: IdentityKeyStore.Direction,
-    ): Boolean = true
+    ): Boolean {
+        if (direction == IdentityKeyStore.Direction.SENDING) return true
+        val pinned = getIdentity(address) ?: return true
+        return pinned == identityKey || admittedKey(address, identityKey) in admitted
+    }
 
     override fun getIdentity(address: SignalProtocolAddress): IdentityKey? {
         val blob = db.blobByAddress("identities", "identity_key", addressKey(address)) ?: return null

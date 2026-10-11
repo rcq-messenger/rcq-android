@@ -56,6 +56,11 @@ object SenderKeyStore {
         var index: Int,
         var ck: String,
         var skipped: MutableMap<Int, String>,
+        /** The LOCAL room the chain was handed to us in (a room on another
+         *  island is filed under its negative alias). Null on chains stored
+         *  before it was kept: those are held to [gid], the room id the
+         *  sender sealed under. */
+        val room: Int? = null,
     )
 
     private fun outKey(ownUin: Int, gid: Int) = "$ownUin:$gid"
@@ -155,21 +160,35 @@ object SenderKeyStore {
     }
 
     /** Store / refresh an inbound chain from an SKDM, bound to its
-     *  authenticated sender. Returns false if a known kid is claimed by a
-     *  DIFFERENT sender (rejected). */
+     *  authenticated sender, the key it was signed with and the room it came
+     *  in ([room], local id). Returns false when [SkdmRule.accepts] refuses:
+     *  a known kid claimed by a different sender, under a different key, or
+     *  in another room.
+     *
+     *  ⚠⚠ The caller has proven [spub] is the key pinned for [senderUin] in
+     *  [room] (Session.ingestGroup). The key of a chain used to be rewritten
+     *  by any SKDM naming its sender, so a member who holds V's chain (every
+     *  member does) could re-sign V's chain with their own key and write as V,
+     *  while V's real messages stopped verifying. */
     @Synchronized
-    fun acceptSkdm(ownUin: Int, kid: String, gid: Int, senderUin: Int, spub: String, epoch: Int, index: Int, ck: String): Boolean {
+    fun acceptSkdm(ownUin: Int, kid: String, gid: Int, senderUin: Int, spub: String, epoch: Int, index: Int, ck: String, room: Int): Boolean {
         val inn = loadIn(ownUin)
         val existing = inn[kid]
-        if (existing != null && existing.senderUin != senderUin) return false
-        if (existing != null && existing.epoch == epoch && existing.index >= index) {
-            existing.spub = spub
-            saveIn(ownUin, inn)
-            return true
-        }
-        inn[kid] = InChain(gid, senderUin, spub, epoch, index, ck, mutableMapOf())
+        val view = existing?.let { SkdmRule.Chain(it.senderUin, it.spub, it.room, it.gid) }
+        if (!SkdmRule.accepts(view, senderUin, spub, room, gid)) return false
+        if (existing != null && existing.epoch == epoch && existing.index >= index) return true
+        inn[kid] = InChain(gid, senderUin, spub, epoch, index, ck, mutableMapOf(), room)
         saveIn(ownUin, inn)
         return true
+    }
+
+    /** Is [kid] a chain handed to us in another room than [room] (sealed under
+     *  [wireGid])? Null when the kid is unknown. A chain opens only the room it
+     *  came in: the room id inside a broadcast is chosen by whoever seals it. */
+    @Synchronized
+    fun chainBoundElsewhere(ownUin: Int, kid: String, room: Int, wireGid: Int): Boolean? {
+        val c = loadIn(ownUin)[kid] ?: return null
+        return !SkdmRule.fits(c.room, c.gid, room, wireGid)
     }
 
     data class InboundKey(val mk: ByteArray, val spub: ByteArray, val senderUin: Int)
@@ -207,6 +226,24 @@ object SenderKeyStore {
 
     @Synchronized
     fun knowsKid(ownUin: Int, kid: String): Boolean = loadIn(ownUin).containsKey(kid)
+
+    /** Who an inbound chain belongs to and the key it verifies with. [legacy]:
+     *  stored before chains were bound to a room (and to a proven sender). */
+    data class ChainSender(val senderUin: Int, val spub: String, val legacy: Boolean)
+
+    @Synchronized
+    fun chainSender(ownUin: Int, kid: String): ChainSender? =
+        loadIn(ownUin)[kid]?.let { ChainSender(it.senderUin, it.spub, it.room == null) }
+
+    /** Bind a legacy chain to [room] once its sender was proven there. */
+    @Synchronized
+    fun bindRoom(ownUin: Int, kid: String, room: Int) {
+        val inn = loadIn(ownUin)
+        val c = inn[kid] ?: return
+        if (c.room != null) return
+        inn[kid] = c.copy(room = room)
+        saveIn(ownUin, inn)
+    }
 
     /** The signing keys our inbound chains recorded for [senderUin] in rooms
      *  [gids]. Read-only; for the F1 prior-key check, which compares a key card
@@ -352,4 +389,25 @@ object SenderKeyStore {
     }
 
     private fun b64d(s: String): ByteArray = Base64.decode(s, Base64.NO_WRAP)
+}
+
+/** The binding rules of an inbound sender-key chain, pure so they are checked
+ *  on the JVM. */
+object SkdmRule {
+    /** What is already stored under a kid. */
+    data class Chain(val senderUin: Int, val spub: String, val room: Int?, val gid: Int)
+
+    /** May an SKDM for a kid we may already hold be stored? Only by the same
+     *  sender, under the same key, in the same room; never a rewrite of the
+     *  key a chain verifies with. */
+    fun accepts(existing: Chain?, senderUin: Int, spub: String, room: Int, wireGid: Int): Boolean {
+        if (spub.isBlank()) return false
+        if (existing == null) return true
+        return existing.senderUin == senderUin && existing.spub == spub && fits(existing.room, existing.gid, room, wireGid)
+    }
+
+    /** Does a chain stored for [chainRoom] (or, before rooms were kept, for
+     *  the wire id [chainGid]) belong to [room], sealed under [wireGid]? */
+    fun fits(chainRoom: Int?, chainGid: Int, room: Int, wireGid: Int): Boolean =
+        if (chainRoom != null) chainRoom == room else chainGid == wireGid
 }

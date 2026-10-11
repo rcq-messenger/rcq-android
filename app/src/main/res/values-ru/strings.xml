@@ -891,6 +891,7 @@
     <string name="ci_backup_key_mismatch">Не добавлено: у аккаунта по этому адресу другой ключ, чем у резервной копии, так что копия может быть не его.</string>
     <string name="ci_contact_request">Хочет переписываться с вами</string>
     <string name="ci_key_changed">Ключ подписи не совпадает с сохранённым контактом. Возможно, это другой человек.</string>
+    <string name="peer_signing_key_changed">Ключ подписи %1$s сменился. Если вы этого не ждали, сверьтесь с собеседником по звонку или лично.</string>
     <string name="ci_request_not_delivered">Добавлен, но запрос до него не дошёл.</string>
     <string name="ci_remove_fav">Убрать из избранного</string>
     <string name="ci_add_fav">В избранное</string>

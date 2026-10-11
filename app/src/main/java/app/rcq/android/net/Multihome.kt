@@ -978,19 +978,30 @@ object Multihome {
     }.getOrDefault(emptyList())
 
     /** Apply a contact's SELF-PUSHED home-island record (gossip B1): verify it
-     *  is signed by [senderSigningPub] (the same Ed25519 key that signed the
-     *  envelope it arrived in — binds the record to its real sender), reject a
-     *  ts rollback against what we've already cached, and cache the homes for
-     *  future sends. Returns true when the cache was updated. Never throws. */
-    fun applyPushedRecord(senderUin: Int, senderSigningPub: ByteArray, rec: JsonObject): Boolean = runCatching {
-        val expectedSk = Base64.encodeToString(senderSigningPub, Base64.NO_WRAP)
-        val prevTs = MultihomeStore.cachedPeerHomes(senderUin)?.recTs ?: 0
-        val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = expectedSk, minTs = prevTs.takeIf { it > 0 })
+     *  is signed by [pinnedSk], the key PINNED for the sender (the caller has
+     *  proven the envelope was signed by it), reject a ts rollback against what
+     *  we've already cached under that key, and cache the homes for future
+     *  sends. Returns true when the cache was updated. Never throws.
+     *
+     *  ⚠⚠ Not the envelope's own key. That one is whatever the sender put in
+     *  it, so a record "from" a contact signed by anybody's key listed the
+     *  forger's islands as the contact's homes: every message to the contact
+     *  then also went there (when, how often, from which address), and a
+     *  huge `ts` locked the contact's real records out of the cache. */
+    fun applyPushedRecord(senderUin: Int, pinnedSk: String, rec: JsonObject): Boolean = runCatching {
+        val cached = MultihomeStore.cachedPeerHomes(senderUin)?.takeIf { sameKey(it.sk, pinnedSk) }
+        val prevTs = cached?.recTs ?: 0
+        val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = pinnedSk, minTs = prevTs.takeIf { it > 0 })
         if (v !is RcqFederation.VerifyResult.Ok) return false
         val ts = v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
-        MultihomeStore.cachePeerHomes(senderUin, homesOf(v.doc), ts)
+        MultihomeStore.cachePeerHomes(senderUin, homesOf(v.doc), ts, pinnedSk)
         true
     }.getOrDefault(false)
+
+    private fun sameKey(a: String?, b: String?): Boolean {
+        val ca = SenderTrust.canonical(a) ?: return false
+        return ca == SenderTrust.canonical(b)
+    }
 
     /** Resolve a peer's home list. Sources, in order: (1) OUR island's by-uin
      *  owner record (peer is on / multi-homed onto us), seeded into our gossip
@@ -999,7 +1010,8 @@ object Multihome {
      *  Verified against the peer's locally-pinned Ed25519 signing key. TTL
      *  cached; a total miss serves the stale cache. */
     private fun resolvePeerHomesCached(ownHost: String, peerUin: Int, peerSigningKeyB64: String): List<RcqFederation.Home> {
-        val cached = MultihomeStore.cachedPeerHomes(peerUin)
+        // Only what was verified against THIS key: the cache is by number.
+        val cached = MultihomeStore.cachedPeerHomes(peerUin)?.takeIf { sameKey(it.sk, peerSigningKeyB64) }
         if (cached != null && System.currentTimeMillis() - cached.ts < PEER_CACHE_TTL_MS) return cached.homes
         // (1) by-uin owner record on our island.
         runCatching {
@@ -1013,7 +1025,7 @@ object Multihome {
                 if (v is RcqFederation.VerifyResult.Ok) {
                     mirrorRecord(ownHost, body)  // seed gossip so other islands can serve it by sk
                     val homes = homesOf(v.doc)
-                    MultihomeStore.cachePeerHomes(peerUin, homes, v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0)
+                    MultihomeStore.cachePeerHomes(peerUin, homes, v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0, peerSigningKeyB64)
                     return homes
                 }
                 null
@@ -1025,13 +1037,13 @@ object Multihome {
             val v = RcqFederation.verifyRecord(rec, expectedIk = null, expectedSk = peerSigningKeyB64)
             if (v is RcqFederation.VerifyResult.Ok) {
                 val homes = homesOf(v.doc)
-                MultihomeStore.cachePeerHomes(peerUin, homes, v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0)
+                MultihomeStore.cachePeerHomes(peerUin, homes, v.doc.get("ts")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0, peerSigningKeyB64)
                 return homes
             }
         }
         // by-uin was a clean 404 (peer has no owner record here) and no gossip:
         // cache empty so single-homed peers cost one lookup per TTL.
-        if (cached == null) MultihomeStore.cachePeerHomes(peerUin, emptyList())
+        if (cached == null) MultihomeStore.cachePeerHomes(peerUin, emptyList(), sk = peerSigningKeyB64)
         return cached?.homes ?: emptyList()
     }
 

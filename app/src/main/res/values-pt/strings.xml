@@ -849,6 +849,7 @@
     <string name="ci_backup_key_mismatch">Não adicionado: a conta nesse endereço tem uma chave diferente desta cópia de reserva, então a cópia pode não ser dela.</string>
     <string name="ci_contact_request">Quer conversar com você</string>
     <string name="ci_key_changed">A chave de assinatura não corresponde ao contato salvo. Pode ser outra pessoa.</string>
+    <string name="peer_signing_key_changed">A chave de assinatura de %1$s mudou. Se você não esperava isso, confirme com a pessoa por chamada ou pessoalmente.</string>
     <string name="ci_request_not_delivered">Adicionado, mas a solicitação não chegou.</string>
     <string name="ci_remove_fav">Tirar dos favoritos</string>
     <string name="ci_add_fav">Adicionar aos favoritos</string>

@@ -48,6 +48,10 @@ import app.rcq.android.net.Multihome
 import app.rcq.android.net.ReissueCascade
 import app.rcq.android.net.CrossIslandRequestsStore
 import app.rcq.android.net.CrossIslandGate
+import app.rcq.android.net.IslandRecheck
+import app.rcq.android.net.MessageAuthority
+import app.rcq.android.net.RoomKeyRule
+import app.rcq.android.net.SenderTrust
 import app.rcq.android.net.GuestCopies
 import app.rcq.android.net.ContactRelayStore
 import app.rcq.android.net.SingBoxTransport
@@ -2629,6 +2633,10 @@ class Session(context: Context) {
         peerIdentityGens.invalidateAll(peerIdentityCache)
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
         noV2Peers.clear(); invitePreviews.clear(); peerDeviceGens.invalidateAll(peerDeviceCache); awaitingReplySince.clear(); lastSilenceProbeAt.clear(); presenceBaselineLive = false; rosterEtag = null; rosterServed = null
+        // What an island published for a number, and the rows waiting on it,
+        // belong to that account's island: the same number elsewhere is
+        // somebody else, and v=2 identities are checked against this map.
+        peerDeviceIdentity.clear(); islandRecheck.clear()
         // A call's grey belongs to the account it was placed from: the same
         // number in the next account is somebody else (#1047 review). The
         // timers already running find nothing to release.
@@ -7582,18 +7590,41 @@ class Session(context: Context) {
         return runCatching {
             val me = store.uin ?: return null
             val dec = decryptInbound(payloadB64)
+            // ★ WHO SENT IT, before anything in the room acts on it, SKDM and
+            // SKNACK included. `from` is outside the v=1 signature and a
+            // group-sealed deposit is anonymous, so a room used to take any
+            // row as its member's (or its owner's): posts, deletes with the
+            // owner's authority, edits of anybody's message, sender-key chains.
+            // Only a member proven by the key held for them passes, see
+            // [decideRoomSender]; a row that is not is dropped, after the
+            // island was asked once more about the roster and the key.
+            when (val who = decideRoomSender(groupId, dec.senderUin, dec.senderSigningPub)) {
+                SenderTrust.Room.SELF, SenderTrust.Room.PINNED -> Unit
+                else -> {
+                    android.util.Log.w("RCQgroup", "row in room $groupId naming ${dec.senderUin} not proven ($who), dropped")
+                    app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+                    return null
+                }
+            }
             when (val env = dec.envelope) {
                 // Sender-keys distribution / recovery (never rendered). SKDM binds
-                // the chain to its authenticated sender; SKNACK asks the kid owner
-                // to re-distribute. Both ride the per-member sealed path.
+                // the chain to its proven sender, their key and this room; SKNACK
+                // asks the kid owner to re-distribute. Both ride the per-member
+                // sealed path.
                 is Envelope.Skdm -> {
-                    val ok = SenderKeyStore.acceptSkdm(me, env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck)
+                    // The chain is for THIS room (the wire gid is the room's id
+                    // on its own island) and under a key: a v=2 row carries none
+                    // to verify the broadcasts with.
+                    val ok = env.gid == gmsgWireGid(groupId) && dec.senderSigningPub.size == 32 &&
+                        SenderKeyStore.acceptSkdm(me, env.kid, env.gid, dec.senderUin, SenderKeys.b64(dec.senderSigningPub), env.epoch, env.index, env.ck, room = groupId)
                     // The chain landed — anything we held for this kid can be
                     // read now. Without this the broadcasts that arrived first
                     // stay lost even though the key is finally here.
                     if (ok) {
                         sknackAnswered(env.kid)
                         replayHeldGmsg(env.kid)
+                    } else {
+                        android.util.Log.w("RCQgroup", "skdm for kid ${env.kid} in room $groupId refused")
                     }
                 }
                 is Envelope.Sknack -> answerSknack(groupId, dec.senderUin, env)
@@ -7601,11 +7632,12 @@ class Session(context: Context) {
             }
             null
         }.getOrElse { e ->
-            logDecryptFailure(payloadB64, e)
+            if (e !is RowWaits) logDecryptFailure(payloadB64, e)
             // A v=2 row served twice (the queue and the log both re-serve what
             // a live frame already delivered) is the ratchet saying it has
-            // opened this one: done, not failed.
-            if (e is DuplicateMessageException) null else e.javaClass.simpleName
+            // opened this one: done, not failed. A row waiting on the island's
+            // word about its sender is neither.
+            ingestTag(e)
         }
     }
 
@@ -7659,6 +7691,29 @@ class Session(context: Context) {
             val wireGid = gmsgWireGid(groupId) ?: return null
             val hdr = SenderKeys.parseGmsgHeader(payloadB64) ?: return null
             if (SenderKeyStore.ownsKid(me, hdr.kid)) return null // my own broadcast echoed back
+            // ⚠ A chain opens only the room it was handed to us in: the room id
+            // inside a broadcast is whatever its sealer wrote, so a chain from
+            // one room could post into another. Checked BEFORE deriving, which
+            // moves the chain.
+            if (SenderKeyStore.chainBoundElsewhere(me, hdr.kid, groupId, wireGid) == true) {
+                android.util.Log.w("RCQgroup", "gmsg kid=${hdr.kid} belongs to another room; dropping gid=$groupId")
+                return null
+            }
+            // And only while its sender is still a proven member here. Also
+            // before deriving: a row the island has to answer for comes back.
+            SenderKeyStore.chainSender(me, hdr.kid)?.let { chain ->
+                val spub = runCatching { Base64.decode(chain.spub, Base64.NO_WRAP) }.getOrDefault(ByteArray(0))
+                when (val who = gmsgSenderVerdict(groupId, chain.senderUin, spub, legacy = chain.legacy)) {
+                    SenderTrust.Room.SELF, SenderTrust.Room.PINNED ->
+                        // A chain from before rooms were kept, now proven here:
+                        // bound to this room from now on.
+                        if (chain.legacy) SenderKeyStore.bindRoom(me, hdr.kid, groupId)
+                    else -> {
+                        android.util.Log.w("RCQgroup", "gmsg from ${chain.senderUin} in room $groupId not proven ($who); dropping")
+                        return null
+                    }
+                }
+            }
             val key = SenderKeyStore.deriveInbound(me, hdr.kid, hdr.epoch, hdr.index)
             if (key == null) {
                 // A chain we HAVE, already moved past this index: the broadcast
@@ -7698,8 +7753,26 @@ class Session(context: Context) {
             routeGroupEnvelope(opened.envelope, groupId, key.senderUin, depositAtMs, key.spub)
             null
         }.getOrElse { e ->
-            logDecryptFailure(payloadB64, e)
-            e.javaClass.simpleName
+            if (e !is RowWaits) logDecryptFailure(payloadB64, e)
+            ingestTag(e)
+        }
+    }
+
+    /** Whether a broadcast under a chain of [senderUin] may still be read in
+     *  [groupId]. A chain stored since rooms were bound to chains was accepted
+     *  only from a proven member, so it is checked against the roster we
+     *  already hold and never makes us fetch one ([legacy] false): the room's
+     *  key may have moved on (the member re-keyed) or they left. A chain from
+     *  before that was accepted from anybody and gets the full check once. */
+    private fun gmsgSenderVerdict(groupId: Int, senderUin: Int, spub: ByteArray, legacy: Boolean): SenderTrust.Room {
+        if (legacy) return decideRoomSender(groupId, senderUin, spub)
+        return when (val r = decideRoomSender(groupId, senderUin, spub, final = true)) {
+            // Nothing to compare against without a roster or a key: the SKDM was.
+            SenderTrust.Room.ASK_ROSTER, SenderTrust.Room.ASK_CARD -> SenderTrust.Room.PINNED
+            // Missing from the roster we hold: one read of it before dropping
+            // (a roster frame can arrive partial).
+            SenderTrust.Room.NOT_MEMBER -> decideRoomSender(groupId, senderUin, spub)
+            else -> r
         }
     }
 
@@ -7762,17 +7835,23 @@ class Session(context: Context) {
                     // ⚠ Authority off the ROW, not off the loaded page. The
                     // in-memory lookup was the gate, so a retraction for
                     // anything not currently loaded was silently ignored
-                    // (#920). `authorOf` answers for every message on this
+                    // (#920). `rowRef` answers for every message on this
                     // device, and null means we simply do not have it.
-                    val author = db.authorOf(env.targetId)?.first
-                    if (author != null) {
-                        val byAuthor = author == dec.senderUin
-                        val byModerator = group(groupId)?.moderator(dec.senderUin) == true
-                        if (byAuthor || byModerator) deleteInFlow(_groupMessages, groupId, env.targetId)
+                    // ⚠⚠ And only a row of THIS room: the id is the sender's
+                    // choice, and a moderator of a room anybody can create
+                    // could otherwise erase a message of any thread by naming
+                    // it. The sender is proven by now (ingestGroup / ingestGmsg).
+                    val me = groupCtx(groupId).myUin
+                    val row = db.rowRef(env.targetId)
+                    val byModerator = group(groupId)?.moderator(dec.senderUin) == true
+                    if (MessageAuthority.groupMayDelete(row, groupId, dec.senderUin, me, byModerator)) {
+                        deleteInFlow(_groupMessages, groupId, env.targetId)
                     }
                 }
                 is Envelope.Edit -> {
-                    if (db.authorOf(env.targetId)?.first == dec.senderUin) {
+                    // The author's own row of this room, see [MessageAuthority].
+                    val row = db.rowRef(env.targetId)
+                    if (MessageAuthority.groupMayEdit(row, groupId, dec.senderUin, groupCtx(groupId).myUin)) {
                         editInFlow(_groupMessages, groupId, env.targetId, env.text)
                     }
                 }
@@ -11533,7 +11612,12 @@ class Session(context: Context) {
         // silently without this argument.
         val keyB64 = _contacts.value.firstOrNull { it.uin == uin }?.identityKey
             ?: identityLookups.run(Triple(epochNow(), uin, gen)) {
-                api.userInfo(uin, app.rcq.android.net.GuestCardStore.theirCard(uin)).identity_key
+                // Writing to somebody outside the roster is the first sight of
+                // them: their signing key off the same card is what their
+                // replies have to carry (see [notePeerSigningKey]).
+                api.userInfo(uin, app.rcq.android.net.GuestCardStore.theirCard(uin))
+                    .also { if (it.uin == uin) notePeerSigningKey(uin, it.signing_key) }
+                    .identity_key
             }
             ?: throw IllegalStateException("peer has no identity key")
         return Base64.decode(keyB64, Base64.NO_WRAP).also { peerIdentityGens.store(peerIdentityCache, uin, gen, it) }
@@ -11555,8 +11639,11 @@ class Session(context: Context) {
      *
      *  Same contract as [ingestGmsg] and the room log's onRow. */
     /** [mailboxHost]: set for a row off our GUEST mailbox on another island (or
-     *  released from a request held under one), see [CrossIslandGate.attributedHost]. */
-    private fun ingest(payloadB64: String, depositAtMs: Long? = null, mailboxHost: String? = null): String? {
+     *  released from a request held under one), see [CrossIslandGate.attributedHost].
+     *  [final]: a replay of a held request, whose answer nobody reads, so the
+     *  row is decided on what this device holds instead of waiting on the
+     *  island (see [decideSender]). */
+    private fun ingest(payloadB64: String, depositAtMs: Long? = null, mailboxHost: String? = null, final: Boolean = false): String? {
         // Last line of defence: in a migrated decoy session `db` is the duress
         // store, and a real message written there is a real message lost.
         if (duressViewUp) return "duress"
@@ -11565,11 +11652,31 @@ class Session(context: Context) {
         if (!::db.isInitialized) return "db_closed"
         var why: String? = null
         runCatching {
-            val dec = attributeToMailbox(decryptInbound(payloadB64), mailboxHost)
+            val opened = attributeToMailbox(decryptInbound(payloadB64, final), mailboxHost)
+            // ★ WHO SENT IT, decided once, before any branch below acts on it:
+            // the call signals, the home record, the room keys, the profile
+            // key, the guest card and the carbon included. See [decideSender].
+            // Our own number under somebody else's key is dropped here too,
+            // whatever host it stamps. A §5f request keeps the address it
+            // claims and is judged by its own branch, which holds one naming an
+            // accepted contact under another key as "key changed".
+            val trust = decideSender(opened, final)
+            if (trust.level == SenderTrust.Level.FORGED &&
+                (opened.senderUin == store.uin || opened.envelope !is Envelope.ContactRequest)
+            ) {
+                fileForgedRow(opened, payloadB64, trust)
+                return@runCatching
+            }
+            // From here on the host is the one the decision attributed: the
+            // pinned row's for somebody we hold a key for, never the unsigned
+            // `from_host`.
+            val dec = if (trust.level == SenderTrust.Level.FORGED) opened else opened.copy(senderHost = trust.host)
+            val proven = trust.level == SenderTrust.Level.PINNED || trust.level == SenderTrust.Level.SELF
             // A row that came over the LIVE socket from somebody a call found
             // offline: they are here after all (#1047 hold). Not for a drained
-            // backlog row, which says nothing about now.
-            if (drainDepth.get() == 0 && callSaysOffline.containsKey(dec.senderUin)) releaseCallHold(dec.senderUin)
+            // backlog row, which says nothing about now, nor for one that
+            // merely names them.
+            if (proven && drainDepth.get() == 0 && callSaysOffline.containsKey(dec.senderUin)) releaseCallHold(dec.senderUin)
             // Opened, so now we know whether the wake for this row (if it came
             // as one we could not open) was a message at all. A caller's sealed
             // `call_end` was the "New message" that led nowhere (#1047). Same
@@ -11583,9 +11690,6 @@ class Session(context: Context) {
             ) {
                 app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
             }
-            // Our own number under somebody else's key is dropped before ANY
-            // branch runs, whatever host it stamps. See [forgedOwnNumberRow].
-            if (forgedOwnNumberRow(dec)) return@runCatching
             // Blocked senders are silently dropped — sealed sender means the
             // server can't filter by sender, so we gate on receipt.
             // ⚠ Never ourselves: a carbon always arrives from our own uin.
@@ -11790,8 +11894,16 @@ class Session(context: Context) {
             // signed this envelope (binds it to the real sender), reject a ts
             // rollback, cache their homes. Intercepted here so it never reaches
             // the message store or the cross-island quarantine.
+            //
+            // ⚠⚠ Only from somebody proven by the key we PINNED for them, and
+            // checked against that key: a record signed by the envelope's own
+            // key proved nothing, so anybody could list their islands as a
+            // contact's homes (see [Multihome.applyPushedRecord]). A v=2 row
+            // carries no key to check a record against.
             (dec.envelope as? Envelope.HomeRecord)?.let { hr ->
-                Multihome.applyPushedRecord(dec.senderUin, dec.senderSigningPub, hr.rec)
+                if (trust.level == SenderTrust.Level.PINNED && dec.senderSigningPub.size == 32) {
+                    Multihome.applyPushedRecord(dec.senderUin, spubB64(dec), hr.rec)
+                }
                 return@runCatching
             }
             // §5f cross-island contact requests. Routed here, BEFORE the
@@ -11856,8 +11968,11 @@ class Session(context: Context) {
             // room key as a 1:1 envelope into the guest mailbox, and holding
             // that as a "request" is why guests on Android never got one. Each
             // kind keeps its roster check, see [handleRoomKeyEnvelope].
+            // ⚠ With the island the row CLAIMS: a room is (island, id), and
+            // which one is meant is the claim; who may speak in it is then
+            // proven against that room's roster, by key.
             if (dec.envelope is Envelope.GsKey || dec.envelope is Envelope.GsKnack) {
-                handleRoomKeyEnvelope(dec)
+                handleRoomKeyEnvelope(opened)
                 return@runCatching
             }
             // The gate holds CONTENT only and drops everything else, and it
@@ -11876,12 +11991,11 @@ class Session(context: Context) {
             if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin &&
                 dec.senderUin != activeRandomPeer && shouldQuarantineStranger(dec.senderUin, dec.envelope)
             ) {
-                // "" for the key, as iOS and the web keep it: on our own island
-                // the ratchet (v=2) or the island vouches for the sender, and a
-                // message sealed v=1 and deleted over v=2 must still match.
+                // The row's own key ("" for v=2), so that only that key can
+                // take the message back, see [CrossIslandRequestsStore.retractSameIsland].
                 val held = CrossIslandRequestsStore.hold(
                     meUin, dec.senderUin, "", payloadB64, ciPreview(dec.envelope),
-                    id = CrossIslandGate.contentId(dec.envelope), spub = "",
+                    id = CrossIslandGate.contentId(dec.envelope), spub = spubB64(dec),
                     // Kept on the row for a block from it, see [blockCrossIslandRequest].
                     sk = spubB64(dec).takeIf { dec.senderSigningPub.size == 32 },
                     owner = blockOwner(),
@@ -11890,19 +12004,20 @@ class Session(context: Context) {
                 return@runCatching
             }
             // A stranger deleting for everyone a message we are still holding:
-            // take it out of the request, or accepting would replay it.
+            // take it out of the request, or accepting would replay it. Only
+            // under the key that sealed it, see [CrossIslandRequestsStore.retractSameIsland].
             if ((ciHost == null || ciHost in ownHosts) && dec.senderUin != meUin) {
                 val e = dec.envelope
-                if (e is Envelope.Delete && CrossIslandRequestsStore.retract(meUin, dec.senderUin, "", e.targetId, "")) {
+                if (e is Envelope.Delete && CrossIslandRequestsStore.retractSameIsland(meUin, dec.senderUin, e.targetId, spubB64(dec))) {
                     refreshCiRequests()
                     return@runCatching
                 }
             }
             // Report 1067: past every gate, so on another island this row is
             // signed by the key pinned for the contact it names. They are
-            // there, whatever a probe said about the address. Our own island
-            // vouches for its own senders. Nothing marked is the common case,
-            // decided on the in-memory map before the store is read.
+            // there, whatever a probe said about the address. On our own island
+            // the decision above is what proved them. Nothing marked is the
+            // common case, decided on the in-memory map before the store is read.
             if (dec.senderUin != meUin && LocalStores.peerMarks.value.values.any { it.gone != null }) {
                 if (ciHost != null && ciHost !in ownHosts) {
                     verifiedCiRow(dec.senderUin, ciHost, dec.senderSigningPub)
@@ -11948,8 +12063,15 @@ class Session(context: Context) {
             // after this. Kept even for a message we go on to treat as a
             // stranger's: the card costs nothing to hold, and the alternative
             // is somebody who accepts an hour later and then cannot reply.
+            // ⚠ Never over a card we hold unless the row is proven: a forged
+            // junk card under a contact's number broke our key lookups for
+            // them on a closed island.
             (dec.envelope as? Envelope.Text)?.card?.let {
-                GuestCardStore.rememberTheirCard(dec.senderUin, null, it)
+                if (trust.level == SenderTrust.Level.PINNED ||
+                    (trust.level == SenderTrust.Level.UNPINNED && GuestCardStore.theirCard(dec.senderUin) == null)
+                ) {
+                    GuestCardStore.rememberTheirCard(dec.senderUin, null, it)
+                }
             }
             when (val env = dec.envelope) {
                 is Envelope.Text ->
@@ -11964,19 +12086,29 @@ class Session(context: Context) {
                     store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.Location ->
                     store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "location", lat = env.lat, lng = env.lng, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
-                is Envelope.Reaction -> applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
+                // Our own reaction from another device names only the message,
+                // anywhere; anybody else's lands in their own thread only.
+                is Envelope.Reaction ->
+                    if (trust.level == SenderTrust.Level.SELF) applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
+                    else applyPeerReaction(env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
-                    // Author-only: a peer can only retract their own message.
-                    // Read off the row rather than off the loaded page, see the
-                    // group branch above and #920.
-                    val fromMe = db.authorOf(env.targetId)?.second
-                    if (fromMe != null && (fromOwnDevice(dec.senderUin) || !fromMe))
-                        deleteInFlow(_messages, dec.senderUin, env.targetId)
+                    // Author-only: a peer can only retract their own message,
+                    // in their own thread. Read off the row rather than off the
+                    // loaded page (#920), and never by the bare id across the
+                    // database: a 1:1 sender could erase a room's message, or
+                    // anybody's, by naming it. See [MessageAuthority]. Our own
+                    // other device retracts in our notes thread, where every
+                    // row is ours (report #601).
+                    val row = db.rowRef(env.targetId)
+                    val may = if (trust.level == SenderTrust.Level.SELF) MessageAuthority.selfMayRetract(row, meUin)
+                        else MessageAuthority.peerMayRetract(row, dec.senderUin)
+                    if (may) deleteInFlow(_messages, row!!.peerUin, env.targetId)
                 }
                 is Envelope.Edit -> {
-                    val fromMe = db.authorOf(env.targetId)?.second
-                    if (fromMe != null && (fromOwnDevice(dec.senderUin) || !fromMe))
-                        editInFlow(_messages, dec.senderUin, env.targetId, env.text)
+                    val row = db.rowRef(env.targetId)
+                    val may = if (trust.level == SenderTrust.Level.SELF) MessageAuthority.selfMayRetract(row, meUin)
+                        else MessageAuthority.peerMayRetract(row, dec.senderUin)
+                    if (may) editInFlow(_messages, row!!.peerUin, env.targetId, env.text)
                 }
                 is Envelope.ReadReceipt -> applyReadReceipt(dec.senderUin, env.targetIds)
         is Envelope.DeliveredReceipt -> applyDeliveredReceipt(dec.senderUin, env.targetIds)
@@ -12071,10 +12203,19 @@ class Session(context: Context) {
                 is Envelope.CiAck -> Unit      // only ever arrives WRAPPED in a carbon
                 is Envelope.PKey ->
                     // A contact handing us the key to their picture. Filed
-                    // against the SEALED sender, never against anything the
+                    // against the PROVEN sender, never against anything the
                     // wire claimed, or one account could publish a face as
                     // another. Refreshing the roster repaints the avatars.
-                    if (LocalStores.putProfileKey(dec.senderUin, env.key)) {
+                    //
+                    // ⚠ The key store is by bare number on OUR island: only a
+                    // sender proven here writes into it (a contact on another
+                    // island wearing the same digits is somebody else), and a
+                    // sender we hold no key for may hand a first key but never
+                    // replace one.
+                    if (dec.senderHost == null && trust.level != SenderTrust.Level.SELF &&
+                        (trust.level == SenderTrust.Level.PINNED || LocalStores.profileKey(dec.senderUin) == null) &&
+                        LocalStores.putProfileKey(dec.senderUin, env.key)
+                    ) {
                         // ⚠⚠ PAINT IT HERE. This used to lean on the roster
                         // refresh below, and that refresh is CONDITIONAL: the
                         // island answers 304 whenever its own list has not
@@ -12163,7 +12304,7 @@ class Session(context: Context) {
                 is Envelope.Unknown -> Unit
             }
         }.onFailure {
-            logDecryptFailure(payloadB64, it)
+            if (it !is RowWaits) logDecryptFailure(payloadB64, it)
             // ⚠⚠ A DUPLICATE IS DONE, NOT FAILED, and this line is why messages
             // kept disappearing (#952, and the same complaint before it). The
             // island deposits every 1:1 message in the queue AND pushes it down
@@ -12184,7 +12325,9 @@ class Session(context: Context) {
             // strike. A write that fails SYSTEMATICALLY - a full disk, a
             // corrupt database - would therefore pass silently, so count them.
             if (it is DuplicateMessageException) duplicateIngests.incrementAndGet()
-            why = if (it is DuplicateMessageException) null else it.javaClass.simpleName
+            // A row waiting on the island's word about its sender stays there
+            // without a strike, see [GroupLogPage.WAITING_ON_ISLAND].
+            why = ingestTag(it)
         }
         return why
     }
@@ -12206,9 +12349,12 @@ class Session(context: Context) {
                 // Control carbons: an edit/retraction made on ANOTHER of our
                 // devices targets a row this device already has — apply it,
                 // never file it as a new message. The carbon is authenticated
-                // as our own account at the call site, so no authority check.
-                is Envelope.Edit -> editInFlow(_groupMessages, gid, inner.targetId, inner.text)
-                is Envelope.Delete -> deleteInFlow(_groupMessages, gid, inner.targetId)
+                // as our own account at the call site; it still acts only in
+                // the thread it names (see [MessageAuthority.carbonMayTouch]).
+                is Envelope.Edit ->
+                    if (MessageAuthority.carbonMayTouch(db.rowRef(inner.targetId), null, gid)) editInFlow(_groupMessages, gid, inner.targetId, inner.text)
+                is Envelope.Delete ->
+                    if (MessageAuthority.carbonMayTouch(db.rowRef(inner.targetId), null, gid)) deleteInFlow(_groupMessages, gid, inner.targetId)
                 // I read this room on another device (A2): drop the badge
                 // here too, minus anything that landed after that moment.
                 is Envelope.ReadMark -> applyRemoteRead(LocalStores.groupThread(gid), inner.at, gid = gid)
@@ -12222,8 +12368,10 @@ class Session(context: Context) {
                 is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
                 is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
                 is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "location", lat = inner.lat, lng = inner.lng, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
-                is Envelope.Edit -> editInFlow(_messages, to, inner.targetId, inner.text)
-                is Envelope.Delete -> deleteInFlow(_messages, to, inner.targetId)
+                is Envelope.Edit ->
+                    if (MessageAuthority.carbonMayTouch(db.rowRef(inner.targetId), to, null)) editInFlow(_messages, to, inner.targetId, inner.text)
+                is Envelope.Delete ->
+                    if (MessageAuthority.carbonMayTouch(db.rowRef(inner.targetId), to, null)) deleteInFlow(_messages, to, inner.targetId)
                 // I read this thread on another device (A2).
                 is Envelope.ReadMark -> applyRemoteRead(LocalStores.peerThread(to), inner.at, peer = to)
                 else -> Unit
@@ -12536,6 +12684,9 @@ class Session(context: Context) {
      *  device and the ack may move past it. A row that fails in a new way
      *  starts over; one that passes has its count cleared by the caller. */
     private fun logRowWrittenOff(guard: android.content.SharedPreferences, rowKey: String, why: String): Boolean {
+        // A row waiting on the island's answer about its sender, or one ingest
+        // refused to look at, is not failing: no strike (see GroupLogPage.strikes).
+        if (!GroupLogPage.strikes(why)) return false
         val strike = GroupLogPage.strike(guard.getString("fail:$rowKey", null), why)
         if (strike.writtenOff) {
             guard.edit().remove("fail:$rowKey").apply()
@@ -13229,20 +13380,294 @@ class Session(context: Context) {
     private fun ownNumberRow(dec: SealedSender.Decrypted, meUin: Int): CrossIslandGate.OwnNumber =
         CrossIslandGate.ownNumberRow(dec.senderUin, meUin, dec.senderSigningPub, runCatching { signingPub() }.getOrNull())
 
-    /** A v=1 row that uses our own number but is not signed by our own key.
-     *  Checked for every row, not only cross-island ones: `from_host` is not
-     *  signed either, and the carbon branch trusts our number to mean us. */
-    private fun forgedOwnNumberRow(dec: SealedSender.Decrypted): Boolean {
-        if (ownNumberRow(dec, store.uin ?: 0) != CrossIslandGate.OwnNumber.FORGED) return false
-        android.util.Log.w("RCQci", "row uses our own number under a foreign key, dropped")
-        return true
+    // ── Who sent a row: one decision, before any branch (sender authentication) ──
+    //
+    // ⚠⚠ `from` and `from_host` are outside the v=1 signature and a deposit is
+    // anonymous, so on our own island every row used to be believed by number:
+    // anybody holding a recipient's public card could write as any contact of
+    // theirs, as any member of a room, or as a contact on another island by
+    // leaving `from_host` out (threads are filed by bare number). Every ingest
+    // now asks [SenderTrust] first, and everything after it reads the host the
+    // decision attributed, never the one on the wire.
+
+    /** Asks the island again before a row is decided against it, see
+     *  [IslandRecheck]. Cleared on an account switch. */
+    private val islandRecheck = IslandRecheck(minGapMs = 20_000L, maxWaitMs = 5 * 60_000L)
+
+    /** A row that waits for one more answer from the island about its sender.
+     *  Thrown from the trust helpers, turned into the ingest's tag ([tag] is
+     *  one of [GroupLogPage.WAITING_ON_ISLAND]): the row stays on the island,
+     *  without a strike, and the read's end drains again. */
+    private class RowWaits(val tag: String) : Exception(tag)
+
+    private fun ownHosts(): List<String> = listOf(serverHost(), FRONT_HOST).filter { it.isNotBlank() }
+
+    /** Whether the island still has to answer [resource] for this row. Starts
+     *  the read when [IslandRecheck] grants one; its end drains both mailboxes,
+     *  which is how the waiting row comes back. False: decide now. */
+    private fun islandStillToAnswer(resource: String, subject: String, read: suspend () -> Unit): Boolean {
+        val step = islandRecheck.step(resource, subject)
+        when (step.kind) {
+            IslandRecheck.Kind.DECIDE -> return false
+            IslandRecheck.Kind.WAIT -> return true
+            IslandRecheck.Kind.FETCH -> {
+                val ep = epochNow()
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        if (step.delayMs > 0) delay(step.delayMs)
+                        if (stillOn(ep)) runCatching { read() }
+                    } finally {
+                        islandRecheck.finished(resource)
+                    }
+                    if (stillOn(ep) && !duressViewUp) {
+                        runCatching { drainQueue() }
+                        runCatching { drainGroupLog() }
+                    }
+                }
+                return true
+            }
+        }
     }
 
-    /** The carbon gate, see [CrossIslandGate.carbonAccepted]. [forgedOwnNumberRow]
-     *  already drops a v=1 row under a foreign key before any branch runs; this
-     *  is checked again at the carbon itself because it is the branch that acts
-     *  on "this is me", and because a v=2 row passes that first filter while a
-     *  ciack must not. */
+    /** The roster row for [uin] on our own island, from the live list or,
+     *  before the first refresh of a cold start, the cached one. */
+    private fun sameIslandRosterRow(uin: Int): Contact? {
+        val live = _contacts.value
+        if (live.isNotEmpty()) return live.firstOrNull { it.uin == uin && it.host.isNullOrBlank() }
+        val json = LocalStores.cachedContactsJson() ?: return null
+        return runCatching { profileGson.fromJson(json, Array<Contact>::class.java) }.getOrNull()
+            ?.firstOrNull { it.uin == uin && it.host.isNullOrBlank() }
+    }
+
+    /** The key a same-island row from [uin] must be signed by: the pin, or the
+     *  roster's on first sight (then pinned). Second: somebody we already talk
+     *  to whose key we never had, a roster contact without one or a chat from
+     *  before keys were pinned: their key card is asked once, so a forger
+     *  cannot ride on a conversation that predates the pin. */
+    private fun sameIslandKey(uin: Int): Pair<String?, Boolean> {
+        LocalStores.peerSigningPin(uin)?.let { return it to false }
+        val row = sameIslandRosterRow(uin)
+        val rk = SenderTrust.canonical(row?.signingKey)
+        if (rk != null) {
+            notePeerSigningKey(uin, rk)
+            return rk to false
+        }
+        if (row != null || uin == store.uin) return null to (row != null)
+        // A chat with a number we hold on another island is THEIR thread
+        // (threads are filed by bare number): it says nothing about anybody
+        // here, and a card fetched for it must not open that thread.
+        if (CrossIslandStore.findByUin(uin) != null) return null to false
+        val talking = _messages.value[uin]?.isNotEmpty() == true ||
+            (::db.isInitialized && runCatching { db.hasPeerThread(uin) }.getOrDefault(false))
+        return null to talking
+    }
+
+    /** The island served [key] for [uin] (the roster, a key card, a room
+     *  roster). Pinned on first sight; a different key re-pins OUT LOUD, see
+     *  [SenderTrust.PinChange.CHANGED]. */
+    private fun notePeerSigningKey(uin: Int, key: String?) {
+        if (uin == store.uin) return
+        if (LocalStores.pinPeerSigningKey(uin, key) != SenderTrust.PinChange.CHANGED) return
+        android.util.Log.w("RCQtrust", "signing key of $uin changed on the island; re-pinned")
+        noteKeyChangedInThread(uin)
+    }
+
+    /** "Their key changed" in the 1:1 thread with [uin], when there is one: a
+     *  re-pin is legitimate after a phrase change and is exactly what an island
+     *  swapping keys would do, and only the person can tell which. Not unread,
+     *  no receipt (a system row sends none, see [store]). */
+    private fun noteKeyChangedInThread(uin: Int) {
+        if (!::db.isInitialized || duressViewUp) return
+        val loaded = _messages.value[uin]?.isNotEmpty() == true
+        if (!loaded && !runCatching { db.hasPeerThread(uin) }.getOrDefault(false)) return
+        store(
+            ChatMessage(
+                java.util.UUID.randomUUID().toString().uppercase(), uin, fromMe = false,
+                body = appCtx.getString(app.rcq.android.R.string.peer_signing_key_changed, contactName(uin)),
+                sentAt = System.currentTimeMillis(), kind = "system",
+            ),
+            countsUnread = false,
+        )
+    }
+
+    /** Read [uin]'s key card off our island and pin what it says. */
+    private suspend fun fetchKeyCard(uin: Int) {
+        val info = api.userInfo(uin, GuestCardStore.theirCard(uin))
+        if (info.uin != uin) return
+        notePeerSigningKey(uin, info.signing_key)
+    }
+
+    /** Who sent this 1:1 row. [final]: decide on what we hold, without asking
+     *  the island (a replay whose answer nobody would read). */
+    private fun decideSender(dec: SealedSender.Decrypted, final: Boolean): SenderTrust.Decision {
+        fun decide(): SenderTrust.Decision {
+            val (same, keyless) = sameIslandKey(dec.senderUin)
+            return SenderTrust.decide(
+                senderUin = dec.senderUin,
+                spub = dec.senderSigningPub,
+                meUin = store.uin ?: 0,
+                ownSpub = runCatching { signingPub() }.getOrNull(),
+                claimedHost = dec.senderHost,
+                ownHosts = ownHosts(),
+                sameIsland = same,
+                sameIslandKeyless = keyless,
+                crossIsland = CrossIslandStore.list().filter { it.uin == dec.senderUin }.map { SenderTrust.Pin(it.host, it.signingKey) },
+                // A v=2 row that opened passed the identity check in decryptInbound.
+                v2Vouched = dec.senderSigningPub.isEmpty(),
+            )
+        }
+        val d = decide()
+        if (!d.askCard || final) return d
+        // One read of the key card before deciding against the row: a phrase
+        // change re-keys an account, and a roster row may carry no key.
+        if (islandStillToAnswer("card:${dec.senderUin}", spubB64(dec)) { fetchKeyCard(dec.senderUin) }) {
+            throw RowWaits("key_check")
+        }
+        return decide().copy(askCard = false)
+    }
+
+    /** A 1:1 row that names a number we hold a key for, under another key.
+     *  Content is held as a request marked "key changed" (Dismiss only, see
+     *  HomeScreen); nothing else it asks for is applied; whatever its wake put
+     *  up is taken back. Our own number under a foreign key is dropped. */
+    private fun fileForgedRow(dec: SealedSender.Decrypted, payloadB64: String, trust: SenderTrust.Decision) {
+        val meUin = store.uin ?: 0
+        val env = dec.envelope
+        // Naming somebody blocked, or signed by a blocked key: not even a request.
+        val blocked = dec.senderUin != meUin && blockedSender(dec.senderUin, trust.host, dec.senderSigningPub)
+        if (dec.senderUin != meUin && !blocked && CrossIslandGate.isContentKind(env)) {
+            android.util.Log.w("RCQtrust", "row naming ${dec.senderUin} is not signed by the key held for it; held as key changed")
+            val held = CrossIslandRequestsStore.hold(
+                meUin, dec.senderUin, trust.host ?: "", payloadB64, ciPreview(env), keyChanged = true,
+                id = CrossIslandGate.contentId(env), spub = spubB64(dec),
+                sk = spubB64(dec).takeIf { dec.senderSigningPub.size == 32 },
+                owner = blockOwner(),
+            )
+            if (held) {
+                refreshCiRequests()
+                return
+            }
+        } else {
+            android.util.Log.w("RCQtrust", "row naming ${dec.senderUin} is not signed by the key held for it; dropped")
+        }
+        app.rcq.android.push.Push.noteSilentEnvelope(appCtx, payloadB64)
+    }
+
+    /** Fetch a room's roster afresh: ours by id, one on another island with the
+     *  room list of that island. A room we do not hold at all yet (added a
+     *  moment ago, the list not refreshed since) needs the list first: the
+     *  island only hands its rows to members, so it is there to be found. */
+    private suspend fun refreshRoomRoster(groupId: Int) {
+        if (groupId < 0 || group(groupId) == null) refreshGroups()
+        if (groupId >= 0) ensureRoster(groupId, refresh = true)
+    }
+
+    /** What a row from [senderUin] under [spub] may do in room [groupId]. Asks
+     *  the island once more (throwing [RowWaits]) before deciding a sender is
+     *  no member, or not who the roster says, see [IslandRecheck]. */
+    private fun decideRoomSender(groupId: Int, senderUin: Int, spub: ByteArray, final: Boolean = false): SenderTrust.Room {
+        val foreign = groupId < 0
+        val me = if (foreign) groupHost(groupId)?.let { foreignCreds(it)?.first } ?: 0 else store.uin ?: 0
+        fun decide(): SenderTrust.Room {
+            val members = group(groupId)?.members.orEmpty()
+            val member = members.firstOrNull { it.uin == senderUin }
+            if (!foreign && member != null && spub.size == 32 && LocalStores.peerSigningPin(senderUin) == null) {
+                // First sight of a member of a room on our island: the roster's key is the pin.
+                notePeerSigningKey(senderUin, member.signingKey)
+            }
+            return SenderTrust.decideRoom(
+                senderUin = senderUin,
+                spub = spub,
+                meUin = me,
+                ownSpub = runCatching { signingPub() }.getOrNull(),
+                foreignRoom = foreign,
+                member = member,
+                rosterKnown = members.isNotEmpty(),
+                pinned = if (foreign) null else LocalStores.peerSigningPin(senderUin),
+                v2Vouched = spub.isEmpty(),
+            )
+        }
+        var r = decide()
+        if (final) return r
+        if (r == SenderTrust.Room.NOT_MEMBER || r == SenderTrust.Room.ASK_ROSTER ||
+            (foreign && r == SenderTrust.Room.FORGED && spub.size == 32)
+        ) {
+            // The roster we hold may be from before they joined (or re-keyed).
+            if (islandStillToAnswer("roster:$groupId", "$senderUin") { refreshRoomRoster(groupId) }) throw RowWaits("roster_check")
+            r = decide()
+            if (r == SenderTrust.Room.ASK_ROSTER) r = SenderTrust.Room.NOT_MEMBER
+        }
+        if (!foreign && spub.size == 32 && (r == SenderTrust.Room.ASK_CARD || r == SenderTrust.Room.FORGED)) {
+            val sub = android.util.Base64.encodeToString(spub, android.util.Base64.NO_WRAP)
+            if (islandStillToAnswer("card:$senderUin", sub) { fetchKeyCard(senderUin) }) throw RowWaits("key_check")
+            r = decide()
+            if (r == SenderTrust.Room.ASK_CARD) r = SenderTrust.Room.FORGED
+        }
+        return r
+    }
+
+    /** Checks a v=2 sender's ratchet identity against what our island
+     *  publishes for that number and device, see [SignalSession.IdentityVouch]:
+     *  a first contact and a changed identity are opened only when the island
+     *  publishes exactly that identity there. */
+    private fun identityVouch(final: Boolean) = SignalSession.IdentityVouch { uin, dev, incoming, _ ->
+        if (publishedIdentityIs(uin, dev, incoming)) return@IdentityVouch
+        val ik = android.util.Base64.encodeToString(incoming.serialize(), android.util.Base64.NO_WRAP)
+        if (!final && islandStillToAnswer("ident:$uin", "$dev:$ik") { fetchIslandIdentities(uin, dev) }) {
+            throw SignalSession.IdentityUnconfirmed(waiting = true, "identity of $uin/$dev not confirmed by the island yet")
+        }
+        if (publishedIdentityIs(uin, dev, incoming)) return@IdentityVouch
+        throw SignalSession.IdentityUnconfirmed(waiting = false, "the island publishes another identity for $uin/$dev")
+    }
+
+    private fun publishedIdentityIs(uin: Int, dev: Int, incoming: org.signal.libsignal.protocol.IdentityKey): Boolean {
+        val published = peerDeviceIdentity["$uin:$dev"] ?: return false
+        return runCatching {
+            org.signal.libsignal.protocol.IdentityKey(android.util.Base64.decode(published, android.util.Base64.NO_WRAP)) == incoming
+        }.getOrDefault(false)
+    }
+
+    /** What our island publishes as [uin]'s ratchet identities, per device: the
+     *  device list (free to read, consumes no prekey), the primary slot off the
+     *  user info on an island without a device registry, and, only when
+     *  neither names [dev] (an island too old to put identities in the list),
+     *  that device's bundle, which costs one of its one-time prekeys. */
+    private suspend fun fetchIslandIdentities(uin: Int, dev: Int) {
+        val rows = try {
+            api.fetchPeerDevices(uin).devices
+        } catch (e: Exception) {
+            if (e.message?.startsWith("HTTP 404") != true) throw e
+            emptyList()
+        }
+        for (r in rows) r.signal_identity_key?.let { peerDeviceIdentity["$uin:${r.device_id}"] = it }
+        if (rows.any { it.device_id == dev && it.signal_identity_key != null }) return
+        val primary = SealedSender.PRIMARY_DEVICE_ID
+        if (dev == primary) {
+            val ik = runCatching { api.userInfo(uin, GuestCardStore.theirCard(uin)) }.getOrNull()
+                ?.takeIf { it.uin == uin }?.signal_identity_key
+            if (ik != null) {
+                peerDeviceIdentity["$uin:$primary"] = ik
+                return
+            }
+        }
+        // Asked about a device and told nothing about it: its bundle says.
+        val bundle = if (dev == primary) api.fetchPeerBundle(uin) else api.fetchPeerDeviceBundle(uin, dev)
+        if (bundle.uin == uin) peerDeviceIdentity["$uin:$dev"] = bundle.signal_identity_key
+    }
+
+    /** The ingest tag for a failure, null when the row is done with. */
+    private fun ingestTag(e: Throwable): String? = when (e) {
+        is DuplicateMessageException -> null
+        is RowWaits -> e.tag
+        is SignalSession.IdentityUnconfirmed -> if (e.waiting) "identity_check" else "identity_refused"
+        else -> e.javaClass.simpleName
+    }
+
+    /** The carbon gate, see [CrossIslandGate.carbonAccepted]. [decideSender]
+     *  already drops a row that uses our number under a foreign key before any
+     *  branch runs; this is checked again at the carbon itself because it is
+     *  the branch that acts on "this is me", and because a v=2 row passes that
+     *  first filter while a ciack must not. */
     private fun carbonIsOurs(dec: SealedSender.Decrypted, inner: Envelope): Boolean {
         val ok = CrossIslandGate.carbonAccepted(ownNumberRow(dec, store.uin ?: 0), dec.senderDeviceId, inner)
         if (!ok && dec.senderUin == store.uin) {
@@ -13337,49 +13762,81 @@ class Session(context: Context) {
         val room = groups.value.firstOrNull { it.id == alias && it.host.equals(host, ignoreCase = true) } ?: return
         val member = CrossIslandGate.verifiedMember(room.members, dec.senderUin, dec.senderSigningPub) ?: return
         when (env) {
-            is Envelope.GsKey ->
-                if (LocalStores.putRoomKey(alias, env.ver, env.key, replaceEqual = true)) {
-                    scope.launch { runCatching { refreshGroups() } }
-                }
+            is Envelope.GsKey -> takeRoomKey(alias, room.stateBlob, env)
             is Envelope.GsKnack -> answerForeignRoomKnack(alias, host, remoteGid, member)
             else -> Unit
         }
     }
 
+    /**
+     * A room key from our own island. Only from a member proven by the key we
+     * hold for them ([decideRoomSender]): a v=1 row signed by it, or a v=2 row
+     * whose identity our island vouched for. Our own number counts only under
+     * our own key. ⚠ A roster row without a key no longer passes on the number
+     * alone, and neither does a keyless v=2 row by itself: either let anybody
+     * who can deposit a row replace a room's state key.
+     */
     private fun handleOwnRoomKey(env: Envelope, dec: SealedSender.Decrypted) {
         val senderUin = dec.senderUin
+        val gid = when (env) {
+            is Envelope.GsKey -> env.gid
+            is Envelope.GsKnack -> env.gid
+            else -> return
+        }
+        // A wire id is the room's id on its island; ours are never negative.
+        if (gid < 0) return
+        val g = groups.value.firstOrNull { it.id == gid && it.host == null } ?: return
+        when (val who = decideRoomSender(gid, senderUin, dec.senderSigningPub)) {
+            SenderTrust.Room.SELF, SenderTrust.Room.PINNED -> Unit
+            else -> {
+                android.util.Log.w("RCQgroup", "room key row for $gid naming $senderUin not proven ($who), dropped")
+                return
+            }
+        }
         when (env) {
-            is Envelope.GsKey ->
-                // Roster gate: only a fellow member's key is worth holding;
-                // equal-version replace is the wedge-repair rule from the design doc.
-                // A signed (v=1) row must carry the key the roster lists for that
-                // member, see [CrossIslandGate.ownRoomMember].
-                if (groups.value.firstOrNull { it.id == env.gid }?.members
-                        ?.let { CrossIslandGate.ownRoomMember(it, senderUin, dec.senderSigningPub) } != null
-                ) {
-                    if (LocalStores.putRoomKey(env.gid, env.ver, env.key, replaceEqual = true)) {
-                        scope.launch { runCatching { refreshGroups() } }
-                    }
-                }
-            is Envelope.GsKnack ->
-                // Any holder answers. The asker must be in the roster we can
-                // see; the reply is a plain sealed gskey.
+            is Envelope.GsKey -> takeRoomKey(gid, g.stateBlob, env)
+            is Envelope.GsKnack -> {
+                // Any holder answers; the reply is a plain sealed gskey.
+                val member = group(gid)?.members?.firstOrNull { it.uin == senderUin } ?: return
                 scope.launch {
                     runCatching {
-                        val g = groups.value.firstOrNull { it.id == env.gid } ?: return@runCatching
-                        val member = CrossIslandGate.ownRoomMember(g.members, senderUin, dec.senderSigningPub) ?: return@runCatching
-                        val k = LocalStores.roomKey(env.gid) ?: return@runCatching
+                        val k = LocalStores.roomKey(gid) ?: return@runCatching
                         if (member.identityKey.isNotBlank()) {
                             sendSealedCopies(
                                 senderUin,
-                                encryptFor(senderUin, Envelope.GsKey(env.gid, k.first, k.second)),
+                                encryptFor(senderUin, Envelope.GsKey(gid, k.first, k.second)),
                                 envelopeType = "skdm",
                             )
                         }
                     }
                 }
+            }
             else -> Unit
         }
+    }
+
+    /** Hold the room key [env] for room [localId] when [RoomKeyRule] lets it
+     *  replace what we hold: one envelope with a runaway version used to
+     *  replace the right key and refuse every later one, for good. [blob] is
+     *  the room's sealed state as the island last served it. */
+    private fun takeRoomKey(localId: Int, blob: String?, env: Envelope.GsKey) {
+        val held = LocalStores.roomKey(localId)
+        val opens = { key: String -> app.rcq.android.crypto.GroupState.open(blob!!, key) != null }
+        val verdict = RoomKeyRule.accept(
+            heldVer = held?.first,
+            offeredVer = env.ver,
+            opensNew = blob?.let { opens(env.key) },
+            opensHeld = if (blob != null && held != null) opens(held.second) else null,
+        )
+        val stored = when (verdict) {
+            RoomKeyRule.Verdict.REFUSE -> {
+                android.util.Log.w("RCQgroup", "room key v${env.ver} for $localId refused (held v${held?.first})")
+                false
+            }
+            RoomKeyRule.Verdict.ACCEPT -> LocalStores.putRoomKey(localId, env.ver, env.key, replaceEqual = true)
+            RoomKeyRule.Verdict.FORCE -> LocalStores.putRoomKey(localId, env.ver, env.key, force = true)
+        }
+        if (stored) scope.launch { runCatching { refreshGroups() } }
     }
 
     /** Answers already given per (room alias, member), so a verified member
@@ -13678,7 +14135,11 @@ class Session(context: Context) {
         // send their delivery receipts.
         if (host.isEmpty()) {
             LocalStores.allowStranger(uin)
-            CrossIslandRequestsStore.clear(me, uin, "")?.msgs?.forEach { ingest(it.payload) }
+            // The island's key for them becomes the pin before anything is
+            // replayed: from here on a row under their number has to carry it,
+            // and a held row that does not is held again as a key change.
+            runCatching { fetchKeyCard(uin) }
+            CrossIslandRequestsStore.clear(me, uin, "")?.msgs?.forEach { ingest(it.payload, final = true) }
             sendCiAck(uin, "", "accept")
             refreshCiRequests()
             return CiAccept.OK
@@ -13722,7 +14183,7 @@ class Session(context: Context) {
         }
         // Released under the island the row was held under: a row that came off
         // a guest mailbox without a foreign host of its own was attributed to it.
-        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
+        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host, final = true) }
         syncCrossIslandContacts()
         // My other devices hold their own copy of this request and would offer
         // to accept it a second time, which re-TOFUs the peer. Hand them the
@@ -14138,7 +14599,7 @@ class Session(context: Context) {
      *  request id), and the row on the island is withdrawn in the background. */
     private suspend fun completeServerAccept(me: Int, uin: Int, host: String, id: Int) {
         CrossIslandRequestsStore.markAnswered(me, host, id)
-        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host) }
+        CrossIslandRequestsStore.clear(me, uin, host)?.msgs?.forEach { ingest(it.payload, mailboxHost = host, final = true) }
         syncCrossIslandContacts()
         CrossIslandStore.get(uin, host)?.let { c -> sendCiAck(uin, host, "accept", ciCardOf(c), srv = srvOf(host, id)) }
         refreshCiRequests()
@@ -14540,6 +15001,15 @@ class Session(context: Context) {
             )
         }
         presenceBaselineLive = true
+        // The roster is where most same-island keys are first seen: pinned
+        // now, and a key that differs from the pin is re-pinned out loud, see
+        // [notePeerSigningKey]. Cheap when nothing moved (a map lookup each).
+        val me = store.uin
+        LocalStores.pinPeerSigningKeys(fetched.filter { it.uin != me }.associate { it.uin to it.signing_key })
+            .forEach { uin ->
+                android.util.Log.w("RCQtrust", "signing key of $uin changed on the island; re-pinned")
+                noteKeyChangedInThread(uin)
+            }
         callHoldReleased.removeAll(releasedNow)
         if (armed) {
             // ONE decision for the whole refresh, taken by a pure rule and then
@@ -15564,31 +16034,6 @@ class Session(context: Context) {
         syncCrossIslandContacts()
     }
 
-    /** True when a 1:1 envelope arrived from MY OWN number — i.e. another
-     *  device of this account, writing into Saved Messages («Заметки»).
-     *
-     *  This is what lets the author rule on `delete` / `edit` stand aside for
-     *  the notes thread. The rule compares the target's `fromMe` against the
-     *  deleter, and in Saved Messages EVERY row is `fromMe`: a note written
-     *  here is mine, and a note written on the web arrives as an ordinary
-     *  sealed envelope from my own number which [store] deliberately files as
-     *  mine (see below). So "only the author may retract this" read as "nobody
-     *  may retract this", and a note deleted on the web stayed on the phone for
-     *  ever — no reconnect or restart could heal it, because the delete
-     *  envelope was ingested, dropped and acked (report #601).
-     *
-     *  Safe for real conversations because it is not a relaxation at all: the
-     *  deleter still has to BE the author. An envelope claiming to come from my
-     *  number is sealed to my identity key and signed by my signing key or it
-     *  never got as far as this function, so "sender == me" is exactly as
-     *  trustworthy as "sender == that peer" is in every other thread. Nothing
-     *  changes for a peer thread: there `dec.senderUin` is the peer, this is
-     *  false, and the `!fromMe` rule decides on its own as before. */
-    private fun fromOwnDevice(senderUin: Int): Boolean {
-        val me = store.uin ?: return false
-        return senderUin == me
-    }
-
     /** Delivered receipts waiting to go, per peer. A reconnect drain files
      *  dozens of rows from one person in a burst, and one envelope per row
      *  meant as many sealed deposits; to a contact on another island each is
@@ -16085,6 +16530,21 @@ class Session(context: Context) {
         if (merged != stored) db.updateReactions(targetId, merged)
     }
 
+    /** A reaction from a peer: on a message of THEIR thread only. The id is
+     *  theirs to choose, and looking it up everywhere let anybody attach a
+     *  reaction to a room's message, a room they are not in included. Same
+     *  disk fallback as [applyReactionByTargetId] for a thread not loaded. */
+    private fun applyPeerReaction(targetId: String, reactorUin: Int, asset: String?) {
+        if (!MessageAuthority.peerMayReact(db.rowRef(targetId), reactorUin)) return
+        if (_messages.value[reactorUin]?.any { it.id == targetId } == true) {
+            addPeerReaction(reactorUin, targetId, reactorUin, asset)
+            return
+        }
+        val stored = db.reactionsOf(targetId) ?: return
+        val merged = if (asset == null) stored - reactorUin else stored + (reactorUin to asset)
+        if (merged != stored) db.updateReactions(targetId, merged)
+    }
+
     private fun addPeerReaction(peer: Int, targetId: String, reactorUin: Int, asset: String?) {
         synchronized(msgFlowLock) {
         val cur = _messages.value.toMutableMap()
@@ -16188,10 +16648,13 @@ class Session(context: Context) {
      *  Ratchet — a prekey message auto-establishes the inbound session with
      *  no server round-trip — while v=1 (and anything else) uses the legacy
      *  ECIES path. Shared by 1:1 and group ingest so a v=2 message decrypts
-     *  wherever it lands. Synchronous (no network on either path). */
-    private fun decryptInbound(payloadB64: String): SealedSender.Decrypted =
+     *  wherever it lands. Synchronous (no network on either path).
+     *
+     *  [final]: a replay; a v=2 identity the island has not confirmed is
+     *  refused rather than waited for (see [identityVouch]). */
+    private fun decryptInbound(payloadB64: String, final: Boolean = false): SealedSender.Decrypted =
         (if (SealedSender.wireVersion(payloadB64) == 2) {
-            SignalSession.decrypt(signalStores, payloadB64, identityPriv(), identityPub())
+            SignalSession.decrypt(signalStores, payloadB64, identityPriv(), identityPub(), identityVouch(final))
         } else {
             SealedSender.decryptV1(payloadB64, identityPriv(), identityPub())
         }).also { d ->

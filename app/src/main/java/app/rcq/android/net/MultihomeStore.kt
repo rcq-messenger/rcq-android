@@ -34,7 +34,11 @@ object MultihomeStore {
      *  cache IS the failover path when the primary island is unreachable.
      *  [recTs] is the signed record's OWN ts (Unix seconds, 0 if unknown), used
      *  as the anti-rollback floor for a self-pushed record (gossip B1). */
-    data class PeerHomes(val homes: List<RcqFederation.Home>, val ts: Long, val recTs: Int = 0)
+    /** [sk]: the signing key the record was verified against. The cache is
+     *  keyed by number, and a number is only that person under that key: an
+     *  entry under another key (or none, from before it was kept) is not
+     *  theirs to use. */
+    data class PeerHomes(val homes: List<RcqFederation.Home>, val ts: Long, val recTs: Int = 0, val sk: String? = null)
 
     /** A backup home removed on THIS install, until a record without it is
      *  confirmed on the primary island (see [dropped]). Looked up by [sk], the
@@ -190,13 +194,13 @@ object MultihomeStore {
         map[peerUin.toString()]
     }.getOrNull()
 
-    fun cachePeerHomes(peerUin: Int, homes: List<RcqFederation.Home>, recTs: Int = 0) {
+    fun cachePeerHomes(peerUin: Int, homes: List<RcqFederation.Home>, recTs: Int = 0, sk: String? = null) {
         runCatching {
             val raw = prefs.getString(KEY_PEER_CACHE, null)
             val map: MutableMap<String, PeerHomes> =
                 if (raw == null) mutableMapOf()
                 else gson.fromJson(raw, object : TypeToken<MutableMap<String, PeerHomes>>() {}.type) ?: mutableMapOf()
-            map[peerUin.toString()] = PeerHomes(homes, System.currentTimeMillis(), recTs)
+            map[peerUin.toString()] = PeerHomes(homes, System.currentTimeMillis(), recTs, sk)
             prefs.edit().putString(KEY_PEER_CACHE, gson.toJson(map)).apply()
         }
     }

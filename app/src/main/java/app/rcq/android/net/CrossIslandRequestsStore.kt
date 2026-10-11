@@ -565,6 +565,30 @@ object CrossIslandRequestsStore {
         return true
     }
 
+    /**
+     * [retract] for a request held on OUR OWN island (host ""). Same-island
+     * rows were held under an empty key, so any row naming the number could
+     * take a held message back; now a v=1 row's own key is kept on it, and a
+     * retraction under a different key is refused. [spub] empty: a v=2 delete,
+     * whose identity our island vouched for. A message held under no key (v=2,
+     * or held before keys were kept) is retracted by any row from the number,
+     * as before: a message sealed v=1 and deleted over v=2 must still match.
+     */
+    fun retractSameIsland(ownUin: Int, uin: Int, targetId: String, spub: String): Boolean {
+        val map = all()
+        val k = reqKey(ownUin, uin, "")
+        val r = map[k] ?: return false
+        val before = r.msgs.size
+        r.msgs.removeAll { it.id == targetId && sameIslandRetracts(it.spub, spub) }
+        if (r.msgs.size == before) return false
+        if (r.msgs.isEmpty() && !r.contactReq && r.srvReqId == null) map.remove(k) else map[k] = r
+        writeAll(map)
+        return true
+    }
+
+    internal fun sameIslandRetracts(heldSpub: String?, spub: String): Boolean =
+        heldSpub.isNullOrEmpty() || spub.isEmpty() || heldSpub == spub
+
     fun clear(ownUin: Int, uin: Int, host: String): Request? {
         val map = all()
         val k = reqKey(ownUin, uin, host)

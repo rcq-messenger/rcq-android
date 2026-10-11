@@ -128,20 +128,6 @@ class CrossIslandGateTest {
         assertEquals(CrossIslandGate.OwnNumber.NOT_OURS, CrossIslandGate.ownNumberRow(0, 0, keyB, keyA))
     }
 
-    @Test fun own_room_key_needs_the_roster_key_on_a_signed_row() {
-        val roster = listOf(
-            GroupMember(uin = 7, nickname = "a", role = "member", identityKey = "ik", signingKey = b64(keyA)),
-            GroupMember(uin = 8, nickname = "b", role = "member", identityKey = "ik", signingKey = null),
-        )
-        assertEquals(7, CrossIslandGate.ownRoomMember(roster, 7, keyA)?.uin)
-        assertNull(CrossIslandGate.ownRoomMember(roster, 7, keyB))
-        // v=2: the ratchet vouches for the number.
-        assertEquals(7, CrossIslandGate.ownRoomMember(roster, 7, ByteArray(0))?.uin)
-        // A roster without a key for the member leaves only the number.
-        assertEquals(8, CrossIslandGate.ownRoomMember(roster, 8, keyB)?.uin)
-        assertNull(CrossIslandGate.ownRoomMember(roster, 9, keyA))
-    }
-
     @Test fun a_guest_mailbox_row_without_a_foreign_host_belongs_to_that_island() {
         val own = listOf("home.example", "cdn.rcq.app")
         assertEquals("b.example", CrossIslandGate.attributedHost(null, "b.example", own))

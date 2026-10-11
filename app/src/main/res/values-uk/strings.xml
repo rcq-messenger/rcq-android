@@ -863,6 +863,7 @@
     <string name="ci_backup_key_mismatch">Не додано: акаунт за цією адресою має інший ключ, ніж резервна копія, тож копія може бути не його.</string>
     <string name="ci_contact_request">Хоче листуватися з вами</string>
     <string name="ci_key_changed">Ключ підпису не збігається зі збереженим контактом. Можливо, це інша людина.</string>
+    <string name="peer_signing_key_changed">Ключ підпису %1$s змінився. Якщо ви цього не очікували, звірте його зі співрозмовником дзвінком або особисто.</string>
     <string name="ci_request_not_delivered">Додано, але запит до нього не дійшов.</string>
     <string name="ci_remove_fav">Прибрати з обраних</string>
     <string name="ci_add_fav">Додати в обрані</string>

@@ -30,8 +30,9 @@ import org.signal.libsignal.protocol.state.PreKeyBundle
  * published bundle (or a transient failure) always falls back to the proven
  * v=1 path, never a broken send.
  *
- * Trust: TOFU, identical to iOS (see [SignalStores.isTrustedIdentity]). Safety
- * numbers / fingerprint verification is a separate future feature.
+ * Trust: a new or changed peer identity is admitted against the island's
+ * published bundle ([decrypt], [SignalStores.isTrustedIdentity]); the safety
+ * number screen lets two people compare what they hold.
  */
 object SignalSession {
     private const val TAG = "RCQsignal"
@@ -375,24 +376,57 @@ object SignalSession {
     }
 
     /**
+     * Checks a v=2 sender's ratchet identity before the row is opened. A v=2
+     * envelope names its sender (`from`, `dev`) in fields nothing signs, so
+     * the identity inside a PreKeySignalMessage is the only thing that says who
+     * it is, and it is believed only when it is the one pinned for that
+     * address or the island publishes it for that number and device.
+     */
+    fun interface IdentityVouch {
+        /** Return to admit [incoming] for [uin]/[deviceId]; throw
+         *  [IdentityUnconfirmed] to leave the row unopened. [pinned] is the
+         *  identity held for that address now, null for a first contact. */
+        fun check(uin: Int, deviceId: Int, incoming: IdentityKey, pinned: IdentityKey?)
+    }
+
+    /** The island has not confirmed a v=2 sender's identity. [waiting]: a read
+     *  of what it publishes is under way, the row stays on the island for it;
+     *  otherwise the island answered and publishes something else. Thrown
+     *  BEFORE the ratchet moves, so the same row can still open later. */
+    class IdentityUnconfirmed(val waiting: Boolean, message: String) : Exception(message)
+
+    /**
      * Decrypt a v=2 payload: peel the outer ECIES, then run the inner
      * libsignal ciphertext through the Double Ratchet. A "prekey" message
      * auto-establishes the inbound session (no server round-trip), so the
      * receive path needs no [ensureSession] call. Synchronous (no network).
+     *
+     * [vouch]: a prekey message whose identity is not the one pinned for its
+     * address goes through it first (see [IdentityVouch]). Null only in tests.
      */
     fun decrypt(
         stores: SignalStores,
         payloadB64: String,
         ownIdentityPriv: ByteArray,
         ownIdentityPub: ByteArray,
+        vouch: IdentityVouch? = null,
     ): SealedSender.Decrypted {
         val u = SealedSender.unwrapV2(payloadB64, ownIdentityPriv, ownIdentityPub)
         val addr = addressOf(u.senderUin, u.senderDeviceId)
+        val prekey = if (u.kind == "prekey") PreKeySignalMessage(u.msgBytes) else null
+        if (prekey != null && vouch != null) {
+            val incoming = prekey.identityKey
+            val pinned = synchronized(stores) { stores.getIdentity(addr) }
+            if (pinned != incoming) {
+                vouch.check(u.senderUin, u.senderDeviceId, incoming, pinned)
+                stores.admitIdentity(addr, incoming)
+            }
+        }
         val plain: ByteArray = synchronized(stores) {
             val cipher = SessionCipher(stores, stores, stores, stores, stores, addr)
             try {
                 when (u.kind) {
-                    "prekey" -> cipher.decrypt(PreKeySignalMessage(u.msgBytes))
+                    "prekey" -> cipher.decrypt(prekey ?: PreKeySignalMessage(u.msgBytes))
                     "signal" -> cipher.decrypt(SignalMessage(u.msgBytes))
                     else -> throw SealedSender.DecryptException("unknown v2 kind ${u.kind}")
                 }
@@ -415,8 +449,8 @@ object SignalSession {
                 throw e
             }
         }
-        // v=2 carries no separate signing pub — the ratchet authenticates the
-        // sender — so report an empty one (ingest never reads it).
+        // v=2 carries no separate signing pub, so report an empty one: the
+        // sender is the identity checked above, see [SenderTrust].
         return SealedSender.Decrypted(u.senderUin, Envelope.fromJsonBytes(plain), ByteArray(0), senderDeviceId = u.senderDeviceId)
     }
 

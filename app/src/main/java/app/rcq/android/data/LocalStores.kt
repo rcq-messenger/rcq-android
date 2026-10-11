@@ -538,6 +538,7 @@ object LocalStores {
             // left out of this list, so unbinding kept one account's map of
             // "number -> key to their face" live in memory for the next one.
             _pkeys.value = emptyMap()
+            _peerPins = emptyMap()
             _reactionInbox.value = emptySet()
             _reactedMsgIds.value = emptyMap()
             _mentionInbox.value = emptySet()
@@ -576,6 +577,7 @@ object LocalStores {
         }.toMap()
         loadRoomKeys()
         loadProfileKeys()
+        _peerPins = parsePins(prefs.getStringSet(pk(K_PEER_PINS), emptySet()))
         _reactionInbox.value = prefs.getStringSet(pk(K_REACT_INBOX), emptySet())!!.toSet()
         _reactedMsgIds.value = loadReactedMsgIds(pk(K_REACTED_MSGS))
         _mentionInbox.value = prefs.getStringSet(pk(K_MENTION_INBOX), emptySet())!!.toSet()
@@ -1402,10 +1404,15 @@ object LocalStores {
 
     fun roomKey(gid: Int): Pair<Long, String>? = _gskeys.value[gid]
 
-    fun putRoomKey(gid: Int, ver: Long, keyB64: String, replaceEqual: Boolean = false): Boolean {
+    /** [force]: replace whatever is held, version included. Only for a key
+     *  proven to open the room's sealed state as the island serves it, which
+     *  is also what repairs a room wedged by a key with a runaway version
+     *  (see [app.rcq.android.net.RoomKeyRule]). */
+    fun putRoomKey(gid: Int, ver: Long, keyB64: String, replaceEqual: Boolean = false, force: Boolean = false): Boolean {
         if (acct == null) return false
         val cur = _gskeys.value[gid]
-        if (cur != null && (cur.first > ver || (cur.first == ver && (!replaceEqual || cur.second == keyB64)))) return false
+        if (cur != null && cur.second == keyB64 && cur.first == ver) return false
+        if (!force && cur != null && (cur.first > ver || (cur.first == ver && (!replaceEqual || cur.second == keyB64)))) return false
         _gskeys.value = _gskeys.value + (gid to (ver to keyB64))
         prefs.edit().putStringSet(
             pk(K_GSKEYS),
@@ -1453,6 +1460,67 @@ object LocalStores {
         if (acct == null || keyB64.isBlank()) return
         prefs.edit().putString(pk(K_MY_PKEY), keyB64).apply()
     }
+
+    // ── signing keys pinned for numbers on our own island ─────────────
+    // The Ed25519 key first seen for each number here (the roster, the key
+    // card, a room roster): what a v=1 row from that number has to be signed
+    // by. The island serves those keys, so a key it serves later that differs
+    // is re-pinned only out loud (Session writes it into the thread), never
+    // in silence: a racing roster refresh or an island swapping keys must not
+    // be able to change who a contact is unnoticed. Per account.
+
+    @Volatile private var _peerPins: Map<Int, String> = emptyMap()
+
+    /** The key pinned for [uin] on our own island, or null. */
+    fun peerSigningPin(uin: Int): String? = _peerPins[uin]
+
+    /** Pin [key] for [uin], see [app.rcq.android.net.SenderTrust.pinChange]. */
+    @Synchronized
+    fun pinPeerSigningKey(uin: Int, key: String?): app.rcq.android.net.SenderTrust.PinChange {
+        if (acct == null || uin <= 0) return app.rcq.android.net.SenderTrust.PinChange.NONE
+        val change = app.rcq.android.net.SenderTrust.pinChange(_peerPins[uin], key)
+        if (change == app.rcq.android.net.SenderTrust.PinChange.FIRST || change == app.rcq.android.net.SenderTrust.PinChange.CHANGED) {
+            _peerPins = _peerPins + (uin to app.rcq.android.net.SenderTrust.canonical(key)!!)
+            prefs.edit().putStringSet(pk(K_PEER_PINS), _peerPins.map { (u, k) -> "$u=$k" }.toSet()).apply()
+        }
+        return change
+    }
+
+    /** [pinPeerSigningKey] for a whole roster in one write. Returns the
+     *  numbers whose pin CHANGED. */
+    @Synchronized
+    fun pinPeerSigningKeys(keys: Map<Int, String?>): List<Int> {
+        if (acct == null) return emptyList()
+        var next = _peerPins
+        val changed = ArrayList<Int>()
+        for ((uin, key) in keys) {
+            if (uin <= 0) continue
+            when (app.rcq.android.net.SenderTrust.pinChange(next[uin], key)) {
+                app.rcq.android.net.SenderTrust.PinChange.FIRST -> next = next + (uin to app.rcq.android.net.SenderTrust.canonical(key)!!)
+                app.rcq.android.net.SenderTrust.PinChange.CHANGED -> {
+                    next = next + (uin to app.rcq.android.net.SenderTrust.canonical(key)!!)
+                    changed.add(uin)
+                }
+                else -> Unit
+            }
+        }
+        if (next !== _peerPins) {
+            _peerPins = next
+            prefs.edit().putStringSet(pk(K_PEER_PINS), next.map { (u, k) -> "$u=$k" }.toSet()).apply()
+        }
+        return changed
+    }
+
+    /** Headless pins of [accountId], for the push service. */
+    fun peerSigningPinsFor(accountId: String): Map<Int, String> =
+        if (!::prefs.isInitialized) emptyMap() else parsePins(prefs.getStringSet("$accountId.$K_PEER_PINS", emptySet()))
+
+    private fun parsePins(rows: Set<String>?): Map<Int, String> = (rows ?: emptySet()).mapNotNull { row ->
+        val eq = row.indexOf('=')
+        if (eq <= 0) return@mapNotNull null
+        val uin = row.substring(0, eq).toIntOrNull() ?: return@mapNotNull null
+        uin to row.substring(eq + 1)
+    }.toMap()
 
     private fun loadProfileKeys() {
         _pkeys.value = (prefs.getStringSet(pk(K_PKEYS), emptySet()) ?: emptySet()).mapNotNull { row ->
@@ -2076,6 +2144,7 @@ object LocalStores {
     private const val K_ECO_HAD_HOME_BG = "economy_had_home_bg"
     private const val K_PKEYS = "pkeys"      // peer uin -> their profile key
     private const val K_MY_PKEY = "mypkey"   // my own, handed to contacts
+    private const val K_PEER_PINS = "peer_signing_pins" // own-island uin -> pinned Ed25519 key
     private const val K_REACT_INBOX = "reaction_inbox"
     private const val K_REACTED_MSGS = "reacted_msg_ids"
     private const val K_REACTION_USES = "reaction_uses"

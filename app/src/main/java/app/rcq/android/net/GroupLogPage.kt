@@ -55,6 +55,16 @@ object GroupLogPage {
      *  PIN-locked through three drains would write off rows it never read. */
     val NOT_THE_ROWS_FAULT = setOf("duress", "db_closed", "switched")
 
+    /** The row is waiting on one more answer from the island about its sender
+     *  (a key card, a roster, a published identity), see [IslandRecheck]. Not a
+     *  strike either: the read it waits for is already under way, its end
+     *  triggers a drain, and the wait itself is bounded there, so a row cannot
+     *  be written off while the answer that would admit it is on the wire. */
+    val WAITING_ON_ISLAND = setOf("key_check", "roster_check", "identity_check")
+
+    /** Whether [why] books a strike against the row. */
+    fun strikes(why: String): Boolean = why !in NOT_THE_ROWS_FAULT && why !in WAITING_ON_ISLAND
+
     /** The fate of one row after one ingest. [done]: the ack may move past
      *  it. [record]: what to keep for the row's next drain, null to forget. */
     data class RowFate(val done: Boolean, val record: String?)
@@ -64,7 +74,7 @@ object GroupLogPage {
      *  ack for [FAIL_DRAINS] drains of the same failure, then writes it off. */
     fun fate(prev: String?, why: String?): RowFate {
         if (why == null) return RowFate(done = true, record = null)
-        if (why in NOT_THE_ROWS_FAULT) return RowFate(done = false, record = prev)
+        if (!strikes(why)) return RowFate(done = false, record = prev)
         val s = strike(prev, why)
         return if (s.writtenOff) RowFate(done = true, record = null) else RowFate(done = false, record = encode(s))
     }
