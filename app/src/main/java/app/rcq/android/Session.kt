@@ -1395,6 +1395,18 @@ class Session(context: Context) {
     ) {
         override fun sizeOf(key: String, value: ByteArray): Int = value.size
     }
+    // Decoded chat TILES (the album grid, the media wall) by picture, size and
+    // cover: a tile scrolled back into view is drawn from here on its first
+    // frame, where it used to show a spinner and decode the JPEG again on
+    // every appearance. Pixels, so it is sized in bytes and kept well under
+    // [imageCache]; the same owner and lifetime as that cache.
+    private val tileCache = object : android.util.LruCache<String, android.graphics.Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 16).coerceIn(4L * 1024 * 1024, 32L * 1024 * 1024).toInt()
+    ) {
+        override fun sizeOf(key: String, value: android.graphics.Bitmap): Int = value.allocationByteCount
+    }
+    fun cachedTile(key: String): android.graphics.Bitmap? = tileCache.get(key)
+    fun keepTile(key: String, bitmap: android.graphics.Bitmap) { tileCache.put(key, bitmap) }
 
     // Own read-receipt privacy ("everyone"|"contacts"|"nobody"); loaded on
     // start, gates whether we emit read receipts. Default everyone.
@@ -9409,8 +9421,13 @@ class Session(context: Context) {
         // denominator, and without this the fraction would jump backwards the
         // moment it did. Reset with _mediaDone when the wave drains.
         val whole = _mediaWhole.updateAndGet { maxOf(it, done + _mediaSending.value.coerceAtLeast(1)) }
-        _mediaProgress.value = if (whole > 1) ((done + here) / whole).coerceIn(0f, 1f)
-                               else if (total > 0) here else null
+        val p = if (whole > 1) ((done + here) / whole).coerceIn(0f, 1f)
+                else if (total > 0) here else null
+        // Whole percents. The strip prints a percent anyway, and a raw fraction
+        // was a new value for every 64 KB chunk: a frame of work for whoever
+        // shows it, hundreds of times over for one video. Equal values are
+        // dropped by the flow, so this is at most a hundred updates a wave.
+        _mediaProgress.value = p?.let { (it * 100f).toInt() / 100f }
     }
 
     /** Mirror an in-flight upload into the shade while the app is NOT on

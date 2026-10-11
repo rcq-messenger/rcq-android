@@ -463,13 +463,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // against yourself, so they're suppressed below.
     val isSelf = !isGroup && peer != null && peer == ownUin
 
-    val peerAll by session.messages.collectAsState()
-    val groupAll by session.groupMessages.collectAsState()
     val contacts by session.contacts.collectAsState()
     val groups by session.groups.collectAsState()
     val typingFrom by session.typingFrom.collectAsState()
 
-    val messages = if (isGroup) groupAll[groupId] ?: emptyList() else peerAll[peer] ?: emptyList()
+    // Only THIS thread: another conversation's traffic no longer runs the
+    // whole screen again (see rememberThread).
+    val messages = rememberThread(session, target)
     val peerContact = peer?.let { p -> contacts.firstOrNull { it.uin == p } }
     val group = groupId?.let { gid -> groups.firstOrNull { it.id == gid } }
     // The chat list is fetched without rosters, and this screen needs one for
@@ -489,35 +489,13 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val filesOff = group != null && !group.filesAllowed && !readerExempt
     // Resolve a `#<uin>` mention in a message body to a nick (group member or
     // contact), for clickable mentions in the bubble — like the pinned banner.
-    val mentionNick = remember(contacts, group, isGroup) {
-        { uin: Int ->
-            (if (isGroup) group?.members?.firstOrNull { it.uin == uin }?.nickname else null)
-                ?: contacts.firstOrNull { it.uin == uin }?.nickname
-        }
-    }
+    // Both resolvers stay the same object across presence frames (see
+    // ChatThreadState.kt).
+    val mentionNick = rememberMentionNick(contacts, group, isGroup)
     val onMentionClick: (Int) -> Unit = { uin -> if (uin != ownUin) onOpenPeerInfo(uin) }
     // Resolve an `@nickname` to a group member's uin (case-insensitive), for
     // clickable @-mentions in the bubble + the composer autocomplete. Groups only.
-    // Roster longest-match @mention resolver: given the body + the index of an
-    // '@', return (uin, matched-nick-length) for the LONGEST member nick that
-    // follows (case-insensitive), so nicks with spaces/colons (e.g. "JO f3 JO",
-    // ".:example") render as clickable links — the old exact-nick + word-char
-    // regex couldn't match them. Groups only.
-    val mentionMatch: ((String, Int) -> Pair<Int, Int>?)? = remember(group, isGroup) {
-        val members = group?.members?.takeIf { isGroup } ?: return@remember null
-        fun match(text: String, at: Int): Pair<Int, Int>? {
-            val after = text.substring(at + 1)
-            val lower = after.lowercase()
-            val mem = members
-                .filter { it.nickname.isNotEmpty() && lower.startsWith(it.nickname.lowercase()) }
-                .maxByOrNull { it.nickname.length } ?: return null
-            val len = mem.nickname.length
-            val tail = after.getOrNull(len)
-            // Boundary so "@bob" doesn't match inside "@bobsled".
-            return if (tail == null || !tail.isLetterOrDigit()) mem.uin to len else null
-        }
-        ::match
-    }
+    val mentionMatch = rememberMentionMatch(group, isGroup)
     val isTyping = !isGroup && typingFrom == peer
 
     // Draft survives leaving + re-entering the chat (tester #6): held per-thread
@@ -629,8 +607,6 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     var confirmClearThread by remember { mutableStateOf(false) }
     // A picked photo/video waiting in the pre-send preview (tap to blur).
     var pendingSend by remember { mutableStateOf<PendingSend?>(null) }
-    val mediaSending by session.mediaSending.collectAsState()
-    val mediaProgress by session.mediaProgress.collectAsState()
     val mediaFailed by session.mediaSendFailed.collectAsState()
     var showGroupPicker by remember { mutableStateOf(false) }
     /** The full-screen media pager: its pages and where to start. From the
@@ -683,7 +659,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val firstUnreadIndex = remember(messages, unreadAnchorId) {
         unreadAnchorId?.let { id -> messages.indexOfFirst { it.id == id } } ?: -1
     }
-    val rows = remember(messages, firstUnreadIndex) { buildChatRows(messages, firstUnreadIndex) }
+    val rows = rememberChatRows(messages, firstUnreadIndex)
     // ⚠ WHICH QUOTED MESSAGES ARE GONE. A reply carries a COPY of the words in
     // `reply_snippet` on the replying row, so deleting the original leaves its
     // text alive in every quote of it — the one place it survived the delete
@@ -859,9 +835,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     val swipeSide by LocalStores.swipeReplySide.collectAsState()
 
     val youLabel = stringResource(R.string.chat_you)
+    // ⚠ The room and the thread are read from the session, not from `group`
+    // and `messages`: this reaches the viewer lambdas every bubble holds, and
+    // capturing either made each of them new on every tick (ChatThreadState.kt).
     fun authorName(m: ChatMessage): String = when {
         m.fromMe -> youLabel
-        isGroup -> session.memberDisplayName(group, m.senderUin ?: 0, messages)
+        isGroup -> session.memberDisplayName(roomOf(session, target), m.senderUin ?: 0, threadOf(session, target))
         else -> session.contactName(peer ?: 0)
     }
     // The sender's roster row, for the picture that goes beside their nick.
@@ -872,7 +851,7 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
     // needs no separate lookup.
     fun wireAuthorName(m: ChatMessage): String = when {
         m.fromMe -> session.nickname ?: youLabel
-        isGroup -> session.memberWireName(group, m.senderUin ?: 0, messages)
+        isGroup -> session.memberWireName(roomOf(session, target), m.senderUin ?: 0, threadOf(session, target))
         else -> session.contactWireName(peer ?: 0)
     }
     fun authorMember(m: ChatMessage): app.rcq.android.model.GroupMember? =
@@ -960,10 +939,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
 
     /** Open the pager on [m] with every picture and clip of this chat as its
      *  pages (#1052). A snapshot, like the walls take: a picture arriving
-     *  while you look does not shift the pages under your finger. */
+     *  while you look does not shift the pages under your finger. The thread
+     *  is read at the tap ([threadOf]), never captured: every bubble holds
+     *  this, and a captured list made all of them new on every receipt. */
     fun openMediaAt(m: ChatMessage, revealed: Boolean = false) {
         albumOpenedRevealed = revealed
-        albumViewer = app.rcq.android.data.ChatMediaPages.around(messages, m)
+        albumViewer = app.rcq.android.data.ChatMediaPages.around(threadOf(session, target), m)
     }
 
     fun viewerVideoOf(m: ChatMessage, source: VideoSource): ViewerVideo =
@@ -1939,35 +1920,9 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // "This account no longer exists" (report 1067): see [PeerGoneBanner].
         PeerGoneBanner(session, if (isGroup || isSelf) null else peer, contacts, scope, onBack)
 
-        // Writing to somebody on ANOTHER island for the first time: their app
-        // files it as a conversation REQUEST, not a chat, and nothing comes
-        // back until they accept it. The sender has no way to see that — the
-        // tick only says the island took the envelope — so a perfectly working
-        // send looks like silence, and the obvious conclusion is "cross-island
-        // messaging is broken" (vss reported exactly that). Say it once, while
-        // the thread has nothing incoming in it yet.
-        //
-        // ⚠ And not once a message of ours was delivered or read: their app
-        // only confirms a message it filed in a chat, never one it held as a
-        // request, so that tick IS the acceptance. Without it the line stayed
-        // up in a conversation they had long accepted and simply not answered,
-        // which read as the very opposite of what was going on (report 1064).
-        val awaitingAcceptance = !isGroup && !isSelf && peer != null &&
-            (peerContact?.host != null || CrossIslandStore.findByUin(peer) != null) &&
-            rows.any { it is ChatRow.Single && it.m.fromMe } &&
-            rows.none { it is ChatRow.Single && !it.m.fromMe } &&
-            rows.none {
-                it is ChatRow.Single && it.m.fromMe &&
-                    (it.m.state == DeliveryState.DELIVERED || it.m.state == DeliveryState.READ)
-            }
-        if (awaitingAcceptance) {
-            Text(
-                stringResource(R.string.chat_cross_island_pending),
-                color = c.textSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
-            )
-        }
+        // "They have to accept you first" for a first write to another
+        // island: see [CrossIslandPendingNote].
+        CrossIslandPendingNote(if (isGroup || isSelf) null else peer, peerContact?.host, rows)
 
         Box(
             Modifier.weight(1f).fillMaxWidth()
@@ -2031,27 +1986,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             }
         }
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(
-                rows,
-                key = { row ->
-                    when (row) {
-                        is ChatRow.Single -> row.m.id
-                        // Keyed on the BATCH, not on its first photo: as the
-                        // photos of an album arrived the first one could change
-                        // and the whole row was torn down and rebuilt per photo
-                        // (audit, 05.09). The album id is the same for all of
-                        // them from the first to the last.
-                        // ...and on the row's ORDINAL within the album: one
-                        // album becomes several rows when a message lands
-                        // between its photos, and two rows with one key is a
-                        // LazyColumn crash. The first photo's id is not stable
-                        // either (photos arrive out of order).
-                        is ChatRow.Album -> "alb-${row.id}-${row.ordinal}"
-                        is ChatRow.DateLabel -> "date-${row.key}"
-                        ChatRow.Unread -> "unread-divider"
-                    }
-                },
-            ) { row ->
+            // Keys and content types: see [chatRowItems].
+            chatRowItems(rows) { row ->
                 when (row) {
                     is ChatRow.DateLabel -> DateDividerRow(row.label)
                     ChatRow.Unread -> UnreadDividerRow(initialUnread)
@@ -2223,8 +2159,12 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
                     if (!listState.canScrollForward && info.totalItemsCount > 0) {
                         info.totalItemsCount - 1
                     } else {
+                        // ⚠ The rows of NOW, not the ones captured when the
+                        // chat opened: those could be empty (the thread loads
+                        // asynchronously) or shifted by a delete, and the chip
+                        // allowance went to the wrong row or to none.
                         info.visibleItemsInfo.lastOrNull {
-                            val r = rows.getOrNull(it.index)
+                            val r = rowsForJump.getOrNull(it.index)
                             val hasChip = (r is ChatRow.Single && r.m.reactions.isNotEmpty()) ||
                                 (r is ChatRow.Album && r.items.any { a -> a.reactions.isNotEmpty() })
                             it.offset + it.size - (if (hasChip) reactionChipPx else 0) <= floor
@@ -2242,10 +2182,10 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
             // one receipt, not one per frame.
             if (!isGroup && !isSelf && peer != null) {
                 // `rows` is rebuilt on every message; the collector must see
-                // the current one, not the one captured when it started.
-                val rowsNow by androidx.compose.runtime.rememberUpdatedState(rows)
+                // the current one (rowsForJump), not the one captured when it
+                // started.
                 val ackSeen: (Int) -> Unit = { seen ->
-                    val rows = rowsNow
+                    val rows = rowsForJump
                     val ids = ArrayList<String>()
                     for (i in 0..minOf(seen, rows.lastIndex)) {
                         when (val r = rows[i]) {
@@ -2430,47 +2370,8 @@ internal fun ChatScreen(session: Session, target: ChatTarget, onBack: () -> Unit
         // read-only rooms included (report 1063).
         if (selection.active) ChatSelectionBar(session, selection, messages)
         else if (canPost) {
-            // A photo produces no row until its upload finishes, so without this
-            // the screen is blank for the whole upload and the user cannot tell
-            // a slow send from one that never started (#473). Sits directly above
-            // the composer, where the message they just sent would appear.
-            if (mediaSending > 0) {
-                Row(
-                    Modifier.fillMaxWidth().background(c.bgSecondary)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    // Determinate as soon as the socket tells us anything: a
-                    // spinner alone cannot distinguish a slow upload from one
-                    // that never started (#537, asked for from Shanghai).
-                    val p = mediaProgress
-                    if (p == null) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = c.accent,
-                        )
-                    } else {
-                        CircularProgressIndicator(
-                            progress = { p },
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = c.accent,
-                        )
-                    }
-                    Text(
-                        pluralStringResource(R.plurals.chat_media_sending, mediaSending, mediaSending),
-                        color = c.textSecondary, fontSize = 13.sp,
-                    )
-                    if (p != null) {
-                        Text(
-                            "${(p * 100).toInt()}%",
-                            color = c.textSecondary, fontSize = 13.sp,
-                        )
-                    }
-                }
-            }
+            // The upload strip (#473): see [MediaSendingStrip].
+            MediaSendingStrip(session)
             Composer(
                 threadKey = threadKey,
                 focusRequester = composerFocus,
@@ -3626,6 +3527,101 @@ private fun PeerGoneBanner(
                 }
             },
         )
+    }
+}
+
+/** Writing to somebody on ANOTHER island for the first time: their app files
+ *  it as a conversation REQUEST, not a chat, and nothing comes back until they
+ *  accept it. The sender has no way to see that (the tick only says the island
+ *  took the envelope), so a perfectly working send looks like silence, and the
+ *  obvious conclusion is "cross-island messaging is broken" (vss reported
+ *  exactly that). Say it once, while the thread has nothing incoming in it yet.
+ *
+ *  ⚠ And not once a message of ours was delivered or read: their app only
+ *  confirms a message it filed in a chat, never one it held as a request, so
+ *  that tick IS the acceptance. Without it the line stayed up in a
+ *  conversation they had long accepted and simply not answered, which read as
+ *  the very opposite of what was going on (report 1064).
+ *
+ *  ⚠ The address check goes LAST. A contact of our own island has no host, so
+ *  the check falls through to [CrossIslandStore.findByUin], which reads and
+ *  parses the whole store; it sat in ChatScreen's own body and ran on every
+ *  recomposition of the screen, in the commonest chat there is. The row checks
+ *  rule out almost every thread first (one incoming message is enough), and
+ *  what remains is asked once per change of the store. [peer] is null for a
+ *  room and for Saved messages. */
+@Composable
+private fun CrossIslandPendingNote(peer: Int?, peerHost: String?, rows: List<ChatRow>) {
+    if (peer == null) return
+    val waiting = rows.any { it is ChatRow.Single && it.m.fromMe } &&
+        rows.none { it is ChatRow.Single && !it.m.fromMe } &&
+        rows.none {
+            it is ChatRow.Single && it.m.fromMe &&
+                (it.m.state == DeliveryState.DELIVERED || it.m.state == DeliveryState.READ)
+        }
+    if (!waiting) return
+    val elsewhere = peerHost != null ||
+        remember(peer, CrossIslandStore.revision()) { CrossIslandStore.findByUin(peer) != null }
+    if (!elsewhere) return
+    val c = RcqTheme.colors
+    Text(
+        stringResource(R.string.chat_cross_island_pending),
+        color = c.textSecondary,
+        fontSize = 12.sp,
+        modifier = Modifier.fillMaxWidth().background(c.bgSecondary).padding(horizontal = 14.dp, vertical = 8.dp),
+    )
+}
+
+/** The upload strip above the composer. A photo produces no row until its
+ *  upload finishes, so without this the screen is blank for the whole upload
+ *  and the user cannot tell a slow send from one that never started (#473).
+ *  Sits directly above the composer, where the message they just sent would
+ *  appear.
+ *
+ *  ⚠ Its own composable, and the two flows are collected HERE: progress moves
+ *  on every 64 KB the socket takes, and read in ChatScreen it ran the whole
+ *  screen once a frame for as long as an upload lasted, which is exactly when
+ *  people scroll the chat. */
+@Composable
+private fun MediaSendingStrip(session: Session) {
+    val sending by session.mediaSending.collectAsState()
+    if (sending <= 0) return
+    val progress by session.mediaProgress.collectAsState()
+    val c = RcqTheme.colors
+    Row(
+        Modifier.fillMaxWidth().background(c.bgSecondary)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // Determinate as soon as the socket tells us anything: a spinner
+        // alone cannot distinguish a slow upload from one that never started
+        // (#537, asked for from Shanghai).
+        val p = progress
+        if (p == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+                color = c.accent,
+            )
+        } else {
+            CircularProgressIndicator(
+                progress = { p },
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+                color = c.accent,
+            )
+        }
+        Text(
+            pluralStringResource(R.plurals.chat_media_sending, sending, sending),
+            color = c.textSecondary, fontSize = 13.sp,
+        )
+        if (p != null) {
+            Text(
+                "${(p * 100).toInt()}%",
+                color = c.textSecondary, fontSize = 13.sp,
+            )
+        }
     }
 }
 
@@ -4974,6 +4970,57 @@ private fun buildChatRows(msgs: List<ChatMessage>, firstUnreadIndex: Int): List<
     return out
 }
 
+/** [buildChatRows] for the composition: rebuilt when the thread changes, with
+ *  every album row that came out equal to last time's handed back as last
+ *  time's object (see [reuseEqualRows]), so an album nothing happened to is
+ *  skipped instead of drawn again. */
+@Composable
+private fun rememberChatRows(messages: List<ChatMessage>, firstUnreadIndex: Int): List<ChatRow> {
+    val last = remember { arrayOfNulls<List<ChatRow>>(1) }
+    return remember(messages, firstUnreadIndex) {
+        reuseEqualRows(last[0], buildChatRows(messages, firstUnreadIndex)) { r ->
+            if (r is ChatRow.Album) chatRowKey(r) else null
+        }.also { last[0] = it }
+    }
+}
+
+/** The LazyColumn key of a row. */
+private fun chatRowKey(row: ChatRow): Any = when (row) {
+    is ChatRow.Single -> row.m.id
+    // Keyed on the BATCH, not on its first photo: as the photos of an album
+    // arrived the first one could change and the whole row was torn down and
+    // rebuilt per photo (audit, 05.09). The album id is the same for all of
+    // them from the first to the last.
+    // ...and on the row's ORDINAL within the album: one album becomes several
+    // rows when a message lands between its photos, and two rows with one key
+    // is a LazyColumn crash. The first photo's id is not stable either (photos
+    // arrive out of order).
+    is ChatRow.Album -> "alb-${row.id}-${row.ordinal}"
+    is ChatRow.DateLabel -> "date-${row.key}"
+    ChatRow.Unread -> "unread-divider"
+}
+
+/** What a row is drawn WITH, so the list reuses a scrolled-away text bubble
+ *  for a text bubble and a photo for a photo. Without it every row was one
+ *  type: the slot an incoming album was given could be a date divider's, and
+ *  nothing in it was any use. A single message goes by its kind (the bubble is
+ *  a different tree per kind); the others are numbers, so they cannot collide
+ *  with a kind. */
+private fun chatRowContentType(row: ChatRow): Any = when (row) {
+    is ChatRow.Single -> row.m.kind
+    is ChatRow.Album -> 1
+    is ChatRow.DateLabel -> 2
+    ChatRow.Unread -> 3
+}
+
+/** The thread's rows as list items, with [chatRowKey] and [chatRowContentType].
+ *  Out here rather than written into ChatScreen's LazyColumn, which is at the
+ *  method size the verifier accepts. */
+private fun androidx.compose.foundation.lazy.LazyListScope.chatRowItems(
+    rows: List<ChatRow>,
+    itemContent: @Composable androidx.compose.foundation.lazy.LazyItemScope.(ChatRow) -> Unit,
+) = items(rows, key = ::chatRowKey, contentType = ::chatRowContentType, itemContent = itemContent)
+
 /** A centered day separator between messages of different dates. */
 @Composable
 private fun DateDividerRow(label: String) {
@@ -5165,25 +5212,15 @@ private fun AlbumTile(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isVideo = m.kind == "video"
-    val photo by produceState<ByteArray?>(initialValue = null, m.id) {
-        value = if (!isVideo && m.mediaId != null && m.mediaKey != null) session.fetchImage(m.mediaId, m.mediaKey, m.groupId?.let { session.groupHost(it) }) else null
-    }
-    val bmp = remember(photo, m.id) {
-        if (isVideo) {
-            m.thumbB64?.takeIf { it.isNotEmpty() }?.let { runCatching { val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP); BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() }
-        } else {
-            // GIF album tiles via the pure-Java first frame (native GIF decoder
-            // SIGSEGVs on some OEM ROMs); JPEG/PNG via the native decoder.
-            photo?.let { runCatching { (if (it.isGif()) gifFirstFrame(it) else BitmapFactory.decodeByteArray(it, 0, it.size))?.asImageBitmap() }.getOrNull() }
-        }
-    }
     // A spoiler in an album is covered like one in its own bubble (#1052
     // review). Opening the album from here lands on its page covered, and a
     // tap there uncovers it. Without an album around it, the first tap here
     // uncovers it, as a bubble's does.
     var revealed by remember(m.id) { mutableStateOf(false) }
     val covered = m.spoiler && !revealed
-    val shown = remember(bmp, covered) { coveredIfSpoiler(bmp, covered) }
+    // Fetched, decoded at the tile's own size and covered OFF the main thread,
+    // and kept for the next time the row scrolls in (see rememberTileImage).
+    val shown = rememberTileImage(session, m, with(LocalDensity.current) { maxOf(w, h).roundToPx() }, covered)
     Box(
         Modifier.size(w, h).background(c.bgSecondary).combinedClickable(
             onClick = {
@@ -7258,37 +7295,11 @@ private fun AllMediaOverlay(
 private fun MediaTile(session: Session, m: ChatMessage, onClick: () -> Unit) {
     val c = RcqTheme.colors
     val isVideo = m.kind == "video"
-    val bmp = if (isVideo) {
-        // Video poster straight from the stored base64 thumbnail (no fetch).
-        remember(m.id) {
-            m.thumbB64?.takeIf { it.isNotEmpty() }?.let {
-                runCatching {
-                    val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP)
-                    BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
-                }.getOrNull()
-            }
-        }
-    } else {
-        val bytes by produceState<ByteArray?>(null, m.id) {
-            val mid = m.mediaId
-            val key = m.mediaKey
-            value = if (mid != null && key != null) {
-                runCatching { session.fetchImage(mid, key, m.groupId?.let { session.groupHost(it) }) }.getOrNull()
-            } else {
-                null
-            }
-        }
-        remember(bytes) {
-            bytes?.let {
-                runCatching {
-                    (if (it.isGif()) gifFirstFrame(it) else decodeSampled(it, 360))?.asImageBitmap()
-                }.getOrNull()
-            }
-        }
-    }
-    // Covered like the bubble covers it (#1052 review); the pager page it
-    // opens is covered too, and a tap there uncovers it.
-    val shown = remember(bmp, m.spoiler) { coveredIfSpoiler(bmp, m.spoiler) }
+    // Video poster from the stored base64 thumbnail, a photo fetched; either
+    // decoded and covered off the main thread (rememberTileImage). Covered
+    // like the bubble covers it (#1052 review); the pager page it opens is
+    // covered too, and a tap there uncovers it.
+    val shown = rememberTileImage(session, m, 360, m.spoiler)
     Box(
         Modifier.aspectRatio(1f).background(c.bgSecondary).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
