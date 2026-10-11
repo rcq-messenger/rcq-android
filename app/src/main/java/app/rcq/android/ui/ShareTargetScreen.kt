@@ -67,6 +67,34 @@ fun ShareTargetScreen(
     req: ShareIntake.Req,
     onPick: (ChatTarget) -> Unit,
     onCancel: () -> Unit,
+) = ChatPickerScreen(
+    session = session,
+    title = stringResource(R.string.share_to_title),
+    summary = payloadSummary(req),
+    onPick = onPick,
+    onCancel = onCancel,
+)
+
+/**
+ * The picker itself, for anything that sends into a chat the person chooses:
+ * another app's share ([ShareTargetScreen]) and a forward (report 1063,
+ * [ForwardPickerLayer]). [title] and [summary] say what is about to go where.
+ *
+ * [groupFilter] and [contactFilter] narrow the rows without touching the
+ * sections around them: a forward leaves out the rooms this person cannot post
+ * in and the people they blocked, where a share has always offered every room
+ * (the chat it lands in says so when it may not post). A locked section keeps
+ * its header either way, so the filters cannot be used to learn what it holds.
+ */
+@Composable
+internal fun ChatPickerScreen(
+    session: Session,
+    title: String,
+    summary: String,
+    onPick: (ChatTarget) -> Unit,
+    onCancel: () -> Unit,
+    groupFilter: (RcqGroup) -> Boolean = { true },
+    contactFilter: (Contact) -> Boolean = { true },
 ) {
     val c = RcqTheme.colors
     val contacts by session.contacts.collectAsState()
@@ -94,8 +122,8 @@ fun ShareTargetScreen(
     val goneAddresses by session.goneAddresses.collectAsState()
     val lists = remember(contacts, groups, unread, messages, favorites, archived, sectionsTree, sectionsOk, aliases, query, goneAddresses) {
         buildHomeLists(
-            filterShareContacts(contacts, query, aliases),
-            filterShareGroups(groups, query),
+            filterShareContacts(contacts, query, aliases).filter(contactFilter),
+            filterShareGroups(groups, query).filter(groupFilter),
             unread, favorites, archived, sectionsTree, sectionsOk,
             isGone = { goneInList(it, goneAddresses) },
         ) { peer -> messages[peer]?.lastOrNull()?.sentAt ?: 0L }
@@ -129,12 +157,12 @@ fun ShareTargetScreen(
             )
             Column(Modifier.padding(start = 12.dp)) {
                 Text(
-                    stringResource(R.string.share_to_title),
+                    title,
                     color = c.textPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(payloadSummary(req), color = c.textSecondary, fontSize = 12.sp, maxLines = 1)
+                Text(summary, color = c.textSecondary, fontSize = 12.sp, maxLines = 1)
             }
         }
 

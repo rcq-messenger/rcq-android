@@ -69,11 +69,14 @@
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">Başka bir adada %1$d numaralı bir kişin zaten var. Bir sohbet yalnızca numaraya göre saklandığından ikinci bir %1$d o geçmişi paylaşırdı. Eklenmedi.</string>
     <string name="share_to_title">Şuraya gönder…</string>
+    <string name="chat_forward_title">Şuraya ilet…</string>
+    <string name="chat_forwarded_to">İletildi: %1$s</string>
     <string name="share_to_search">Sohbetlerde ara</string>
     <string name="share_to_empty">Henüz gönderilecek sohbet yok.</string>
     <string name="chat_media_send_failed">Gönderilemedi. Bağlantını kontrol edip tekrar dene.</string>
     <string name="share_to_unreadable">Paylaşılan şey okunamadı. Diğer uygulamadan tekrar göndermeyi dene.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d dosya</item><item quantity="other">%1$d dosya</item></plurals>
+    <plurals name="chat_forward_summary"><item quantity="one">%1$d mesaj</item><item quantity="other">%1$d mesaj</item></plurals>
     <string name="outgoing_state_pending">Bekliyor</string>
     <string name="outgoing_state_backup">Yedek kopya, istek ulaşmayacak. Asıl adresi: %1$s</string>
     <string name="outgoing_state_declined">Reddedildi</string>
@@ -911,6 +914,8 @@
     <string name="chat_report">Şikayet et</string>
     <string name="chat_reply">Yanıtla</string>
     <string name="chat_copy">Kopyala</string>
+    <string name="chat_forward">İlet</string>
+    <string name="chat_select">Seç</string>
     <string name="media_share">Paylaş</string>
     <string name="media_show_in_chat">Sohbette göster</string>
     <string name="media_save">Kaydet</string>
@@ -932,6 +937,8 @@
     <string name="chat_deleted">Mesaj silindi</string>
     <string name="chat_edit_title">Mesajı düzenle</string>
     <string name="chat_edited">düzenlendi</string>
+    <string name="chat_forwarded_from">%1$s kişisinden iletildi</string>
+    <string name="chat_forward_someone">Biri</string>
     <string name="chat_cross_island_pending">Bu kişi başka bir adada. İlk mesajın oraya bağlanma isteği olarak ulaşır: kabul edene kadar ne mesaj ne arama geçer.</string>
     <string name="chat_peer_gone">Bu hesap artık yok: ada böyle bir numara olmadığını söylüyor. Mesajlar teslim edilmeyecek.</string>
     <string name="chat_peer_gone_row">Hesap silindi</string>
@@ -1328,6 +1335,7 @@
     <string name="gi_slow_off">Kapalı</string>
     <string name="chat_files_off">Grup sahibi dosyaları kapattı</string>
     <string name="chat_links_off">Grup sahibi bağlantıları kapattı</string>
+    <string name="chat_forward_slowmode">Bu grupta yavaş mod açık: mesajları tek tek iletin</string>
     <string name="chat_slowmode_wait">Yavaş mod açık: birazdan tekrar deneyin</string>
     <string name="chat_slowmode_wait_in">Yavaş mod açık: %1$d sn sonra deneyin</string>
     <string name="chat_age_gate_wait">Burada yeni üyeler hemen yazamaz. Yaklaşık %1$d saat sonra yazabilirsiniz.</string>
@@ -1335,6 +1343,9 @@
     <string name="push_channel_upload_desc">RCQ ekranda değilken yüklenmeye devam eden dosyalar.</string>
     <string name="chat_delete_album_all">%1$d fotoğrafın tümünü herkesten sil</string>
     <string name="chat_delete_album_me">%1$d fotoğrafın tümünü benden sil</string>
+    <string name="chat_selection_count">%1$d seçildi</string>
+    <string name="chat_selection_delete_title">Seçilen mesajlar silinsin mi?</string>
+    <string name="chat_selection_too_many">En fazla %1$d mesaj seçebilirsiniz</string>
     <string name="last_seen_recently">az önce</string>
     <string name="last_seen_today">bugün</string>
     <string name="last_seen_yesterday">dün</string>

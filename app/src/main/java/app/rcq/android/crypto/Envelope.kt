@@ -41,6 +41,23 @@ private fun JsonObject.putReply(r: Reply?) {
     })
 }
 
+/** "Forwarded from" under the "fwdName" key (report 1063), on the same six
+ *  content kinds the quote rides: text, photo, video, voice, file, location.
+ *
+ *  It is the name the ORIGINAL author chose for themselves, or a neutral word
+ *  when the forwarder only knows them as a number: it travels inside the
+ *  sealed envelope to every recipient, so it is never the forwarder's private
+ *  alias and never a bare number. iOS and the web have written this key since
+ *  they could forward (`CryptoService.swift` `forwardedFromName`, `crypto.ts`),
+ *  and this client used to drop it on the way in.
+ *
+ *  Omitted when absent, the `encodeIfPresent` rule every optional here
+ *  follows. Control kinds (edit, delete, reaction, receipts) never carry it;
+ *  a carbon wraps the content envelope whole, so my other devices get it too. */
+private fun JsonObject.putFwd(name: String?) {
+    name?.takeIf { it.isNotBlank() }?.let { addProperty("fwdName", it) }
+}
+
 sealed interface Envelope {
     /** Disappearing-message TTL in seconds carried by the sender inside the
      *  encrypted envelope (iOS/web key "ttl"); null = permanent. Only the
@@ -75,11 +92,12 @@ sealed interface Envelope {
      *  ⚠ 1:1 only, and never on an open island: a card is a live credential
      *  with no business travelling to a door that is not locked, or to a room
      *  whose membership can change after the fact. */
-    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null, val ts: Long? = null, val card: String? = null) : Envelope
+    data class Text(val id: String, val text: String, val replyTo: Reply? = null, val ttl: Int? = null, val ts: Long? = null, val card: String? = null, val fwdName: String? = null) : Envelope
     /** Photo. `mediaId`/`mediaKey` point at the out-of-band encrypted
      *  blob (rcq-spec 9). caption may be empty. [spoiler] = sent blurred,
-     *  the recipient taps to reveal (Android-only flag; iOS ignores it). */
-    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null, val ts: Long? = null, val replyTo: Reply? = null) : Envelope
+     *  the recipient taps to reveal (every client reads and writes it now;
+     *  an old build that does not know it simply shows the picture). */
+    data class Photo(val id: String, val mediaId: String, val mediaKey: String, val caption: String?, val spoiler: Boolean = false, val albumId: String? = null, val ttl: Int? = null, val ts: Long? = null, val replyTo: Reply? = null, val fwdName: String? = null) : Envelope
     /** A reaction to another message (iOS kind "reaction"). Carries no own
      *  message id; [targetId] is the reacted message's UUID, [asset] the
      *  emoji (null clears, currently treated as a no-op on receipt). */
@@ -121,6 +139,7 @@ sealed interface Envelope {
         val ttl: Int? = null,
         val ts: Long? = null,
         val replyTo: Reply? = null,
+        val fwdName: String? = null,
     ) : Envelope
     /** Voice note (iOS kind "voice"). Audio bytes live in an encrypted
      *  blob; [durationSec] drives the bubble timer. */
@@ -132,6 +151,7 @@ sealed interface Envelope {
         val ttl: Int? = null,
         val ts: Long? = null,
         val replyTo: Reply? = null,
+        val fwdName: String? = null,
     ) : Envelope
     /** Video (iOS kind "video"). Bytes in an encrypted blob; [thumbnailB64]
      *  is a base64 JPEG poster frame shown before download, [durationSec]
@@ -148,9 +168,10 @@ sealed interface Envelope {
         val ttl: Int? = null,
         val ts: Long? = null,
         val replyTo: Reply? = null,
+        val fwdName: String? = null,
     ) : Envelope
     /** Shared location (iOS kind "location"). */
-    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null, val ts: Long? = null, val replyTo: Reply? = null) : Envelope
+    data class Location(val id: String, val lat: Double, val lng: Double, val caption: String?, val ttl: Int? = null, val ts: Long? = null, val replyTo: Reply? = null, val fwdName: String? = null) : Envelope
     /** Profile-view ping (iOS kind "visit"). Fire-and-forget, no bubble:
      *  the recipient tallies it locally for the "profile views" stat.
      *  [at] is seconds since the 2001 reference date, matching the iOS
@@ -397,6 +418,7 @@ sealed interface Envelope {
             }
             putReply(replyTo)
             card?.takeIf { it.isNotBlank() }?.let { addProperty("card", it) }
+            putFwd(fwdName)
         }.toString().toByteArray(Charsets.UTF_8)
         is Photo -> JsonObject().apply {
             addProperty("kind", "photo")
@@ -412,6 +434,7 @@ sealed interface Envelope {
                 ts?.let { sec -> addProperty("ts", sec) }
             }
             putReply(replyTo)
+            putFwd(fwdName)
         }.toString().toByteArray(Charsets.UTF_8)
         is Reaction -> JsonObject().apply {
             addProperty("kind", "reaction")
@@ -450,6 +473,7 @@ sealed interface Envelope {
                 ts?.let { sec -> addProperty("ts", sec) }
             }
             putReply(replyTo)
+            putFwd(fwdName)
         }.toString().toByteArray(Charsets.UTF_8)
         is Voice -> JsonObject().apply {
             addProperty("kind", "voice")
@@ -463,6 +487,7 @@ sealed interface Envelope {
                 ts?.let { sec -> addProperty("ts", sec) }
             }
             putReply(replyTo)
+            putFwd(fwdName)
         }.toString().toByteArray(Charsets.UTF_8)
         is Video -> JsonObject().apply {
             addProperty("kind", "video")
@@ -480,6 +505,7 @@ sealed interface Envelope {
                 ts?.let { sec -> addProperty("ts", sec) }
             }
             putReply(replyTo)
+            putFwd(fwdName)
         }.toString().toByteArray(Charsets.UTF_8)
         is Location -> JsonObject().apply {
             addProperty("kind", "location")
@@ -493,6 +519,7 @@ sealed interface Envelope {
                 ts?.let { sec -> addProperty("ts", sec) }
             }
             putReply(replyTo)
+            putFwd(fwdName)
         }.toString().toByteArray(Charsets.UTF_8)
         is Visit -> JsonObject().apply {
             addProperty("kind", "visit")
@@ -685,6 +712,38 @@ sealed interface Envelope {
         fun anchorFromTs(ts: Long?, nowMs: Long): Long? =
             saneAnchorMs(ts?.takeIf { it > 0 }?.times(1000L), nowMs)
 
+        /** Longest "forwarded from" label kept, in code points. iOS cuts its
+         *  own credit at 64 characters too (`cleanForwardCredit`). */
+        const val FWD_NAME_MAX = 64
+
+        /** A "forwarded from" label fit to keep and draw, or null.
+         *
+         *  ⚠ ATTACKER-CONTROLLED, like `ts`. It is a string another person's
+         *  client chose, and it lands in a one-line label over a bubble. So:
+         *  every control and format character becomes a space (a newline
+         *  would push the label over the message, a bidi override would make
+         *  "Alice" read as somebody else), the result is trimmed and cut to
+         *  [FWD_NAME_MAX] code points without splitting a surrogate pair, and
+         *  nothing left means no label at all. It does NOT refuse a name made
+         *  of digits: that is the sender's own choice to show, and only the
+         *  forwarding side holds itself to "never a bare number". */
+        fun sanitizeFwdName(raw: String?): String? {
+            if (raw.isNullOrEmpty()) return null
+            val sb = StringBuilder(minOf(raw.length, FWD_NAME_MAX * 2))
+            var taken = 0
+            var i = 0
+            while (i < raw.length && taken < FWD_NAME_MAX) {
+                val cp = raw.codePointAt(i)
+                val type = Character.getType(cp)
+                val unsafe = type == Character.CONTROL.toInt() || type == Character.FORMAT.toInt() ||
+                    type == Character.LINE_SEPARATOR.toInt() || type == Character.PARAGRAPH_SEPARATOR.toInt()
+                if (unsafe) sb.append(' ') else sb.appendCodePoint(cp)
+                taken++
+                i += Character.charCount(cp)
+            }
+            return sb.toString().trim().takeIf { it.isNotEmpty() }
+        }
+
         /** Build a visit ping stamped at [epochMillis] (epoch ms). */
         fun visit(epochMillis: Long): Visit = Visit(epochMillis / 1000.0 - APPLE_EPOCH_OFFSET_SEC)
 
@@ -715,14 +774,14 @@ sealed interface Envelope {
                 ?.take(MAX_CIACK_KEYS)
                 .orEmpty()
 
-        fun text(body: String, replyTo: Reply? = null, ttl: Int? = null, card: String? = null): Text {
+        fun text(body: String, replyTo: Reply? = null, ttl: Int? = null, card: String? = null, fwdName: String? = null): Text {
             val (t, ts) = dying(ttl)
-            return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts, card = card)
+            return Text(id = UUID.randomUUID().toString().uppercase(), text = body, replyTo = replyTo, ttl = t, ts = ts, card = card, fwdName = fwdName)
         }
 
-        fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null, replyTo: Reply? = null): Photo {
+        fun photo(mediaId: String, mediaKey: String, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null, replyTo: Reply? = null, fwdName: String? = null): Photo {
             val (t, ts) = dying(ttl)
-            return Photo(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, caption, spoiler, albumId, t, ts, replyTo)
+            return Photo(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, caption, spoiler, albumId, t, ts, replyTo, fwdName)
         }
 
         fun reaction(targetId: String, asset: String?): Reaction = Reaction(targetId, asset)
@@ -735,24 +794,24 @@ sealed interface Envelope {
 
         fun deliveredReceipt(targetIds: List<String>): DeliveredReceipt = DeliveredReceipt(targetIds)
 
-        fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?, ttl: Int? = null, replyTo: Reply? = null): File {
+        fun file(mediaId: String, mediaKey: String, fileName: String, mime: String, sizeBytes: Long, caption: String?, ttl: Int? = null, replyTo: Reply? = null, fwdName: String? = null): File {
             val (t, ts) = dying(ttl)
-            return File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption, t, ts, replyTo)
+            return File(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, fileName, mime, sizeBytes, caption, t, ts, replyTo, fwdName)
         }
 
-        fun voice(mediaId: String, mediaKey: String, durationSec: Double, ttl: Int? = null, replyTo: Reply? = null): Voice {
+        fun voice(mediaId: String, mediaKey: String, durationSec: Double, ttl: Int? = null, replyTo: Reply? = null, fwdName: String? = null): Voice {
             val (t, ts) = dying(ttl)
-            return Voice(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, durationSec, t, ts, replyTo)
+            return Voice(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, durationSec, t, ts, replyTo, fwdName)
         }
 
-        fun video(mediaId: String, mediaKey: String, thumbnailB64: String, durationSec: Double, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null, replyTo: Reply? = null): Video {
+        fun video(mediaId: String, mediaKey: String, thumbnailB64: String, durationSec: Double, caption: String?, spoiler: Boolean = false, albumId: String? = null, ttl: Int? = null, replyTo: Reply? = null, fwdName: String? = null): Video {
             val (t, ts) = dying(ttl)
-            return Video(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, thumbnailB64, durationSec, caption, spoiler, albumId, t, ts, replyTo)
+            return Video(UUID.randomUUID().toString().uppercase(), mediaId, mediaKey, thumbnailB64, durationSec, caption, spoiler, albumId, t, ts, replyTo, fwdName)
         }
 
-        fun location(lat: Double, lng: Double, caption: String?, ttl: Int? = null, replyTo: Reply? = null): Location {
+        fun location(lat: Double, lng: Double, caption: String?, ttl: Int? = null, replyTo: Reply? = null, fwdName: String? = null): Location {
             val (t, ts) = dying(ttl)
-            return Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption, t, ts, replyTo)
+            return Location(UUID.randomUUID().toString().uppercase(), lat, lng, caption, t, ts, replyTo, fwdName)
         }
 
         fun secureScreen(on: Boolean): SecureScreen = SecureScreen(on)
@@ -838,12 +897,20 @@ sealed interface Envelope {
             // decides what to believe.
             val ts = obj.get("ts")?.takeIf { it.isJsonPrimitive }
                 ?.let { runCatching { it.asLong }.getOrNull() }
+            // "Forwarded from" (report 1063). A label a stranger's client wrote
+            // and this one draws, so it is cleaned before anything keeps it:
+            // see [sanitizeFwdName]. A malformed one costs the label, never the
+            // message.
+            val fwd = sanitizeFwdName(
+                obj.get("fwdName")?.takeIf { it.isJsonPrimitive }?.let { runCatching { it.asString }.getOrNull() },
+            )
             return when (val kind = obj.get("kind")?.asString) {
                 "text" -> Text(
                     id, obj.get("text")?.asString.orEmpty(), reply, ttl, ts,
                     // Bounded on the way in: it arrives from a peer and leaves
                     // as a request header.
                     card = obj.get("card")?.asString?.takeIf { it.isNotBlank() && it.length <= 128 },
+                    fwdName = fwd,
                 )
                 "photo" -> Photo(
                     id = id,
@@ -855,6 +922,7 @@ sealed interface Envelope {
                     ttl = ttl,
                     ts = ts,
                     replyTo = reply,
+                    fwdName = fwd,
                 )
                 "reaction" -> Reaction(
                     targetId = obj.get("targetID")?.asString.orEmpty(),
@@ -882,6 +950,7 @@ sealed interface Envelope {
                     ttl = ttl,
                     ts = ts,
                     replyTo = reply,
+                    fwdName = fwd,
                 )
                 "voice" -> Voice(
                     id = id,
@@ -891,6 +960,7 @@ sealed interface Envelope {
                     ttl = ttl,
                     ts = ts,
                     replyTo = reply,
+                    fwdName = fwd,
                 )
                 "video" -> Video(
                     id = id,
@@ -904,6 +974,7 @@ sealed interface Envelope {
                     ttl = ttl,
                     ts = ts,
                     replyTo = reply,
+                    fwdName = fwd,
                 )
                 "location" -> Location(
                     id = id,
@@ -913,6 +984,7 @@ sealed interface Envelope {
                     ttl = ttl,
                     ts = ts,
                     replyTo = reply,
+                    fwdName = fwd,
                 )
                 "visit" -> Visit(obj.get("at")?.asDouble ?: 0.0)
                 "poll" -> Poll(

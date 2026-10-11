@@ -7253,12 +7253,12 @@ class Session(context: Context) {
         return (own + foreign).sortedBy { it.nickname.lowercase() }
     }
 
-    suspend fun sendGroupText(groupId: Int, text: String, replyTo: app.rcq.android.crypto.Reply? = null) {
-        val env = Envelope.text(text, replyTo, groupTtl(groupId))
+    suspend fun sendGroupText(groupId: Int, text: String, replyTo: app.rcq.android.crypto.Reply? = null, fwdName: String? = null) {
+        val env = Envelope.text(text, replyTo, groupTtl(groupId), fwdName = fwdName)
         sendGroupEnvelope(groupId, env, env.id, text, kind = "text", replyTo = replyTo)
     }
 
-    suspend fun sendGroupPhoto(groupId: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null, replyTo: Reply? = null) {
+    suspend fun sendGroupPhoto(groupId: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null, replyTo: Reply? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
@@ -7266,7 +7266,7 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, jpeg)
-        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl, replyTo)
+        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl, replyTo, fwdName)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId, batch = batch, replyTo = replyTo)
     }
 
@@ -7333,6 +7333,9 @@ class Session(context: Context) {
                 durationSec = durationSec, thumbB64 = thumbB64, lat = lat, lng = lng,
                 spoiler = spoiler, albumId = albumId,
                 expiresAt = expiryFor(ttl, ts, now),
+                // Off the envelope itself, like the timer above: the label on
+                // my copy is the one that went out.
+                fwdName = fwdOf(env),
             )
         )
         fanOutGroup(groupId, env, id, batch)
@@ -7615,22 +7618,22 @@ class Session(context: Context) {
         val now = System.currentTimeMillis()
         when (val env = envelope) {
                 is Envelope.Text -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.text, disappearAnchorMs(env.ts, depositAtMs, now), kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
+                    ChatMessage(env.id, 0, false, env.text, disappearAnchorMs(env.ts, depositAtMs, now), kind = "text", groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName)
                 )
                 is Envelope.Photo -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName)
                 )
                 is Envelope.File -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName)
                 )
                 is Envelope.Voice -> storeGroup(
-                    ChatMessage(env.id, 0, false, "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
+                    ChatMessage(env.id, 0, false, "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName)
                 )
                 is Envelope.Video -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, groupId = groupId, senderUin = dec.senderUin, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName)
                 )
                 is Envelope.Location -> storeGroup(
-                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "location", lat = env.lat, lng = env.lng, groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs))
+                    ChatMessage(env.id, 0, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "location", lat = env.lat, lng = env.lng, groupId = groupId, senderUin = dec.senderUin, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName)
                 )
                 is Envelope.Poll -> storeGroup(
                     ChatMessage(env.id, 0, false, app.rcq.android.model.PollContent(env.pollId, env.question, env.options, env.singleChoice, env.anonymous).toJson(), now, kind = "poll", groupId = groupId, senderUin = dec.senderUin)
@@ -9059,16 +9062,22 @@ class Session(context: Context) {
      *  written into the export in the clear, which is the one guarantee that
      *  function exists to make. The deadline comes off `env.ts`, so both copies
      *  die at the same instant. */
-    suspend fun sendText(toUin: Int, text: String, replyTo: Reply? = null) {
+    suspend fun sendText(toUin: Int, text: String, replyTo: Reply? = null, fwdName: String? = null) {
         // ⚠ On a CLOSED island the envelope carries a guest card, and that is
         // the whole of "I wrote to you first, so you may write back": no server
         // state, no screen, no round trip, because it rides inside the sealed
         // blob. 1:1 only — a card handed to a room is a card handed to whoever
         // joins it later — and never on an open island, where a live credential
         // would be travelling to a door that is not locked.
-        val env = Envelope.text(text, replyTo, peerTtl(toUin), card = outgoingGuestCard())
+        val ttl = peerTtl(toUin)
+        val card = outgoingGuestCard()
+        // The card can wait on the island, and a forward runs detached
+        // ([forwardMessages]): whose send this is gets asked again before the
+        // row is written. A no-op for a send a screen is waiting on.
+        ensureSendStillOwned()
+        val env = Envelope.text(text, replyTo, ttl, card = card, fwdName = fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, fromMe = true, body = text, sentAt = now, state = DeliveryState.SENDING, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, fromMe = true, body = text, sentAt = now, state = DeliveryState.SENDING, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = env.fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
@@ -9383,7 +9392,7 @@ class Session(context: Context) {
         }
     }
 
-    suspend fun sendPhoto(toUin: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, replyTo: Reply? = null) {
+    suspend fun sendPhoto(toUin: Int, jpeg: ByteArray, caption: String?, spoiler: Boolean = false, albumId: String? = null, replyTo: Reply? = null, fwdName: String? = null) {
         // Whose it is, before anything is read for it (the thread's timer
         // included): a batch item can start after a lock or a switch.
         ensureSendStillOwned()
@@ -9397,15 +9406,17 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)      // throws on failure (caller catches)
         imageCache.put(upload.media_id, jpeg)            // own bubble renders without re-download
-        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl, replyTo)
+        val env = Envelope.photo(upload.media_id, keyB64, caption, spoiler, albumId, ttl, replyTo, fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "photo", mediaId = upload.media_id, mediaKey = keyB64, spoiler = spoiler, albumId = albumId, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Encrypt+upload arbitrary file bytes, then send a file envelope (same
-     *  blob path as photos; rcq-spec 9). [fileName]/[mime]/size describe it. */
-    suspend fun sendFile(toUin: Int, bytes: ByteArray, fileName: String, mime: String, replyTo: Reply? = null) {
+     *  blob path as photos; rcq-spec 9). [fileName]/[mime]/size describe it.
+     *  [caption] is only ever set by a forward: the paperclip sends none, but
+     *  a document from iOS can carry one and a forward keeps it. */
+    suspend fun sendFile(toUin: Int, bytes: ByteArray, fileName: String, mime: String, replyTo: Reply? = null, caption: String? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
@@ -9414,14 +9425,14 @@ class Session(context: Context) {
         val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
-        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null, ttl, replyTo)
+        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, caption, ttl, replyTo, fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, true, "", now, DeliveryState.SENDING, kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Group file: encrypt once, fan out per member (same as group photo). */
-    suspend fun sendGroupFile(groupId: Int, bytes: ByteArray, fileName: String, mime: String, replyTo: Reply? = null) {
+    suspend fun sendGroupFile(groupId: Int, bytes: ByteArray, fileName: String, mime: String, replyTo: Reply? = null, caption: String? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
@@ -9430,12 +9441,12 @@ class Session(context: Context) {
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
         val size = bytes.size.toLong()
-        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, null, ttl, replyTo)
-        sendGroupEnvelope(groupId, env, env.id, "", kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size, replyTo = replyTo)
+        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, size, caption, ttl, replyTo, fwdName)
+        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = size, replyTo = replyTo)
     }
 
     /** Encrypt+upload a recorded voice clip, then send a voice envelope. */
-    suspend fun sendVoice(toUin: Int, bytes: ByteArray, durationSec: Int, replyTo: Reply? = null) {
+    suspend fun sendVoice(toUin: Int, bytes: ByteArray, durationSec: Int, replyTo: Reply? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
@@ -9443,14 +9454,14 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble(), ttl, replyTo)
+        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble(), ttl, replyTo, fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, true, "", now, DeliveryState.SENDING, kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, true, "", now, DeliveryState.SENDING, kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Group voice note: encrypt once, fan out per member. */
-    suspend fun sendGroupVoice(groupId: Int, bytes: ByteArray, durationSec: Int, replyTo: Reply? = null) {
+    suspend fun sendGroupVoice(groupId: Int, bytes: ByteArray, durationSec: Int, replyTo: Reply? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
@@ -9458,13 +9469,13 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble(), ttl, replyTo)
+        val env = Envelope.voice(upload.media_id, keyB64, durationSec.toDouble(), ttl, replyTo, fwdName)
         sendGroupEnvelope(groupId, env, env.id, "", kind = "voice", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, replyTo = replyTo)
     }
 
     /** Encrypt+upload a picked video, then send a video envelope carrying a
      *  base64 poster thumbnail so the bubble renders before download. */
-    suspend fun sendVideo(toUin: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, replyTo: Reply? = null) {
+    suspend fun sendVideo(toUin: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, replyTo: Reply? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
@@ -9472,14 +9483,14 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobFor(toUin, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo, fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
     /** Group video: encrypt once, fan out per member. */
-    suspend fun sendGroupVideo(groupId: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null, replyTo: Reply? = null) {
+    suspend fun sendGroupVideo(groupId: Int, bytes: ByteArray, thumbB64: String, durationSec: Int, caption: String?, spoiler: Boolean = false, albumId: String? = null, batch: RcqApi.Batch? = null, replyTo: Reply? = null, fwdName: String? = null) {
         ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
@@ -9487,20 +9498,20 @@ class Session(context: Context) {
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadBlobForGroup(groupId, blob)
         imageCache.put(upload.media_id, bytes)
-        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo, fwdName)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, batch = batch, replyTo = replyTo)
     }
 
     /** Share a geographic point (no blob, just coordinates in the envelope). */
-    suspend fun sendLocation(toUin: Int, lat: Double, lng: Double, caption: String?, replyTo: Reply? = null) {
-        val env = Envelope.location(lat, lng, caption, peerTtl(toUin), replyTo)
+    suspend fun sendLocation(toUin: Int, lat: Double, lng: Double, caption: String?, replyTo: Reply? = null, fwdName: String? = null) {
+        val env = Envelope.location(lat, lng, caption, peerTtl(toUin), replyTo, fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "location", lat = lat, lng = lng, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "location", lat = lat, lng = lng, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
-    suspend fun sendGroupLocation(groupId: Int, lat: Double, lng: Double, caption: String?, replyTo: Reply? = null) {
-        val env = Envelope.location(lat, lng, caption, groupTtl(groupId), replyTo)
+    suspend fun sendGroupLocation(groupId: Int, lat: Double, lng: Double, caption: String?, replyTo: Reply? = null, fwdName: String? = null) {
+        val env = Envelope.location(lat, lng, caption, groupTtl(groupId), replyTo, fwdName)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "location", lat = lat, lng = lng, replyTo = replyTo)
     }
 
@@ -9535,21 +9546,25 @@ class Session(context: Context) {
         // answered nothing, while the sender's own bubble still showed the
         // quote (found with #1048).
         val reply = msg.replyToId?.let { Reply(it, msg.replyToSnippet.orEmpty(), msg.replyToAuthor.orEmpty()) }
+        // ...and so does "forwarded from" (report 1063): a forward that
+        // failed once must not arrive on the second attempt as the
+        // forwarder's own words.
+        val fwd = msg.fwdName
         return when {
         msg.kind == "photo" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.Photo(msg.id, msg.mediaId, msg.mediaKey, msg.body.ifEmpty { null }, msg.spoiler, msg.albumId, ttl, ts, reply)
+            Envelope.Photo(msg.id, msg.mediaId, msg.mediaKey, msg.body.ifEmpty { null }, msg.spoiler, msg.albumId, ttl, ts, reply, fwd)
         msg.kind == "file" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.File(msg.id, msg.mediaId, msg.mediaKey, msg.fileName ?: "file", msg.fileMime ?: "application/octet-stream", msg.fileSize ?: 0L, msg.body.ifEmpty { null }, ttl, ts, reply)
+            Envelope.File(msg.id, msg.mediaId, msg.mediaKey, msg.fileName ?: "file", msg.fileMime ?: "application/octet-stream", msg.fileSize ?: 0L, msg.body.ifEmpty { null }, ttl, ts, reply, fwd)
         msg.kind == "voice" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.Voice(msg.id, msg.mediaId, msg.mediaKey, (msg.durationSec ?: 0).toDouble(), ttl, ts, reply)
+            Envelope.Voice(msg.id, msg.mediaId, msg.mediaKey, (msg.durationSec ?: 0).toDouble(), ttl, ts, reply, fwd)
         msg.kind == "video" && msg.mediaId != null && msg.mediaKey != null ->
-            Envelope.Video(msg.id, msg.mediaId, msg.mediaKey, msg.thumbB64 ?: "", (msg.durationSec ?: 0).toDouble(), msg.body.ifEmpty { null }, msg.spoiler, msg.albumId, ttl, ts, reply)
+            Envelope.Video(msg.id, msg.mediaId, msg.mediaKey, msg.thumbB64 ?: "", (msg.durationSec ?: 0).toDouble(), msg.body.ifEmpty { null }, msg.spoiler, msg.albumId, ttl, ts, reply, fwd)
         msg.kind == "location" && msg.lat != null && msg.lng != null ->
-            Envelope.Location(msg.id, msg.lat, msg.lng, msg.body.ifEmpty { null }, ttl, ts, reply)
+            Envelope.Location(msg.id, msg.lat, msg.lng, msg.body.ifEmpty { null }, ttl, ts, reply, fwd)
         msg.kind == "poll" -> app.rcq.android.model.PollContent.fromJson(msg.body)?.let {
             Envelope.Poll(msg.id, it.pollId, it.question, it.options, it.singleChoice, it.anonymous)
         } ?: Envelope.Text(msg.id, msg.body, null, ttl, ts)
-        else -> Envelope.Text(msg.id, msg.body, reply, ttl, ts)
+        else -> Envelope.Text(msg.id, msg.body, reply, ttl, ts, fwdName = fwd)
         }
     }
 
@@ -10365,24 +10380,53 @@ class Session(context: Context) {
      *  fan-outs). A failure restores only the item that failed, so a partial
      *  send is visible instead of pretending the whole batch went.
      */
-    fun deleteAlbumForEveryone(items: List<ChatMessage>) {
-        if (items.isEmpty()) return
-        val first = items.first()
-        val gid = first.groupId
-        val mine = first.fromMe || (gid == null && first.peerUin == store.uin)
+    fun deleteAlbumForEveryone(items: List<ChatMessage>) = deleteManyForEveryone(items, skipInFlight = false)
+
+    /** Retract a pick of messages for everyone: an album (#831) or a
+     *  multi-select (report 1063).
+     *
+     *  The permission is decided PER MESSAGE by the rule [sendDeleteForEveryone]
+     *  applies to one: mine (a note in Saved Messages is always mine), or
+     *  somebody else's in a room where I may moderate. The roster is asked for
+     *  once per room, not once per row. A row the rule refuses is left alone,
+     *  silently: the chat only offers this when the rule passes for all of
+     *  them, so a refusal here means the rights changed underneath.
+     *
+     *  [skipInFlight] leaves out my rows still SENDING, as the web does: a
+     *  retraction can overtake the message it retracts, and a recipient who
+     *  gets the delete first and the message second keeps the message. The
+     *  album item never did this and keeps its behaviour.
+     *
+     *  Everything allowed vanishes locally at once, then the wire half runs
+     *  one item at a time through [pushRetraction] (see the note there about
+     *  parallel fan-outs). A failure restores only the item that failed. */
+    fun deleteManyForEveryone(items: List<ChatMessage>, skipInFlight: Boolean = true) {
+        val rows = if (skipInFlight) items.filterNot { it.fromMe && it.state == DeliveryState.SENDING } else items
+        if (rows.isEmpty()) return
+        val ep = epochNow()
         scope.launch {
-            if (!mine) {
-                if (gid == null) return@launch
-                ensureRoster(gid)
-                val g = group(gid)
-                val me = store.uin
-                if (g == null || me == null || !g.moderator(me)) return@launch
+            val me = store.uin
+            val moderates = HashMap<Int, Boolean>()
+            val allowed = rows.filter { m ->
+                val gid = m.groupId
+                when {
+                    m.fromMe || (gid == null && m.peerUin == me) -> true
+                    gid == null -> false
+                    else -> moderates.getOrPut(gid) {
+                        ensureRoster(gid)
+                        val g = group(gid)
+                        g != null && me != null && g.moderator(me)
+                    }
+                }
             }
-            // Local first, all of it: the point of the item is that the batch
-            // goes in one action.
-            val wasFailed = items.associate { m -> m.id to (liveRow(m)?.let { it.fromMe && it.state == DeliveryState.FAILED } ?: false) }
-            items.forEach { deleteLocal(it) }
-            items.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId, wasFailed[m.id] == true) }
+            // The roster fetch can outlast an account switch, and the deletes
+            // below would land in the next account's database.
+            if (allowed.isEmpty() || !stillOn(ep)) return@launch
+            // Local first, all of it: the point of the action is that the
+            // batch goes in one go.
+            val wasFailed = allowed.associate { m -> m.id to (liveRow(m)?.let { it.fromMe && it.state == DeliveryState.FAILED } ?: false) }
+            allowed.forEach { deleteLocal(it) }
+            allowed.forEach { m -> pushRetraction(m, Envelope.delete(m.id), m.groupId, wasFailed[m.id] == true) }
         }
     }
 
@@ -11152,15 +11196,16 @@ class Session(context: Context) {
         spoiler: Boolean = false,
         albumId: String? = null,
         replyTo: Reply? = null,
+        fwdName: String? = null,
     ) {
         ensureSendStillOwned()
         val ttl = peerTtl(toUin)
         val key = MediaCrypto.newKey()
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadStreamedFor(toUin, openSource, plainLen, key)
-        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo, fwdName)
         val now = System.currentTimeMillis()
-        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now)))
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, replyToSnippet = replyTo?.snippet, replyToAuthor = replyTo?.authorName, replyToId = replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
         sendEnvelope(env, env.id, toUin)
     }
 
@@ -11176,14 +11221,218 @@ class Session(context: Context) {
         albumId: String? = null,
         batch: RcqApi.Batch? = null,
         replyTo: Reply? = null,
+        fwdName: String? = null,
     ) {
         ensureSendStillOwned()
         val ttl = groupTtl(groupId)
         val key = MediaCrypto.newKey()
         val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
         val upload = uploadStreamedForGroup(groupId, openSource, plainLen, key)
-        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo)
+        val env = Envelope.video(upload.media_id, keyB64, thumbB64, durationSec.toDouble(), caption, spoiler, albumId, ttl, replyTo, fwdName)
         sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "video", mediaId = upload.media_id, mediaKey = keyB64, durationSec = durationSec, thumbB64 = thumbB64, spoiler = spoiler, albumId = albumId, batch = batch, replyTo = replyTo)
+    }
+
+    /** [sendFile] for a document too big to hold, read from [openSource] a
+     *  chunk at a time and sealed on the socket, the way [sendVideoStreamed]
+     *  sends a film. Only a forward reaches it today (report 1063): what the
+     *  paperclip sends it has already read into memory. [openSource] must
+     *  open a FRESH stream on every call, see [uploadStreamedFor]. */
+    suspend fun sendFileStreamed(
+        toUin: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        fileName: String,
+        mime: String,
+        caption: String? = null,
+        fwdName: String? = null,
+    ) {
+        ensureSendStillOwned()
+        val ttl = peerTtl(toUin)
+        val key = MediaCrypto.newKey()
+        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val upload = uploadStreamedFor(toUin, openSource, plainLen, key)
+        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, plainLen, caption, ttl, null, fwdName)
+        val now = System.currentTimeMillis()
+        store(ChatMessage(env.id, toUin, true, caption ?: "", now, DeliveryState.SENDING, kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = plainLen, expiresAt = expiryFor(env.ttl, env.ts, now), fwdName = fwdName))
+        sendEnvelope(env, env.id, toUin)
+    }
+
+    /** Group twin of [sendFileStreamed]. */
+    suspend fun sendGroupFileStreamed(
+        groupId: Int,
+        openSource: () -> java.io.InputStream,
+        plainLen: Long,
+        fileName: String,
+        mime: String,
+        caption: String? = null,
+        fwdName: String? = null,
+    ) {
+        ensureSendStillOwned()
+        val ttl = groupTtl(groupId)
+        val key = MediaCrypto.newKey()
+        val keyB64 = Base64.encodeToString(key, Base64.NO_WRAP)
+        val upload = uploadStreamedForGroup(groupId, openSource, plainLen, key)
+        val env = Envelope.file(upload.media_id, keyB64, fileName, mime, plainLen, caption, ttl, null, fwdName)
+        sendGroupEnvelope(groupId, env, env.id, caption ?: "", kind = "file", mediaId = upload.media_id, mediaKey = keyB64, fileName = fileName, fileMime = mime, fileSize = plainLen)
+    }
+
+    // ── forwarding (report 1063) ─────────────────────────────────────────
+
+    /** True when [mediaId]'s bytes are on this device already: decrypted in
+     *  memory, or the whole encrypted blob in one of the two disk caches. The
+     *  chat offers Forward only for media that passes this, so a forward never
+     *  turns into the download of something the person has not opened yet. */
+    fun mediaOnDevice(mediaId: String?): Boolean {
+        val id = mediaId?.takeIf { it.isNotEmpty() } ?: return false
+        if (imageCache.get(id) != null) return true
+        return listOf(mediaBigFile(id), mediaDiskFile(id)).any { it.isFile && it.length() > 0L }
+    }
+
+    /**
+     * Forward [items] to ONE chat: exactly one of [toPeer] / [toGroup].
+     * [credits] is the "forwarded from" label per message id. The chat works
+     * it out, because the chat knows the names (see ForwardRules.credit): the
+     * name the author chose, or a neutral word, never my alias and never a
+     * number.
+     *
+     * Every item goes out through the ordinary send for its kind, so to the
+     * island and to the recipient a forward is a new message in every way: a
+     * new id, the TARGET chat's timer, a guest card on a closed island,
+     * cross-island delivery, the copy to backup homes, the carbon to my other
+     * devices, the decoy's pretend send. The quote a message answered is not
+     * carried: it points at a message the new chat does not have.
+     *
+     * ⚠⚠ Media is opened here and sealed again under a NEW key, then uploaded
+     * again by the same sends the paperclip uses. iOS forwards the original
+     * media id and key, and that copy cannot be opened by a contact on another
+     * island (the blob is not on their island), nor out of a room on another
+     * island, nor once the island's 30-day sweep has taken the original; it
+     * also tells the island that two messages carry one file. A fresh upload
+     * lands where the recipient reads and links to nothing.
+     *
+     * One at a time, oldest first, so the recipient reads them in the order
+     * they were written. Detached, with the owner taken on the tap
+     * ([sendMediaDetached]), and asked again before every item: a switch to
+     * another account halfway through a pack parks the rest of it rather than
+     * sending it in somebody else's name.
+     */
+    fun forwardMessages(items: List<ChatMessage>, toPeer: Int?, toGroup: Int?, credits: Map<String, String>) {
+        if (items.isEmpty() || (toPeer == null) == (toGroup == null)) return
+        val ordered = items.sortedBy { it.sentAt }
+        // Only media moves the "Sending N files" strip; a text goes in a blink
+        // and "files" would be the wrong word for it.
+        val mediaCount = ordered.count { it.kind in FORWARD_MEDIA_KINDS }
+        // A pack keeps its albums together, under NEW album ids: the old id
+        // is a string the original sender chose and means nothing here. Only
+        // where two or more of one album travel together; a lone tile is a
+        // lone picture.
+        val perAlbum = ordered.filter { it.albumId != null && (it.kind == "photo" || it.kind == "video") }
+            .groupingBy { it.albumId!! }.eachCount().filterValues { it > 1 }
+        val newAlbum = perAlbum.keys.associateWith { java.util.UUID.randomUUID().toString().uppercase() }
+        // ...and in a room, one slowmode slot per album, as the album picker
+        // asks for it (#950). The island takes a declared size of at most
+        // FORWARD_BATCH_MAX and refuses the post outright above it; an album
+        // from a client that allows more rides the token's slack.
+        val batch = if (toGroup == null) emptyMap()
+            else perAlbum.mapValues { (_, n) -> RcqApi.Batch(java.util.UUID.randomUUID().toString(), n.coerceAtMost(FORWARD_BATCH_MAX)) }
+        sendMediaDetached("forward", mediaCount) { oneDone ->
+            // The roster once, up front: each group send asks for it, and a
+            // fetch inside the loop is a wait between two items of one pack.
+            // Asked of the owner's island only: the tap can be followed by a
+            // switch before this runs.
+            ensureSendStillOwned()
+            toGroup?.let { gid -> runCatching { ensureRoster(gid) } }
+            var failed = 0
+            for (m in ordered) {
+                ensureSendStillOwned()
+                val isMedia = m.kind in FORWARD_MEDIA_KINDS
+                try {
+                    val album = m.albumId?.let { newAlbum[it] }
+                    val ok = forwardOne(m, toPeer, toGroup, credits[m.id], album, m.albumId?.let { batch[it] })
+                    if (!ok) failed += 1
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    // Throwable, like the album picker: opening a big legacy
+                    // blob can run out of memory, and one item must not take
+                    // the app down with it.
+                    android.util.Log.w("RCQforward", "forward of a ${m.kind} failed", e)
+                    failed += 1
+                } finally {
+                    if (isMedia) oneDone()
+                }
+            }
+            // One failure toast for the pack, raised by the wrapper.
+            if (failed > 0) throw IllegalStateException("$failed of ${ordered.size} forwards failed")
+        }
+    }
+
+    /** One item of [forwardMessages]. False when this kind cannot go, or its
+     *  bytes cannot be opened here; a send that fails on the wire paints its
+     *  own red bubble and is retried like any other. */
+    private suspend fun forwardOne(
+        m: ChatMessage,
+        toPeer: Int?,
+        toGroup: Int?,
+        credit: String?,
+        albumId: String?,
+        batch: RcqApi.Batch?,
+    ): Boolean {
+        val caption = m.body.takeIf { it.isNotEmpty() }
+        when (m.kind) {
+            "text" -> {
+                if (toGroup != null) sendGroupText(toGroup, m.body, null, credit) else sendText(toPeer!!, m.body, null, credit)
+                return true
+            }
+            "location" -> {
+                val lat = m.lat ?: return false
+                val lng = m.lng ?: return false
+                if (toGroup != null) sendGroupLocation(toGroup, lat, lng, caption, null, credit)
+                else sendLocation(toPeer!!, lat, lng, caption, null, credit)
+                return true
+            }
+        }
+        if (m.kind !in FORWARD_MEDIA_KINDS) return false
+        val mid = m.mediaId ?: return false
+        val key = m.mediaKey ?: return false
+        // From where the chat itself reads it: a room on another island keeps
+        // its media there.
+        val src = fetchMediaSource(mid, key, m.groupId?.let { groupHost(it) }) ?: return false
+        val thumb = m.thumbB64.orEmpty()
+        val secs = m.durationSec ?: 0
+        val name = m.fileName ?: "file"
+        val mime = m.fileMime ?: "application/octet-stream"
+        when (src) {
+            is MediaSource.InMemory -> {
+                val b = src.bytes
+                when (m.kind) {
+                    "photo" -> if (toGroup != null) sendGroupPhoto(toGroup, b, caption, m.spoiler, albumId, batch, null, credit)
+                        else sendPhoto(toPeer!!, b, caption, m.spoiler, albumId, null, credit)
+                    "video" -> if (toGroup != null) sendGroupVideo(toGroup, b, thumb, secs, caption, m.spoiler, albumId, batch, null, credit)
+                        else sendVideo(toPeer!!, b, thumb, secs, caption, m.spoiler, albumId, null, credit)
+                    "voice" -> if (toGroup != null) sendGroupVoice(toGroup, b, secs, null, credit)
+                        else sendVoice(toPeer!!, b, secs, null, credit)
+                    "file" -> if (toGroup != null) sendGroupFile(toGroup, b, name, mime, null, caption, credit)
+                        else sendFile(toPeer!!, b, name, mime, null, caption, credit)
+                }
+            }
+            // Too big to hold: re-sealed a chunk at a time, every chunk
+            // checked on the way out (see MediaStream.openPlain).
+            is MediaSource.Streamed -> {
+                val open = { app.rcq.android.crypto.MediaStream.openPlain(src.file, src.key) }
+                when (m.kind) {
+                    "video" -> if (toGroup != null) sendGroupVideoStreamed(toGroup, open, src.plainLen, thumb, secs, caption, m.spoiler, albumId, batch, null, credit)
+                        else sendVideoStreamed(toPeer!!, open, src.plainLen, thumb, secs, caption, m.spoiler, albumId, null, credit)
+                    "file" -> if (toGroup != null) sendGroupFileStreamed(toGroup, open, src.plainLen, name, mime, caption, credit)
+                        else sendFileStreamed(toPeer!!, open, src.plainLen, name, mime, caption, credit)
+                    // A photo or a voice note is never sent in the big format.
+                    else -> return false
+                }
+            }
+            // Nothing here can open it, so nothing here can send it.
+            is MediaSource.TooLargeLegacy -> return false
+        }
+        return true
     }
 
     fun sendTyping(toUin: Int, active: Boolean) {
@@ -11619,17 +11868,17 @@ class Session(context: Context) {
             }
             when (val env = dec.envelope) {
                 is Envelope.Text ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.text, disappearAnchorMs(env.ts, depositAtMs, now), replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.text, disappearAnchorMs(env.ts, depositAtMs, now), replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.Photo ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "photo", mediaId = env.mediaId, mediaKey = env.mediaKey, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.File ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "file", mediaId = env.mediaId, mediaKey = env.mediaKey, fileName = env.fileName, fileMime = env.mime, fileSize = env.sizeBytes, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.Voice ->
-                    store(ChatMessage(env.id, dec.senderUin, false, "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
+                    store(ChatMessage(env.id, dec.senderUin, false, "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "voice", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.Video ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "video", mediaId = env.mediaId, mediaKey = env.mediaKey, durationSec = env.durationSec.toInt(), thumbB64 = env.thumbnailB64, spoiler = env.spoiler, albumId = env.albumId, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.Location ->
-                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "location", lat = env.lat, lng = env.lng, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs)))
+                    store(ChatMessage(env.id, dec.senderUin, false, env.caption ?: "", disappearAnchorMs(env.ts, depositAtMs, now), kind = "location", lat = env.lat, lng = env.lng, replyToSnippet = env.replyTo?.snippet, replyToAuthor = env.replyTo?.authorName, replyToId = env.replyTo?.id, expiresAt = expiryFor(env.ttl, env.ts, now, depositAtMs), fwdName = env.fwdName))
                 is Envelope.Reaction -> applyReactionByTargetId(env.targetId, dec.senderUin, env.asset)
                 is Envelope.Delete -> {
                     // Author-only: a peer can only retract their own message.
@@ -11863,12 +12112,12 @@ class Session(context: Context) {
         val me = store.uin ?: return
         if (gid != null) {
             when (inner) {
-                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, disappearAnchorMs(inner.ts, depositAtMs, now), kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Text -> storeGroup(ChatMessage(inner.id, 0, true, inner.text, disappearAnchorMs(inner.ts, depositAtMs, now), kind = "text", groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Photo -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.File -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Voice -> storeGroup(ChatMessage(inner.id, 0, true, "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Video -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, groupId = gid, senderUin = me, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Location -> storeGroup(ChatMessage(inner.id, 0, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "location", lat = inner.lat, lng = inner.lng, groupId = gid, senderUin = me, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
                 // Control carbons: an edit/retraction made on ANOTHER of our
                 // devices targets a row this device already has — apply it,
                 // never file it as a new message. The carbon is authenticated
@@ -11882,12 +12131,12 @@ class Session(context: Context) {
             }
         } else if (to != null) {
             when (inner) {
-                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, disappearAnchorMs(inner.ts, depositAtMs, now), replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
-                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "location", lat = inner.lat, lng = inner.lng, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs)))
+                is Envelope.Text -> store(ChatMessage(inner.id, to, true, inner.text, disappearAnchorMs(inner.ts, depositAtMs, now), replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Photo -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "photo", mediaId = inner.mediaId, mediaKey = inner.mediaKey, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.File -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "file", mediaId = inner.mediaId, mediaKey = inner.mediaKey, fileName = inner.fileName, fileMime = inner.mime, fileSize = inner.sizeBytes, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Voice -> store(ChatMessage(inner.id, to, true, "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "voice", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Video -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "video", mediaId = inner.mediaId, mediaKey = inner.mediaKey, durationSec = inner.durationSec.toInt(), thumbB64 = inner.thumbnailB64, spoiler = inner.spoiler, albumId = inner.albumId, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
+                is Envelope.Location -> store(ChatMessage(inner.id, to, true, inner.caption ?: "", disappearAnchorMs(inner.ts, depositAtMs, now), kind = "location", lat = inner.lat, lng = inner.lng, replyToSnippet = inner.replyTo?.snippet, replyToAuthor = inner.replyTo?.authorName, replyToId = inner.replyTo?.id, expiresAt = expiryFor(inner.ttl, inner.ts, now, depositAtMs), fwdName = inner.fwdName))
                 is Envelope.Edit -> editInFlow(_messages, to, inner.targetId, inner.text)
                 is Envelope.Delete -> deleteInFlow(_messages, to, inner.targetId)
                 // I read this thread on another device (A2).
@@ -15070,6 +15319,19 @@ class Session(context: Context) {
         else -> null to null
     }
 
+    /** The "forwarded from" label a content envelope carries (report 1063),
+     *  read off the envelope for the same reason as [dyingOf]: the sender's
+     *  own row shows what actually went on the wire. */
+    private fun fwdOf(env: Envelope): String? = when (env) {
+        is Envelope.Text -> env.fwdName
+        is Envelope.Photo -> env.fwdName
+        is Envelope.File -> env.fwdName
+        is Envelope.Voice -> env.fwdName
+        is Envelope.Video -> env.fwdName
+        is Envelope.Location -> env.fwdName
+        else -> null
+    }
+
     /** Disappearing messages: the TTL (seconds) the sender packed into the
      *  envelope, turned into an absolute epoch-ms deadline. A null or
      *  non-positive [ttl] is permanent.
@@ -15923,6 +16185,14 @@ class Session(context: Context) {
     }
 
     companion object {
+        /** The kinds [forwardMessages] re-uploads (text and location carry no
+         *  blob). */
+        private val FORWARD_MEDIA_KINDS = setOf("photo", "video", "voice", "file")
+
+        /** The largest `batch_size` the island accepts on a group send
+         *  (`messages.py`, `le=10`): the album picker's own limit. */
+        private const val FORWARD_BATCH_MAX = 10
+
         /** The session of this process, for the one caller that lives outside
          *  it: the push service. A message push while the process is alive is
          *  PROOF the island holds something this session has not shown, and

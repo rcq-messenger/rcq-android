@@ -114,9 +114,16 @@ object BackupService {
          *  Additive and optional; an archive written by an older build or by
          *  another client simply has no such field and reads as null. */
         val call_id: String? = null,
+        /** "Forwarded from" (report 1063). The key iOS has always written
+         *  (`BackupRecordMapping.swift` `forwarded_from`), so a forward keeps
+         *  its label across a restore on either client. Absent = not a
+         *  forward. */
+        val forwarded_from: String? = null,
     )
 
-    private fun ChatMessage.toRecord() = Record(
+    /** Internal, like [toMessageOrNull], so a JVM test can hold one archive
+     *  line up against the other clients' shape. */
+    internal fun ChatMessage.toRecord() = Record(
         id = id,
         peer = if (groupId == null) peerUin else null,
         group = groupId,
@@ -143,12 +150,13 @@ object BackupService {
         reactions = reactions.mapKeys { it.key.toString() },
         expires_at = expiresAt,
         call_id = callId,
+        forwarded_from = fwdName,
     )
 
     /** Back into this client's shape, or null when the line cannot be a message
      *  here at all. Null rather than an exception: one unreadable record must
      *  cost that record and nothing more. */
-    private fun Record.toMessageOrNull(): ChatMessage? {
+    internal fun Record.toMessageOrNull(): ChatMessage? {
         val msgId = id?.takeIf { it.isNotBlank() } ?: return null
         // Exactly one of the two is set; a record naming neither thread has
         // nowhere to land and would otherwise appear as a chat with #0.
@@ -183,6 +191,9 @@ object BackupService {
             albumId = album_id,
             expiresAt = expires_at,
             callId = call_id,
+            // Cleaned like the wire field: an archive is a file anyone can
+            // hand this client, and the label is drawn as one line.
+            fwdName = app.rcq.android.crypto.Envelope.sanitizeFwdName(forwarded_from),
         )
     }
 

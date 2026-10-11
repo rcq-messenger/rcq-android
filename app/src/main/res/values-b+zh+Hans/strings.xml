@@ -69,11 +69,14 @@
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">你在另一个岛上已经有一个号码为 %1$d 的联系人。会话目前仅按号码归档，第二个 %1$d 会和它共用同一段聊天记录。未添加。</string>
     <string name="share_to_title">发送到…</string>
+    <string name="chat_forward_title">转发到…</string>
+    <string name="chat_forwarded_to">已转发到 %1$s</string>
     <string name="share_to_search">搜索聊天</string>
     <string name="share_to_empty">还没有可以发送的聊天。</string>
     <string name="chat_media_send_failed">发送失败。请检查网络后重试。</string>
     <string name="share_to_unreadable">无法读取分享过来的内容。请在那个应用里重新发送一次。</string>
     <plurals name="share_to_files"><item quantity="other">%1$d 个文件</item></plurals>
+    <plurals name="chat_forward_summary"><item quantity="other">%1$d 条消息</item></plurals>
     <string name="outgoing_state_pending">等待中</string>
     <string name="outgoing_state_backup">备份副本，请求不会送达。对方的地址：%1$s</string>
     <string name="outgoing_state_declined">已拒绝</string>
@@ -925,6 +928,8 @@
     <string name="chat_report">举报</string>
     <string name="chat_reply">回复</string>
     <string name="chat_copy">复制</string>
+    <string name="chat_forward">转发</string>
+    <string name="chat_select">选择</string>
     <string name="media_share">分享</string>
     <string name="media_show_in_chat">在聊天中显示</string>
     <string name="media_save">保存</string>
@@ -947,6 +952,8 @@
     <string name="chat_deleted">消息已删除</string>
     <string name="chat_edit_title">编辑消息</string>
     <string name="chat_edited">已编辑</string>
+    <string name="chat_forwarded_from">转发自 %1$s</string>
+    <string name="chat_forward_someone">某人</string>
     <string name="chat_cross_island_pending">这个人在另一个岛上。你的第一条消息会作为好友请求送达那里：在对方接受之前，消息和通话都无法接通。</string>
     <string name="chat_peer_gone">这个账号已经不存在了：岛上说没有这个号码。消息不会送达。</string>
     <string name="chat_peer_gone_row">账号已删除</string>
@@ -1345,6 +1352,7 @@
     <string name="gi_slow_off">关闭</string>
     <string name="chat_files_off">群主已禁用文件</string>
     <string name="chat_links_off">群主已禁用链接</string>
+    <string name="chat_forward_slowmode">此群已开启慢速模式：请一次转发一条消息</string>
     <string name="chat_slowmode_wait">已开启慢速模式:请稍后再试</string>
     <string name="chat_slowmode_wait_in">已开启慢速模式:请在 %1$d 秒后再试</string>
     <string name="chat_age_gate_wait">这个群的新成员不能立刻发言。大约 %1$d 小时后你就可以了。</string>
@@ -1352,6 +1360,9 @@
     <string name="push_channel_upload_desc">RCQ 不在前台时仍在上传的文件。</string>
     <string name="chat_delete_album_all">为所有人删除全部 %1$d 张照片</string>
     <string name="chat_delete_album_me">为我删除全部 %1$d 张照片</string>
+    <string name="chat_selection_count">已选择 %1$d 项</string>
+    <string name="chat_selection_delete_title">删除所选消息？</string>
+    <string name="chat_selection_too_many">最多可选择 %1$d 条消息</string>
     <string name="last_seen_recently">最近</string>
     <string name="last_seen_today">今天</string>
     <string name="last_seen_yesterday">昨天</string>

@@ -79,11 +79,14 @@
     <!-- "Send to…": the chat picker another app's share sheet lands on -->
     <string name="add_ci_number_clash">У вас уже есть контакт с номером %1$d на другом острове. Переписка пока хранится по одному номеру, и второй %1$d попал бы в ту же историю. Не добавлен.</string>
     <string name="share_to_title">Отправить в…</string>
+    <string name="chat_forward_title">Переслать…</string>
+    <string name="chat_forwarded_to">Переслано: %1$s</string>
     <string name="share_to_search">Поиск по чатам</string>
     <string name="share_to_empty">Пока некому отправить.</string>
     <string name="chat_media_send_failed">Не удалось отправить. Проверьте связь и попробуйте ещё раз.</string>
     <string name="share_to_unreadable">Не удалось прочитать то, чем поделились. Попробуйте отправить из того приложения ещё раз.</string>
     <plurals name="share_to_files"><item quantity="one">%1$d файл</item><item quantity="few">%1$d файла</item><item quantity="many">%1$d файлов</item><item quantity="other">%1$d файла</item></plurals>
+    <plurals name="chat_forward_summary"><item quantity="one">%1$d сообщение</item><item quantity="few">%1$d сообщения</item><item quantity="many">%1$d сообщений</item><item quantity="other">%1$d сообщения</item></plurals>
     <string name="outgoing_state_pending">Ожидает</string>
     <string name="outgoing_state_backup">Резервная копия, запрос не дойдёт. Их адрес: %1$s</string>
     <string name="outgoing_state_declined">Отклонена</string>
@@ -956,6 +959,8 @@
     <string name="chat_quote_expand_cd">Показать цитату целиком</string>
     <string name="chat_quote_collapse_cd">Свернуть цитату</string>
     <string name="chat_copy">Копировать</string>
+    <string name="chat_forward">Переслать</string>
+    <string name="chat_select">Выбрать</string>
     <string name="media_share">Поделиться</string>
     <string name="media_show_in_chat">Показать в чате</string>
     <string name="media_save">Сохранить</string>
@@ -980,6 +985,8 @@
     <string name="chat_deleted">Сообщение удалено</string>
     <string name="chat_edit_title">Изменить сообщение</string>
     <string name="chat_edited">изменено</string>
+    <string name="chat_forwarded_from">Переслано от %1$s</string>
+    <string name="chat_forward_someone">Кто-то</string>
     <string name="chat_cross_island_pending">Собеседник на другом острове. Ваше первое сообщение придёт ему как запрос на общение, и ни сообщений, ни звонков не будет, пока он не примет запрос.</string>
     <string name="chat_peer_gone">Этого аккаунта больше нет: остров отвечает, что такого номера у него не значится. Сообщения не дойдут.</string>
     <string name="chat_peer_gone_row">Аккаунт удалён</string>
@@ -1395,6 +1402,7 @@
     <string name="gi_slow_off">Выкл</string>
     <string name="chat_files_off">Владелец группы отключил отправку файлов</string>
     <string name="chat_links_off">Владелец группы отключил ссылки</string>
+    <string name="chat_forward_slowmode">В группе включён медленный режим: пересылайте по одному сообщению</string>
     <string name="chat_slowmode_wait">Медленный режим: чуть позже</string>
     <string name="chat_slowmode_wait_in">Медленный режим: ещё %1$d с</string>
     <string name="chat_age_gate_wait">Новичкам здесь можно через %1$d ч</string>
@@ -1402,6 +1410,9 @@
     <string name="push_channel_upload_desc">Файлы, которые ещё загружаются, пока RCQ не на экране.</string>
     <string name="chat_delete_album_all">Удалить все %1$d фото у всех</string>
     <string name="chat_delete_album_me">Удалить все %1$d фото у меня</string>
+    <string name="chat_selection_count">Выбрано: %1$d</string>
+    <string name="chat_selection_delete_title">Удалить выбранные сообщения?</string>
+    <string name="chat_selection_too_many">Можно выбрать не больше %1$d сообщений</string>
     <string name="last_seen_recently">недавно</string>
     <string name="last_seen_today">сегодня</string>
     <string name="last_seen_yesterday">вчера</string>
