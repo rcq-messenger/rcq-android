@@ -2647,7 +2647,7 @@ private fun DiagnosticsScreen(session: Session, onBack: () -> Unit) {
                             // means the same as it always did: no call line.
                             val turnHost = session.callRelayHost()
                             app.rcq.android.net.NetworkAudit.run(
-                                session.currentServer, session.connected.value, turnHost,
+                                context, session.currentServer, session.connected.value, turnHost,
                             )
                         }.getOrNull()
                     }

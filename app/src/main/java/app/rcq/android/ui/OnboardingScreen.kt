@@ -255,7 +255,7 @@ internal fun OnboardingScreen(onStart: (String?, String?) -> Unit, onRestore: ()
                         auditing = true; audit = null
                         scope.launch {
                             audit = withContext(Dispatchers.IO) {
-                                runCatching { app.rcq.android.net.NetworkAudit.run(server) }.getOrNull()
+                                runCatching { app.rcq.android.net.NetworkAudit.run(ctx, server) }.getOrNull()
                             }
                             auditing = false
                         }

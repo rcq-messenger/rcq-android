@@ -1,5 +1,7 @@
 package app.rcq.android.net
 
+import android.content.Context
+import app.rcq.android.R
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -40,8 +42,14 @@ object NetworkAudit {
 
     /** A host the network is expected to permit even under a whitelist: if
      *  THIS is dead the device simply has no internet, and nothing below means
-     *  anything. Two of them so one operator's quirk does not decide it. */
-    private val CONTROL_HOSTS = listOf("ya.ru", "dzen.ru")
+     *  anything. Two of them so one operator's quirk does not decide it.
+     *
+     *  ⚠ Shown on screen by POSITION ("control host 1"), never by name. The
+     *  pair is chosen for the networks where whitelists are in force, and a
+     *  person anywhere else reading two foreign sites by name was reading a
+     *  check that looked like it was written for somebody else. Which host is
+     *  number one is this list's order. */
+    internal val CONTROL_HOSTS = listOf("ya.ru", "dzen.ru")
 
     /** Object storage of the clouds a whitelisted network is most likely to
      *  already permit, because ordinary permitted apps fetch their assets from
@@ -217,7 +225,12 @@ object NetworkAudit {
     ///   check only runs for somebody who has already placed a call in this
     ///   process, which is never the person opening this screen because calls
     ///   do not work.
+    /// - Parameter ctx: only for the words on each line, so pass the screen's
+    ///   own context: it carries the language the app is shown in. Nothing
+    ///   measured depends on it, and the compact line stays the same in every
+    ///   language because it is what people send us.
     fun run(
+        ctx: Context,
         islandHost: String,
         realtimeUp: Boolean? = null,
         knownTurnHost: String? = null,
@@ -240,23 +253,27 @@ object NetworkAudit {
 
         // 1. Is there any usable internet at all.
         var controlOk = false
-        for (h in CONTROL_HOSTS) {
+        CONTROL_HOSTS.forEachIndexed { i, h ->
             val r = probe(h, 443, h)
             if (r.first == Reach.OPEN) controlOk = true
-            add("контроль $h", r)
+            add(ctx.getString(R.string.diag_audit_control, i + 1), r)
         }
 
         // 2. Does the name even resolve. A whitelist that works by DNS answers
         //    here and nowhere else.
         val islandIp = resolve(islandHost)
-        lines += Line("DNS $islandHost", islandIp != null, islandIp ?: "не резолвится")
+        lines += Line(
+            ctx.getString(R.string.diag_audit_dns, islandHost),
+            islandIp != null,
+            islandIp ?: ctx.getString(R.string.diag_audit_dns_fail),
+        )
 
         // 3. The three paths the app itself would take.
         val direct = probe(islandHost, 443, islandHost)
-        add("остров напрямую", direct)
+        add(ctx.getString(R.string.diag_audit_island_direct), direct)
         val front = RelayConfigStore.frontHost
         val frontR = probe(front, 443, front)
-        add("фронт $front", frontR)
+        add(ctx.getString(R.string.diag_audit_front, front), frontR)
         var relaysOpen = 0
         var udpRelays = 0
         var udpRelaysOpen = 0
@@ -280,20 +297,20 @@ object NetworkAudit {
             }
         }
         lines += Line(
-            "релеи",
+            ctx.getString(R.string.diag_relays),
             relaysOpen > 0,
-            "$relaysOpen из ${relays.size} принимают TCP" +
-                (if (deadTags.isEmpty()) "" else ", молчат: " + deadTags.joinToString(", ")),
+            if (deadTags.isEmpty()) ctx.getString(R.string.diag_audit_relays_tcp, relaysOpen, relays.size)
+            else ctx.getString(R.string.diag_audit_relays_tcp_silent, relaysOpen, relays.size, deadTags.joinToString(", ")),
         )
 
         // 4. The crossed pair that names the filter.
         //    A: permitted address, our name.
         val controlIp = CONTROL_HOSTS.firstNotNullOfOrNull { resolve(it) }
         val crossName = controlIp?.let { probe(it, 443, islandHost) }
-        crossName?.let { addCross("чужой адрес + наше имя", it) }
+        crossName?.let { addCross(ctx.getString(R.string.diag_audit_cross_name), it) }
         //    B: our address, permitted name.
         val crossAddr = islandIp?.let { probe(it, 443, CONTROL_HOSTS.first()) }
-        crossAddr?.let { addCross("наш адрес + чужое имя", it) }
+        crossAddr?.let { addCross(ctx.getString(R.string.diag_audit_cross_addr), it) }
 
         // 5. If our own address is unreachable, where COULD a machine stand?
         //    Only worth the seconds when something is actually wrong; on a
@@ -311,12 +328,16 @@ object NetworkAudit {
         // measurement on a healthy direct path meant every such report arrived
         // saying ALL_FINE with nothing to go on.
         val udpOk: Boolean = udpWorks()
-        lines += Line("UDP наружу", udpOk, if (udpOk) "проходит" else "не проходит")
+        lines += Line(
+            ctx.getString(R.string.diag_audit_udp),
+            udpOk,
+            ctx.getString(if (udpOk) R.string.diag_audit_udp_ok else R.string.diag_audit_udp_fail),
+        )
         if (!udpOk && udpRelays > 0) {
             lines += Line(
-                "релеи на UDP",
+                ctx.getString(R.string.diag_audit_udp_relays),
                 false,
-                "$udpRelays из ${relays.size} работают по UDP (Hysteria2), а UDP на этой сети не проходит",
+                ctx.getString(R.string.diag_audit_udp_relays_dead, udpRelays, relays.size),
             )
         }
         if (direct.first != Reach.OPEN) {
@@ -331,10 +352,10 @@ object NetworkAudit {
             }
             carrierNames = reachable.joinToString("+")
             lines += Line(
-                "разрешённые облака",
+                ctx.getString(R.string.diag_audit_clouds),
                 carriersOpen > 0,
-                if (carriersOpen > 0) "$carriersOpen из ${CARRIERS.size} отвечают ($carrierNames)"
-                else "ни одно из ${CARRIERS.size} не отвечает",
+                if (carriersOpen > 0) ctx.getString(R.string.diag_audit_clouds_some, carriersOpen, CARRIERS.size, carrierNames)
+                else ctx.getString(R.string.diag_audit_clouds_none, CARRIERS.size),
             )
             // ⚠⚠ The question the line above does NOT answer, and the one that
             // decides whether renting a machine in that cloud is worth anything:
@@ -353,10 +374,12 @@ object NetworkAudit {
             carrierOurName = firstCarrierIp?.let { probe(it, 443, islandHost, timeoutMs = 4000) }
             carrierOurName?.let {
                 lines += Line(
-                    "адрес облака + наше имя",
+                    ctx.getString(R.string.diag_audit_cloud_addr),
                     it.first != Reach.BLOCKED,
-                    if (it.first != Reach.BLOCKED) "проходит: разрешён АДРЕС, машина в этом облаке заработает"
-                    else "не проходит: разрешён только сам сервис, аренда машины там не поможет",
+                    ctx.getString(
+                        if (it.first != Reach.BLOCKED) R.string.diag_audit_cloud_addr_ok
+                        else R.string.diag_audit_cloud_addr_fail,
+                    ),
                 )
             }
         }
@@ -391,9 +414,9 @@ object NetworkAudit {
                 val viaTunnel = probeVia(SingBoxTransport.proxy(), th, 3478)
                 turnOk = viaTunnel
                 lines += Line(
-                    "релей звонков",
+                    ctx.getString(R.string.diag_audit_turn),
                     turnOk,
-                    if (viaTunnel) "доступен через релеи" else "НЕДОСТУПЕН даже через релеи",
+                    ctx.getString(if (viaTunnel) R.string.diag_audit_turn_tunnel_ok else R.string.diag_audit_turn_tunnel_fail),
                 )
             } else {
                 // 443 first: it is the port most likely to survive a filter, and
@@ -402,16 +425,16 @@ object NetworkAudit {
                 val plain = probe(th, 3478, null, timeoutMs = 4000)
                 turnOk = tls.first != Reach.BLOCKED || plain.first != Reach.BLOCKED
                 lines += Line(
-                    "релей звонков",
+                    ctx.getString(R.string.diag_audit_turn),
                     turnOk,
-                    if (turnOk == true) "доступен напрямую (443 ${short(tls.first)}, 3478 ${short(plain.first)})"
-                    else "НЕДОСТУПЕН напрямую",
+                    if (turnOk == true) ctx.getString(R.string.diag_audit_turn_direct_ok, short(tls.first), short(plain.first))
+                    else ctx.getString(R.string.diag_audit_turn_direct_fail),
                 )
                 if (turnOk != true) {
                     lines += Line(
-                        "что делать",
+                        ctx.getString(R.string.diag_audit_todo),
                         null,
-                        "включить релеи RCQ: тогда звонки пойдут через них",
+                        ctx.getString(R.string.diag_audit_todo_relays),
                     )
                 }
             }
@@ -422,29 +445,31 @@ object NetworkAudit {
         // ones where every other check here comes back fine.
         app.rcq.android.call.CallDiagnostics.last?.let { c ->
             lines += Line(
-                "последний звонок",
+                ctx.getString(R.string.diag_audit_last_call),
                 c.connected,
-                if (c.connected) "соединился за ${c.seconds} с"
-                else "не соединился, ${c.seconds} с · ${c.ice}",
+                if (c.connected) ctx.getString(R.string.diag_audit_last_call_ok, c.seconds)
+                else ctx.getString(R.string.diag_audit_last_call_fail, c.seconds, c.ice),
             )
             if (!c.connected) {
                 lines += Line(
-                    "путь для звонков",
+                    ctx.getString(R.string.diag_audit_call_path),
                     c.relayReachable,
-                    when (c.relayReachable) {
-                        true -> "ретранслятор доступен"
-                        false -> "ретранслятор недоступен с этой сети"
-                        null -> "не проверялся"
-                    },
+                    ctx.getString(
+                        when (c.relayReachable) {
+                            true -> R.string.diag_audit_call_path_ok
+                            false -> R.string.diag_audit_call_path_fail
+                            null -> R.string.diag_audit_call_path_unknown
+                        },
+                    ),
                 )
             }
         }
 
         realtimeUp?.let {
             lines += Line(
-                "канал реального времени",
+                ctx.getString(R.string.diag_ws),
                 it,
-                if (it) "открыт" else "закрыт, сообщения приходят только по запросу",
+                ctx.getString(if (it) R.string.diag_audit_ws_open else R.string.diag_audit_ws_closed),
             )
         }
 
@@ -459,13 +484,15 @@ object NetworkAudit {
         val routeDead = SingBoxTransport.isActive && run {
             val r = SingBoxTransport.probeCurrentRoute(islandHost)
             lines += Line(
-                "маршрут, которым идёт приложение",
+                ctx.getString(R.string.diag_audit_app_route),
                 r == SingBoxTransport.Reachability.REACHABLE,
-                when (r) {
-                    SingBoxTransport.Reachability.REACHABLE -> "через релеи, отвечает"
-                    SingBoxTransport.Reachability.REFUSED -> "через релеи, сертификат не тот"
-                    else -> "через релеи, не отвечает"
-                },
+                ctx.getString(
+                    when (r) {
+                        SingBoxTransport.Reachability.REACHABLE -> R.string.diag_audit_app_route_ok
+                        SingBoxTransport.Reachability.REFUSED -> R.string.diag_audit_app_route_refused
+                        else -> R.string.diag_audit_app_route_fail
+                    },
+                ),
             )
             r != SingBoxTransport.Reachability.REACHABLE
         }
