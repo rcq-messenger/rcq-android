@@ -49,8 +49,10 @@ fun RcqScaledText(content: @Composable () -> Unit) {
 
 /**
  * `ModalBottomSheet` with the app's text size applied inside it. Same
- * parameters, same defaults; the only difference is [RcqScaledText] around the
- * content. Use this rather than Material's directly.
+ * parameters, same defaults, plus two things every RCQ sheet needs:
+ * [RcqScaledText] around the content, and Back that puts the keyboard away
+ * before it closes the sheet ([RcqSheetProperties] and [SheetBackHandler],
+ * report 867). Use this rather than Material's directly.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,7 +74,11 @@ fun RcqModalBottomSheet(
         shape = shape,
         contentWindowInsets = contentWindowInsets,
         dragHandle = dragHandle,
+        properties = RcqSheetProperties,
     ) {
+        // Inside the content on purpose: only here is the sheet's own window
+        // (and its back dispatcher) the one BackHandler finds.
+        SheetBackHandler(sheetState, onDismissRequest)
         RcqScaledText { androidx.compose.foundation.layout.Column { content() } }
     }
 }

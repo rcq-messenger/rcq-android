@@ -2984,52 +2984,43 @@ private fun AddContactDialog(
     // ⚠ The content declares FULL height on purpose (#524). A ModalBottomSheet
     // can only rise as high as its content measures, so wrap-height content with
     // a capped result list left the sheet stuck two thirds down the screen no
-    // matter how hard you dragged it — the drag simply had nowhere to go. It
-    // still OPENS half-way (the default sheet state keeps its partial anchor);
-    // only the ceiling changed.
+    // matter how hard you dragged it — the drag simply had nowhere to go.
     //
-    // ⚠⚠ DO NOT "finish the job" by giving this sheet the treatment the other
-    // typing sheets got (`rememberRcqSheetState()` + `rcqSheetInsets` + an outer
-    // `verticalScroll`, see Sheets.kt). It is excluded on purpose, and the outer
-    // scroll in particular would not merely change the look, it would EMPTY the
-    // sheet: a `verticalScroll` measures its child with an INFINITE height, and
-    // both `fillMaxHeight()` on the Column below and `weight(1f)` on the result
-    // list resolve against the incoming max height. With that max unbounded,
-    // `fillMaxHeight` becomes a no-op and every weighted child collapses to zero,
-    // so the search field and all results would render at nothing tall. This
-    // layout is height-driven by design (#524); it cannot live inside a scroller.
+    // ⚠⚠ DO NOT wrap this content in an outer `verticalScroll` like the other
+    // typing sheets (RcqSheet). It would not merely change the look, it would
+    // EMPTY the sheet: a `verticalScroll` measures its child with an INFINITE
+    // height, and both `fillMaxHeight()` on the Column below and `weight(1f)`
+    // on the result list resolve against the incoming max height. With that
+    // max unbounded, `fillMaxHeight` becomes a no-op and every weighted child
+    // collapses to zero, so the search field and all results would render at
+    // nothing tall. This layout is height-driven by design (#524); it cannot
+    // live inside a scroller.
     //
-    // `skipPartiallyExpanded` is separately unwanted here: the half-open opening
-    // position IS the #524 decision, not an accident of the anchor.
+    // Report 867, the keyboard, as it was finally understood (11.10, from the
+    // shipped Material3 1.3.0 bytecode, after an evening of attempts on a
+    // device on 04.09 that this comment used to record):
+    //   * ONE back press hid the keyboard AND closed the sheet. Material's
+    //     sheet window takes Back at PRIORITY_OVERLAY, ahead of the keyboard
+    //     and of any BackHandler. Fixed for every sheet in
+    //     RcqModalBottomSheet: see `RcqSheetProperties` in Sheets.kt.
+    //   * Dragged to the top, opening the keyboard dropped the sheet to the
+    //     half anchor. Material pads the sheet's window for the keyboard
+    //     (`imePadding` on its root), every keyboard frame re-measures the
+    //     sheet, and every re-measure retargets an open sheet to the half
+    //     anchor while one exists (see `rememberRcqSheetState`); an `expand()`
+    //     loses to that mid-animation, which is why the 04.09 attempt failed.
+    //     The cure is having no half anchor, i.e. the state below. The inset
+    //     did reach the sheet all along; it was never "read as zero".
     //
-    // ⏭ THE KEYBOARD IS STILL WRONG HERE (#867), and this is what an evening on
-    // a device actually established, so the next attempt does not start over.
-    //
-    // Both reported symptoms REPRODUCE on API 35, every time:
-    //   * dragged to the top, opening the keyboard drops the sheet back to the
-    //     half anchor (top edge measured at y=0 before, y=520 after);
-    //   * ONE back press hides the keyboard AND dismisses the sheet, so you
-    //     cannot put the keyboard away and keep looking at your results.
-    //
-    // ⚠⚠ What did NOT work, so nobody spends another evening on it:
-    //   * `LaunchedEffect(imeUp) { sheetState.expand() }` plus a
-    //     `BackHandler(enabled = imeUp)`, with `imeUp` read as
-    //     `WindowInsets.ime.getBottom(density) > 0`. Placed BESIDE the sheet it
-    //     is obviously wrong (the keyboard belongs to the sheet's own window),
-    //     but placed INSIDE the sheet content it still reads zero: neither the
-    //     expand nor the back handler ever fired, verified by both symptoms
-    //     surviving unchanged. `contentWindowInsets = rcqSheetInsets` alongside
-    //     made no visible difference either.
-    //   * So the next thing to try is a different source of truth for "the
-    //     keyboard is up" in a sheet window — Material3's own
-    //     `WindowInsets.isImeVisible`, or the inset read before this sheet
-    //     consumes it — not another arrangement of the same reads.
-    //
-    // The reverted attempt is not in the tree on purpose: half-working code on
-    // a surface this fragile is worse than none. `skipPartiallyExpanded` is
-    // still not the answer, because the half-open opening position IS #524.
+    // ⚠ So this sheet OPENS at full height. The half-way opening #524 asked
+    // for went away on 08.09 (a8e24bf, Android 0.185), when the wrapper's
+    // default state started skipping the half anchor, and on Material3 1.3.0
+    // it cannot come back without bringing the drop back with it: the anchor
+    // that opens half-way is the anchor the keyboard drops the sheet to. The
+    // state is passed explicitly so the fix does not hang on a default.
     RcqModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberRcqSheetState(),
         containerColor = c.bgSecondary,
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 16.dp).padding(bottom = 20.dp)) {

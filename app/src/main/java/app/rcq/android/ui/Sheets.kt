@@ -1,5 +1,6 @@
 package app.rcq.android.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,13 +22,18 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
@@ -39,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import app.rcq.android.R
+import kotlinx.coroutines.launch
 
 /**
  * The app's own bottom sheet, and the reason there is one.
@@ -114,6 +121,12 @@ fun RcqSheet(
  * never rose, it opened at the half-height anchor and the comment field and the
  * buttons were below the fold).
  *
+ * The keyboard is a resize too: Material pads the sheet's window for it, so
+ * every frame of the keyboard sliding up re-measures the sheet, and a sheet
+ * dragged to the top with a half anchor dropped back to it as soon as a field
+ * was tapped (report 867). `expand()` cannot fight that: each re-measure
+ * retargets the running animation.
+ *
  * `skipPartiallyExpanded` deletes the half-height anchor, so the retarget has
  * nowhere to fall back to and always resolves to Expanded. It is not a styling
  * preference; it is the fix. Sheets shorter than half the screen never had that
@@ -124,21 +137,72 @@ fun RcqSheet(
 fun rememberRcqSheetState(): SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
 /**
- * ⚠⚠ The insets a sheet must consume, and the reason the default is not enough.
+ * ⚠⚠ Back with the keyboard up must put the KEYBOARD away and leave the sheet
+ * where it is (report 867). It closed both: one press, keyboard and sheet gone
+ * together, and in most sheets whatever had been typed into it as well.
+ *
+ * Why (Material3 1.3.0, read in the shipped bytecode): on API 33+ the sheet's
+ * window registers its own back callback at `PRIORITY_OVERLAY` whenever
+ * `shouldDismissOnBackPress` is on. The keyboard's callback and any
+ * `BackHandler` sit at `PRIORITY_DEFAULT`, and OVERLAY always goes first, so
+ * nothing in the sheet ever saw that press. That is also why the earlier
+ * `BackHandler(enabled = imeUp)` attempts did nothing at all.
+ *
+ * So every RCQ sheet turns Material's handler off ([RcqSheetProperties]) and
+ * carries [SheetBackHandler] inside its content instead. Then the keyboard,
+ * which registers after the sheet's window did, takes the first press and
+ * hides; the next press reaches the handler and the sheet slides away as it
+ * did before. A sheet opened over a sheet is a window of its own with its own
+ * dispatcher, so Back closes the top one only. Taps on the scrim and the drag
+ * down are untouched.
+ *
+ * The price: on API 34+ the sheet no longer shrinks along with the predictive
+ * back gesture before it goes. Material's animation is internal to it and
+ * cannot be driven from outside on 1.3.0.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+internal val RcqSheetProperties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
+
+/** Back for a sheet, from INSIDE its content (that is where the sheet window's
+ *  dispatcher is found), doing what Material's own handler did: down to the
+ *  half anchor when there is one, otherwise away and then [onDismissRequest].
+ *  Dismissed only once the sheet is actually gone, so a press that is
+ *  overtaken by a drag does not close a sheet the finger is still holding. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SheetBackHandler(sheetState: SheetState, onDismissRequest: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val dismiss by rememberUpdatedState(onDismissRequest)
+    BackHandler {
+        if (sheetState.currentValue == SheetValue.Expanded && sheetState.hasPartiallyExpandedState) {
+            scope.launch { sheetState.partialExpand() }
+        } else {
+            scope.launch { sheetState.hide() }.invokeOnCompletion { if (!sheetState.isVisible) dismiss() }
+        }
+    }
+}
+
+/**
+ * The insets a sheet's content consumes.
  *
  * A ModalBottomSheet is its OWN window, and Material3 1.3.0 creates that window
  * with `WindowCompat.setDecorFitsSystemWindows(false)` and, on API 30+,
- * `setSoftInputMode(SOFT_INPUT_ADJUST_NOTHING)`. Nothing resizes and nothing
- * moves when the keyboard opens: the IME inset is merely PUBLISHED, and somebody
- * has to consume it (the same lesson the profile editor learned — see
- * `ProfileEditScreen`, where the inset belongs to the screen, not to whoever
- * mounted it). Material's own default, `BottomSheetDefaults.windowInsets`, is
- * the system bars and nothing else, which is why the keyboard came up straight
- * over the sheet — the second half of #543.
+ * `setSoftInputMode(SOFT_INPUT_ADJUST_NOTHING)`: the IME inset is merely
+ * PUBLISHED to the sheet's window, and somebody has to consume it.
+ *
+ * ⚠ Corrected 11.10 (report 867, read in the shipped bytecode): on 1.3.0 that
+ * somebody is Material itself. The root of the sheet window is
+ * `Box(Modifier.fillMaxSize().imePadding())`, so the keyboard is consumed
+ * before these insets are applied, and `BottomSheetDefaults.windowInsets` is
+ * `safeDrawing.only(Bottom)`, not "the system bars and nothing else" as this
+ * note used to say. The `union(ime)` below is therefore a no-op on 1.3.0. It is
+ * kept because it is harmless and would matter again under a Material that
+ * stops padding for the keyboard; do not expect a change here to move a sheet
+ * with the keyboard. That outer `imePadding` is also what made a sheet with a
+ * half anchor drop on every keyboard frame (see [rememberRcqSheetState]).
  *
  * `union` takes the larger of each side, so the bottom is max(navigation bar,
- * keyboard): the nav-bar gap when the keyboard is down, exactly the keyboard
- * when it is up, and never the two stacked on top of each other.
+ * keyboard), never the two stacked on top of each other.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 val rcqSheetInsets: @Composable () -> WindowInsets = {
