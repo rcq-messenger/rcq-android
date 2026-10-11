@@ -332,7 +332,15 @@ object SenderKeyStore {
     internal fun <T> dropOwner(out: Map<String, T>, ownUin: Int): Map<String, T> =
         out.filterKeys { !it.startsWith("$ownUin:") }
 
-    /** Wipe all chains for an account (account burn / logout). */
+    /** Every account's chains: no account is left on this device. */
+    @Synchronized
+    fun wipeAll() {
+        if (::prefs.isInitialized) prefs.edit().clear().apply()
+    }
+
+    /** Wipe all chains for an account (account burn / logout). Keyed by the
+     *  number, so the caller asks first whether another account here still
+     *  holds it. */
     @Synchronized
     fun clearForAccount(ownUin: Int) {
         val out = loadOut()

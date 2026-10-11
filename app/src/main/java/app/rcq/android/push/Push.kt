@@ -1543,8 +1543,15 @@ object Push {
                 else -> null
             }
             if (thread != null) {
-                // Fully muted (NONE): never wake.
-                if (app.rcq.android.data.LocalStores.isMutedFor(acctId, thread)) return
+                // Fully muted (NONE): never wake. A 1:1 by its address: the
+                // same number on another island is somebody else, with a mute
+                // of their own.
+                val muted = if (groupId == null && peerUin != null) {
+                    app.rcq.android.data.LocalStores.isPeerMutedFor(acctId, peerUin, opened?.senderHost)
+                } else {
+                    app.rcq.android.data.LocalStores.isMutedFor(acctId, thread)
+                }
+                if (muted) return
                 // Mentions-only: a banner ONLY when actually mentioned. With the
                 // envelope open we can finally tell — before, this was a blanket
                 // return, which made "Mentions" behave exactly like "None" in the

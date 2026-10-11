@@ -1146,7 +1146,7 @@
     <string name="notif_fsi_grant">Liberar a tela de chamada</string>
     <string name="notif_contact_requests">Novas solicitações de contato</string>
     <string name="notif_contact_requests_desc">Acordar o celular quando alguém pedir para te adicionar</string>
-    <string name="notif_perchat_note">Para silenciar uma conversa específica, faça um toque longo nela na tela inicial.</string>
+    <string name="notif_perchat_note">Para silenciar uma conversa específica, faça um toque longo nela na tela inicial. Enquanto o RCQ estiver fechado ou bloqueado com PIN, uma conversa silenciada ainda pode tocar uma vez.</string>
     <string name="chat_menu_all_media">Todas as mídias</string>
     <string name="chat_all_media_title">Mídia</string>
     <string name="chat_all_media_empty">Nenhuma foto ou vídeo ainda</string>

@@ -1652,7 +1652,7 @@ internal fun ProfileEditScreen(session: Session, onBack: () -> Unit) {
  * server that refuses the fetch before it becomes enforcement, and the string
  * shown next to the switch has to say so.
  */
-private object SettingsLocalPrivacy {
+internal object SettingsLocalPrivacy {
     private const val FILE = "rcq_settings_privacy"
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -1666,6 +1666,17 @@ private object SettingsLocalPrivacy {
 
     fun setCardSideListsClosed(context: Context, uin: Int, closed: Boolean) {
         prefs(context).edit().putBoolean(cardSideListsKey(uin), closed).apply()
+    }
+
+    /** The account with [uin] left this device. Keyed by the number, so the
+     *  caller asks first whether another account here still holds it. */
+    fun forget(context: Context, uin: Int) {
+        prefs(context).edit().remove(cardSideListsKey(uin)).apply()
+    }
+
+    /** No account is left on this device. */
+    fun wipeAll(context: Context) {
+        prefs(context).edit().clear().apply()
     }
 }
 

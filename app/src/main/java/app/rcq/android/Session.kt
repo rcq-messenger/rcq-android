@@ -1189,6 +1189,25 @@ class Session(context: Context) {
         }
     }
 
+    /** See [LocalStores.migrateIslandMutes]: the active account's contacts on
+     *  other islands, and the numbers of its contacts on ours from the cached
+     *  roster (null when there is none yet, which drops nothing). Never in the
+     *  duress view, where the stores belong to the decoy namespace. */
+    private fun migrateIslandMutes() {
+        if (duressViewUp) return
+        val id = AccountManager.activeId.value ?: return
+        if (LocalStores.boundAccount() != id) return
+        // Gson leaves a field a damaged row lacks as null, whatever the type says.
+        val crossIsland = CrossIslandStore.listFor(appCtx, id).mapNotNull { c ->
+            val host: String? = c.host
+            host?.takeIf { it.isNotBlank() }?.let { c.uin to it }
+        }
+        val own = LocalStores.cachedContactsJson()?.let { json ->
+            runCatching { profileGson.fromJson(json, Array<Contact>::class.java) }.getOrNull()
+        }?.filter { it.host.isNullOrBlank() }?.mapTo(HashSet()) { it.uin }
+        LocalStores.migrateIslandMutes(id, crossIsland, own)
+    }
+
     // ── decoy (duress) session identity ──────────────────────────────
     // Set only while unlocked into a MIGRATED decoy, which is not a roster
     // account at all: it has its own SQLCipher store, its own key and this
@@ -2455,12 +2474,90 @@ class Session(context: Context) {
      *  SQLCipher file. Companion to [DecoyStore.destroy]: the store file is not
      *  the only thing a duress session leaves on disk. */
     private fun wipeDecoyNamespaceStores() {
-        LocalStores.clearAccount(DecoyStore.STORE_ID)
-        runCatching { CrossIslandRequestsStore.wipeOwner(DecoyStore.STORE_ID) }
-        app.rcq.android.data.VisitStore.wipeAccount(DecoyStore.STORE_ID)
-        CrossIslandStore.wipeAccount(DecoyStore.STORE_ID)
-        VisitedIslandsStore.wipeAccount(DecoyStore.STORE_ID)
-        app.rcq.android.data.AccountCards.forget(appCtx, DecoyStore.STORE_ID)
+        eraseAccountTraces(DecoyStore.STORE_ID)
+    }
+
+    // ── erasing one account from this device ─────────────────────────
+    //
+    // ⚠⚠ ONE LIST, used by every path that erases an account: a burn (the
+    // active account and its same-key siblings), the #655 erase, a removal from
+    // Manage accounts, a wipe PIN, a PIN removed from duress, and the decoy
+    // namespace. Each of those used to carry its own copy of the list, and the
+    // copies fell behind one by one: the guest cards (a live credential) were
+    // never wiped by any of them, the sender-key chains (key material) and the
+    // card-privacy switch by none, the blocks of the account only by some, and
+    // rcq_local.xml kept the names you gave people. A store added tomorrow goes
+    // in here once. Local only: nothing here dials, so the duress paths stay as
+    // silent as they were; the push row is each caller's business, before this.
+
+    /** Every store this device keeps for [accountId] under its id. */
+    private fun eraseAccountStores(accountId: String) {
+        runCatching { SecureStore.wipeAccount(appCtx, accountId) }
+        runCatching { MessageDb.wipeAccount(appCtx, accountId) }
+        runCatching { SignalStoreDb.wipeAccount(appCtx, accountId) }
+        eraseAccountTraces(accountId)
+    }
+
+    /** [eraseAccountStores] without the identity, history and ratchet files:
+     *  the plain stores, which the decoy namespace writes as well. Each step on
+     *  its own, so one store that throws does not keep the rest. */
+    private fun eraseAccountTraces(accountId: String) {
+        runCatching { app.rcq.android.data.VisitStore.wipeAccount(accountId) }
+        runCatching { CrossIslandStore.wipeAccount(accountId) }
+        runCatching { VisitedIslandsStore.wipeAccount(accountId) }
+        runCatching { GuestCardStore.wipeAccount(accountId) }
+        runCatching { CrossIslandRequestsStore.wipeOwner(accountId) }
+        runCatching { LocalStores.clearAccount(accountId) }
+        // The switcher's cached face for that account: a nickname, a uin, an
+        // island and an avatar id. A wipe that leaves the name and picture of
+        // the account it just destroyed sitting in preferences is not a wipe.
+        runCatching { app.rcq.android.data.AccountCards.forget(appCtx, accountId) }
+        // Not keyed by account at all, so every account's go: they are caches.
+        runCatching { app.rcq.android.media.PlaintextFiles.wipe(appCtx) }
+    }
+
+    /** The stores keyed by the account's NUMBER, not its id: §5f requests and
+     *  blocks written by number, the backup islands and their LIVE tokens, the
+     *  sender-key chains, the card-privacy switch. Call once the account is out
+     *  of the roster, with its number read before its store was wiped.
+     *
+     *  ⚠ Only when no account left here holds that number: two accounts on two
+     *  islands can share one, and these rows cannot tell them apart, so
+     *  sweeping them would take the other account's rows too. */
+    private fun eraseNumberStores(uin: Int?) {
+        val u = uin ?: return
+        val heldHere = AccountManager.accounts.value.any {
+            runCatching { SecureStore.peekUin(appCtx, it.id) }.getOrNull() == u
+        }
+        if (heldHere) return
+        runCatching { CrossIslandRequestsStore.wipeOwn(u) }
+        runCatching { MultihomeStore.wipeOwn(u) }
+        runCatching { app.rcq.android.crypto.SenderKeyStore.clearForAccount(u) }
+        runCatching { app.rcq.android.ui.SettingsLocalPrivacy.forget(appCtx, u) }
+    }
+
+    /** No account is left on this device: what the per-account sweeps cannot
+     *  reach because it is kept per island, per room or for every number at
+     *  once. The two island caches are a plaintext list of every island this
+     *  device ever talked to and one file per host; the room-key asks and the
+     *  island answers are keyed by room and by host; the backup-island cache
+     *  holds the homes of the contacts; and the removals still queued from
+     *  accounts that left earlier hold their islands and tokens.
+     *
+     *  ⚠ Never while an account remains: it still needs its own island drawn
+     *  on the first frame. */
+    private fun eraseDeviceLeftovers() {
+        runCatching { MultihomeStore.wipeAll() }
+        runCatching { CrossIslandRequestsStore.wipeAll() }
+        runCatching { app.rcq.android.data.IslandCards.wipe(appCtx) }
+        runCatching { app.rcq.android.data.IslandLogos.clear(appCtx) }
+        runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
+        runCatching { app.rcq.android.crypto.SenderKeyStore.wipeAll() }
+        runCatching { app.rcq.android.ui.SettingsLocalPrivacy.wipeAll(appCtx) }
+        runCatching {
+            appCtx.getSharedPreferences("rcq_gsknack", Context.MODE_PRIVATE).edit().clear().apply()
+            appCtx.getSharedPreferences("rcq_caps", Context.MODE_PRIVATE).edit().clear().apply()
+        }
     }
 
     /** Tear the in-memory session state down and re-point every per-account
@@ -2658,6 +2755,11 @@ class Session(context: Context) {
         // reconcile after login — fixes mutes the server never learned about)
         // and re-fires on every mute/unmute. Single collector per ACCOUNT: it
         // rides [accountJob], so a switch ends it instead of adding one.
+        //
+        // Before it subscribes: the mutes written before a mute knew its
+        // island are moved onto it first, so the first set it sees already
+        // keeps another island's numbers out of ours.
+        runCatching { migrateIslandMutes() }
         accountScope.launch { LocalStores.muted.collect { syncPushMutes() } }
         // The "account deleted" set follows the marks (report 1067), the same
         // way: replays the current value on subscribe, one collector per account.
@@ -4306,22 +4408,11 @@ class Session(context: Context) {
                 // account's push row off its island (report 1066). One attempt
                 // and nothing written down, as on every duress path.
                 runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, acc.id) }
-                runCatching {
-                    SecureStore.wipeAccount(appCtx, acc.id)
-                    MessageDb.wipeAccount(appCtx, acc.id)
-                    SignalStoreDb.wipeAccount(appCtx, acc.id)
-                    app.rcq.android.data.VisitStore.wipeAccount(acc.id)
-                    CrossIslandStore.wipeAccount(acc.id)
-                    VisitedIslandsStore.wipeAccount(acc.id)
-                    LocalStores.clearAccount(acc.id)
-                    // The switcher's cached face for that account: a nickname,
-                    // a uin, an island and an avatar id. Written outside
-                    // LocalStores, so clearAccount does not reach it, and a
-                    // wipe that leaves the name and picture of the account it
-                    // just destroyed sitting in preferences is not a wipe.
-                    app.rcq.android.data.AccountCards.forget(appCtx, acc.id)
-                }
+                // Read before the wipe: the number-keyed stores need it.
+                val uin = runCatching { SecureStore.peekUin(appCtx, acc.id) }.getOrNull()
+                eraseAccountStores(acc.id)
                 AccountManager.remove(acc.id)
+                eraseNumberStores(uin)
             }
             // Removals queued before the phone changed hands carry the tokens
             // of real accounts. See [app.rcq.android.push.PendingDeregister].
@@ -4382,19 +4473,10 @@ class Session(context: Context) {
         SecureStore.setMsgDbMigrated(appCtx, shellId)
         AccountManager.accounts.value.forEach { acc ->
             runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, acc.id) }
-            runCatching {
-                SecureStore.wipeAccount(appCtx, acc.id)
-                MessageDb.wipeAccount(appCtx, acc.id)
-                SignalStoreDb.wipeAccount(appCtx, acc.id)
-                app.rcq.android.data.VisitStore.wipeAccount(acc.id)
-                CrossIslandStore.wipeAccount(acc.id)
-                VisitedIslandsStore.wipeAccount(acc.id)
-                LocalStores.clearAccount(acc.id)
-                // See the note in removePin: the switcher card lives outside
-                // LocalStores and has to be forgotten by name.
-                app.rcq.android.data.AccountCards.forget(appCtx, acc.id)
-            }
+            val uin = runCatching { SecureStore.peekUin(appCtx, acc.id) }.getOrNull()
+            eraseAccountStores(acc.id)
             AccountManager.remove(acc.id)
+            eraseNumberStores(uin)
         }
         // Queued removals of accounts that left earlier hold real accounts'
         // islands and tokens, and none of them may outlive this.
@@ -4501,19 +4583,10 @@ class Session(context: Context) {
         if (::db.isInitialized) runCatching { db.close() }
         AccountManager.accounts.value.forEach { acc ->
             runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, acc.id) }
-            runCatching {
-                SecureStore.wipeAccount(appCtx, acc.id)
-                MessageDb.wipeAccount(appCtx, acc.id)
-                SignalStoreDb.wipeAccount(appCtx, acc.id)
-                app.rcq.android.data.VisitStore.wipeAccount(acc.id)
-                CrossIslandStore.wipeAccount(acc.id)
-                VisitedIslandsStore.wipeAccount(acc.id)
-                LocalStores.clearAccount(acc.id)
-                // See the note in removePin: the switcher card lives outside
-                // LocalStores and has to be forgotten by name.
-                app.rcq.android.data.AccountCards.forget(appCtx, acc.id)
-            }
+            val uin = runCatching { SecureStore.peekUin(appCtx, acc.id) }.getOrNull()
+            eraseAccountStores(acc.id)
             AccountManager.remove(acc.id)
+            eraseNumberStores(uin)
         }
         // ⚠ The decoy store is NOT a roster account, so the loop above never
         // reaches it. Without this a duress wipe left the seeded conversations
@@ -4536,10 +4609,11 @@ class Session(context: Context) {
             MultihomeStore.wipeAll()
             CrossIslandRequestsStore.wipeAll()
         }
-        // ⚠ And the removals still queued from accounts that left earlier:
-        // each one is an island and a live token of an account this phone once
-        // held, which is the list a wipe PIN promises not to leave.
-        runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
+        // ⚠ And what no single account owns: the removals still queued from
+        // accounts that left earlier (each one an island and a live token of
+        // an account this phone once held), the island caches, the sender-key
+        // chains of every number. See [eraseDeviceLeftovers].
+        eraseDeviceLeftovers()
         // ⚠ Two more device-wide stores the account loop cannot reach, and the
         // same promise broken: the island pins are the list of every island
         // this phone ever dialled (host, port and the hour of the first
@@ -8087,24 +8161,9 @@ class Session(context: Context) {
         // authenticate with. A row left behind keeps waking this phone for an
         // account that is no longer on it (#1037).
         runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, accountId) }
-        runCatching {
-            SecureStore.wipeAccount(appCtx, accountId)
-            MessageDb.wipeAccount(appCtx, accountId)
-            SignalStoreDb.wipeAccount(appCtx, accountId)
-            app.rcq.android.data.VisitStore.wipeAccount(accountId)
-            CrossIslandStore.wipeAccount(accountId)
-            VisitedIslandsStore.wipeAccount(accountId)
-            LocalStores.clearAccount(accountId)
-            app.rcq.android.data.AccountCards.forget(appCtx, accountId)
-        }
+        eraseAccountStores(accountId)
         AccountManager.remove(accountId)
-        runCatching { CrossIslandRequestsStore.wipeOwner(accountId) }
-        uin?.let {
-            runCatching {
-                CrossIslandRequestsStore.wipeOwn(it)
-                MultihomeStore.wipeOwn(it)
-            }
-        }
+        eraseNumberStores(uin)
     }
 
     private fun ed25519Pub(priv: ByteArray): ByteArray = Ed25519PrivateKeyParameters(priv, 0).generatePublicKey().encoded
@@ -8149,14 +8208,7 @@ class Session(context: Context) {
             // been asked to delete the account; this is the row that belongs to
             // THIS device and is not covered by that.
             runCatching { app.rcq.android.push.Push.deregisterAccount(appCtx, burnedId) }
-            SecureStore.wipeAccount(appCtx, burnedId)
-            MessageDb.wipeAccount(appCtx, burnedId)
-            SignalStoreDb.wipeAccount(appCtx, burnedId)
-            app.rcq.android.data.VisitStore.wipeAccount(burnedId)
-            CrossIslandStore.wipeAccount(burnedId)
-            VisitedIslandsStore.wipeAccount(burnedId)
-            LocalStores.clearAccount(burnedId)
-            app.rcq.android.data.AccountCards.forget(appCtx, burnedId)
+            eraseAccountStores(burnedId)
             AccountManager.remove(burnedId)   // active falls back to first remaining (or null)
         }
         // Keyed by number rather than by account id, so they sit outside the
@@ -8164,15 +8216,15 @@ class Session(context: Context) {
         // the burned identity, the numbers it blocked, and LIVE JWTs to its
         // backup islands. Same shape as the fourth hole of the iOS
         // cross-island leak (f50a7b0).
-        burnedUin?.let {
-            CrossIslandRequestsStore.wipeOwn(it)
-            MultihomeStore.wipeOwn(it)
-        }
-        burnedOwner?.let { CrossIslandRequestsStore.wipeOwner(it) }
+        eraseNumberStores(burnedUin)
+        burnedOwner?.let { runCatching { CrossIslandRequestsStore.wipeOwner(it) } }
         if (burnedId == null) {
             store.wipe()
             db.wipe()
             app.rcq.android.data.VisitStore.wipe()
+            // No id, so whatever the per-account stores are bound to is the
+            // account being burned (see [burnedOwner]).
+            LocalStores.boundAccount()?.let { runCatching { eraseAccountTraces(it) } }
         }
         peerIdentityGens.invalidateAll(peerIdentityCache)
         askedProfileKeyAt.clear(); answeredProfileKeyAt.clear()
@@ -8219,17 +8271,13 @@ class Session(context: Context) {
             CrossIslandStore.bindAccount(null)
             GuestCardStore.bindAccount(null)
             VisitedIslandsStore.bindAccount(null)
-            // Nothing is signed in any more, so the two device-wide island
-            // caches are now a plaintext list of every island this device ever
-            // talked to and one file per host on disk, outliving the
-            // per-account record of the same islands that was just deleted.
-            // Not touched while another account remains: it still needs its own
-            // island drawn on the first frame.
-            app.rcq.android.data.IslandCards.wipe(appCtx)
-            app.rcq.android.data.IslandLogos.clear(appCtx)
-            // Same reasoning for the removals still queued from accounts that
-            // left before: their islands and tokens, with nobody left here.
-            runCatching { app.rcq.android.push.PendingDeregister.purge(appCtx) }
+            // Nothing is signed in any more, so the device-wide island caches
+            // are now a plaintext list of every island this device ever talked
+            // to, outliving the per-account record of the same islands that
+            // was just deleted; the removals still queued from accounts that
+            // left before hold their islands and tokens. See
+            // [eraseDeviceLeftovers].
+            eraseDeviceLeftovers()
             null
         }
     }
@@ -8663,36 +8711,15 @@ class Session(context: Context) {
         // this one). Written down first and retried until the island answers,
         // because the wipe below leaves nothing to retry with.
         runCatching { app.rcq.android.push.PendingDeregister.record(appCtx, accountId) }
-        SecureStore.wipeAccount(appCtx, accountId)
-        MessageDb.wipeAccount(appCtx, accountId)
-        SignalStoreDb.wipeAccount(appCtx, accountId)
-        app.rcq.android.data.VisitStore.wipeAccount(accountId)
-        CrossIslandStore.wipeAccount(accountId)
-        VisitedIslandsStore.wipeAccount(accountId)
-        LocalStores.clearAccount(accountId)
-        app.rcq.android.data.AccountCards.forget(appCtx, accountId)
+        eraseAccountStores(accountId)
         AccountManager.remove(accountId)
         // Out of the roster now, so the attempt cannot mistake the leaver for
         // an account still holding the row.
         app.rcq.android.push.PendingDeregister.flush(appCtx)
-        // The blocks are keyed by the account and go whatever else is here.
-        runCatching { CrossIslandRequestsStore.wipeOwner(accountId) }
-        // The number-keyed stores the burn sweeps and this delete did not: §5f
-        // requests and LIVE JWTs to its backup islands. ⚠ Keyed by the bare
-        // number, so they stay when another account here holds the same number
-        // (on another island, as a rule): sweeping them would take that
-        // account's rows too.
-        uin?.let { u ->
-            val sharedHere = AccountManager.accounts.value.any {
-                runCatching { SecureStore.peekUin(appCtx, it.id) }.getOrNull() == u
-            }
-            if (!sharedHere) {
-                runCatching {
-                    CrossIslandRequestsStore.wipeOwn(u)
-                    MultihomeStore.wipeOwn(u)
-                }
-            }
-        }
+        // The number-keyed stores: §5f requests, LIVE JWTs to its backup
+        // islands, sender keys. They stay when another account here holds the
+        // same number (on another island, as a rule), see [eraseNumberStores].
+        eraseNumberStores(uin)
         return true
     }
 
@@ -11874,10 +11901,13 @@ class Session(context: Context) {
             // Otherwise an alert held for this sounds now. Own carbons were
             // settled above with the control kinds.
             if (dec.senderUin != meUin && app.rcq.android.push.PushEnvelope.announces(appCtx, dec.envelope)) {
+                // The sender's own mute, by address: the same number on
+                // another island is somebody else.
+                val muteKey = LocalStores.peerMuteKey(dec.senderUin, ciHost?.takeIf { it !in ownHosts })
                 app.rcq.android.push.Push.noteOpenedMessage(
                     appCtx,
                     payloadB64,
-                    rings = LocalStores.notifyMode(LocalStores.peerThread(dec.senderUin)) == LocalStores.NotifyMode.ALL,
+                    rings = LocalStores.notifyMode(muteKey) == LocalStores.NotifyMode.ALL,
                 )
             }
             // ⚠ No clearRemoved here any more (#1055 review). Nothing hides a
@@ -15636,7 +15666,7 @@ class Session(context: Context) {
         // Not everything that lands in a thread is something to catch up on.
         // A finished call is a record of something both people were present
         // for; only a missed one is still owed attention.
-        if (countsUnread) bumpUnreadIfInbound(row, LocalStores.peerThread(row.peerUin))
+        if (countsUnread) bumpUnreadIfInbound(row, LocalStores.peerThread(row.peerUin), chatMuteKey(row.peerUin))
         // (A message that arrives into the open thread is NOT acked here: the
         // chat screen sends the receipt once the row has actually been on
         // screen, which for a reader at the bottom is the next frame and for
@@ -15707,10 +15737,18 @@ class Session(context: Context) {
         return body.contains("@$nick", ignoreCase = true)
     }
 
+    /** The mute of the 1:1 chat with [uin], by the address of the contact it
+     *  is with ([LocalStores.peerMuteKey]). A chat is filed by number, and a
+     *  number belongs to one contact here ([clashesWithKnownNumber]), so the
+     *  roster says which island it is on; nobody in it is our own island. */
+    private fun chatMuteKey(uin: Int): String =
+        LocalStores.peerMuteKey(uin, _contacts.value.firstOrNull { it.uin == uin }?.host)
+
     /** Bump the unread badge for a genuinely-new inbound message, unless
      *  the user is currently looking at that thread. Own (fromMe)
-     *  messages never count. */
-    private fun bumpUnreadIfInbound(msg: ChatMessage, thread: String) {
+     *  messages never count. [muteKey]: where the thread's mute is filed, when
+     *  that is not [thread] itself (a 1:1, see [chatMuteKey]). */
+    private fun bumpUnreadIfInbound(msg: ChatMessage, thread: String, muteKey: String = thread) {
         if (msg.fromMe) return
         // A row another device of mine has already read (its marker came
         // first, see applyRemoteRead) is not unread here either. Same
@@ -15739,7 +15777,7 @@ class Session(context: Context) {
         // Notify gate (#11): NONE = silent, MENTIONS = only when @mentioned,
         // ALL = always. One authoritative read of the mute state, so mute is
         // deterministic on both the socket and the push path.
-        val ring = when (LocalStores.notifyMode(thread)) {
+        val ring = when (LocalStores.notifyMode(muteKey)) {
             LocalStores.NotifyMode.NONE -> false
             LocalStores.NotifyMode.MENTIONS -> msg.groupId != null && bodyMentionsMe(msg.body)
             LocalStores.NotifyMode.ALL -> true

@@ -166,7 +166,7 @@ internal fun ContactRowItem(contact: Contact, unread: Int, session: Session, onC
     // below, in the draw phase, so a press animates without recomposing the row.
     val scale = animateFloatAsState(if (pressed) 0.97f else 1f, label = "press")
     val mutedSet by LocalStores.muted.collectAsState()
-    val muted = LocalStores.peerThread(contact.uin) in mutedSet
+    val muted = LocalStores.peerMuteKey(contact.uin, contact.host) in mutedSet
     val reactSet by LocalStores.reactionInbox.collectAsState()
     val mentionSet by LocalStores.mentionInbox.collectAsState()
     val thread = LocalStores.peerThread(contact.uin)

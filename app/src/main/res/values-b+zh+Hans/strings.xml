@@ -1165,7 +1165,7 @@
     <string name="notif_fsi_grant">去允许</string>
     <string name="notif_contact_requests">新的好友请求</string>
     <string name="notif_contact_requests_desc">有人请求添加你时唤醒手机</string>
-    <string name="notif_perchat_note">要静音某个聊天，请在主屏幕长按它。</string>
+    <string name="notif_perchat_note">要静音某个聊天，请在主屏幕长按它。RCQ 关闭或被 PIN 锁定时，已静音的聊天仍可能响一次。</string>
     <string name="chat_menu_all_media">全部媒体</string>
     <string name="chat_all_media_title">媒体</string>
     <string name="chat_all_media_empty">还没有照片或视频</string>

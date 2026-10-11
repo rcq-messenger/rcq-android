@@ -56,6 +56,10 @@ internal object PushEnvelope {
          *  so it may stand in the banner even for a quarantined sender, where
          *  a stranger's own words may not. */
         val contactRequest: Boolean = false,
+        /** The sender's island when it is not ours, null for our own: the
+         *  mute of a 1:1 is filed by address ([LocalStores.peerMuteKey]), and
+         *  the same number on two islands is two people. */
+        val senderHost: String? = null,
     )
 
     /**
@@ -89,12 +93,15 @@ internal object PushEnvelope {
         val quarantined = host != null &&
             !host.equals(store.serverHost ?: "", ignoreCase = true) &&
             CrossIslandStore.getFor(ctx, accountId, dec.senderUin, host) == null
+        val foreignHost = host?.takeUnless {
+            it.isBlank() || it.equals(store.serverHost ?: app.rcq.android.net.RcqApi.DEFAULT_HOST, ignoreCase = true)
+        }
 
         // Somebody this account blocked: no banner at all. Their message is
         // dropped on arrival, and the "New message" its wake put up led to
         // nothing (report 1064). The same rule ingest applies, see [blocked].
         if (dec.senderUin != me && blocked(ctx, accountId, me, dec) == true) {
-            return Opened(dec.senderUin, "${dec.senderUin}", preview = null, mentionsMe = false, quarantined = quarantined)
+            return Opened(dec.senderUin, "${dec.senderUin}", preview = null, mentionsMe = false, quarantined = quarantined, senderHost = foreignHost)
         }
 
         // Our own message, carboned to this device from another one of ours, is
@@ -114,6 +121,7 @@ internal object PushEnvelope {
             mentionsMe = preview != null && mentionsMe(preview, me, store.nickname),
             quarantined = quarantined,
             contactRequest = preview != null && dec.envelope is Envelope.ContactRequest,
+            senderHost = foreignHost,
         )
     }
 

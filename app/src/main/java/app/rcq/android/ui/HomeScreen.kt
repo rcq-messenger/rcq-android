@@ -1837,7 +1837,9 @@ private fun contactActions(
 ): List<ContextAction> {
     val thread = LocalStores.peerThread(contact.uin)
     val fav = LocalStores.isFavorite(thread)
-    val muted = LocalStores.isMuted(thread)
+    // By address: the same number on another island is somebody else.
+    val muteKey = LocalStores.peerMuteKey(contact.uin, contact.host)
+    val muted = LocalStores.isMuted(muteKey)
     val archived = LocalStores.isArchived(thread)
     val locked = LocalStores.isLocked(thread)
     // At exactly this row's address (reports 1064, 1065), not the row's flag:
@@ -1848,7 +1850,7 @@ private fun contactActions(
     return listOfNotNull(
         ContextAction(s(R.string.home_send_message), Icons.AutoMirrored.Filled.Chat) { onOpenChat(contact.uin) },
         ContextAction(s(if (fav) R.string.home_remove_fav else R.string.home_add_fav), if (fav) Icons.Filled.Star else Icons.Filled.StarBorder) { LocalStores.toggleFavorite(thread) },
-        ContextAction(s(if (muted) R.string.home_unmute else R.string.home_mute), if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff) { LocalStores.toggleMute(thread) },
+        ContextAction(s(if (muted) R.string.home_unmute else R.string.home_mute), if (muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff) { LocalStores.toggleMute(muteKey) },
         ContextAction(s(if (archived) R.string.home_unarchive else R.string.home_archive), if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive) { LocalStores.toggleArchive(thread) },
         // Per-chat PIN lock — only offered when an app PIN is set. Off goes
         // through the PIN (#1045), on is immediate.

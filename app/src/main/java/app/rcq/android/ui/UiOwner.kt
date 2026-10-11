@@ -59,4 +59,8 @@ internal class PerOwnerMap {
     fun remove(key: String): String? = all.remove(at(key))
     /** Every owner's entries. */
     fun clear() = all.clear()
+    /** The entries of [accountId] as either owner ([UiOwner.key]). */
+    fun forgetAccount(accountId: String) {
+        if (accountId.isNotEmpty()) all.keys.removeAll { it.startsWith("$accountId/") }
+    }
 }

@@ -638,6 +638,8 @@ private fun RcqApp(session: Session) {
     // this moves the UI to wherever that landed and says why out loud.
     LaunchedEffect(Unit) {
         session.accountLost.collect { ev ->
+            // The account is erased already; nothing typed as it stays either.
+            app.rcq.android.ui.forgetChatDrafts()
             resetNav()
             state = ev.nextUin?.let { UiState.Registered(it) } ?: UiState.Onboarding
             Toast.makeText(context, context.getString(R.string.account_burned_elsewhere), Toast.LENGTH_LONG).show()
@@ -753,6 +755,7 @@ private fun RcqApp(session: Session) {
         state = UiState.Registering
         scope.launch {
             state = UiState.Registered(session.deleteActiveAccountLocal(gone, next))
+            app.rcq.android.ui.forgetChatDraftsOf(gone)
             showManageAccounts = true
         }
     }

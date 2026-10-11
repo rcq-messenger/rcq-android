@@ -1165,7 +1165,7 @@
     <string name="notif_fsi_grant">Дозволити екран дзвінка</string>
     <string name="notif_contact_requests">Нові запити в контакти</string>
     <string name="notif_contact_requests_desc">Будити телефон, коли хтось просить додати його</string>
-    <string name="notif_perchat_note">Щоб заглушити окремий чат, натисни і потримай його на головному екрані.</string>
+    <string name="notif_perchat_note">Щоб заглушити окремий чат, натисни і потримай його на головному екрані. Поки RCQ закритий або заблокований PIN-кодом, заглушений чат усе ж може пролунати один раз.</string>
     <string name="chat_menu_all_media">Усі медіа</string>
     <string name="chat_all_media_title">Медіа</string>
     <string name="chat_all_media_empty">Фото і відео поки немає</string>

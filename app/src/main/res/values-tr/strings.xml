@@ -1146,7 +1146,7 @@
     <string name="notif_fsi_grant">Arama ekranına izin ver</string>
     <string name="notif_contact_requests">Yeni kişi istekleri</string>
     <string name="notif_contact_requests_desc">Biri seni eklemek istediğinde telefonu uyandır</string>
-    <string name="notif_perchat_note">Belirli bir sohbeti susturmak için ana ekranda ona uzun bas.</string>
+    <string name="notif_perchat_note">Belirli bir sohbeti susturmak için ana ekranda ona uzun bas. RCQ kapalıyken veya PIN ile kilitliyken susturulmuş bir sohbet yine de bir kez ses çıkarabilir.</string>
     <string name="chat_menu_all_media">Bütün medya</string>
     <string name="chat_all_media_title">Medya</string>
     <string name="chat_all_media_empty">Henüz fotoğraf ya da video yok</string>

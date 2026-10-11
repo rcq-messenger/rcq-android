@@ -1146,7 +1146,7 @@
     <string name="notif_fsi_grant">Permitir la pantalla de llamada</string>
     <string name="notif_contact_requests">Solicitudes de contacto nuevas</string>
     <string name="notif_contact_requests_desc">Despertar el teléfono cuando alguien pida añadirte</string>
-    <string name="notif_perchat_note">Para silenciar un chat concreto, mantenlo pulsado en la pantalla principal.</string>
+    <string name="notif_perchat_note">Para silenciar un chat concreto, mantenlo pulsado en la pantalla principal. Mientras RCQ esté cerrado o bloqueado con PIN, un chat silenciado aún puede sonar una vez.</string>
     <string name="chat_menu_all_media">Todo lo multimedia</string>
     <string name="chat_all_media_title">Multimedia</string>
     <string name="chat_all_media_empty">Todavía no hay fotos ni vídeos</string>

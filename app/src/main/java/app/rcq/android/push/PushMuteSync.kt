@@ -29,12 +29,21 @@ object PushMuteSync {
     private const val PEER = "peer:"
     private const val GROUP = "group:"
 
-    /** Only the keys the island can act on: a number or a room id. Anything
-     *  that does not parse stays out, as it did from the old full-list PUT. */
+    /** Only the keys the island can act on: a number or a room OF ITS OWN.
+     *  Anything that does not parse stays out, as it did from the old full-list
+     *  PUT.
+     *
+     *  ⚠ That rule is also what keeps other islands out of these lists. A mute
+     *  of somebody on another island is `peer:<uin>@<host>`
+     *  ([app.rcq.android.data.LocalStores.peerMuteKey]): the number alone would
+     *  silence whoever holds it HERE. A room on another island has a negative
+     *  local alias for an id, which names no room here. Neither parses as a
+     *  positive id, so neither goes up, and one that went up from an older
+     *  build is taken back as a removal by [merge]. */
     fun syncable(local: Set<String>): Set<String> = local.filterTo(LinkedHashSet()) { key ->
         when {
-            key.startsWith(PEER) -> key.removePrefix(PEER).toIntOrNull() != null
-            key.startsWith(GROUP) -> key.removePrefix(GROUP).toIntOrNull() != null
+            key.startsWith(PEER) -> (key.removePrefix(PEER).toIntOrNull() ?: 0) > 0
+            key.startsWith(GROUP) -> (key.removePrefix(GROUP).toIntOrNull() ?: 0) > 0
             else -> false
         }
     }

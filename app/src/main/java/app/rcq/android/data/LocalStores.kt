@@ -698,6 +698,78 @@ object LocalStores {
     fun isMuted(thread: String) = thread in _muted.value
     fun toggleMute(thread: String) = toggle(_muted, K_MUTE, thread)
 
+    /** What the mute of a 1:1 is filed under: [peerThread] for somebody on our
+     *  own island, `peer:<uin>@<host>` for somebody on another one ([host] null
+     *  or blank = ours, as on a [app.rcq.android.model.Contact]).
+     *
+     *  ⚠⚠ Not [peerThread] for both. A number is per island, and the bare key
+     *  gave `1234` here and `1234@is2.rcq.app` ONE mute between them: muting
+     *  the stranger muted your friend, and the bare number went into OUR
+     *  island's `muted_uins`, so the island stopped waking this phone for
+     *  whoever holds 1234 here. Only the bare form can reach the island
+     *  ([app.rcq.android.push.PushMuteSync.syncable]); another island's number
+     *  stays on this device. Groups and the rest of the per-thread state keep
+     *  their own keys. */
+    fun peerMuteKey(uin: Int, host: String? = null): String =
+        if (host.isNullOrBlank()) peerThread(uin) else "peer:${aliasKey(uin, host)}"
+
+    /** One-time, per account: the bare mutes written before a mute knew its
+     *  island are moved onto the address they were meant for. See
+     *  [withIslandMutes] for the rule; [crossIsland] is the account's contacts
+     *  on other islands (number and island), [ownIsland] the numbers of its
+     *  contacts on ours, or null when that roster has never been loaded here.
+     *
+     *  Done for good only once [ownIsland] is known. Before that nothing is
+     *  dropped, and the next bind tries again.
+     *
+     *  ⚠ When a bare mute leaves, the island has to hear it as a REMOVAL, or
+     *  the number stays in its `muted_uins` and our own island's 1234 stays
+     *  silent. An install that has never delivered a set counts removals from
+     *  [pushMutesLegacy], so the set as it was is written there first if
+     *  nothing is. */
+    @Synchronized
+    fun migrateIslandMutes(accountId: String, crossIsland: Collection<Pair<Int, String>>, ownIsland: Set<Int>?) {
+        if (!::prefs.isInitialized || acct != accountId) return
+        if (prefs.getBoolean(pk(K_MUTES_BY_ISLAND), false)) return
+        val before = _muted.value
+        val next = withIslandMutes(before, crossIsland, ownIsland)
+        val e = prefs.edit()
+        if (next != before) {
+            if (!prefs.contains(pk(K_PUSH_MUTES_SENT)) && !prefs.contains(pk(K_PUSH_MUTES_LEGACY))) {
+                e.putStringSet(pk(K_PUSH_MUTES_LEGACY), app.rcq.android.push.PushMuteSync.syncable(before))
+            }
+            e.putStringSet(pk(K_MUTE), next.toSet())
+        }
+        if (ownIsland != null) e.putBoolean(pk(K_MUTES_BY_ISLAND), true)
+        e.apply()
+        // After the write: the set going out is what wakes the island sync,
+        // and it must find the baseline above already in place.
+        if (next != before) _muted.value = next
+    }
+
+    /** The rule of [migrateIslandMutes], pure. A bare `peer:<uin>` whose number
+     *  a contact on another island holds puts that address's mute in place,
+     *  one per island. The bare mute itself stays unless the number is held
+     *  ONLY by those contacts: if somebody on our island has it too, the old
+     *  mute was for both of them and stays on both; a number nobody in the
+     *  roster holds is a stranger on our island and keeps its mute; and with
+     *  [ownIsland] unknown nothing is dropped. Everything else passes through. */
+    internal fun withIslandMutes(
+        muted: Set<String>,
+        crossIsland: Collection<Pair<Int, String>>,
+        ownIsland: Set<Int>?,
+    ): Set<String> {
+        val out = LinkedHashSet(muted)
+        val foreign = HashSet<Int>()
+        for ((uin, host) in crossIsland) {
+            if (host.isBlank() || peerThread(uin) !in muted) continue
+            out += peerMuteKey(uin, host)
+            foreign += uin
+        }
+        if (ownIsland != null) foreign.filterNot { it in ownIsland }.forEach { out -= peerThread(it) }
+        return out
+    }
+
     fun isMentionsOnly(thread: String) = thread in _mentionsOnly.value
 
     /** Group notify mode (#11): ALL rings always, MENTIONS rings only on an
@@ -762,6 +834,19 @@ object LocalStores {
      *  if prefs aren't initialised yet (degrade to showing the notification). */
     fun isMutedFor(accountId: String, thread: String): Boolean =
         ::prefs.isInitialized && prefs.getStringSet("$accountId.$K_MUTE", emptySet())!!.contains(thread)
+
+    /** Headless mute check for a 1:1 with [uin] on [host] (null = our island),
+     *  for the push service: [peerMuteKey], and while [accountId]'s mutes have
+     *  not been moved onto their islands yet ([migrateIslandMutes] runs when the
+     *  app binds the account, which a cold wake may precede) the bare number
+     *  still speaks for another island too, as it always did. */
+    fun isPeerMutedFor(accountId: String, uin: Int, host: String?): Boolean {
+        if (!::prefs.isInitialized) return false
+        val set = prefs.getStringSet("$accountId.$K_MUTE", emptySet())!!
+        if (peerMuteKey(uin, host) in set) return true
+        return !host.isNullOrBlank() && peerThread(uin) in set &&
+            !prefs.getBoolean("$accountId.$K_MUTES_BY_ISLAND", false)
+    }
 
     /** Whether [accountId] has any 1:1 chat fully muted. Headless, like
      *  [isMutedFor]: the push path asks it before it knows who wrote. */
@@ -1926,29 +2011,36 @@ object LocalStores {
         if (::prefs.isInitialized && acct != null) prefs.edit().putString(pk(K_GROUPS_CACHE), json).apply()
     }
 
-    /** Remove every per-account slot for [accountId] (local account delete). */
+    /** Remove every per-account slot for [accountId]: a burn, a local delete,
+     *  a wipe PIN, the end of a duress session.
+     *
+     *  ⚠⚠ A SWEEP OF THE PREFIX, NOT A LIST. This used to name the slots one by
+     *  one, and the list fell behind every time a slot was added: K_PKEYS (the
+     *  key to every contact's face) was missing until 36181d1, and after it
+     *  the names the person gave people (contact_aliases), the numbers whose
+     *  random chat had just ended, the read watermarks of their other devices,
+     *  both screen-secure sets and the presence leftovers all outlived a burn,
+     *  a wipe PIN and the duress teardown in rcq_local.xml. Every per-account slot is written as
+     *  `<id>.<name>` ([pk]), so the prefix is the whole account, the vault
+     *  floors keyed by slot name included, and a slot added tomorrow is covered
+     *  without anybody remembering to come back here. */
     fun clearAccount(accountId: String) {
         if (!::prefs.isInitialized) return
         val e = prefs.edit()
-        listOf(K_FAV, K_MUTE, K_MENTIONS, K_ARCH, K_LOCKED, K_REMOVED, K_BLOCKED, K_BLOCKED_KEYS, K_BLOCK_TIMES, K_BLOCKS_SCOPED, K_STRANGER_Q, K_STRANGER_ALLOW, K_GONE, K_LIVENESS, K_UNREAD, K_REACT_INBOX, K_REACTED_MSGS, K_REACTION_USES, K_MENTION_INBOX, K_MENTION_SEEN, K_CHAT_POS, K_THREAD_TTL, K_PRIVACY_CACHE, K_INVITES_CACHE, K_AVATAR_MIGRATED, K_CONTACTS_CACHE, K_GROUPS_CACHE, K_VAULT_CONTACTS_VERSION, K_SECTIONS, K_SECTIONS_PENDING, K_SECTION_FLAGS, K_PUSH_MUTES_SENT, K_PUSH_MUTES_LEGACY,
-            // ⚠⚠ KEY MATERIAL, and it was missing from this list. K_PKEYS is
-            // the profile key of every contact, stored BY NUMBER, so leaving it
-            // behind keeps a plaintext roster of the burned identity plus the
-            // keys that open their faces, in rcq_local.xml, after a burn and
-            // after a duress session is taken apart. K_GSKEYS and K_MY_PKEY are
-            // the same class. This is the list 36181d1 filled in for two other
-            // stores in this release and did not notice here.
-            K_PKEYS, K_GSKEYS, K_MY_PKEY).forEach { e.remove("$accountId.$it") }
-        // The vault floors are keyed by SLOT NAME (see [vaultSlotVersion]), so
-        // they cannot be listed by hand: sweep the prefix instead. Leaving one
-        // behind would lock a later account on this device out of a slot whose
-        // name it re-derived.
-        prefs.all.keys.filter { it.startsWith("$accountId.$K_VAULT_SLOT_VERSION.") }.forEach { e.remove(it) }
+        accountKeys(prefs.all.keys, accountId).forEach { e.remove(it) }
         e.apply()
     }
 
+    /** The keys among [keys] that belong to [accountId] (see [clearAccount]).
+     *  Global settings carry no account prefix, and an account id is a UUID, so
+     *  `<id>.` cannot be the start of one of them or of another account's key. */
+    internal fun accountKeys(keys: Collection<String>, accountId: String): List<String> =
+        if (accountId.isBlank()) emptyList() else keys.filter { it.startsWith("$accountId.") }
+
     private const val K_FAV = "favorites"
     private const val K_MUTE = "muted"
+    /** Set once [migrateIslandMutes] has moved the bare mutes onto islands. */
+    private const val K_MUTES_BY_ISLAND = "mutes_by_island"
     private const val K_PUSH_MUTES_SENT = "push_mutes_sent"
     private const val K_PUSH_MUTES_LEGACY = "push_mutes_legacy"
     private const val K_MENTIONS = "mentions_only"

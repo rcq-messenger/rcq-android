@@ -114,7 +114,6 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
     val favorites by LocalStores.favorites.collectAsState()
     val muted by LocalStores.muted.collectAsState()
     val isFav = thread in favorites
-    val isMuted = thread in muted
 
     var profile by remember { mutableStateOf<RcqApi.MeProfile?>(null) }
     var requestSent by remember { mutableStateOf(false) }
@@ -167,6 +166,10 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
         rosterHost = contact?.host,
         storeHost = storeHost,
     )
+    // The mute is this person's, at this address: the same number on another
+    // island is somebody else (see LocalStores.peerMuteKey).
+    val muteKey = LocalStores.peerMuteKey(uin, crossIslandHost)
+    val isMuted = muteKey in muted
     // ⚠⚠ NO LONGER GATED ON THE ISLAND. This comment used to say the blob
     // lives on THEIR island and ours has never held it. §5e changed that from
     // both ends: a cross-island contact DEPOSITS the encrypted blob to our
@@ -609,7 +612,7 @@ internal fun ContactInfoScreen(session: Session, uin: Int, onBack: () -> Unit, o
                 val favLabel = stringResource(if (isFav) R.string.ci_remove_fav else R.string.ci_add_fav)
                 InfoAction(if (isFav) Icons.Filled.Star else Icons.Filled.StarBorder, favLabel) { guarded(favLabel) { LocalStores.toggleFavorite(thread) } }
                 InfoDivider()
-                InfoAction(Icons.Filled.NotificationsOff, stringResource(if (isMuted) R.string.ci_unmute else R.string.ci_mute)) { LocalStores.toggleMute(thread) }
+                InfoAction(Icons.Filled.NotificationsOff, stringResource(if (isMuted) R.string.ci_unmute else R.string.ci_mute)) { LocalStores.toggleMute(muteKey) }
                 InfoDivider()
                 InfoAction(Icons.Outlined.Block, stringResource(if (blocked) R.string.ci_unblock else R.string.ci_block), danger = !blocked) {
                     scope.launch { runCatching { session.setBlock(uin, crossIslandHost, !blocked) } }

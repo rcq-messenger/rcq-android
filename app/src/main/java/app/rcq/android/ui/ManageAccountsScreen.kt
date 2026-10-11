@@ -293,7 +293,10 @@ internal fun ManageAccountsScreen(
                         // here as well wiped the card of an active account the
                         // delete had refused.
                         when {
-                            account.id != activeId -> session.deleteAccountLocal(account.id)
+                            account.id != activeId -> {
+                                // Nothing typed as that account outlives it.
+                                if (session.deleteAccountLocal(account.id)) forgetChatDraftsOf(account.id)
+                            }
                             next != null -> onDeleteActive(account.id, next.id)
                             else -> Unit
                         }

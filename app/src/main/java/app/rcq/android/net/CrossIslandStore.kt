@@ -296,6 +296,15 @@ object CrossIslandStore {
         return all?.get(ciKey(uin, host))
     }
 
+    /** [getFor]'s list: every cross-island contact of [accountId], read by id
+     *  whatever the stores are bound to. */
+    fun listFor(ctx: Context, accountId: String): List<Contact> {
+        val p = ctx.applicationContext.getSharedPreferences("rcq_crossisland", Context.MODE_PRIVATE)
+        val raw = p.getString(storageKey(accountId), "{}") ?: "{}"
+        val type = object : TypeToken<MutableMap<String, Contact>>() {}.type
+        return runCatching { gson.fromJson<MutableMap<String, Contact>>(raw, type) }.getOrNull()?.values?.toList().orEmpty()
+    }
+
     fun remove(uin: Int, host: String) {
         val m = loadAll(); m.remove(ciKey(uin, host)); saveAll(m)
         bury(uin, host)

@@ -279,6 +279,14 @@ private object ChatDrafts {
  *  wipe PIN and a burn (MainActivity), on the main thread. */
 internal fun forgetChatDrafts() = ChatDrafts.forgetAll()
 
+/** The drafts and parked quotes of one account that has left this device
+ *  (Manage accounts), as itself or under the duress view over it. The other
+ *  accounts keep theirs. Main thread. */
+internal fun forgetChatDraftsOf(accountId: String) {
+    ChatDrafts.byThread.forgetAccount(accountId)
+    ChatDrafts.replyByThread.forgetAccount(accountId)
+}
+
 /** "Show in chat" from a viewer that is not inside the chat (#1042): the
  *  group card's media wall hands over the thread ("g:<id>", the [ChatDrafts]
  *  key) and the message, the card closes, and the chat that appears under it
